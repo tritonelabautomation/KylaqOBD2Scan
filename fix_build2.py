@@ -1,7 +1,25 @@
-import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
+import re
 
+with open('app/build.gradle.kts', 'r') as f:
+    content = f.read()
 
-val gitCommit = "unknown"
+# I will just write a new clean build.gradle.kts
+
+clean_content = """import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
+
+fun getGitCommitHash(): String {
+    return try {
+        val proc = ProcessBuilder("git", "rev-parse", "--short", "HEAD")
+            .redirectOutput(ProcessBuilder.Redirect.PIPE)
+            .redirectError(ProcessBuilder.Redirect.PIPE)
+            .start()
+        proc.waitFor()
+        proc.inputStream.bufferedReader().readText().trim().ifEmpty { "unknown" }
+    } catch (e: Exception) {
+        "unknown"
+    }
+}
+val gitCommit = getGitCommitHash()
 
 plugins {
   alias(libs.plugins.android.application)
@@ -23,7 +41,7 @@ android {
     versionCode = 100
     versionName = "1.0.0"
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-    buildConfigField("String", "GIT_COMMIT", "\"${gitCommit}\"")
+    buildConfigField("String", "GIT_COMMIT", "\\"${gitCommit}\\"")
   }
 
   signingConfigs {
@@ -122,3 +140,7 @@ dependencies {
   "ksp"(libs.androidx.room.compiler)
   "ksp"(libs.moshi.kotlin.codegen)
 }
+"""
+with open('app/build.gradle.kts', 'w') as f:
+    f.write(clean_content)
+

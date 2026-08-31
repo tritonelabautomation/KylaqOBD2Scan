@@ -61,6 +61,7 @@ fun DashboardScreen(
 
     val isConnected = connectionState == ConnectionState.CONNECTED
 
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -69,7 +70,20 @@ fun DashboardScreen(
             .padding(16.dp)
             .testTag("dashboard_screen")
     ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("OBD Logger", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Column(horizontalAlignment = Alignment.End) {
+                Text("v${com.example.BuildConfig.VERSION_NAME} (Build ${com.example.BuildConfig.VERSION_CODE})", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Commit: ${com.example.BuildConfig.GIT_COMMIT}", style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        
         // Vehicle & Connection Status Banner
+
         VehicleStatusHeader(
             vehicleName = vehicleName,
             adapterName = connectedDeviceName ?: "Not Connected",
@@ -83,6 +97,7 @@ fun DashboardScreen(
         Spacer(modifier = Modifier.height(14.dp))
         
         var showBatchTestDialog by remember { mutableStateOf(false) }
+        var showDiagnosticsDialog by remember { mutableStateOf(false) }
 
         // Protocol Verification Selector
         ProtocolVerificationControl(
@@ -92,7 +107,8 @@ fun DashboardScreen(
             isConnected = isConnected,
             onProtocolSelected = { viewModel.selectCanProtocol(it) },
             onVerify = { viewModel.verifySelectedProtocol() },
-            onShowBatchTest = { showBatchTestDialog = true }
+            onShowBatchTest = { showBatchTestDialog = true },
+            onShowDiagnostics = { showDiagnosticsDialog = true }
         )
 
         if (showBatchTestDialog) {
@@ -102,9 +118,24 @@ fun DashboardScreen(
                 results = batchResults,
                 isTesting = isBatchTesting,
                 onStartTest = { viewModel.testAllCanProtocols() },
-                onDismiss = { showBatchTestDialog = false }
+                onDismiss = { showBatchTestDialog = false },
+                onApply = { 
+                    if(it != null) {
+                        viewModel.selectCanProtocol(it.protocol)
+                        showBatchTestDialog = false
+                    }
+                }
             )
         }
+        
+        protocolResult?.let { pr ->
+        if (showDiagnosticsDialog) {
+            ProtocolDiagnosticsDialog(
+                result = pr,
+                onDismiss = { showDiagnosticsDialog = false }
+            )
+        }
+    }
 
         Spacer(modifier = Modifier.height(14.dp))
 
@@ -172,7 +203,7 @@ fun DashboardScreen(
                         Icon(Icons.Default.Warning, contentDescription = null, tint = WarningRed, modifier = Modifier.size(32.dp))
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = if (protocolHealth == ProtocolHealth.NO_RESPONSE) "NO VALID ECU RESPONSE" else "CAN Protocol not verified.",
+                            text = if (protocolHealth == ProtocolHealth.NO_RESPONSE) "NO ECU RESPONSE" else "CAN Protocol not verified.",
                             color = WarningRed,
                             fontWeight = FontWeight.Bold
                         )
@@ -666,7 +697,8 @@ fun ProtocolVerificationControl(
     isConnected: Boolean,
     onProtocolSelected: (CanProtocol) -> Unit,
     onVerify: () -> Unit,
-    onShowBatchTest: () -> Unit
+    onShowBatchTest: () -> Unit,
+    onShowDiagnostics: () -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
 
@@ -676,7 +708,7 @@ fun ProtocolVerificationControl(
         shape = RoundedCornerShape(14.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text("CAN Transport Configuration", style = MaterialTheme.typography.labelMedium, color = CyberCyan)
+            Text("Selected OBD-II Profile", style = MaterialTheme.typography.labelMedium, color = CyberCyan)
             Spacer(modifier = Modifier.height(8.dp))
             
             ExposedDropdownMenuBox(
@@ -714,28 +746,43 @@ fun ProtocolVerificationControl(
                     ProtocolHealth.WORKING -> NeonEmerald
                     ProtocolHealth.PARTIAL -> ElectricAmber
                     ProtocolHealth.NO_RESPONSE -> WarningRed
+                    ProtocolHealth.ADAPTER_ERROR -> WarningRed
                     ProtocolHealth.TESTING -> CyberCyan
                     ProtocolHealth.UNKNOWN -> Color.Gray
                 }
                 val statusText = when (health) {
-                    ProtocolHealth.WORKING -> "🟢 WORKING - ECU RESPONDING"
-                    ProtocolHealth.PARTIAL -> "🟡 PARTIAL - ECU RESPONDING"
-                    ProtocolHealth.NO_RESPONSE -> "🔴 NO VALID ECU RESPONSE"
+                    ProtocolHealth.WORKING -> "🟢 WORKING"
+                    ProtocolHealth.PARTIAL -> "🟡 PARTIAL"
+                    ProtocolHealth.NO_RESPONSE -> "🔴 NO_RESPONSE"
+                    ProtocolHealth.ADAPTER_ERROR -> "🔴 ADAPTER_ERROR"
                     ProtocolHealth.TESTING -> "🔵 TESTING..."
                     ProtocolHealth.UNKNOWN -> "⚪ UNVERIFIED"
                 }
                 
                 Column {
-                    Text("Protocol Health", style = MaterialTheme.typography.labelSmall)
+                    Text("Verification", style = MaterialTheme.typography.labelSmall)
                     Text(statusText, color = statusColor, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                 }
+                
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = onShowBatchTest,
+                        enabled = isConnected,
+                        modifier = Modifier.height(36.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp)
+                    ) {
+                        Text("Test All", fontSize = 12.sp)
+                    }
 
-                Button(
-                    onClick = onVerify,
-                    enabled = isConnected && health != ProtocolHealth.TESTING,
-                    colors = ButtonDefaults.buttonColors(containerColor = CyberCyan, disabledContainerColor = Color.DarkGray)
-                ) {
-                    Text(if (health == ProtocolHealth.TESTING) "Testing..." else "Test Protocol")
+                    Button(
+                        onClick = onVerify,
+                        enabled = isConnected && health != ProtocolHealth.TESTING,
+                        colors = ButtonDefaults.buttonColors(containerColor = CyberCyan, disabledContainerColor = Color.DarkGray),
+                        modifier = Modifier.height(36.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp)
+                    ) {
+                        Text(if (health == ProtocolHealth.TESTING) "Testing..." else "Test Protocol", fontSize = 12.sp)
+                    }
                 }
             }
 
@@ -745,15 +792,16 @@ fun ProtocolVerificationControl(
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Column {
-                        Text("Successful: ${result.successCount}/${result.totalRequests}", style = MaterialTheme.typography.bodySmall, color = NeonEmerald)
-                        Text("Failed/Invalid: ${result.invalidCount}", style = MaterialTheme.typography.bodySmall, color = WarningRed)
-                        Text("Timeouts: ${result.timeoutCount}", style = MaterialTheme.typography.bodySmall, color = WarningRed)
+                        Text("ECU responses: ${result.successCount}/${result.totalRequests}", style = MaterialTheme.typography.bodySmall, color = NeonEmerald)
                         Text("Unsupported: ${result.unsupportedCount}", style = MaterialTheme.typography.bodySmall, color = ElectricAmber)
+                        Text("Timeouts: ${result.timeoutCount}", style = MaterialTheme.typography.bodySmall, color = WarningRed)
+                        Text("CAN errors: ${result.canErrorCount}", style = MaterialTheme.typography.bodySmall, color = WarningRed)
                     }
                     Column(horizontalAlignment = Alignment.End) {
-                        Text("Avg Response: ${result.avgResponseTimeMs} ms", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
-                        Text("Min: ${result.minResponseTimeMs} ms", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
-                        Text("Max: ${result.maxResponseTimeMs} ms", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+                        TextButton(onClick = onShowDiagnostics, contentPadding = PaddingValues(0.dp), modifier = Modifier.height(24.dp)) {
+                            Text("Diagnostics", fontSize = 12.sp, color = CyberCyan)
+                        }
+                        Text("Avg Latency: ${result.avgResponseTimeMs} ms", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
                     }
                 }
             }

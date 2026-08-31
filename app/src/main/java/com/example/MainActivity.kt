@@ -222,7 +222,7 @@ fun MainApp(viewModel: MainViewModel) {
     // Connection selection dialog
     if (showConnectionDialog) {
         ConnectionDialog(
-            pairedDevices = viewModel.getPairedDevices(),
+            pairedDevices = viewModel.bluetoothManager.getPairedDevices(),
             isBluetoothEnabled = viewModel.bluetoothManager.isBluetoothEnabled,
             onDeviceSelected = { deviceAddress ->
                 viewModel.connectDevice(deviceAddress)

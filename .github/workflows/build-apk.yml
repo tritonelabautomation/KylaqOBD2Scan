@@ -25,9 +25,17 @@ jobs:
         with:
           gradle-version: '9.3.1'
 
+
+      - name: Inject Git Commit
+        run: |
+          sed -i "s/val gitCommit = \"unknown\"/val gitCommit = \"${GITHUB_SHA::7}\"/" app/build.gradle.kts
       - name: Build debug APK
         run: gradle assembleDebug --stacktrace
 
+
+      - name: Rename APK
+        run: |
+          mv app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/OBDLogger-v1.0.0-build100-debug.apk || true
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:

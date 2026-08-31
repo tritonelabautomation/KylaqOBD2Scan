@@ -1,4 +1,9 @@
-package com.example.model
+import re
+
+with open('app/src/main/java/com/example/model/CanProtocol.kt', 'r') as f:
+    content = f.read()
+
+new_content = """package com.example.model
 
 enum class CanProtocol(val protocolNumber: String, val displayName: String, val atCommand: String) {
     AUTO("0", "Auto Detect", "ATSP0"),
@@ -51,3 +56,8 @@ data class ProtocolVerificationResult(
     val buildNumber: Int = 0,
     val commitHash: String = ""
 )
+"""
+
+with open('app/src/main/java/com/example/model/CanProtocol.kt', 'w') as f:
+    f.write(new_content)
+

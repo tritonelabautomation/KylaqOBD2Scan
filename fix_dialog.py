@@ -1,4 +1,9 @@
-package com.example.ui.screens
+import re
+
+with open('app/src/main/java/com/example/ui/screens/ProtocolComparisonDialog.kt', 'r') as f:
+    content = f.read()
+
+new_dialog_content = """package com.example.ui.screens
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -107,3 +112,8 @@ fun ProtocolComparisonDialog(
         }
     )
 }
+"""
+
+with open('app/src/main/java/com/example/ui/screens/ProtocolComparisonDialog.kt', 'w') as f:
+    f.write(new_dialog_content)
+
