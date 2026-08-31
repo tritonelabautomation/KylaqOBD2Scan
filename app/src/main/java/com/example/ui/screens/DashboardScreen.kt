@@ -29,6 +29,9 @@ import androidx.compose.ui.unit.sp
 import com.example.bluetooth.ConnectionState
 import com.example.data.PollingSpeedMode
 import com.example.model.TransactionRecord
+import com.example.model.CanProtocol
+import com.example.model.ProtocolHealth
+import com.example.model.ProtocolVerificationResult
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.MainViewModel
 
@@ -47,11 +50,14 @@ fun DashboardScreen(
     val errorCount by viewModel.errorCount.collectAsState()
     val liveDecodedMap by viewModel.liveDecodedMap.collectAsState()
     val pidRawHistory by viewModel.pidRawHistory.collectAsState()
-
     val isRecording by viewModel.isRecording.collectAsState()
     val recordingDurationSeconds by viewModel.recordingDurationSeconds.collectAsState()
     val pollingMode by viewModel.pollingMode.collectAsState()
     val vehicleName by viewModel.vehicleName.collectAsState()
+    
+    val selectedCanProtocol by viewModel.selectedCanProtocol.collectAsState()
+    val protocolHealth by viewModel.protocolHealth.collectAsState()
+    val protocolResult by viewModel.protocolVerificationResult.collectAsState()
 
     val isConnected = connectionState == ConnectionState.CONNECTED
 
@@ -68,10 +74,37 @@ fun DashboardScreen(
             vehicleName = vehicleName,
             adapterName = connectedDeviceName ?: "Not Connected",
             connectionState = connectionState,
-            protocol = "ISO 15765-4 (CAN 11/500)",
+            protocol = selectedCanProtocol.displayName,
+            protocolHealth = protocolHealth,
             onConnectClick = onOpenConnectDialog,
             onDisconnectClick = { viewModel.disconnect() }
         )
+        
+        Spacer(modifier = Modifier.height(14.dp))
+        
+        var showBatchTestDialog by remember { mutableStateOf(false) }
+
+        // Protocol Verification Selector
+        ProtocolVerificationControl(
+            selectedProtocol = selectedCanProtocol,
+            health = protocolHealth,
+            result = protocolResult,
+            isConnected = isConnected,
+            onProtocolSelected = { viewModel.selectCanProtocol(it) },
+            onVerify = { viewModel.verifySelectedProtocol() },
+            onShowBatchTest = { showBatchTestDialog = true }
+        )
+
+        if (showBatchTestDialog) {
+            val batchResults by viewModel.batchTestResults.collectAsState()
+            val isBatchTesting by viewModel.isBatchTesting.collectAsState()
+            ProtocolComparisonDialog(
+                results = batchResults,
+                isTesting = isBatchTesting,
+                onStartTest = { viewModel.testAllCanProtocols() },
+                onDismiss = { showBatchTestDialog = false }
+            )
+        }
 
         Spacer(modifier = Modifier.height(14.dp))
 
@@ -119,71 +152,49 @@ fun DashboardScreen(
                 fontFamily = FontFamily.Monospace
             )
         }
-
         Spacer(modifier = Modifier.height(10.dp))
 
         // Primary Live Telemetry Cards Grid
-        TelemetryCardsGrid(
-            liveMap = liveDecodedMap,
-            onPidClick = { pidId -> onNavigateToPidDetail(pidId) }
-        )
-
-        Spacer(modifier = Modifier.height(20.dp))
-
-        // Section Title: Experimental Research Channels (016D & 0170)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(10.dp)
-                        .clip(CircleShape)
-                        .background(ResearchPurple)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "RESEARCH CHANNELS (PASSIVE CAPTURE)",
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = ResearchPurple,
-                    letterSpacing = 1.sp
-                )
+        if (protocolHealth == ProtocolHealth.UNKNOWN || protocolHealth == ProtocolHealth.NO_RESPONSE || protocolHealth == ProtocolHealth.TESTING) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(200.dp)
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), RoundedCornerShape(14.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    if (protocolHealth == ProtocolHealth.TESTING) {
+                        CircularProgressIndicator(color = CyberCyan)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Waiting for ECU response...", color = CyberCyan)
+                    } else {
+                        Icon(Icons.Default.Warning, contentDescription = null, tint = WarningRed, modifier = Modifier.size(32.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = if (protocolHealth == ProtocolHealth.NO_RESPONSE) "NO VALID ECU RESPONSE" else "CAN Protocol not verified.",
+                            color = WarningRed,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Please verify protocol to view telemetry.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
             }
-            TextButton(onClick = onNavigateToRawMonitor) {
-                Text("Raw Monitor", color = CyberCyan)
-                Spacer(modifier = Modifier.width(4.dp))
-                Icon(Icons.Default.ArrowForward, contentDescription = null, tint = CyberCyan, modifier = Modifier.size(14.dp))
-            }
+        } else {
+            TelemetryCardsGrid(
+                liveMap = liveDecodedMap,
+                onPidClick = { pidId -> onNavigateToPidDetail(pidId) }
+            )
         }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // 016D Research Card
-        ResearchPidCard(
-            pidId = "016D",
-            name = "016D Fuel Pressure Control",
-            description = "High-Pressure Direct Injection Rail Channel",
-            history = pidRawHistory["016D"] ?: emptyList(),
-            onClick = { onNavigateToPidDetail("016D") }
-        )
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // 0170 Research Card
-        ResearchPidCard(
-            pidId = "0170",
-            name = "0170 Boost Pressure Control",
-            description = "EA211 Turbo Wastegate & Charge Control Channel",
-            history = pidRawHistory["0170"] ?: emptyList(),
-            onClick = { onNavigateToPidDetail("0170") }
-        )
 
         Spacer(modifier = Modifier.height(24.dp))
     }
 }
+
 
 @Composable
 fun VehicleStatusHeader(
@@ -191,25 +202,14 @@ fun VehicleStatusHeader(
     adapterName: String,
     connectionState: ConnectionState,
     protocol: String,
+    protocolHealth: ProtocolHealth,
     onConnectClick: () -> Unit,
     onDisconnectClick: () -> Unit
 ) {
-    val statusColor by animateColorAsState(
-        when (connectionState) {
-            ConnectionState.CONNECTED -> NeonEmerald
-            ConnectionState.CONNECTING, ConnectionState.INITIALIZING -> ElectricAmber
-            ConnectionState.ERROR -> WarningRed
-            ConnectionState.DISCONNECTED -> MaterialTheme.colorScheme.onSurfaceVariant
-        }
-    )
-
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
-            .testTag("vehicle_status_card"),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        shape = RoundedCornerShape(14.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
@@ -217,78 +217,51 @@ fun VehicleStatusHeader(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(10.dp)
-                                .clip(CircleShape)
-                                .background(statusColor)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = when (connectionState) {
-                                ConnectionState.CONNECTED -> "CONNECTED"
-                                ConnectionState.CONNECTING -> "CONNECTING..."
-                                ConnectionState.INITIALIZING -> "INITIALIZING..."
-                                ConnectionState.ERROR -> "CONNECTION ERROR"
-                                ConnectionState.DISCONNECTED -> "DISCONNECTED"
-                            },
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = statusColor
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(4.dp))
+                Column {
                     Text(
-                        text = vehicleName,
+                        text = vehicleName.uppercase(),
                         style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Black,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = adapterName,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-
+                
                 if (connectionState == ConnectionState.CONNECTED) {
-                    FilledTonalButton(
+                    OutlinedButton(
                         onClick = onDisconnectClick,
-                        colors = ButtonDefaults.filledTonalButtonColors(
-                            containerColor = MaterialTheme.colorScheme.errorContainer,
-                            contentColor = MaterialTheme.colorScheme.onErrorContainer
-                        ),
-                        modifier = Modifier.testTag("btn_disconnect")
+                        border = androidx.compose.foundation.BorderStroke(1.dp, WarningRed),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = WarningRed)
                     ) {
-                        Icon(Icons.Default.PowerSettingsNew, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
                         Text("Disconnect", fontSize = 12.sp)
                     }
                 } else {
                     Button(
                         onClick = onConnectClick,
-                        colors = ButtonDefaults.buttonColors(containerColor = CyberCyan, contentColor = Color(0xFF00363D)),
-                        modifier = Modifier.testTag("btn_connect")
+                        colors = ButtonDefaults.buttonColors(containerColor = NeonEmerald)
                     ) {
-                        Icon(Icons.Default.Bluetooth, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Connect", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Text(if (connectionState == ConnectionState.CONNECTING) "Connecting..." else "Connect", fontSize = 12.sp)
                     }
                 }
             }
-
-            Spacer(modifier = Modifier.height(10.dp))
-            Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
-            Spacer(modifier = Modifier.height(10.dp))
-
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Column {
-                    Text("Adapter", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(adapterName, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium, fontFamily = FontFamily.Monospace)
-                }
-                Column(horizontalAlignment = Alignment.End) {
-                    Text("CAN Protocol", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(protocol, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium, fontFamily = FontFamily.Monospace)
-                }
+                val isBt = connectionState == ConnectionState.CONNECTED
+                val isEcu = protocolHealth == ProtocolHealth.WORKING || protocolHealth == ProtocolHealth.PARTIAL
+                StatusBadge(label = "Bluetooth", isActive = isBt)
+                StatusBadge(label = "Adapter", isActive = isBt)
+                StatusBadge(label = "CAN", isActive = isEcu)
+                StatusBadge(label = "ECU", isActive = isEcu)
             }
         }
     }
@@ -681,5 +654,129 @@ fun ResearchPidCard(
                 )
             }
         }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ProtocolVerificationControl(
+    selectedProtocol: CanProtocol,
+    health: ProtocolHealth,
+    result: ProtocolVerificationResult?,
+    isConnected: Boolean,
+    onProtocolSelected: (CanProtocol) -> Unit,
+    onVerify: () -> Unit,
+    onShowBatchTest: () -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        shape = RoundedCornerShape(14.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text("CAN Transport Configuration", style = MaterialTheme.typography.labelMedium, color = CyberCyan)
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            ExposedDropdownMenuBox(
+                expanded = expanded,
+                onExpandedChange = { expanded = !expanded }
+            ) {
+                OutlinedTextField(
+                    value = selectedProtocol.displayName,
+                    onValueChange = {},
+                    readOnly = true,
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                    modifier = Modifier.menuAnchor().fillMaxWidth(),
+                    colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors()
+                )
+                ExposedDropdownMenu(
+                    expanded = expanded,
+                    onDismissRequest = { expanded = false }
+                ) {
+                    CanProtocol.values().forEach { proto ->
+                        DropdownMenuItem(
+                            text = { Text(proto.displayName) },
+                            onClick = {
+                                onProtocolSelected(proto)
+                                expanded = false
+                            }
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                val statusColor = when (health) {
+                    ProtocolHealth.WORKING -> NeonEmerald
+                    ProtocolHealth.PARTIAL -> ElectricAmber
+                    ProtocolHealth.NO_RESPONSE -> WarningRed
+                    ProtocolHealth.TESTING -> CyberCyan
+                    ProtocolHealth.UNKNOWN -> Color.Gray
+                }
+                val statusText = when (health) {
+                    ProtocolHealth.WORKING -> "🟢 WORKING - ECU RESPONDING"
+                    ProtocolHealth.PARTIAL -> "🟡 PARTIAL - ECU RESPONDING"
+                    ProtocolHealth.NO_RESPONSE -> "🔴 NO VALID ECU RESPONSE"
+                    ProtocolHealth.TESTING -> "🔵 TESTING..."
+                    ProtocolHealth.UNKNOWN -> "⚪ UNVERIFIED"
+                }
+                
+                Column {
+                    Text("Protocol Health", style = MaterialTheme.typography.labelSmall)
+                    Text(statusText, color = statusColor, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                }
+
+                Button(
+                    onClick = onVerify,
+                    enabled = isConnected && health != ProtocolHealth.TESTING,
+                    colors = ButtonDefaults.buttonColors(containerColor = CyberCyan, disabledContainerColor = Color.DarkGray)
+                ) {
+                    Text(if (health == ProtocolHealth.TESTING) "Testing..." else "Test Protocol")
+                }
+            }
+
+            if (result != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Divider(color = Color.DarkGray)
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Column {
+                        Text("Successful: ${result.successCount}/${result.totalRequests}", style = MaterialTheme.typography.bodySmall, color = NeonEmerald)
+                        Text("Failed/Invalid: ${result.invalidCount}", style = MaterialTheme.typography.bodySmall, color = WarningRed)
+                        Text("Timeouts: ${result.timeoutCount}", style = MaterialTheme.typography.bodySmall, color = WarningRed)
+                        Text("Unsupported: ${result.unsupportedCount}", style = MaterialTheme.typography.bodySmall, color = ElectricAmber)
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text("Avg Response: ${result.avgResponseTimeMs} ms", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+                        Text("Min: ${result.minResponseTimeMs} ms", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+                        Text("Max: ${result.maxResponseTimeMs} ms", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun StatusBadge(label: String, isActive: Boolean) {
+    val color = if (isActive) NeonEmerald else Color.DarkGray
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .clip(CircleShape)
+                .background(color)
+        )
+        Spacer(modifier = Modifier.width(4.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = if (isActive) MaterialTheme.colorScheme.onSurface else Color.Gray,
+            fontSize = 10.sp
+        )
     }
 }

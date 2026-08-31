@@ -52,6 +52,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val connectionStatusMessage: StateFlow<String> = bluetoothManager.statusMessage
 
     val isPolling: StateFlow<Boolean> = obdScheduler.isPolling
+
+    private val _selectedCanProtocol = MutableStateFlow(com.example.model.CanProtocol.AUTO)
+    val selectedCanProtocol: StateFlow<com.example.model.CanProtocol> = _selectedCanProtocol.asStateFlow()
+
+    private val _protocolHealth = MutableStateFlow(com.example.model.ProtocolHealth.UNKNOWN)
+    val protocolHealth: StateFlow<com.example.model.ProtocolHealth> = _protocolHealth.asStateFlow()
+    
+    private val _protocolVerificationResult = MutableStateFlow<com.example.model.ProtocolVerificationResult?>(null)
+    val protocolVerificationResult: StateFlow<com.example.model.ProtocolVerificationResult?> = _protocolVerificationResult.asStateFlow()
+
     val transactionCount: StateFlow<Long> = obdScheduler.transactionCount
     val canResponseCount: StateFlow<Long> = obdScheduler.canResponseCount
     val errorCount: StateFlow<Long> = obdScheduler.errorCount
@@ -81,6 +91,176 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _manualCommandError = MutableStateFlow<String?>(null)
     val manualCommandError: StateFlow<String?> = _manualCommandError.asStateFlow()
+
+    fun selectCanProtocol(protocol: com.example.model.CanProtocol) {
+        if (_selectedCanProtocol.value != protocol) {
+            _selectedCanProtocol.value = protocol
+            obdScheduler.resetCounters()
+            _protocolHealth.value = com.example.model.ProtocolHealth.UNKNOWN
+            _protocolVerificationResult.value = null
+        }
+    }
+
+    fun verifySelectedProtocol() {
+        val transport = activeTransport ?: return
+        if (!transport.isConnected) return
+        
+        viewModelScope.launch {
+            _protocolHealth.value = com.example.model.ProtocolHealth.TESTING
+            obdScheduler.stopPolling()
+            obdScheduler.resetCounters()
+            
+            transport.sendCommand("ATPC", 1000)
+            val proto = _selectedCanProtocol.value
+            transport.sendCommand(proto.atCommand, 1500)
+            
+            val pidsToTest = listOf("0100", "010C", "010D", "0105", "010B", "0111", "010F", "0142")
+            var success = 0
+            var timeout = 0
+            var invalid = 0
+            var unsupported = 0
+            var totalTime = 0L
+            var minTime = Long.MAX_VALUE
+            var maxTime = Long.MIN_VALUE
+            
+            for (pid in pidsToTest) {
+                val resp = transport.sendCommand(pid, 2000L)
+                val duration = resp.durationMs
+                
+                if (duration > 0) {
+                    totalTime += duration
+                    if (duration < minTime) minTime = duration
+                    if (duration > maxTime) maxTime = duration
+                }
+                
+                if (resp.status == com.example.model.ResponseStatus.OK && resp.lines.isNotEmpty()) {
+                    success++
+                } else if (resp.status == com.example.model.ResponseStatus.TIMEOUT) {
+                    timeout++
+                } else if (resp.status == com.example.model.ResponseStatus.NO_DATA) {
+                    unsupported++
+                } else {
+                    invalid++
+                }
+                kotlinx.coroutines.delay(100)
+            }
+            
+            val avgTime = if (success + timeout + invalid + unsupported > 0) totalTime / pidsToTest.size else 0L
+            val health = when {
+                success > 0 && success == pidsToTest.size -> com.example.model.ProtocolHealth.WORKING
+                success > 0 -> com.example.model.ProtocolHealth.PARTIAL
+                else -> com.example.model.ProtocolHealth.NO_RESPONSE
+            }
+            
+            val res = com.example.model.ProtocolVerificationResult(
+                protocol = proto,
+                successCount = success,
+                timeoutCount = timeout,
+                unsupportedCount = unsupported,
+                invalidCount = invalid,
+                totalRequests = pidsToTest.size,
+                avgResponseTimeMs = avgTime,
+                minResponseTimeMs = if (minTime == Long.MAX_VALUE) 0L else minTime,
+                maxResponseTimeMs = if (maxTime == Long.MIN_VALUE) 0L else maxTime,
+                health = health
+            )
+            
+            _protocolVerificationResult.value = res
+            _protocolHealth.value = health
+            
+            if (health == com.example.model.ProtocolHealth.WORKING || health == com.example.model.ProtocolHealth.PARTIAL) {
+                obdScheduler.startPolling(viewModelScope, transport)
+            }
+        }
+    }
+
+    private val _batchTestResults = MutableStateFlow<List<com.example.model.ProtocolVerificationResult>>(emptyList())
+    val batchTestResults: StateFlow<List<com.example.model.ProtocolVerificationResult>> = _batchTestResults.asStateFlow()
+    
+    private val _isBatchTesting = MutableStateFlow(false)
+    val isBatchTesting: StateFlow<Boolean> = _isBatchTesting.asStateFlow()
+
+    fun testAllCanProtocols() {
+        val transport = activeTransport ?: return
+        if (!transport.isConnected) return
+        
+        viewModelScope.launch {
+            _isBatchTesting.value = true
+            _batchTestResults.value = emptyList()
+            obdScheduler.stopPolling()
+            obdScheduler.resetCounters()
+            
+            val protocolsToTest = listOf(
+                com.example.model.CanProtocol.ISO_15765_11B_500K,
+                com.example.model.CanProtocol.ISO_15765_29B_500K,
+                com.example.model.CanProtocol.ISO_15765_11B_250K,
+                com.example.model.CanProtocol.ISO_15765_29B_250K
+            )
+            
+            val results = mutableListOf<com.example.model.ProtocolVerificationResult>()
+            
+            for (proto in protocolsToTest) {
+                transport.sendCommand("ATPC", 1000)
+                transport.sendCommand(proto.atCommand, 1500)
+                
+                val pidsToTest = listOf("0100", "010C", "010D", "0105", "010B", "0111", "010F", "0142")
+                var success = 0
+                var timeout = 0
+                var invalid = 0
+                var unsupported = 0
+                var totalTime = 0L
+                var minTime = Long.MAX_VALUE
+                var maxTime = Long.MIN_VALUE
+                
+                for (pid in pidsToTest) {
+                    val resp = transport.sendCommand(pid, 2000L)
+                    val duration = resp.durationMs
+                    if (duration > 0) {
+                        totalTime += duration
+                        if (duration < minTime) minTime = duration
+                        if (duration > maxTime) maxTime = duration
+                    }
+                    if (resp.status == com.example.model.ResponseStatus.OK && resp.lines.isNotEmpty()) {
+                        success++
+                    } else if (resp.status == com.example.model.ResponseStatus.TIMEOUT) {
+                        timeout++
+                    } else if (resp.status == com.example.model.ResponseStatus.NO_DATA) {
+                        unsupported++
+                    } else {
+                        invalid++
+                    }
+                    kotlinx.coroutines.delay(100)
+                }
+                
+                val avgTime = if (success + timeout + invalid + unsupported > 0) totalTime / pidsToTest.size else 0L
+                val health = when {
+                    success > 0 && success == pidsToTest.size -> com.example.model.ProtocolHealth.WORKING
+                    success > 0 -> com.example.model.ProtocolHealth.PARTIAL
+                    else -> com.example.model.ProtocolHealth.NO_RESPONSE
+                }
+                
+                results.add(com.example.model.ProtocolVerificationResult(
+                    protocol = proto,
+                    successCount = success,
+                    timeoutCount = timeout,
+                    unsupportedCount = unsupported,
+                    invalidCount = invalid,
+                    totalRequests = pidsToTest.size,
+                    avgResponseTimeMs = avgTime,
+                    minResponseTimeMs = if (minTime == Long.MAX_VALUE) 0L else minTime,
+                    maxResponseTimeMs = if (maxTime == Long.MIN_VALUE) 0L else maxTime,
+                    health = health
+                ))
+                _batchTestResults.value = results.toList()
+                
+                // Allow user to cancel? Just sequential.
+            }
+            
+            _isBatchTesting.value = false
+            
+            // If best found, auto-select it? Or leave it to the user.
+        }
+    }
 
     fun getPairedDevices(): List<BluetoothDeviceInfo> {
         return bluetoothManager.getPairedDevices()
