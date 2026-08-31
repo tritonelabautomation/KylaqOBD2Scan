@@ -1,0 +1,34 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:pivotX="54"
+        android:pivotY="54">
+        <!-- Diagnostic connector plug base -->
+        <path
+            android:fillColor="#00E5FF"
+            android:pathData="M32,36 L76,36 L80,50 L82,68 C82,72 78,75 74,75 L34,75 C30,75 26,72 26,68 L28,50 Z" />
+        <!-- Inner connector face -->
+        <path
+            android:fillColor="#0D1B2A"
+            android:pathData="M36,42 L72,42 L75,52 L76,67 C76,69 74,70 72,70 L36,70 C34,70 32,69 32,67 L33,52 Z" />
+        <!-- OBD Pin contacts row 1 -->
+        <path
+            android:fillColor="#00E676"
+            android:pathData="M38,48 H43 V54 H38 Z M47,48 H52 V54 H47 Z M56,48 H61 V54 H56 Z M65,48 H70 V54 H65 Z" />
+        <!-- OBD Pin contacts row 2 -->
+        <path
+            android:fillColor="#00E676"
+            android:pathData="M38,58 H43 V64 H38 Z M47,58 H52 V64 H47 Z M56,58 H61 V64 H56 Z M65,58 H70 V64 H65 Z" />
+        <!-- Telemetry heartbeat / waveform -->
+        <path
+            android:fillColor="#00000000"
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="2.5"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="M24,56 L35,56 L40,44 L45,68 L50,48 L55,62 L60,56 L84,56" />
+    </group>
+</vector>

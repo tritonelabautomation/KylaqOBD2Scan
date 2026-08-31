@@ -1,0 +1,7 @@
+{
+  "name": "OBD Research Logger",
+  "description": "Passive OBD-II diagnostic data logger for Škoda Kylaq EA211 research with Bluetooth ELM327 support.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+

@@ -1,0 +1,315 @@
+package com.example.ui.screens
+
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.core.content.FileProvider
+import com.example.data.SavedRecording
+import com.example.ui.theme.*
+import com.example.ui.viewmodel.MainViewModel
+import java.io.File
+
+@Composable
+fun RecordingsScreen(
+    viewModel: MainViewModel,
+    onBack: () -> Unit
+) {
+    val context = LocalContext.current
+    val savedRecordings by viewModel.savedRecordings.collectAsState()
+    val isRecording by viewModel.isRecording.collectAsState()
+
+    var renamingRecording by remember { mutableStateOf<SavedRecording?>(null) }
+    var deletingRecording by remember { mutableStateOf<SavedRecording?>(null) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .padding(16.dp)
+            .testTag("recordings_screen")
+    ) {
+        // Top Bar
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack, modifier = Modifier.testTag("btn_recordings_back")) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+            }
+            Spacer(modifier = Modifier.width(6.dp))
+            Column {
+                Text(
+                    text = "Saved Recordings (${savedRecordings.size})",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "Local CSV & JSON Diagnostic Runs",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 11.sp
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        if (savedRecordings.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(32.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Default.FolderOpen, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(48.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "No saved recording runs yet.\nStart a diagnostic recording from the Dashboard to save sessions.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                }
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                items(savedRecordings, key = { it.metadata.sessionId }) { rec ->
+                    RecordingItemCard(
+                        recording = rec,
+                        onShareFile = { file, mimeType -> shareFile(context, file, mimeType) },
+                        onRename = { renamingRecording = rec },
+                        onDelete = { deletingRecording = rec }
+                    )
+                }
+            }
+        }
+    }
+
+    // Rename Dialog
+    renamingRecording?.let { rec ->
+        var newName by remember { mutableStateOf(rec.metadata.sessionName) }
+        Dialog(onDismissRequest = { renamingRecording = null }) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Rename Recording", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    OutlinedTextField(
+                        value = newName,
+                        onValueChange = { newName = it },
+                        label = { Text("Session Name") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(onClick = { renamingRecording = null }) { Text("Cancel") }
+                        Button(onClick = {
+                            viewModel.renameRecording(rec.metadata.sessionId, newName)
+                            renamingRecording = null
+                        }) {
+                            Text("Save")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Delete Confirmation Dialog
+    deletingRecording?.let { rec ->
+        AlertDialog(
+            onDismissRequest = { deletingRecording = null },
+            title = { Text("Delete Session ${rec.metadata.sessionName}?") },
+            text = { Text("This will permanently remove the CSV, JSON, and raw TXT log files for this session from local storage.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.deleteRecording(rec.metadata.sessionId)
+                        deletingRecording = null
+                    }
+                ) {
+                    Text("Delete", color = WarningRed, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deletingRecording = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+}
+
+@Composable
+fun RecordingItemCard(
+    recording: SavedRecording,
+    onShareFile: (File, String) -> Unit,
+    onRename: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val meta = recording.metadata
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("recording_card_${meta.sessionId}"),
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = meta.sessionName,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "ID: ${meta.sessionId} • ${meta.vehicle}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+
+                Row {
+                    IconButton(onClick = onRename, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.Edit, contentDescription = "Rename", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
+                    }
+                    IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.DeleteOutline, contentDescription = "Delete", tint = WarningRed, modifier = Modifier.size(16.dp))
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "${recording.transactionCount} transactions",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = NeonEmerald,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 11.sp
+                )
+                Text(
+                    text = meta.startTimeUtc.take(19).replace("T", " "),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 11.sp
+                )
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+            Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Export Actions Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                OutlinedButton(
+                    onClick = { onShareFile(recording.transactionCsvFile, "text/csv") },
+                    modifier = Modifier.weight(1f).height(36.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp)
+                ) {
+                    Text("TX CSV", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
+
+                OutlinedButton(
+                    onClick = { onShareFile(recording.samplesCsvFile, "text/csv") },
+                    modifier = Modifier.weight(1f).height(36.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp)
+                ) {
+                    Text("Telemetry CSV", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
+
+                OutlinedButton(
+                    onClick = { onShareFile(recording.jsonFile, "application/json") },
+                    modifier = Modifier.weight(1f).height(36.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp)
+                ) {
+                    Text("JSON", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
+
+                if (recording.rawLogFile != null) {
+                    OutlinedButton(
+                        onClick = { onShareFile(recording.rawLogFile, "text/plain") },
+                        modifier = Modifier.weight(1f).height(36.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 4.dp)
+                    ) {
+                        Text("RAW TXT", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun shareFile(context: Context, file: File, mimeType: String) {
+    if (!file.exists()) {
+        Toast.makeText(context, "File does not exist", Toast.LENGTH_SHORT).show()
+        return
+    }
+
+    try {
+        val uri: Uri = FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            file
+        )
+
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = mimeType
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(intent, "Share ${file.name}"))
+    } catch (e: Exception) {
+        Toast.makeText(context, "Share error: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+    }
+}
