@@ -48,6 +48,7 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector)
     object Console : Screen("console", "Console", Icons.Default.Terminal)
     object Recordings : Screen("recordings", "Recordings", Icons.Default.Folder)
     object PidConfig : Screen("pid_config", "Config", Icons.Default.Tune)
+    object Profiles : Screen("profiles", "Profiles", Icons.Default.VerifiedUser)
 }
 
 class MainActivity : ComponentActivity() {
@@ -105,7 +106,7 @@ fun MainApp(viewModel: MainViewModel) {
         Screen.Dashboard,
         Screen.RawMonitor,
         Screen.Console,
-        Screen.Recordings,
+        Screen.Profiles,
         Screen.PidConfig
     )
 
@@ -204,6 +205,14 @@ fun MainApp(viewModel: MainViewModel) {
             composable(Screen.PidConfig.route) {
                 PidConfigScreen(
                     viewModel = viewModel,
+                    onBack = { navController.popBackStack() }
+                )
+            }
+            composable(Screen.Profiles.route) {
+                val profilesViewModel: com.example.ui.viewmodel.ProfilesViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+                ProfilesScreen(
+                    viewModel = profilesViewModel,
+                    mainViewModel = viewModel,
                     onBack = { navController.popBackStack() }
                 )
             }

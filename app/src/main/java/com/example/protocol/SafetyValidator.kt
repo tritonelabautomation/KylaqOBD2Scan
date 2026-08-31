@@ -16,7 +16,8 @@ object SafetyValidator {
     // 01: Current Powertrain Diagnostic Data
     // 02: Powertrain Freeze Frame Data
     // 09: Vehicle Information (VIN, Calibration ID, etc.)
-    private val ALLOWED_OBD_SERVICES = setOf("01", "02", "09")
+    // 22: Read Data By Identifier (UDS)
+    private val ALLOWED_OBD_SERVICES = setOf("01", "02", "09", "22")
 
     // Disallowed services explicitly blocked:
     // 04: Clear DTCs / Reset Emission Data (BLOCKED)

@@ -43,7 +43,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val bluetoothManager = BluetoothManager(application)
     val obdScheduler = ObdScheduler(recordingManager, settingsRepository)
 
-    private var activeTransport: ElmTransport? = null
+    var activeTransport: ElmTransport? = null
+        private set
     private var recordingTimerJob: Job? = null
 
     val connectionState: StateFlow<ConnectionState> = bluetoothManager.connectionState
