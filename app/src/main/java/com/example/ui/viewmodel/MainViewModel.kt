@@ -35,16 +35,19 @@ import kotlinx.coroutines.launch
 import java.io.File
 import java.util.UUID
 
-class MainViewModel(application: Application) : AndroidViewModel(application) {
+import com.example.di.AppContainer
 
-    private val logDir = File(application.filesDir, "raw_logs")
-    val rawLogManager = RawLogManager(logDir)
-    val gpsManager = com.example.data.GpsManager(application)
+class MainViewModel(application: Application) : AndroidViewModel(application) {
+    init { AppContainer.init(application) }
+
+    
+    val rawLogManager = AppContainer.rawLogManager
+    val gpsManager = AppContainer.gpsManager
     val gpsData = gpsManager.gpsData
-    val settingsRepository = SettingsRepository(application)
-    val recordingManager = RecordingManager(application, rawLogManager)
-    val bluetoothManager = BluetoothManager(application)
-    val obdScheduler = ObdScheduler(recordingManager, settingsRepository)
+    val settingsRepository = AppContainer.settingsRepository
+    val recordingManager = AppContainer.recordingManager
+    val bluetoothManager = AppContainer.bluetoothManager
+    val obdScheduler = AppContainer.obdScheduler
 
     var activeTransport: ElmTransport? = null
         private set
@@ -59,8 +62,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _selectedCanProtocol = MutableStateFlow(com.example.model.CanProtocol.AUTO)
     val selectedCanProtocol: StateFlow<com.example.model.CanProtocol> = _selectedCanProtocol.asStateFlow()
 
-    private val _protocolHealth = MutableStateFlow(com.example.model.ProtocolHealth.UNKNOWN)
-    val protocolHealth: StateFlow<com.example.model.ProtocolHealth> = _protocolHealth.asStateFlow()
+    val protocolHealth: StateFlow<com.example.model.ProtocolHealth> = AppContainer.protocolHealth.asStateFlow()
     
     private val _protocolVerificationResult = MutableStateFlow<com.example.model.ProtocolVerificationResult?>(null)
     val protocolVerificationResult: StateFlow<com.example.model.ProtocolVerificationResult?> = _protocolVerificationResult.asStateFlow()
@@ -146,7 +148,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _selectedCanProtocol.value = protocol
             obdScheduler.stopPolling()
             obdScheduler.resetCounters()
-            _protocolHealth.value = com.example.model.ProtocolHealth.UNKNOWN
+            AppContainer.protocolHealth.value = com.example.model.ProtocolHealth.UNKNOWN
             _protocolVerificationResult.value = null
         }
     }
@@ -166,7 +168,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (!transport.isConnected) return
         
         viewModelScope.launch {
-            _protocolHealth.value = com.example.model.ProtocolHealth.TESTING
+            AppContainer.protocolHealth.value = com.example.model.ProtocolHealth.TESTING
             obdScheduler.stopPolling()
             obdScheduler.resetCounters()
             
@@ -180,7 +182,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val result = executeProtocolVerification(transport, proto)
             
             _protocolVerificationResult.value = result
-            _protocolHealth.value = result.health
+            AppContainer.protocolHealth.value = result.health
             
             if (result.health == com.example.model.ProtocolHealth.WORKING || result.health == com.example.model.ProtocolHealth.PARTIAL) {
                 obdScheduler.startPolling(viewModelScope, transport)
@@ -349,7 +351,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (best != null && (best.health == com.example.model.ProtocolHealth.WORKING || best.health == com.example.model.ProtocolHealth.PARTIAL)) {
                 _selectedCanProtocol.value = best.protocol
                 _protocolVerificationResult.value = best
-                _protocolHealth.value = best.health
+                AppContainer.protocolHealth.value = best.health
                 obdScheduler.startPolling(viewModelScope, transport)
             }
         }
