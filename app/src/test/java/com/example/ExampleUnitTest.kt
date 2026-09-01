@@ -1,16 +1,112 @@
 package com.example
 
+import com.example.model.DecoderType
+import com.example.model.DefaultPidDefinitions
+import com.example.model.PidDefinition
+import com.example.protocol.*
 import org.junit.Assert.*
 import org.junit.Test
 
-/**
- * Example local unit test, which will execute on the development machine (host).
- *
- * See [testing documentation](http://d.android.com/tools/testing).
- */
 class ExampleUnitTest {
-  @Test
-  fun addition_isCorrect() {
-    assertEquals(4, 2 + 2)
-  }
+
+    @Test
+    fun testContinuousCanFrameParsing_RealEcuLog() {
+        // 010C -> 7E904410C0000 / 7E804410C0000
+        val frameRpm7E9 = CanFrameParser.parseFrame("7E904410C0000")
+        assertEquals("7E9", frameRpm7E9.canId)
+        assertEquals(IsoTpPciType.SINGLE_FRAME, frameRpm7E9.pciType)
+        assertEquals(listOf(0x41, 0x0C, 0x00, 0x00), frameRpm7E9.payloadBytes)
+
+        val frameRpm7E8 = CanFrameParser.parseFrame("7E804410C0000")
+        assertEquals("7E8", frameRpm7E8.canId)
+        assertEquals(IsoTpPciType.SINGLE_FRAME, frameRpm7E8.pciType)
+        assertEquals(listOf(0x41, 0x0C, 0x00, 0x00), frameRpm7E8.payloadBytes)
+
+        // 010D -> 7E803410D00
+        val frameSpeed = CanFrameParser.parseFrame("7E803410D00")
+        assertEquals("7E8", frameSpeed.canId)
+        assertEquals(listOf(0x41, 0x0D, 0x00), frameSpeed.payloadBytes)
+
+        // 010B -> 7E803410B5E (MAP: 0x5E = 94 kPa)
+        val frameMap = CanFrameParser.parseFrame("7E803410B5E")
+        assertEquals("7E8", frameMap.canId)
+        assertEquals(listOf(0x41, 0x0B, 0x5E), frameMap.payloadBytes)
+
+        // 0111 -> 7E80341112B (Throttle: 0x2B = 43 -> 16.9%)
+        val frameThrottle = CanFrameParser.parseFrame("7E80341112B")
+        assertEquals("7E8", frameThrottle.canId)
+        assertEquals(listOf(0x41, 0x11, 0x2B), frameThrottle.payloadBytes)
+
+        // 0105 -> 7E80341058C (Coolant: 0x8C = 140 -> 100 °C)
+        val frameCoolant = CanFrameParser.parseFrame("7E80341058C")
+        assertEquals("7E8", frameCoolant.canId)
+        assertEquals(listOf(0x41, 0x05, 0x8C), frameCoolant.payloadBytes)
+
+        // 010F -> 7E803410F63 (IAT: 0x63 = 99 -> 59 °C)
+        val frameIat = CanFrameParser.parseFrame("7E803410F63")
+        assertEquals("7E8", frameIat.canId)
+        assertEquals(listOf(0x41, 0x0F, 0x63), frameIat.payloadBytes)
+
+        // 0142 -> 7E9044142308E / 7E80441422FE4
+        val frameVolt7E9 = CanFrameParser.parseFrame("7E9044142308E")
+        assertEquals("7E9", frameVolt7E9.canId)
+        assertEquals(listOf(0x41, 0x42, 0x30, 0x8E), frameVolt7E9.payloadBytes)
+
+        val frameVolt7E8 = CanFrameParser.parseFrame("7E80441422FE4")
+        assertEquals("7E8", frameVolt7E8.canId)
+        assertEquals(listOf(0x41, 0x42, 0x2F, 0xE4), frameVolt7E8.payloadBytes)
+    }
+
+    @Test
+    fun testSpaceSeparatedCanFrames() {
+        val frame = CanFrameParser.parseFrame("7E8 04 41 0C 0F A0")
+        assertEquals("7E8", frame.canId)
+        assertEquals(IsoTpPciType.SINGLE_FRAME, frame.pciType)
+        assertEquals(listOf(0x41, 0x0C, 0x0F, 0xA0), frame.payloadBytes)
+    }
+
+    @Test
+    fun testPidDecoding_EcuTelemetryValues() {
+        val pids = DefaultPidDefinitions.getDefaults().associateBy { it.id }
+
+        // Test RPM: 0x0FA0 = 4000 -> 4000 / 4 = 1000 RPM
+        val rpmDef = pids["010C"]!!
+        val decodedRpm = PidDecoder.decode(rpmDef, listOf(0x41, 0x0C, 0x0F, 0xA0))
+        assertEquals(1000.0, decodedRpm.numericValue!!, 0.01)
+        assertEquals("1000", decodedRpm.displayValue)
+
+        // Test MAP: 0x5E = 94 kPa
+        val mapDef = pids["010B"]!!
+        val decodedMap = PidDecoder.decode(mapDef, listOf(0x41, 0x0B, 0x5E))
+        assertEquals(94.0, decodedMap.numericValue!!, 0.01)
+        assertEquals("94", decodedMap.displayValue)
+
+        // Test Coolant: 0x8C = 140 -> 100 °C
+        val coolantDef = pids["0105"]!!
+        val decodedCoolant = PidDecoder.decode(coolantDef, listOf(0x41, 0x05, 0x8C))
+        assertEquals(100.0, decodedCoolant.numericValue!!, 0.01)
+        assertEquals("100", decodedCoolant.displayValue)
+
+        // Test Voltage: 0x2FE4 = 12260 -> 12.26 V
+        val voltDef = pids["0142"]!!
+        val decodedVolt = PidDecoder.decode(voltDef, listOf(0x41, 0x42, 0x2F, 0xE4))
+        assertEquals(12.26, decodedVolt.numericValue!!, 0.01)
+        assertEquals("12.26", decodedVolt.displayValue)
+    }
+
+    @Test
+    fun testSafetyValidator_RejectsWriteCommands() {
+        assertTrue(SafetyValidator.validateCommand("010C") is ValidationResult.Allowed)
+        assertTrue(SafetyValidator.validateCommand("0170") is ValidationResult.Allowed)
+        assertTrue(SafetyValidator.validateCommand("ATSP6") is ValidationResult.Allowed)
+        assertTrue(SafetyValidator.validateCommand("ATSH7DF") is ValidationResult.Allowed)
+
+        // Block Mode 04 (Clear DTCs)
+        assertTrue(SafetyValidator.validateCommand("04") is ValidationResult.Rejected)
+        // Block UDS write / actuator test
+        assertTrue(SafetyValidator.validateCommand("2E 01 02") is ValidationResult.Rejected)
+        assertTrue(SafetyValidator.validateCommand("2F 01 02") is ValidationResult.Rejected)
+        assertTrue(SafetyValidator.validateCommand("31 01") is ValidationResult.Rejected)
+    }
 }
+

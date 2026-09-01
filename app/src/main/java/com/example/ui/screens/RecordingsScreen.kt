@@ -308,7 +308,9 @@ private fun shareFile(context: Context, file: File, mimeType: String) {
             putExtra(Intent.EXTRA_STREAM, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        context.startActivity(Intent.createChooser(intent, "Share ${file.name}"))
+        val chooser = Intent.createChooser(intent, "Share ${file.name}")
+        chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(chooser)
     } catch (e: Exception) {
         Toast.makeText(context, "Share error: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
     }

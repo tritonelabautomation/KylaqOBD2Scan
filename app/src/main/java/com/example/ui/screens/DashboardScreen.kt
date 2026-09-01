@@ -186,41 +186,42 @@ fun DashboardScreen(
         Spacer(modifier = Modifier.height(10.dp))
 
         // Primary Live Telemetry Cards Grid
-        if (protocolHealth == ProtocolHealth.UNKNOWN || protocolHealth == ProtocolHealth.NO_RESPONSE || protocolHealth == ProtocolHealth.TESTING) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(200.dp)
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), RoundedCornerShape(14.dp)),
-                contentAlignment = Alignment.Center
+        if (protocolHealth == ProtocolHealth.TESTING) {
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    if (protocolHealth == ProtocolHealth.TESTING) {
-                        CircularProgressIndicator(color = CyberCyan)
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text("Waiting for ECU response...", color = CyberCyan)
-                    } else {
-                        Icon(Icons.Default.Warning, contentDescription = null, tint = WarningRed, modifier = Modifier.size(32.dp))
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = if (protocolHealth == ProtocolHealth.NO_RESPONSE) "NO ECU RESPONSE" else "CAN Protocol not verified.",
-                            color = WarningRed,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "Please verify protocol to view telemetry.",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = CyberCyan)
+                    Text("Verifying ELM327 protocol profile with ECU...", color = CyberCyan, fontSize = 12.sp)
                 }
             }
-        } else {
-            TelemetryCardsGrid(
-                liveMap = liveDecodedMap,
-                onPidClick = { pidId -> onNavigateToPidDetail(pidId) }
-            )
+        } else if (protocolHealth == ProtocolHealth.NO_RESPONSE && isConnected) {
+            Surface(
+                color = WarningRed.copy(alpha = 0.12f),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Icon(Icons.Default.Warning, contentDescription = null, tint = WarningRed, modifier = Modifier.size(18.dp))
+                    Text("No ECU response received on current protocol profile.", color = WarningRed, fontSize = 12.sp)
+                }
+            }
         }
+
+        TelemetryCardsGrid(
+            liveMap = liveDecodedMap,
+            onPidClick = { pidId -> onNavigateToPidDetail(pidId) }
+        )
 
         Spacer(modifier = Modifier.height(24.dp))
     }

@@ -200,8 +200,12 @@ class ObdScheduler(
 
         _canResponseCount.value += isoTpMessages.size
 
-        // 4. Decode each reassembled response (e.g. from 7E8)
-        for (msg in isoTpMessages) {
+        // 4. Decode each reassembled response (prioritizing expected ECU e.g. 7E8)
+        val sortedMessages = isoTpMessages.sortedBy { msg ->
+            if (msg.canId.equals(pidDef.expectedRxId, ignoreCase = true) || msg.canId.equals("7E8", ignoreCase = true)) 1 else 0
+        }
+
+        for (msg in sortedMessages) {
             val decoded = PidDecoder.decode(pidDef, msg.reconstructedBytes)
             val rxCanId = msg.canId ?: pidDef.expectedRxId
 

@@ -3,6 +3,8 @@ package com.example.ui.screens
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -23,10 +25,15 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.FileProvider
 import com.example.protocol.SafetyValidator
 import com.example.protocol.ValidationResult
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.MainViewModel
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun AdapterConsoleScreen(
@@ -73,6 +80,15 @@ fun AdapterConsoleScreen(
             }
 
             Row {
+                IconButton(
+                    onClick = {
+                        shareConsoleLog(context, viewModel.getAllRawLogText())
+                    },
+                    modifier = Modifier.testTag("btn_share_log")
+                ) {
+                    Icon(Icons.Default.Share, contentDescription = "Share Log", tint = NeonEmerald)
+                }
+
                 IconButton(
                     onClick = {
                         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -216,3 +232,39 @@ fun AdapterConsoleScreen(
         }
     }
 }
+
+private fun shareConsoleLog(context: Context, logText: String) {
+    if (logText.isBlank()) {
+        Toast.makeText(context, "Log is empty, nothing to export", Toast.LENGTH_SHORT).show()
+        return
+    }
+
+    try {
+        val rawLogsDir = File(context.filesDir, "raw_logs")
+        if (!rawLogsDir.exists()) {
+            rawLogsDir.mkdirs()
+        }
+
+        val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+        val logFile = File(rawLogsDir, "ELM327_Console_$timeStamp.txt")
+        logFile.writeText(logText)
+
+        val uri: Uri = FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            logFile
+        )
+
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        val chooser = Intent.createChooser(intent, "Share Console Log")
+        chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(chooser)
+    } catch (e: Exception) {
+        Toast.makeText(context, "Share error: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+    }
+}
+

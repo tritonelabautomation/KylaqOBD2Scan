@@ -35,7 +35,13 @@ object CanFrameParser {
      * "41 0C 0F 2C" (headers off) -> canId: null, pci: NON_ISO_TP
      */
     fun parseFrame(line: String): RawCanFrame {
-        val trimmed = line.trim().uppercase()
+        var trimmed = line.trim().uppercase()
+        
+        // Strip line indexing prefixes like "0:", "1:", "01:", etc.
+        if (trimmed.matches(Regex("^[0-9A-F]{1,3}:.*"))) {
+            trimmed = trimmed.substringAfter(":").trim()
+        }
+
         val tokens = trimmed.split(Regex("\\s+")).filter { it.isNotBlank() }
 
         if (tokens.isEmpty()) {
@@ -50,46 +56,61 @@ object CanFrameParser {
             )
         }
 
-        // Check if first token is a 3 or 4 hex-digit or 8 hex-digit CAN ID (e.g. 7E8, 7DF, 18DAF110)
-        val hasCanIdHeader = tokens.size >= 2 && tokens[0].matches(Regex("^[0-9A-F]{3,8}$")) &&
-                tokens.drop(1).all { it.matches(Regex("^[0-9A-F]{1,2}$")) }
+        var canId: String? = null
+        val byteTokens: MutableList<String> = mutableListOf()
 
-        val canId: String?
-        val byteTokens: List<String>
+        if (tokens.size >= 2) {
+            // Space separated: Check if first token is a 3, 4 or 8 hex-digit CAN ID (e.g. 7E8, 7DF, 07E8, 18DAF110)
+            val firstToken = tokens[0]
+            val restTokens = tokens.drop(1)
+            val restAreHexBytes = restTokens.all { it.matches(Regex("^[0-9A-F]{1,2}$")) }
 
-        if (hasCanIdHeader) {
-            canId = tokens[0]
-            byteTokens = tokens.drop(1)
-        } else {
-            // Check if all tokens are hex bytes
-            val allHex = tokens.all { it.matches(Regex("^[0-9A-F]{1,2}$")) }
-            if (allHex) {
+            if (firstToken.matches(Regex("^[0-9A-F]{3,8}$")) && restAreHexBytes) {
+                canId = firstToken
+                byteTokens.addAll(restTokens.map { if (it.length == 1) "0$it" else it })
+            } else if (tokens.all { it.matches(Regex("^[0-9A-F]{1,2}$")) }) {
                 canId = null
-                byteTokens = tokens
-            } else {
-                // If it's something like "0: 49 02 01"
-                if (tokens[0].endsWith(":") && tokens.size > 1) {
+                byteTokens.addAll(tokens.map { if (it.length == 1) "0$it" else it })
+            }
+        }
+
+        if (byteTokens.isEmpty()) {
+            // Single continuous hex string or unspaced tokens (e.g. "7E904410C0000", "7E803410D00", "410C0000")
+            val cleanHex = trimmed.replace(" ", "")
+            if (cleanHex.matches(Regex("^[0-9A-F]+$"))) {
+                // Check 29-bit CAN ID (8 hex chars header + even length payload >= 2)
+                if (cleanHex.length >= 10 && (cleanHex.startsWith("18DA") || cleanHex.startsWith("18DB") || cleanHex.startsWith("18EA") || cleanHex.startsWith("18EC")) && (cleanHex.length - 8) % 2 == 0) {
+                    canId = cleanHex.substring(0, 8)
+                    byteTokens.addAll(cleanHex.substring(8).chunked(2))
+                }
+                // Check 11-bit CAN ID (3 hex chars header e.g. 7E8, 7E9, 7DF, 7E0..7EF where remainder is even and >= 2)
+                else if (cleanHex.length >= 5 && (cleanHex.length - 3) % 2 == 0 && (cleanHex.startsWith("7E") || cleanHex.startsWith("7D") || cleanHex.startsWith("7F") || cleanHex.startsWith("18") || cleanHex.take(3).matches(Regex("^[0-9A-F]{3}$")))) {
+                    canId = cleanHex.substring(0, 3)
+                    byteTokens.addAll(cleanHex.substring(3).chunked(2))
+                }
+                // Check 4-char CAN ID (e.g. 07E8 where remainder is even and >= 2)
+                else if (cleanHex.length >= 6 && cleanHex.startsWith("07E") && (cleanHex.length - 4) % 2 == 0) {
+                    canId = cleanHex.substring(0, 4)
+                    byteTokens.addAll(cleanHex.substring(4).chunked(2))
+                }
+                // Check raw byte sequence without header (even length)
+                else if (cleanHex.length % 2 == 0) {
                     canId = null
-                    byteTokens = tokens.drop(1).filter { it.matches(Regex("^[0-9A-F]{1,2}$")) }
-                } else {
-                    // Try parsing continuous hex string e.g. "410C0F2C"
-                    val continuous = trimmed.replace(" ", "")
-                    if (continuous.matches(Regex("^[0-9A-F]+$")) && continuous.length % 2 == 0) {
-                        canId = null
-                        byteTokens = continuous.chunked(2)
-                    } else {
-                        return RawCanFrame(
-                            rawLine = line,
-                            canId = null,
-                            dataBytes = emptyList(),
-                            dataHex = "",
-                            isIsoTp = false,
-                            pciType = IsoTpPciType.NON_ISO_TP,
-                            payloadBytes = emptyList()
-                        )
-                    }
+                    byteTokens.addAll(cleanHex.chunked(2))
                 }
             }
+        }
+
+        if (byteTokens.isEmpty()) {
+            return RawCanFrame(
+                rawLine = line,
+                canId = null,
+                dataBytes = emptyList(),
+                dataHex = "",
+                isIsoTp = false,
+                pciType = IsoTpPciType.NON_ISO_TP,
+                payloadBytes = emptyList()
+            )
         }
 
         val dataBytes = byteTokens.mapNotNull { it.toIntOrNull(16) }
@@ -113,7 +134,7 @@ object CanFrameParser {
 
         return when (pciNibble) {
             0 -> {
-                // Single Frame: length is lower nibble
+                // Single Frame: length is lower nibble (1..7)
                 val length = firstByte and 0x0F
                 val payload = if (length in 1..(dataBytes.size - 1)) {
                     dataBytes.subList(1, 1 + length)

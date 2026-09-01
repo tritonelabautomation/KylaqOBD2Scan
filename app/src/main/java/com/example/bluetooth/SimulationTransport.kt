@@ -105,6 +105,24 @@ class SimulationElmTransport : ElmTransport {
                 lines.add("OK")
             }
 
+            // Supported PIDs Bitmasks for EA211 1.0 TSI
+            cleanCmd == "0100" -> {
+                // PIDs 01-20: 04, 05, 06, 07, 0B, 0C, 0D, 0E, 0F, 11, etc.
+                lines.add("7E8 06 41 00 BE 3F B8 13")
+            }
+            cleanCmd == "0120" -> {
+                // PIDs 21-40: 2E, 2F, 33, 3C, etc.
+                lines.add("7E8 06 41 20 80 07 20 01")
+            }
+            cleanCmd == "0140" -> {
+                // PIDs 41-60: 42, 43, 44, 45, 46, 47, 49, 4A, 4C, 51, etc.
+                lines.add("7E8 06 41 40 FE D0 80 00")
+            }
+            cleanCmd == "0160" -> {
+                // PIDs 61-80: 62, 63, 67, 6D, 70, etc.
+                lines.add("7E8 06 41 60 70 00 00 00")
+            }
+
             // Standard Mode 01 OBD PIDs for EA211 (Single Frame with 7E8 CAN header)
             cleanCmd == "010C" -> {
                 // RPM formula: ((A * 256) + B) / 4
