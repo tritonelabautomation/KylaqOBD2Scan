@@ -1,13 +1,19 @@
 package com.example.data
 
 import android.content.Context
+import com.example.data.db.TripRepository
+import com.example.data.db.entities.RawLogEntity
+import com.example.data.db.entities.TelemetrySampleEntity
+import com.example.data.db.entities.TripEntity
 import com.example.model.RecordingMetadata
 import com.example.model.SynchronizedSample
 import com.example.model.TransactionRecord
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
@@ -23,13 +29,18 @@ data class SavedRecording(
     val transactionCsvFile: File,
     val samplesCsvFile: File,
     val jsonFile: File,
-    val rawLogFile: File?
+    val rawLogFile: File?,
+    val zipFile: File? = null
 )
 
 /**
- * Manages active recording lifecycle and saved sessions storage
+ * Manages active recording lifecycle and saved sessions storage, backed by Room database and file system
  */
-class RecordingManager(private val context: Context, private val rawLogManager: RawLogManager) {
+class RecordingManager(
+    private val context: Context,
+    private val rawLogManager: RawLogManager,
+    val tripRepository: TripRepository = TripRepository(context)
+) {
 
     private val recordingsDir: File = File(context.filesDir, "recordings").apply {
         if (!exists()) mkdirs()
@@ -54,6 +65,8 @@ class RecordingManager(private val context: Context, private val rawLogManager: 
         timestampMonotonic = 0L
     )
 
+    private var sessionStartTimestamp = 0L
+
     init {
         loadSavedRecordings()
     }
@@ -65,6 +78,7 @@ class RecordingManager(private val context: Context, private val rawLogManager: 
         protocolName: String = "ISO 15765-4 CAN 11-bit 500kbps"
     ): RecordingMetadata {
         val sessionId = UUID.randomUUID().toString().take(8)
+        sessionStartTimestamp = System.currentTimeMillis()
         val nowUtc = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
             timeZone = TimeZone.getTimeZone("UTC")
         }.format(Date())
@@ -93,6 +107,23 @@ class RecordingManager(private val context: Context, private val rawLogManager: 
         _isRecording.value = true
 
         rawLogManager.startFileLogging(sessionId)
+
+        // Asynchronously insert initial Trip record in Room
+        CoroutineScope(Dispatchers.IO).launch {
+            tripRepository.insertTrip(
+                TripEntity(
+                    id = sessionId,
+                    title = defaultName,
+                    vehicleName = vehicleName,
+                    adapterName = adapterName,
+                    protocolName = protocolName,
+                    startTimeUtc = nowUtc,
+                    startTimestamp = sessionStartTimestamp,
+                    status = "RECORDING"
+                )
+            )
+        }
+
         return metadata
     }
 
@@ -128,6 +159,7 @@ class RecordingManager(private val context: Context, private val rawLogManager: 
 
     suspend fun stopRecording(): SavedRecording? = withContext(Dispatchers.IO) {
         val metadata = _currentSessionMetadata.value ?: return@withContext null
+        val endTimestamp = System.currentTimeMillis()
         val nowUtc = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
             timeZone = TimeZone.getTimeZone("UTC")
         }.format(Date())
@@ -159,13 +191,78 @@ class RecordingManager(private val context: Context, private val rawLogManager: 
             dest
         } else null
 
+        // Generate full ZIP bundle
+        val zipFile = File(sessionDir, "${metadata.sessionId}_bundle.zip")
+        val filesToZip = listOfNotNull(txCsvFile, sampleCsvFile, jsonFile, destRawLog)
+        ZipExporter.createTripZip(zipFile, filesToZip)
+
+        // Calculate summary metrics for Room
+        val maxRpm = txList.filter { it.pid.equals("0C", ignoreCase = true) }.mapNotNull { it.decodedValue }.maxOrNull() ?: 0.0
+        val maxSpeed = txList.filter { it.pid.equals("0D", ignoreCase = true) }.mapNotNull { it.decodedValue }.maxOrNull() ?: 0.0
+        val maxCoolant = txList.filter { it.pid.equals("05", ignoreCase = true) }.mapNotNull { it.decodedValue }.maxOrNull() ?: 0.0
+        val voltList = txList.filter { it.pid.equals("42", ignoreCase = true) }.mapNotNull { it.decodedValue }
+        val avgVolt = if (voltList.isNotEmpty()) voltList.average() else 0.0
+        val detectedEcus = txList.mapNotNull { it.canRxId.takeIf { id -> id.isNotBlank() } }.distinct().joinToString(", ").ifBlank { "7E8" }
+        val durationSec = maxOf(1L, (endTimestamp - sessionStartTimestamp) / 1000)
+
+        // Save complete entities into Room Database
+        val tripEntity = TripEntity(
+            id = metadata.sessionId,
+            title = metadata.sessionName,
+            vehicleName = metadata.vehicle,
+            adapterName = metadata.adapter,
+            protocolName = metadata.protocol,
+            startTimeUtc = metadata.startTimeUtc,
+            endTimeUtc = nowUtc,
+            startTimestamp = sessionStartTimestamp,
+            endTimestamp = endTimestamp,
+            durationSeconds = durationSec,
+            status = "COMPLETED",
+            sampleCount = txList.size,
+            rawLogCount = txList.size,
+            maxRpm = maxRpm,
+            maxSpeedKmh = maxSpeed,
+            maxCoolantC = maxCoolant,
+            avgVoltageV = avgVolt,
+            detectedEcus = detectedEcus,
+            healthScore = 100
+        )
+        tripRepository.insertTrip(tripEntity)
+
+        // Insert telemetry sample records
+        val dbSamples = txList.mapIndexed { idx, tx ->
+            TelemetrySampleEntity(
+                tripId = metadata.sessionId,
+                timestamp = tx.timestampMonotonic,
+                timestampUtc = tx.timestampUtc,
+                ecuCanId = tx.canRxId.ifBlank { "7E8" },
+                pid = tx.pid,
+                parameterName = tx.decodedParameter.ifBlank { "PID ${tx.pid}" },
+                rawHex = tx.responseHex,
+                numericValue = tx.decodedValue,
+                displayValue = tx.decodedValueDisplay,
+                unit = tx.unit,
+                quality = "VALID",
+                sequence = idx.toLong()
+            )
+        }
+        tripRepository.insertSamples(dbSamples)
+
+        // Auto-run local AI Doctor analysis
+        try {
+            tripRepository.runAiCarDoctorAnalysis(metadata.sessionId)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
         val saved = SavedRecording(
             metadata = metadata,
             transactionCount = txList.size,
             transactionCsvFile = txCsvFile,
             samplesCsvFile = sampleCsvFile,
             jsonFile = jsonFile,
-            rawLogFile = destRawLog
+            rawLogFile = destRawLog,
+            zipFile = zipFile
         )
 
         _isRecording.value = false
@@ -184,6 +281,7 @@ class RecordingManager(private val context: Context, private val rawLogManager: 
             val txCsv = File(dir, "${sessionId}_transactions.csv")
             val sampleCsv = File(dir, "${sessionId}_samples.csv")
             val rawFile = File(dir, "${sessionId}_raw.txt")
+            val zipFile = File(dir, "${sessionId}_bundle.zip")
 
             if (jsonFile.exists()) {
                 try {
@@ -212,7 +310,8 @@ class RecordingManager(private val context: Context, private val rawLogManager: 
                             transactionCsvFile = txCsv,
                             samplesCsvFile = sampleCsv,
                             jsonFile = jsonFile,
-                            rawLogFile = if (rawFile.exists()) rawFile else null
+                            rawLogFile = if (rawFile.exists()) rawFile else null,
+                            zipFile = if (zipFile.exists()) zipFile else null
                         )
                     )
                 } catch (e: Exception) {
@@ -247,5 +346,20 @@ class RecordingManager(private val context: Context, private val rawLogManager: 
             sessionDir.deleteRecursively()
             loadSavedRecordings()
         }
+        CoroutineScope(Dispatchers.IO).launch {
+            tripRepository.deleteTrip(sessionId)
+        }
+    }
+
+    fun deleteAllRecordings() {
+        recordingsDir.listFiles()?.forEach { file ->
+            if (file.isDirectory) file.deleteRecursively() else file.delete()
+        }
+        loadSavedRecordings()
+        CoroutineScope(Dispatchers.IO).launch {
+            tripRepository.deleteAllTrips()
+        }
     }
 }
+
+

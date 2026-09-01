@@ -26,6 +26,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
+import com.example.bluetooth.ConnectionState
 import com.example.protocol.SafetyValidator
 import com.example.protocol.ValidationResult
 import com.example.ui.theme.*
@@ -197,37 +198,20 @@ fun AdapterConsoleScreen(
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // Manual Command Input Field
-        Row(
+        // Adapter Info Card
+        Card(
             modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+            shape = RoundedCornerShape(12.dp)
         ) {
-            OutlinedTextField(
-                value = inputCommand,
-                onValueChange = { inputCommand = it.uppercase() },
-                modifier = Modifier
-                    .weight(1f)
-                    .testTag("input_manual_command"),
-                placeholder = { Text("Command (e.g. ATRV, ATDP, 0100)", fontSize = 12.sp) },
-                singleLine = true,
-                shape = RoundedCornerShape(12.dp)
-            )
-
-            Button(
-                onClick = {
-                    if (inputCommand.isNotBlank()) {
-                        viewModel.sendManualCommand(inputCommand)
-                        inputCommand = ""
-                    }
-                },
-                modifier = Modifier
-                    .height(54.dp)
-                    .testTag("btn_send_command"),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = CyberCyan, contentColor = Color(0xFF00363D))
-            ) {
-                Icon(Icons.Default.Send, contentDescription = "Send", modifier = Modifier.size(18.dp))
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("Adapter Information", style = MaterialTheme.typography.titleMedium, color = CyberCyan)
+                Spacer(modifier = Modifier.height(8.dp))
+                val isConnected = viewModel.connectionState.collectAsState().value == ConnectionState.CONNECTED
+                Text("Bluetooth: ${if (isConnected) "Connected" else "Disconnected"}", style = MaterialTheme.typography.bodySmall)
+                Text("Protocol: ${viewModel.selectedCanProtocol.collectAsState().value.displayName}", style = MaterialTheme.typography.bodySmall)
+                Text("Voltage: ${viewModel.adapterVoltage.collectAsState().value ?: "Unavailable"}", style = MaterialTheme.typography.bodySmall)
+                Text("Firmware: ${viewModel.adapterFirmware.collectAsState().value ?: "Unavailable"}", style = MaterialTheme.typography.bodySmall)
             }
         }
     }

@@ -16,7 +16,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -27,21 +26,32 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.core.content.FileProvider
 import com.example.data.SavedRecording
+import com.example.data.db.StorageStats
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.MainViewModel
+import kotlinx.coroutines.launch
 import java.io.File
 
 @Composable
 fun RecordingsScreen(
     viewModel: MainViewModel,
+    onNavigateToTripDetail: (String) -> Unit,
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     val savedRecordings by viewModel.savedRecordings.collectAsState()
     val isRecording by viewModel.isRecording.collectAsState()
+    val tripRepo = viewModel.recordingManager.tripRepository
 
     var renamingRecording by remember { mutableStateOf<SavedRecording?>(null) }
     var deletingRecording by remember { mutableStateOf<SavedRecording?>(null) }
+    var storageStats by remember { mutableStateOf<StorageStats?>(null) }
+    var showStorageDialog by remember { mutableStateOf(false) }
+
+    LaunchedEffect(savedRecordings) {
+        storageStats = tripRepo.getStorageStats()
+    }
 
     Column(
         modifier = Modifier
@@ -53,28 +63,65 @@ fun RecordingsScreen(
         // Top Bar
         Row(
             modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            IconButton(onClick = onBack, modifier = Modifier.testTag("btn_recordings_back")) {
-                Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onBack, modifier = Modifier.testTag("btn_recordings_back")) {
+                    Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                }
+                Spacer(modifier = Modifier.width(6.dp))
+                Column {
+                    Text(
+                        text = "Trips & Recordings (${savedRecordings.size})",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Persistent Room Database & Diagnostic Files",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 11.sp
+                    )
+                }
             }
-            Spacer(modifier = Modifier.width(6.dp))
-            Column {
+
+            IconButton(onClick = { showStorageDialog = true }) {
+                Icon(Icons.Default.Storage, contentDescription = "Storage", tint = CyberCyan)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // Storage & Retention Banner
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        ) {
+            Row(
+                modifier = Modifier.padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(Icons.Default.Security, contentDescription = null, tint = NeonEmerald, modifier = Modifier.size(18.dp))
+                    Text(
+                        text = "Policy: Persist Until User Deletes (Safe)",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
                 Text(
-                    text = "Saved Recordings (${savedRecordings.size})",
-                    style = MaterialTheme.typography.titleLarge,
+                    text = "${storageStats?.sampleCount ?: 0} samples",
+                    fontSize = 11.sp,
+                    color = CyberCyan,
                     fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = "Local CSV & JSON Diagnostic Runs",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 11.sp
                 )
             }
         }
 
-        Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
         if (savedRecordings.isEmpty()) {
             Box(
@@ -87,7 +134,7 @@ fun RecordingsScreen(
                     Icon(Icons.Default.FolderOpen, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(48.dp))
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
-                        text = "No saved recording runs yet.\nStart a diagnostic recording from the Dashboard to save sessions.",
+                        text = "No saved recording runs yet.\nStart a diagnostic recording from the Dashboard to record trips.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -102,6 +149,7 @@ fun RecordingsScreen(
                 items(savedRecordings, key = { it.metadata.sessionId }) { rec ->
                     RecordingItemCard(
                         recording = rec,
+                        onClick = { onNavigateToTripDetail(rec.metadata.sessionId) },
                         onShareFile = { file, mimeType -> shareFile(context, file, mimeType) },
                         onRename = { renamingRecording = rec },
                         onDelete = { deletingRecording = rec }
@@ -109,6 +157,42 @@ fun RecordingsScreen(
                 }
             }
         }
+    }
+
+    // Storage Management Dialog
+    if (showStorageDialog) {
+        AlertDialog(
+            onDismissRequest = { showStorageDialog = false },
+            title = { Text("Diagnostic Storage & Retention") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("• Saved Trips: ${storageStats?.tripCount ?: 0}", fontSize = 13.sp)
+                    Text("• Telemetry Samples: ${storageStats?.sampleCount ?: 0}", fontSize = 13.sp)
+                    Text("• Raw Communication Frames: ${storageStats?.rawLogCount ?: 0}", fontSize = 13.sp)
+                    Text("• Storage Engine: Room Database (Indexed) + Local Files", fontSize = 13.sp)
+                    Text("• Auto-Pruning: Disabled (All diagnostic history is preserved permanently).", fontSize = 12.sp, color = NeonEmerald)
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        coroutineScope.launch {
+                            viewModel.recordingManager.deleteAllRecordings()
+                            storageStats = tripRepo.getStorageStats()
+                            showStorageDialog = false
+                            Toast.makeText(context, "All recordings cleared", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                ) {
+                    Text("Clear All Storage", color = WarningRed, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showStorageDialog = false }) {
+                    Text("Close")
+                }
+            }
+        )
     }
 
     // Rename Dialog
@@ -148,8 +232,8 @@ fun RecordingsScreen(
     deletingRecording?.let { rec ->
         AlertDialog(
             onDismissRequest = { deletingRecording = null },
-            title = { Text("Delete Session ${rec.metadata.sessionName}?") },
-            text = { Text("This will permanently remove the CSV, JSON, and raw TXT log files for this session from local storage.") },
+            title = { Text("Delete Trip ${rec.metadata.sessionName}?") },
+            text = { Text("This will permanently remove the trip, Room telemetry samples, and exported logs from local storage.") },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -172,6 +256,7 @@ fun RecordingsScreen(
 @Composable
 fun RecordingItemCard(
     recording: SavedRecording,
+    onClick: () -> Unit,
     onShareFile: (File, String) -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit
@@ -181,6 +266,7 @@ fun RecordingItemCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
+            .clickable(onClick = onClick)
             .testTag("recording_card_${meta.sessionId}"),
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
@@ -248,6 +334,17 @@ fun RecordingItemCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
+                if (recording.zipFile != null && recording.zipFile.exists()) {
+                    OutlinedButton(
+                        onClick = { onShareFile(recording.zipFile, "application/zip") },
+                        modifier = Modifier.weight(1f).height(36.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 4.dp)
+                    ) {
+                        Text("ZIP BUNDLE", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = CyberCyan)
+                    }
+                }
+
                 OutlinedButton(
                     onClick = { onShareFile(recording.transactionCsvFile, "text/csv") },
                     modifier = Modifier.weight(1f).height(36.dp),
@@ -263,7 +360,7 @@ fun RecordingItemCard(
                     shape = RoundedCornerShape(8.dp),
                     contentPadding = PaddingValues(horizontal = 4.dp)
                 ) {
-                    Text("Telemetry CSV", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text("SAMPLES", fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 }
 
                 OutlinedButton(
@@ -274,25 +371,14 @@ fun RecordingItemCard(
                 ) {
                     Text("JSON", fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 }
-
-                if (recording.rawLogFile != null) {
-                    OutlinedButton(
-                        onClick = { onShareFile(recording.rawLogFile, "text/plain") },
-                        modifier = Modifier.weight(1f).height(36.dp),
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 4.dp)
-                    ) {
-                        Text("RAW TXT", fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
             }
         }
     }
 }
 
 private fun shareFile(context: Context, file: File, mimeType: String) {
-    if (!file.exists()) {
-        Toast.makeText(context, "File does not exist", Toast.LENGTH_SHORT).show()
+    if (!file.exists() || file.length() == 0L) {
+        Toast.makeText(context, "File does not exist or is empty", Toast.LENGTH_SHORT).show()
         return
     }
 

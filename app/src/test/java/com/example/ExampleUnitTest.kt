@@ -1,12 +1,23 @@
 package com.example
 
-import com.example.model.DecoderType
-import com.example.model.DefaultPidDefinitions
-import com.example.model.PidDefinition
+import com.example.ai.PrivacyFilter
+import com.example.ai.RuleBasedAnalysisEngine
+import com.example.data.ZipExporter
+import com.example.data.db.entities.TelemetrySampleEntity
+import com.example.data.db.entities.TripEntity
+import com.example.model.*
 import com.example.protocol.*
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import java.io.File
+import java.util.zip.ZipFile
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
 class ExampleUnitTest {
 
     @Test
@@ -95,6 +106,23 @@ class ExampleUnitTest {
     }
 
     @Test
+    fun testIsoTpMultiFrameReassembly() {
+        val lines = listOf(
+            "7E8 10 14 49 02 01 54 4D 42",
+            "7E8 21 41 41 31 32 33 34 35",
+            "7E8 22 36 37 38 39 00 00 00"
+        )
+        val messages = IsoTpParser.reassembleLines(lines)
+        assertEquals(1, messages.size)
+        val msg = messages.first()
+        assertEquals("7E8", msg.canId)
+        assertTrue(msg.isComplete)
+        assertEquals(20, msg.totalExpectedLength)
+        assertEquals(0x49, msg.reconstructedBytes[0])
+        assertEquals(0x02, msg.reconstructedBytes[1])
+    }
+
+    @Test
     fun testSafetyValidator_RejectsWriteCommands() {
         assertTrue(SafetyValidator.validateCommand("010C") is ValidationResult.Allowed)
         assertTrue(SafetyValidator.validateCommand("0170") is ValidationResult.Allowed)
@@ -108,5 +136,130 @@ class ExampleUnitTest {
         assertTrue(SafetyValidator.validateCommand("2F 01 02") is ValidationResult.Rejected)
         assertTrue(SafetyValidator.validateCommand("31 01") is ValidationResult.Rejected)
     }
-}
 
+    @Test
+    fun testRuleBasedAiDoctor_Analysis() = runBlocking {
+        val trip = TripEntity(
+            id = "test_trip_1",
+            title = "Test Drive",
+            vehicleName = "Škoda Kylaq 1.0 TSI",
+            adapterName = "OBDLink CX",
+            protocolName = "ISO 15765-4 (CAN 11/500)",
+            startTimeUtc = "2026-09-01T05:00:00Z",
+            endTimeUtc = "2026-09-01T05:20:00Z",
+            durationSeconds = 1200L,
+            maxRpm = 4500.0,
+            maxSpeedKmh = 105.0,
+            maxCoolantC = 92.0,
+            avgVoltageV = 14.2,
+            sampleCount = 100,
+            rawLogCount = 500,
+            status = "COMPLETED",
+            healthScore = 95
+        )
+
+        val samples = listOf(
+            TelemetrySampleEntity(
+                tripId = "test_trip_1",
+                timestamp = 1000L,
+                timestampUtc = "2026-09-01T05:00:01Z",
+                pid = "010C",
+                parameterName = "Engine RPM",
+                rawHex = "410C1388",
+                numericValue = 1250.0,
+                displayValue = "1250",
+                unit = "RPM",
+                ecuCanId = "7E8"
+            ),
+            TelemetrySampleEntity(
+                tripId = "test_trip_1",
+                timestamp = 2000L,
+                timestampUtc = "2026-09-01T05:00:02Z",
+                pid = "0105",
+                parameterName = "Coolant Temp",
+                rawHex = "410584",
+                numericValue = 92.0,
+                displayValue = "92",
+                unit = "°C",
+                ecuCanId = "7E8"
+            ),
+            TelemetrySampleEntity(
+                tripId = "test_trip_1",
+                timestamp = 3000L,
+                timestampUtc = "2026-09-01T05:00:03Z",
+                pid = "0142",
+                parameterName = "Voltage",
+                rawHex = "41423850",
+                numericValue = 14.2,
+                displayValue = "14.2",
+                unit = "V",
+                ecuCanId = "7E8"
+            )
+        )
+
+        val doctor = RuleBasedAnalysisEngine()
+        val report = doctor.analyzeTrip(trip, samples, emptyList())
+        assertNotNull(report)
+        assertEquals("NORMAL", report.overallHealth)
+        assertTrue(report.healthScore >= 90)
+        assertTrue(report.engineBehavior.contains("nominal", ignoreCase = true) || report.engineBehavior.contains("4500"))
+        assertTrue(report.temperatureBehavior.contains("92"))
+    }
+
+    @Test
+    fun testPrivacyFilter_Anonymization() {
+        val trip = TripEntity(
+            id = "test_trip_priv",
+            title = "Commute",
+            startTimeUtc = "2026-09-01T05:00:00Z",
+            durationSeconds = 600L,
+            maxRpm = 3000.0,
+            maxSpeedKmh = 60.0,
+            maxCoolantC = 90.0,
+            avgVoltageV = 14.1
+        )
+        val samples = listOf(
+            TelemetrySampleEntity(
+                tripId = "test_trip_priv",
+                timestamp = 1000L,
+                timestampUtc = "2026-09-01T05:00:01Z",
+                pid = "010C",
+                parameterName = "Engine RPM",
+                rawHex = "410C1388",
+                numericValue = 1250.0,
+                displayValue = "1250",
+                unit = "RPM",
+                ecuCanId = "7E8"
+            )
+        )
+
+        val json = PrivacyFilter.anonymizeTripData(trip, samples)
+        assertNotNull(json)
+        assertTrue(json.has("vehicleProfile"))
+        assertTrue(json.has("sampledTelemetry"))
+        assertFalse(json.toString().contains("test_trip_priv"))
+    }
+
+    @Test
+    fun testZipExporter_CreatesValidArchive() {
+        val tempDir = File.createTempFile("obd_test_zip", "").apply {
+            delete()
+            mkdirs()
+        }
+
+        val file1 = File(tempDir, "file1.txt").apply { writeText("Hello OBD") }
+        val file2 = File(tempDir, "file2.csv").apply { writeText("Timestamp,RPM\n1000,1200") }
+        val zipFile = File(tempDir, "bundle.zip")
+
+        ZipExporter.createTripZip(zipFile, listOf(file1, file2))
+        assertTrue(zipFile.exists())
+        assertTrue(zipFile.length() > 0)
+
+        val zip = ZipFile(zipFile)
+        assertNotNull(zip.getEntry("file1.txt"))
+        assertNotNull(zip.getEntry("file2.csv"))
+        zip.close()
+
+        tempDir.deleteRecursively()
+    }
+}

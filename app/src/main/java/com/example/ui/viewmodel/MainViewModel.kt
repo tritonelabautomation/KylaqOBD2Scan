@@ -8,6 +8,7 @@ import com.example.bluetooth.BluetoothManager
 import com.example.bluetooth.ConnectionState
 import com.example.bluetooth.ElmResponse
 import com.example.bluetooth.ElmTransport
+import kotlinx.coroutines.flow.firstOrNull
 import com.example.data.PollingSpeedMode
 import com.example.data.RawLogEntry
 import com.example.data.RawLogManager
@@ -62,6 +63,47 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _protocolVerificationResult = MutableStateFlow<com.example.model.ProtocolVerificationResult?>(null)
     val protocolVerificationResult: StateFlow<com.example.model.ProtocolVerificationResult?> = _protocolVerificationResult.asStateFlow()
 
+    private val _adapterVoltage = MutableStateFlow<String?>(null)
+    val adapterVoltage: StateFlow<String?> = _adapterVoltage.asStateFlow()
+
+    private val _adapterFirmware = MutableStateFlow<String?>(null)
+    val adapterFirmware: StateFlow<String?> = _adapterFirmware.asStateFlow()
+
+    private val _vehicleVin = MutableStateFlow<String?>(null)
+    val vehicleVin: StateFlow<String?> = _vehicleVin.asStateFlow()
+
+    fun fetchVehicleVin() {
+        val transport = activeTransport ?: return
+        if (!transport.isConnected) return
+
+        viewModelScope.launch {
+            val resp = transport.sendCommand("0902", 3000)
+            if (resp.status == com.example.model.ResponseStatus.OK && resp.lines.isNotEmpty()) {
+                // Decode VIN (simplified decoder, actual Mode 0902 decoding requires parsing multi-frame ASCII)
+                val cleanLines = resp.lines.map { it.replace(" ", "") }
+                val hexString = cleanLines.joinToString("")
+                try {
+                    val ascii = StringBuilder()
+                    var i = 0
+                    while (i < hexString.length - 1) {
+                        val str = hexString.substring(i, i + 2)
+                        val num = str.toIntOrNull(16)
+                        if (num != null && num in 32..126) {
+                            ascii.append(num.toChar())
+                        }
+                        i += 2
+                    }
+                    val vinMatch = Regex("[A-HJ-NPR-Z0-9]{17}").find(ascii.toString())
+                    _vehicleVin.value = vinMatch?.value ?: "VIN Decoded: $ascii"
+                } catch (e: Exception) {
+                    _vehicleVin.value = "Failed to parse VIN"
+                }
+            } else {
+                _vehicleVin.value = "VIN Unavailable"
+            }
+        }
+    }
+
     val transactionCount: StateFlow<Long> = obdScheduler.transactionCount
     val canResponseCount: StateFlow<Long> = obdScheduler.canResponseCount
     val errorCount: StateFlow<Long> = obdScheduler.errorCount
@@ -80,6 +122,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val pollingMode: StateFlow<PollingSpeedMode> = settingsRepository.pollingMode
     val pidDefinitions: StateFlow<List<PidDefinition>> = settingsRepository.pidDefinitions
     val vehicleName: StateFlow<String> = settingsRepository.vehicleName
+
+    fun setVehicleName(name: String) {
+        settingsRepository.setVehicleName(name)
+    }
+
     val canHeader: StateFlow<String> = settingsRepository.canHeader
     val sppUuid: StateFlow<String> = settingsRepository.sppUuid
 
@@ -95,6 +142,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun selectCanProtocol(protocol: com.example.model.CanProtocol) {
         if (_selectedCanProtocol.value != protocol) {
             _selectedCanProtocol.value = protocol
+            obdScheduler.stopPolling()
             obdScheduler.resetCounters()
             _protocolHealth.value = com.example.model.ProtocolHealth.UNKNOWN
             _protocolVerificationResult.value = null
@@ -166,7 +214,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             
             val hasEcuResponse = resp.lines.any { line -> 
                 val cleanLine = line.replace(" ", "").uppercase()
-                cleanLine.contains(expectedService + expectedPid)
+                val expected = expectedService + expectedPid
+                val idx = cleanLine.indexOf(expected)
+                idx in 0..8
             }
             
             val status = when {
@@ -270,6 +320,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 results.add(result)
                 _batchTestResults.value = results.toList()
                 
+                // Save to database
+                val entity = com.example.data.db.entities.ProtocolTestResultEntity(
+                    timestamp = System.currentTimeMillis(),
+                    protocol = result.protocol.displayName,
+                    atCommand = result.protocol.atCommand,
+                    resultStatus = result.health.name,
+                    ecuResponses = result.successCount,
+                    canErrors = result.canErrorCount,
+                    timeouts = result.timeoutCount,
+                    averageLatency = result.avgResponseTimeMs,
+                    appVersion = result.appVersion,
+                    buildNumber = result.buildNumber,
+                    gitCommit = result.commitHash
+                )
+                recordingManager.tripRepository.insertProtocolTestResult(entity)
+                
                 // Safety delay before testing next protocol
                 kotlinx.coroutines.delay(500)
             }
@@ -320,9 +386,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
             if (success && transport != null) {
                 activeTransport = transport
+                fetchAdapterInfo(transport)
                 obdScheduler.startPolling(viewModelScope, transport)
             }
         }
+    }
+
+    private suspend fun fetchAdapterInfo(transport: ElmTransport) {
+        val voltageResp = transport.sendCommand("ATRV", 1000)
+        _adapterVoltage.value = if (voltageResp.status == com.example.model.ResponseStatus.OK) voltageResp.rawText.trim() else null
+
+        val firmwareResp = transport.sendCommand("ATI", 1000)
+        _adapterFirmware.value = if (firmwareResp.status == com.example.model.ResponseStatus.OK) firmwareResp.rawText.trim() else null
     }
 
     fun startSimulationMode() {
@@ -334,6 +409,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
             if (success) {
                 activeTransport = transport
+                fetchAdapterInfo(transport)
                 obdScheduler.startPolling(viewModelScope, transport)
             }
         }
@@ -467,5 +543,80 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } else null
         }
         return PidDecoder.analyze16BitWords(byteLists)
+    }
+
+    // AI Doctor State and Methods
+    private val _aiChatHistory = MutableStateFlow<List<com.example.model.ChatMessage>>(listOf(
+        com.example.model.ChatMessage(
+            sender = com.example.model.MessageSender.CAR_DOCTOR,
+            text = "Hello! I am your AI Car Doctor. Ask me anything regarding your engine telemetry, coolant thresholds, boost pressure, or diagnostic codes."
+        )
+    ))
+    val aiChatHistory: StateFlow<List<com.example.model.ChatMessage>> = _aiChatHistory.asStateFlow()
+
+    private val aiProvider: com.example.ai.AiDoctorProvider = com.example.ai.FirebaseAiDoctorProvider()
+
+    fun sendAiMessage(query: String) {
+        val userMsg = com.example.model.ChatMessage(sender = com.example.model.MessageSender.USER, text = query)
+        val loadingMsg = com.example.model.ChatMessage(sender = com.example.model.MessageSender.CAR_DOCTOR, text = "Analyzing...")
+        _aiChatHistory.value = _aiChatHistory.value + userMsg + loadingMsg
+
+        viewModelScope.launch {
+            val context = buildDiagnosticContext()
+            
+            // Map history to AiMessage format
+            val historyForAi = _aiChatHistory.value
+                .dropLast(1) // Remove the "Analyzing..." message
+                .map {
+                    com.example.ai.AiMessage(
+                        role = if (it.sender == com.example.model.MessageSender.USER) "user" else "model",
+                        text = it.text
+                    )
+                }
+
+            val request = com.example.ai.AiDoctorRequest(
+                context = context,
+                chatHistory = historyForAi,
+                latestQuery = query
+            )
+
+            val response = aiProvider.analyze(request)
+            
+            // Replace the loading message with the actual response
+            _aiChatHistory.value = _aiChatHistory.value.dropLast(1) + com.example.model.ChatMessage(
+                sender = com.example.model.MessageSender.CAR_DOCTOR,
+                text = response.responseText,
+                isEcuFact = response.isEcuFact
+            )
+        }
+    }
+
+    private suspend fun buildDiagnosticContext(): com.example.ai.VehicleDiagnosticContext {
+        val dtcRecords = try {
+            recordingManager.tripRepository.dtcRecordsFlow.firstOrNull() ?: emptyList()
+        } catch (e: Exception) {
+            emptyList()
+        }
+        val dtcString = if (dtcRecords.isEmpty()) "No active DTCs were detected by the application." 
+            else dtcRecords.joinToString("\n") { "${it.code}: ${it.description} (${it.status})" }
+
+        val verificationState = protocolVerificationResult.value?.health?.name ?: "Not verified"
+        
+        return com.example.ai.VehicleDiagnosticContext(
+            vehicleName = vehicleName.value,
+            vin = vehicleVin.value ?: "UNAVAILABLE",
+            connectionStatus = connectionState.value.name,
+            adapterName = adapterFirmware.value ?: "UNAVAILABLE",
+            protocol = selectedCanProtocol.value.displayName,
+            verificationState = verificationState,
+            ecuResponses = protocolVerificationResult.value?.successCount?.toLong() ?: 0L,
+            canErrors = protocolVerificationResult.value?.canErrorCount?.toLong() ?: 0L,
+            timeouts = protocolVerificationResult.value?.timeoutCount?.toLong() ?: 0L,
+            liveData = liveDecodedMap.value,
+            dtcs = dtcString,
+            appVersion = com.example.BuildConfig.VERSION_NAME,
+            buildNumber = com.example.BuildConfig.VERSION_CODE,
+            gitCommit = "Unknown" // Could be injected via BuildConfig if configured
+        )
     }
 }

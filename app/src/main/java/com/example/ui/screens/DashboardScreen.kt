@@ -40,6 +40,9 @@ fun DashboardScreen(
     viewModel: MainViewModel,
     onNavigateToRawMonitor: () -> Unit,
     onNavigateToPidDetail: (String) -> Unit,
+    onNavigateToCarDoctor: () -> Unit,
+    onNavigateToTrips: () -> Unit,
+    onNavigateToHud: () -> Unit,
     onOpenConnectDialog: () -> Unit
 ) {
     val connectionState by viewModel.connectionState.collectAsState()
@@ -54,13 +57,14 @@ fun DashboardScreen(
     val recordingDurationSeconds by viewModel.recordingDurationSeconds.collectAsState()
     val pollingMode by viewModel.pollingMode.collectAsState()
     val vehicleName by viewModel.vehicleName.collectAsState()
+    val vehicleVin by viewModel.vehicleVin.collectAsState()
+    val savedRecordings by viewModel.savedRecordings.collectAsState()
     
     val selectedCanProtocol by viewModel.selectedCanProtocol.collectAsState()
     val protocolHealth by viewModel.protocolHealth.collectAsState()
     val protocolResult by viewModel.protocolVerificationResult.collectAsState()
 
     val isConnected = connectionState == ConnectionState.CONNECTED
-
 
     Column(
         modifier = Modifier
@@ -75,7 +79,7 @@ fun DashboardScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("OBD Logger", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text("OBD Logger & Diagnostics", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Column(horizontalAlignment = Alignment.End) {
                 Text("v${com.example.BuildConfig.VERSION_NAME} (Build ${com.example.BuildConfig.VERSION_CODE})", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text("Commit: ${com.example.BuildConfig.GIT_COMMIT}", style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -83,17 +87,30 @@ fun DashboardScreen(
         }
         
         // Vehicle & Connection Status Banner
-
         VehicleStatusHeader(
             vehicleName = vehicleName,
+            vehicleVin = vehicleVin,
             adapterName = connectedDeviceName ?: "Not Connected",
             connectionState = connectionState,
             protocol = selectedCanProtocol.displayName,
             protocolHealth = protocolHealth,
             onConnectClick = onOpenConnectDialog,
-            onDisconnectClick = { viewModel.disconnect() }
+            onDisconnectClick = { viewModel.disconnect() },
+            onFetchVinClick = { viewModel.fetchVehicleVin() }
         )
         
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Quick Access Hub
+        QuickAccessHub(
+            tripCount = savedRecordings.size,
+            isRecording = isRecording,
+            onCarDoctorClick = onNavigateToCarDoctor,
+            onHudClick = onNavigateToHud,
+            onTripsClick = onNavigateToTrips,
+            onRawMonitorClick = onNavigateToRawMonitor
+        )
+
         Spacer(modifier = Modifier.height(14.dp))
         
         var showBatchTestDialog by remember { mutableStateOf(false) }
@@ -231,12 +248,14 @@ fun DashboardScreen(
 @Composable
 fun VehicleStatusHeader(
     vehicleName: String,
+    vehicleVin: String?,
     adapterName: String,
     connectionState: ConnectionState,
     protocol: String,
     protocolHealth: ProtocolHealth,
     onConnectClick: () -> Unit,
-    onDisconnectClick: () -> Unit
+    onDisconnectClick: () -> Unit,
+    onFetchVinClick: () -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -256,6 +275,21 @@ fun VehicleStatusHeader(
                         fontWeight = FontWeight.Black,
                         color = MaterialTheme.colorScheme.onSurface
                     )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = vehicleVin ?: "VIN Unavailable",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = CyberCyan
+                        )
+                        if (connectionState == ConnectionState.CONNECTED && vehicleVin == null) {
+                            Spacer(modifier = Modifier.width(8.dp))
+                            TextButton(onClick = onFetchVinClick, contentPadding = PaddingValues(0.dp), modifier = Modifier.height(20.dp)) {
+                                Text("READ VIN", fontSize = 10.sp)
+                            }
+                        }
+                    }
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = adapterName,
@@ -829,3 +863,98 @@ fun StatusBadge(label: String, isActive: Boolean) {
         )
     }
 }
+
+@Composable
+fun QuickAccessHub(
+    tripCount: Int,
+    isRecording: Boolean,
+    onCarDoctorClick: () -> Unit,
+    onHudClick: () -> Unit,
+    onTripsClick: () -> Unit,
+    onRawMonitorClick: () -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            QuickActionCard(
+                title = "AI Car Doctor",
+                subtitle = "Diagnostic Review & Ask AI",
+                icon = Icons.Default.HealthAndSafety,
+                accentColor = CyberCyan,
+                modifier = Modifier.weight(1f),
+                onClick = onCarDoctorClick
+            )
+            QuickActionCard(
+                title = "Driving HUD",
+                subtitle = "High-Contrast Live Cluster",
+                icon = Icons.Default.DirectionsCar,
+                accentColor = NeonEmerald,
+                modifier = Modifier.weight(1f),
+                onClick = onHudClick
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            QuickActionCard(
+                title = "Trips ($tripCount)",
+                subtitle = if (isRecording) "Recording in progress..." else "Room Database Storage",
+                icon = Icons.Default.Folder,
+                accentColor = ElectricAmber,
+                modifier = Modifier.weight(1f),
+                onClick = onTripsClick
+            )
+            QuickActionCard(
+                title = "Raw CAN Stream",
+                subtitle = "7E8/7E9 Filter & Hex Log",
+                icon = Icons.Default.FormatListBulleted,
+                accentColor = Color(0xFF81D4FA),
+                modifier = Modifier.weight(1f),
+                onClick = onRawMonitorClick
+            )
+        }
+    }
+}
+
+@Composable
+fun QuickActionCard(
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+    accentColor: Color,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, accentColor.copy(alpha = 0.3f))
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(accentColor.copy(alpha = 0.15f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(icon, contentDescription = null, tint = accentColor, modifier = Modifier.size(20.dp))
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(title, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface)
+                Text(subtitle, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+            }
+        }
+    }
+}
+

@@ -35,7 +35,9 @@ jobs:
 
       - name: Rename APK
         run: |
-          mv app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/OBDLogger-v1.0.0-build100-debug.apk || true
+          VERSION_NAME=$(grep 'versionName =' app/build.gradle.kts | awk -F'"' '{print $2}')
+          VERSION_CODE=$(grep 'versionCode =' app/build.gradle.kts | awk '{print $3}')
+          mv app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/OBDLogger-v${VERSION_NAME}-build${VERSION_CODE}-debug.apk || true
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:

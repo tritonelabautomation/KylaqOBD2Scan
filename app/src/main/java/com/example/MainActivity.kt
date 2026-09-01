@@ -38,15 +38,22 @@ import com.example.ui.theme.CyberCyan
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.theme.NeonEmerald
 import com.example.ui.viewmodel.MainViewModel
+import kotlinx.coroutines.launch
 
 sealed class Screen(val route: String, val title: String, val icon: ImageVector) {
     object Dashboard : Screen("dashboard", "Dashboard", Icons.Default.Speed)
+    object CarDoctor : Screen("car_doctor", "AI Doctor", Icons.Default.HealthAndSafety)
+    object DrivingDashboard : Screen("driving_hud", "Auto HUD", Icons.Default.DirectionsCar)
+    object Recordings : Screen("recordings", "Trips", Icons.Default.Folder)
     object RawMonitor : Screen("raw_monitor", "Raw Monitor", Icons.Default.FormatListBulleted)
+    object Console : Screen("console", "Console", Icons.Default.Terminal)
+    object Garage : Screen("garage", "Garage", Icons.Default.Garage)
     object PidDetail : Screen("pid_detail/{pidId}", "Research", Icons.Default.Science) {
         fun createRoute(pidId: String) = "pid_detail/$pidId"
     }
-    object Console : Screen("console", "Console", Icons.Default.Terminal)
-    object Recordings : Screen("recordings", "Recordings", Icons.Default.Folder)
+    object TripDetail : Screen("trip_detail/{tripId}", "Trip Detail", Icons.Default.Assessment) {
+        fun createRoute(tripId: String) = "trip_detail/$tripId"
+    }
     object PidConfig : Screen("pid_config", "Config", Icons.Default.Tune)
     object Profiles : Screen("profiles", "Profiles", Icons.Default.VerifiedUser)
 }
@@ -104,10 +111,11 @@ fun MainApp(viewModel: MainViewModel) {
 
     val bottomNavItems = listOf(
         Screen.Dashboard,
+        Screen.Garage,
+        Screen.CarDoctor,
+        Screen.Recordings,
         Screen.RawMonitor,
-        Screen.Console,
-        Screen.Profiles,
-        Screen.PidConfig
+        Screen.Console
     )
 
     Scaffold(
@@ -119,7 +127,8 @@ fun MainApp(viewModel: MainViewModel) {
             ) {
                 bottomNavItems.forEach { screen ->
                     val isSelected = currentRoute == screen.route ||
-                            (screen is Screen.PidDetail && currentRoute?.startsWith("pid_detail") == true)
+                            (screen is Screen.PidDetail && currentRoute?.startsWith("pid_detail") == true) ||
+                            (screen is Screen.TripDetail && currentRoute?.startsWith("trip_detail") == true)
 
                     NavigationBarItem(
                         icon = { Icon(screen.icon, contentDescription = screen.title) },
@@ -163,7 +172,33 @@ fun MainApp(viewModel: MainViewModel) {
                     onNavigateToPidDetail = { pidId ->
                         navController.navigate(Screen.PidDetail.createRoute(pidId))
                     },
+                    onNavigateToCarDoctor = {
+                        navController.navigate(Screen.CarDoctor.route)
+                    },
+                    onNavigateToTrips = {
+                        navController.navigate(Screen.Recordings.route)
+                    },
+                    onNavigateToHud = {
+                        navController.navigate(Screen.DrivingDashboard.route)
+                    },
                     onOpenConnectDialog = { showConnectionDialog = true }
+                )
+            }
+
+            composable(Screen.CarDoctor.route) {
+                AiDoctorScreen(
+                    viewModel = viewModel,
+                    onNavigateToTripDetail = { tripId ->
+                        navController.navigate(Screen.TripDetail.createRoute(tripId))
+                    },
+                    onBack = { navController.popBackStack() }
+                )
+            }
+
+            composable(Screen.DrivingDashboard.route) {
+                DrivingDashboardScreen(
+                    viewModel = viewModel,
+                    onBack = { navController.popBackStack() }
                 )
             }
 
@@ -195,8 +230,61 @@ fun MainApp(viewModel: MainViewModel) {
                 )
             }
 
+            composable(Screen.Garage.route) {
+                val allVehicles by viewModel.recordingManager.tripRepository.allVehiclesFlow.collectAsState(initial = emptyList())
+                val coroutineScope = rememberCoroutineScope()
+                var showAddDialog by remember { mutableStateOf(false) }
+
+                VehicleGarageScreen(
+                    vehicles = allVehicles,
+                    onAddVehicle = { showAddDialog = true },
+                    onSelectVehicle = { vehicle ->
+                        viewModel.setVehicleName("${vehicle.make} ${vehicle.model}")
+                        navController.navigate(Screen.Dashboard.route) {
+                            popUpTo(Screen.Dashboard.route) { inclusive = true }
+                        }
+                    }
+                )
+
+                if (showAddDialog) {
+                    AddVehicleDialog(
+                        onDismiss = { showAddDialog = false },
+                        onSave = { make, model, year, vin ->
+                            showAddDialog = false
+                            coroutineScope.launch {
+                                viewModel.recordingManager.tripRepository.insertVehicle(
+                                    com.example.data.db.entities.VehicleEntity(
+                                        id = java.util.UUID.randomUUID().toString(),
+                                        make = make,
+                                        model = model,
+                                        year = year,
+                                        vin = vin.takeIf { it.isNotBlank() },
+                                        defaultProtocol = null
+                                    )
+                                )
+                            }
+                        }
+                    )
+                }
+            }
+
             composable(Screen.Recordings.route) {
                 RecordingsScreen(
+                    viewModel = viewModel,
+                    onNavigateToTripDetail = { tripId ->
+                        navController.navigate(Screen.TripDetail.createRoute(tripId))
+                    },
+                    onBack = { navController.popBackStack() }
+                )
+            }
+
+            composable(
+                route = Screen.TripDetail.route,
+                arguments = listOf(navArgument("tripId") { type = NavType.StringType; defaultValue = "" })
+            ) { backStackEntry ->
+                val tripId = backStackEntry.arguments?.getString("tripId") ?: ""
+                TripDetailScreen(
+                    tripId = tripId,
                     viewModel = viewModel,
                     onBack = { navController.popBackStack() }
                 )
@@ -218,6 +306,7 @@ fun MainApp(viewModel: MainViewModel) {
             }
         }
     }
+
 
     // Connection selection dialog
     if (showConnectionDialog) {
