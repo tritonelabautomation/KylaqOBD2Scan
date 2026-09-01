@@ -17,6 +17,8 @@ enum class DecoderType {
     EQUIVALENCE_RATIO,    // ((A * 256) + B) / 32768
     CATALYST_TEMP,        // ((A * 256) + B) / 10 - 40
     FUEL_TYPE_ENUM,       // Enum lookup
+    FUEL_SYSTEM_STATUS,   // Enum lookup
+    FUEL_RAIL_PRESSURE,   // ((A * 256) + B) * 10
     TORQUE_PCT,           // A - 125
     TORQUE_NM,            // A * 256 + B
     FUEL_RATE_20,         // ((A * 256) + B) / 20
@@ -470,6 +472,66 @@ object DefaultPidDefinitions {
                 decoderType = DecoderType.FUEL_TYPE_ENUM,
                 formulaDisplay = "Enumeration lookup (Gasoline/Ethanol/etc)",
                 description = "Vehicle fuel classification"
+            ),
+            PidDefinition(
+                id = "0152",
+                service = "01",
+                pid = "52",
+                name = "Ethanol Fuel %",
+                shortName = "Ethanol",
+                unit = "%",
+                canHeader = "7DF",
+                expectedRxId = "7E8",
+                defaultIntervalMs = 5000L,
+                enabled = true,
+                decoderType = DecoderType.PERCENT_255,
+                formulaDisplay = "A * 100 / 255",
+                description = "Ethanol fuel percentage"
+            ),
+            PidDefinition(
+                id = "0103",
+                service = "01",
+                pid = "03",
+                name = "Fuel System Status",
+                shortName = "Fuel Sys",
+                unit = "Status",
+                canHeader = "7DF",
+                expectedRxId = "7E8",
+                defaultIntervalMs = 2000L,
+                enabled = true,
+                decoderType = DecoderType.FUEL_SYSTEM_STATUS,
+                formulaDisplay = "Enum lookup",
+                description = "Fuel system status"
+            ),
+            PidDefinition(
+                id = "019D",
+                service = "01",
+                pid = "9D",
+                name = "Engine Fuel Rate",
+                shortName = "Fuel Rate",
+                unit = "L/h",
+                canHeader = "7DF",
+                expectedRxId = "7E8",
+                defaultIntervalMs = 1000L,
+                enabled = true,
+                decoderType = DecoderType.FUEL_RATE_20,
+                formulaDisplay = "((A * 256) + B) / 20",
+                description = "Engine fuel rate"
+            ),
+            PidDefinition(
+                id = "0123",
+                service = "01",
+                pid = "23",
+                name = "Fuel Rail Pressure",
+                shortName = "FRP",
+                unit = "kPa",
+                canHeader = "7DF",
+                expectedRxId = "7E8",
+                defaultIntervalMs = 1000L,
+                enabled = true,
+                decoderType = DecoderType.FUEL_RAIL_PRESSURE,
+                formulaDisplay = "((A * 256) + B) * 10",
+                description = "Fuel rail pressure"
             ),
             PidDefinition(
                 id = "0163",

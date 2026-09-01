@@ -280,6 +280,40 @@ object PidDecoder {
                 )
             }
 
+            DecoderType.FUEL_SYSTEM_STATUS -> {
+                val statusStr = when (a) {
+                    0 -> "Motor off"
+                    1 -> "Open loop (insufficient temp)"
+                    2 -> "Closed loop (using O2 sensor)"
+                    4 -> "Open loop (load or decel)"
+                    8 -> "Open loop (system failure)"
+                    16 -> "Closed loop (feedback fault)"
+                    else -> "Status 0x%02X".format(a)
+                }
+                DecodedResult(
+                    parameterName = pidDef.name,
+                    numericValue = a.toDouble(),
+                    displayValue = statusStr,
+                    unit = "",
+                    rawPayloadHex = rawHex,
+                    dataBytes = dataBytes,
+                    isKnown = true
+                )
+            }
+
+            DecoderType.FUEL_RAIL_PRESSURE -> {
+                val value = ((a * 256.0) + b) * 10.0
+                DecodedResult(
+                    parameterName = pidDef.name,
+                    numericValue = value,
+                    displayValue = String.format(Locale.US, "%.0f", value),
+                    unit = "kPa",
+                    rawPayloadHex = rawHex,
+                    dataBytes = dataBytes,
+                    isKnown = true
+                )
+            }
+
             DecoderType.TORQUE_PCT -> {
                 val value = (a - 125).toDouble()
                 DecodedResult(

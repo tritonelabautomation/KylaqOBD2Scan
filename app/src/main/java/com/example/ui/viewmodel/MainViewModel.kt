@@ -39,6 +39,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val logDir = File(application.filesDir, "raw_logs")
     val rawLogManager = RawLogManager(logDir)
+    val gpsManager = com.example.data.GpsManager(application)
+    val gpsData = gpsManager.gpsData
     val settingsRepository = SettingsRepository(application)
     val recordingManager = RecordingManager(application, rawLogManager)
     val bluetoothManager = BluetoothManager(application)
@@ -439,6 +441,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             adapterName = connectedDeviceName.value ?: "ELM327 v1.5",
             protocolName = "ISO 15765-4 CAN 11/500"
         )
+        gpsManager.startTracking()
         _recordingDurationSeconds.value = 0L
         recordingTimerJob?.cancel()
         recordingTimerJob = viewModelScope.launch {
@@ -452,6 +455,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun stopRecording() {
         viewModelScope.launch {
             recordingTimerJob?.cancel()
+            gpsManager.stopTracking()
             recordingManager.stopRecording()
         }
     }

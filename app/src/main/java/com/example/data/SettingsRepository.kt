@@ -112,7 +112,14 @@ class SettingsRepository(private val context: Context) {
                     )
                 )
             }
-            if (list.isEmpty()) DefaultPidDefinitions.getDefaults() else list
+            if (list.isEmpty()) {
+                DefaultPidDefinitions.getDefaults()
+            } else {
+                val defaultList = DefaultPidDefinitions.getDefaults()
+                val existingIds = list.map { it.id }.toSet()
+                list.addAll(defaultList.filter { !existingIds.contains(it.id) })
+                list
+            }
         } catch (_: Exception) {
             DefaultPidDefinitions.getDefaults()
         }

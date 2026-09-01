@@ -110,6 +110,8 @@ class ObdScheduler(
         pollingJob?.cancel()
         pollingJob = null
         _isPolling.value = false
+        _liveDecodedMap.value = emptyMap()
+        _liveNumericMap.value = emptyMap()
     }
 
     private suspend fun executePidQuery(transport: ElmTransport, pidDef: PidDefinition) {
@@ -169,6 +171,12 @@ class ObdScheduler(
             _lastTransaction.value = errorRecord
             recordingManager.recordTransaction(errorRecord)
             appendRawHistory(pidDef.id, errorRecord)
+            
+            // Update live map so UI knows it's unsupported/error
+            val currMap = _liveDecodedMap.value.toMutableMap()
+            currMap[pidDef.id] = elmResponse.status.name
+            _liveDecodedMap.value = currMap
+            
             return
         }
 
@@ -195,6 +203,12 @@ class ObdScheduler(
             _transactionCount.value++
             _lastTransaction.value = emptyRecord
             recordingManager.recordTransaction(emptyRecord)
+            
+            // Update live map so UI knows it's empty
+            val currMap = _liveDecodedMap.value.toMutableMap()
+            currMap[pidDef.id] = "UNSUPPORTED"
+            _liveDecodedMap.value = currMap
+            
             return
         }
 

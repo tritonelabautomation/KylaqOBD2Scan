@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.sp
 import com.example.bluetooth.ConnectionState
 import com.example.data.PollingSpeedMode
 import com.example.model.TransactionRecord
+import com.example.data.GpsData
 import com.example.model.CanProtocol
 import com.example.model.ProtocolHealth
 import com.example.model.ProtocolVerificationResult
@@ -63,6 +64,7 @@ fun DashboardScreen(
     val selectedCanProtocol by viewModel.selectedCanProtocol.collectAsState()
     val protocolHealth by viewModel.protocolHealth.collectAsState()
     val protocolResult by viewModel.protocolVerificationResult.collectAsState()
+    val gpsData by viewModel.gpsData.collectAsState()
 
     val isConnected = connectionState == ConnectionState.CONNECTED
 
@@ -235,7 +237,8 @@ fun DashboardScreen(
             }
         }
 
-        TelemetryCardsGrid(
+        TelemetryDashboardContent(
+            gpsData = gpsData,
             liveMap = liveDecodedMap,
             onPidClick = { pidId -> onNavigateToPidDetail(pidId) }
         )
@@ -514,43 +517,6 @@ fun PollingModeSelector(
                         },
                         modifier = Modifier.weight(1f).testTag("chip_mode_${mode.name}")
                     )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun TelemetryCardsGrid(
-    liveMap: Map<String, String>,
-    onPidClick: (String) -> Unit
-) {
-    val items = listOf(
-        TelemetryItem("010C", "Engine RPM", liveMap["010C"] ?: "-- RPM", Icons.Default.Speed, CyberCyan),
-        TelemetryItem("010D", "Vehicle Speed", liveMap["010D"] ?: "-- km/h", Icons.Default.Navigation, CyberCyan),
-        TelemetryItem("010B", "Intake MAP (Boost)", liveMap["010B"] ?: "-- kPa", Icons.Default.Compress, NeonEmerald),
-        TelemetryItem("0104", "Engine Load", liveMap["0104"] ?: "-- %", Icons.Default.FitnessCenter, NeonEmerald),
-        TelemetryItem("0111", "Throttle Position", liveMap["0111"] ?: "-- %", Icons.Default.Tune, ElectricAmber),
-        TelemetryItem("0149", "Accelerator D", liveMap["0149"] ?: "-- %", Icons.Default.ElectricCar, ElectricAmber),
-        TelemetryItem("0105", "Coolant Temp", liveMap["0105"] ?: "-- °C", Icons.Default.DeviceThermostat, WarningRed),
-        TelemetryItem("010F", "Intake Air Temp", liveMap["010F"] ?: "-- °C", Icons.Default.Air, WarningRed),
-        TelemetryItem("0146", "Ambient Temp", liveMap["0146"] ?: "-- °C", Icons.Default.WbSunny, Color(0xFF81D4FA)),
-        TelemetryItem("019D", "Fuel Rate", liveMap["019D"] ?: "-- L/h", Icons.Default.LocalGasStation, Color(0xFFFF8A80)),
-        TelemetryItem("0162", "Engine Torque", liveMap["0162"] ?: "-- %", Icons.Default.Bolt, Color(0xFFFFD54F)),
-        TelemetryItem("0142", "ECU Voltage", liveMap["0142"] ?: "-- V", Icons.Default.BatteryChargingFull, Color(0xFF80CBC4))
-    )
-
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        for (i in items.indices step 2) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                TelemetryCard(item = items[i], modifier = Modifier.weight(1f), onClick = { onPidClick(items[i].pidId) })
-                if (i + 1 < items.size) {
-                    TelemetryCard(item = items[i + 1], modifier = Modifier.weight(1f), onClick = { onPidClick(items[i + 1].pidId) })
-                } else {
-                    Spacer(modifier = Modifier.weight(1f))
                 }
             }
         }

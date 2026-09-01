@@ -3,6 +3,7 @@ package com.example.model
 object ProfileDefinitions {
 
     val standardObdRequests = listOf(
+        DiagnosticRequest("0103", "Fuel System Status", "01", "03", "Fuel system status", DecoderType.FUEL_SYSTEM_STATUS),
         DiagnosticRequest("0104", "Engine Load", "01", "04", "Calculated engine load", DecoderType.PERCENT_255),
         DiagnosticRequest("0105", "Coolant Temp", "01", "05", "Engine coolant temperature", DecoderType.TEMP_MINUS_40),
         DiagnosticRequest("0106", "STFT Bank 1", "01", "06", "Short-term fuel trim Bank 1", DecoderType.FUEL_TRIM),
@@ -17,7 +18,16 @@ object ProfileDefinitions {
         DiagnosticRequest("0144", "Equivalence Ratio", "01", "44", "Commanded equivalence ratio", DecoderType.EQUIVALENCE_RATIO),
         DiagnosticRequest("0145", "Rel Throttle Pos", "01", "45", "Relative throttle position", DecoderType.PERCENT_255),
         DiagnosticRequest("0149", "Accel Pedal D", "01", "49", "Accelerator pedal position D", DecoderType.PERCENT_255),
-        DiagnosticRequest("014C", "Cmd Throttle", "01", "4C", "Commanded throttle actuator", DecoderType.PERCENT_255)
+        DiagnosticRequest("014C", "Cmd Throttle", "01", "4C", "Commanded throttle actuator", DecoderType.PERCENT_255),
+        DiagnosticRequest("012F", "Fuel Level", "01", "2F", "Fuel tank level input", DecoderType.PERCENT_255),
+        DiagnosticRequest("014A", "Accel Pedal E", "01", "4A", "Accelerator pedal position E", DecoderType.PERCENT_255),
+        DiagnosticRequest("0133", "Barometric Pressure", "01", "33", "Absolute barometric pressure", DecoderType.RAW_A_KPA),
+        DiagnosticRequest("013C", "Catalyst Temp B1S1", "01", "3C", "Catalyst temperature Bank 1 Sensor 1", DecoderType.CATALYST_TEMP),
+        DiagnosticRequest("0146", "Ambient Air Temp", "01", "46", "Ambient air temperature", DecoderType.TEMP_MINUS_40),
+        DiagnosticRequest("0151", "Fuel Type", "01", "51", "Vehicle fuel type", DecoderType.FUEL_TYPE_ENUM),
+        DiagnosticRequest("0152", "Ethanol Fuel %", "01", "52", "Ethanol fuel percentage", DecoderType.PERCENT_255),
+        DiagnosticRequest("019D", "Engine Fuel Rate", "01", "9D", "Engine fuel rate", DecoderType.FUEL_RATE_20),
+        DiagnosticRequest("0123", "Fuel Rail Pressure", "01", "23", "Fuel rail pressure (manifold vacuum)", DecoderType.FUEL_RAIL_PRESSURE)
     )
 
     val vagExperimentalRequests = listOf(

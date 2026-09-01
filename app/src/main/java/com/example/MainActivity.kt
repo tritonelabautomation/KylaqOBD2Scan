@@ -94,16 +94,19 @@ fun MainApp(viewModel: MainViewModel) {
     }
 
     LaunchedEffect(Unit) {
+        val basePermissions = arrayOf(
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        )
         val requiredPermissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            arrayOf(
+            basePermissions + arrayOf(
                 Manifest.permission.BLUETOOTH_CONNECT,
                 Manifest.permission.BLUETOOTH_SCAN
             )
         } else {
-            arrayOf(
+            basePermissions + arrayOf(
                 Manifest.permission.BLUETOOTH,
-                Manifest.permission.BLUETOOTH_ADMIN,
-                Manifest.permission.ACCESS_FINE_LOCATION
+                Manifest.permission.BLUETOOTH_ADMIN
             )
         }
         permissionLauncher.launch(requiredPermissions)
