@@ -130,8 +130,8 @@ fun MainApp(viewModel: MainViewModel) {
             ) {
                 bottomNavItems.forEach { screen ->
                     val isSelected = currentRoute == screen.route ||
-                            (screen is Screen.PidDetail && currentRoute?.startsWith("pid_detail") == true) ||
-                            (screen is Screen.TripDetail && currentRoute?.startsWith("trip_detail") == true)
+                            (screen.route == Screen.PidDetail.route && currentRoute?.startsWith("pid_detail") == true) ||
+                            (screen.route == Screen.Recordings.route && currentRoute?.startsWith("trip_detail") == true)
 
                     NavigationBarItem(
                         icon = { Icon(screen.icon, contentDescription = screen.title) },
@@ -140,7 +140,7 @@ fun MainApp(viewModel: MainViewModel) {
                         onClick = {
                             if (currentRoute != screen.route) {
                                 navController.navigate(screen.route) {
-                                    popUpTo(navController.graph.findStartDestination().id) {
+                                    popUpTo(Screen.Dashboard.route) {
                                         saveState = true
                                     }
                                     launchSingleTop = true

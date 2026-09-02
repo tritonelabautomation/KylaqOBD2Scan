@@ -199,7 +199,11 @@ fun TripDetailScreen(
                     )
                 }
                 TripDetailTab.EXPORT -> {
-                    TripExportView(tripId = tripId, context = context)
+                    TripExportView(
+                        tripId = tripId,
+                        trip = trip,
+                        context = context
+                    )
                 }
             }
         }
@@ -637,6 +641,7 @@ private fun TripRawLogsView(
 @Composable
 private fun TripExportView(
     tripId: String,
+    trip: TripEntity?,
     context: Context
 ) {
     val sessionDir = File(context.filesDir, "recordings/session_$tripId")
@@ -644,7 +649,14 @@ private fun TripExportView(
     val sampleCsv = File(sessionDir, "${tripId}_samples.csv")
     val jsonFile = File(sessionDir, "$tripId.json")
     val rawFile = File(sessionDir, "${tripId}_raw.txt")
-    val zipFile = File(sessionDir, "${tripId}_bundle.zip")
+    
+    val safeVehicle = trip?.vehicleName?.replace(Regex("[^a-zA-Z0-9.-]"), "_") ?: "Vehicle"
+    val safeDate = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date(trip?.startTimestamp ?: System.currentTimeMillis()))
+    val bundleName = "OBDLogger_${safeVehicle}_${safeDate}_$tripId.zip"
+    val zipFile = File(sessionDir, bundleName)
+    
+    val coroutineScope = rememberCoroutineScope()
+    var isZipping by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier.fillMaxSize().padding(16.dp),
@@ -657,7 +669,29 @@ private fun TripExportView(
             desc = "Contains CSVs, JSON metadata, raw logs, and diagnostic analysis.",
             file = zipFile,
             mimeType = "application/zip",
-            context = context
+            context = context,
+            isGenerating = isZipping,
+            onExportClick = {
+                if (isZipping) return@ExportActionCard
+                isZipping = true
+                coroutineScope.launch {
+                    try {
+                        val filesToZip = listOf(txCsv, sampleCsv, jsonFile, rawFile).filter { it.exists() }
+                        if (filesToZip.isEmpty()) {
+                            Toast.makeText(context, "No trip data available to zip", Toast.LENGTH_SHORT).show()
+                            return@launch
+                        }
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            com.example.data.ZipExporter.createTripZip(zipFile, filesToZip)
+                        }
+                        shareFileSafely(context, zipFile, "application/zip")
+                    } catch (e: Exception) {
+                        Toast.makeText(context, "Failed to create ZIP: ${e.message}", Toast.LENGTH_LONG).show()
+                    } finally {
+                        isZipping = false
+                    }
+                }
+            }
         )
 
         ExportActionCard(
@@ -702,7 +736,9 @@ private fun ExportActionCard(
     desc: String,
     file: File,
     mimeType: String,
-    context: Context
+    context: Context,
+    isGenerating: Boolean = false,
+    onExportClick: (() -> Unit)? = null
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -719,13 +755,20 @@ private fun ExportActionCard(
                 Text(desc, color = TextSecondaryDark, fontSize = 11.sp)
                 Text("File size: ${if (file.exists()) "${file.length() / 1024} KB" else "Ready on generate"}", color = CyberCyan, fontSize = 10.sp)
             }
-
-            IconButton(
-                onClick = {
-                    shareFileSafely(context, file, mimeType)
+            if (isGenerating) {
+                CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp, color = CyberCyan)
+            } else {
+                IconButton(
+                    onClick = {
+                        if (onExportClick != null) {
+                            onExportClick()
+                        } else {
+                            shareFileSafely(context, file, mimeType)
+                        }
+                    }
+                ) {
+                    Icon(Icons.Default.Share, contentDescription = "Share", tint = NeonEmerald)
                 }
-            ) {
-                Icon(Icons.Default.Share, contentDescription = "Share", tint = NeonEmerald)
             }
         }
     }
