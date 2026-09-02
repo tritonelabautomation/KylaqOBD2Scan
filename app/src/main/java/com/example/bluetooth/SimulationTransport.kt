@@ -176,13 +176,102 @@ class SimulationElmTransport : ElmTransport {
                 val a = (ambientC + 40).toInt().coerceIn(0, 255)
                 lines.add("7E8 03 41 46 %02X".format(a))
             }
-            cleanCmd == "019D" -> {
-                // Fuel Rate: ((A * 256) + B) / 20 = L/h
-                val rateLh = 0.8 + (engineRpm / 1000.0) * (loadPct / 100.0) * 1.6
+            cleanCmd == "015E" -> {
+                // Engine Fuel Rate (Volume: L/h): ((A * 256) + B) / 20.0
+                val rateLh = if (throttlePct < 1.0 && engineRpm > 1200.0 && speedKmh > 20.0) {
+                    0.0 // Fuel-cut deceleration
+                } else if (speedKmh < 2.0) {
+                    0.65 // Idle fuel consumption (L/h)
+                } else {
+                    0.65 + (engineRpm / 1000.0) * (loadPct / 100.0) * 1.5
+                }
                 val rawVal = (rateLh * 20.0).toInt().coerceIn(0, 65535)
                 val a = (rawVal ushr 8) and 0xFF
                 val b = rawVal and 0xFF
+                lines.add("7E8 04 41 5E %02X %02X".format(a, b))
+            }
+            cleanCmd == "019D" -> {
+                // Engine Fuel Rate (Mass: g/s): ((A * 256) + B) / 10.0
+                // Gasoline density ~ 745 g/L -> g/s = (L/h * 745) / 3600.0
+                val rateLh = if (throttlePct < 1.0 && engineRpm > 1200.0 && speedKmh > 20.0) {
+                    0.0
+                } else if (speedKmh < 2.0) {
+                    0.65
+                } else {
+                    0.65 + (engineRpm / 1000.0) * (loadPct / 100.0) * 1.5
+                }
+                val rateMassGs = (rateLh * 745.0) / 3600.0
+                val rawVal = (rateMassGs * 10.0).toInt().coerceIn(0, 65535)
+                val a = (rawVal ushr 8) and 0xFF
+                val b = rawVal and 0xFF
                 lines.add("7E8 04 41 9D %02X %02X".format(a, b))
+            }
+            cleanCmd == "0110" -> {
+                // MAF: ((A * 256) + B) / 100.0 (g/s)
+                val mafVal = (engineRpm / 1000.0) * (boostKpa / 101.3) * 12.0
+                val rawVal = (mafVal * 100.0).toInt().coerceIn(0, 65535)
+                val a = (rawVal ushr 8) and 0xFF
+                val b = rawVal and 0xFF
+                lines.add("7E8 04 41 10 %02X %02X".format(a, b))
+            }
+            cleanCmd == "010A" -> {
+                // Fuel Pressure: A * 3 kPa gauge (~350 kPa low-pressure fuel line)
+                val a = (350.0 / 3.0).toInt().coerceIn(0, 255)
+                lines.add("7E8 03 41 0A %02X".format(a))
+            }
+            cleanCmd == "015D" -> {
+                // Fuel Injection Timing: (((A * 256) + B) - 26880) / 128.0
+                val timingDeg = -5.0 + (throttlePct * 0.2)
+                val rawVal = ((timingDeg * 128.0) + 26880.0).toInt().coerceIn(0, 65535)
+                val a = (rawVal ushr 8) and 0xFF
+                val b = rawVal and 0xFF
+                lines.add("7E8 04 41 5D %02X %02X".format(a, b))
+            }
+            cleanCmd == "0161" -> {
+                // Driver Demand Torque %: A - 125
+                val demandPct = throttlePct.toInt()
+                val a = (demandPct + 125).coerceIn(0, 255)
+                lines.add("7E8 03 41 61 %02X".format(a))
+            }
+            cleanCmd == "01A4" -> {
+                // Transmission Actual Gear Ratio (PID 01A4)
+                // A: Status, B & C: Ratio * 1000
+                val gearRatio = when {
+                    speedKmh < 15.0 -> 4.04
+                    speedKmh < 30.0 -> 2.37
+                    speedKmh < 50.0 -> 1.56
+                    speedKmh < 75.0 -> 1.16
+                    speedKmh < 105.0 -> 0.85
+                    else -> 0.67
+                }
+                val rawRatio = (gearRatio * 1000.0).toInt()
+                val b = (rawRatio ushr 8) and 0xFF
+                val c = rawRatio and 0xFF
+                lines.add("7E8 05 41 A4 01 %02X %02X".format(b, c))
+            }
+            cleanCmd == "0902" -> {
+                // VIN: TMBE79N15S001234 (17 chars)
+                lines.add("7E8 10 14 49 02 01 54 4D 42")
+                lines.add("7E8 21 45 37 39 4E 31 35 53")
+                lines.add("7E8 22 30 30 31 32 33 34 00")
+            }
+            cleanCmd == "0904" -> {
+                // Calibration ID: 04C906027A
+                lines.add("7E8 10 0E 49 04 01 30 34 43")
+                lines.add("7E8 21 39 30 36 30 32 37 41")
+            }
+            cleanCmd == "090A" -> {
+                // ECU Name: EA211_1.0TSI
+                lines.add("7E8 08 49 0A 01 45 41 32 31 31")
+            }
+            cleanCmd == "22F189" -> {
+                // SW Version
+                lines.add("7E8 06 62 F1 89 39 38 34")
+            }
+            cleanCmd == "22F187" -> {
+                // Spare Part Number: 04C906027A
+                lines.add("7E8 10 0E 62 F1 87 30 34 43")
+                lines.add("7E8 21 39 30 36 30 32 37 41")
             }
             cleanCmd == "0162" -> {
                 // Actual Torque %: A - 125

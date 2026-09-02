@@ -67,6 +67,14 @@ fun DashboardScreen(
     val protocolResult by viewModel.protocolVerificationResult.collectAsState()
     val gpsData by viewModel.gpsData.collectAsState()
 
+    val realtimeEconomy by viewModel.realtimeEconomy.collectAsState()
+    val tripEconomy by viewModel.tripEconomy.collectAsState()
+    val drivingState by viewModel.drivingState.collectAsState()
+    val transmissionState by viewModel.transmissionState.collectAsState()
+    val ecuDiscoveryReport by viewModel.ecuDiscoveryReport.collectAsState()
+    val isDiscoveringEcus by viewModel.isDiscoveringEcus.collectAsState()
+    val discoveryProgressText by viewModel.discoveryProgressText.collectAsState()
+
     val isConnected = connectionState == ConnectionState.CONNECTED
 
     Column(
@@ -245,9 +253,88 @@ fun DashboardScreen(
             }
         }
 
+        // ECU Discovery & Capability Banner
+        if (isConnected) {
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Memory, contentDescription = null, tint = CyberCyan, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("ECU & HARDWARE DISCOVERY", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+                        }
+                        Button(
+                            onClick = { viewModel.runEcuDiscovery() },
+                            enabled = !isDiscoveringEcus,
+                            colors = ButtonDefaults.buttonColors(containerColor = CyberCyan, contentColor = Color.Black),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                            modifier = Modifier.height(34.dp)
+                        ) {
+                            if (isDiscoveringEcus) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Color.Black)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("PROBING...", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            } else {
+                                Text("RUN DISCOVERY", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+
+                    if (isDiscoveringEcus) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = discoveryProgressText,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = CyberCyan,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+
+                    ecuDiscoveryReport?.let { report ->
+                        Spacer(modifier = Modifier.height(8.dp))
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        val engineEcu = report.detectedEcus.firstOrNull { it.rxCanId == "7E8" } ?: report.detectedEcus.firstOrNull()
+                        val transmissionTcu = report.detectedEcus.firstOrNull { it.rxCanId == "7E9" }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Engine ECU:", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(engineEcu?.let { "${it.ecuName ?: it.ecuRole} (${it.rxCanId})" } ?: "Not detected", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                        }
+                        if (engineEcu?.calibrationId != null) {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Calibration ID:", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(engineEcu.calibrationId, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+                            }
+                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Transmission TCU:", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(transmissionTcu?.let { "${it.ecuName ?: it.ecuRole} (${it.rxCanId})" } ?: "Unified Gateway / Integrated", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Verified Supported PIDs:", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("${report.totalSupportedPids} validated", style = MaterialTheme.typography.bodySmall, color = NeonEmerald, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+
         TelemetryDashboardContent(
             gpsData = gpsData,
             liveMap = liveDecodedMap,
+            realtimeEconomy = realtimeEconomy,
+            tripEconomy = tripEconomy,
+            drivingState = drivingState,
+            transmissionState = transmissionState,
             onPidClick = { pidId -> onNavigateToPidDetail(pidId) }
         )
 

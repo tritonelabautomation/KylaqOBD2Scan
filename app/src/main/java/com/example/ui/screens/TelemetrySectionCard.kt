@@ -70,6 +70,16 @@ fun MetricRow(
     value: String,
     isError: Boolean = false
 ) {
+    MetricRowWithSource(label = label, value = value, isError = isError, source = null)
+}
+
+@Composable
+fun MetricRowWithSource(
+    label: String,
+    value: String,
+    isError: Boolean = false,
+    source: String? = null
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -77,7 +87,17 @@ fun MetricRow(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(text = label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (source != null) {
+                Text(
+                    text = source,
+                    fontSize = 10.sp,
+                    color = CyberCyan.copy(alpha = 0.8f),
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+        }
         Text(
             text = value,
             style = MaterialTheme.typography.bodyMedium,

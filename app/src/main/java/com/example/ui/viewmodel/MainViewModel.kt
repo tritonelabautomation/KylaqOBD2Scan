@@ -117,6 +117,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val pidRawHistory: StateFlow<Map<String, List<TransactionRecord>>> = obdScheduler.pidRawHistory
     val lastTransaction: StateFlow<TransactionRecord?> = obdScheduler.lastTransaction
 
+    // Powertrain Intelligence & Trust Model Streams
+    val liveTelemetryMap = obdScheduler.liveTelemetryMap
+    val realtimeEconomy = obdScheduler.realtimeEconomy
+    val tripEconomy = obdScheduler.tripEconomy
+    val drivingState = obdScheduler.drivingState
+    val transmissionState = obdScheduler.transmissionState
+    val ecuDiscoveryReport = obdScheduler.ecuDiscoveryManager.discoveryReport
+    val isDiscoveringEcus = obdScheduler.ecuDiscoveryManager.isDiscovering
+    val discoveryProgressText = obdScheduler.ecuDiscoveryManager.discoveryProgressText
+
+    fun runEcuDiscovery() {
+        val transport = activeTransport ?: return
+        if (!transport.isConnected) return
+        viewModelScope.launch {
+            obdScheduler.ecuDiscoveryManager.runDiscovery(transport)
+        }
+    }
+
+    fun resetTripEconomy() {
+        obdScheduler.economyEngine.resetTrip()
+    }
+
     val isRecording: StateFlow<Boolean> = recordingManager.isRecording
     val currentSessionMetadata: StateFlow<RecordingMetadata?> = recordingManager.currentSessionMetadata
     val currentTransactions: StateFlow<List<TransactionRecord>> = recordingManager.currentTransactions

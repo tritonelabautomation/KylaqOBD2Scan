@@ -353,6 +353,97 @@ object PidDecoder {
                 )
             }
 
+            DecoderType.FUEL_RATE_MASS_10 -> {
+                val value = ((a * 256.0) + b) / 10.0
+                DecodedResult(
+                    parameterName = pidDef.name,
+                    numericValue = value,
+                    displayValue = String.format(Locale.US, "%.2f", value),
+                    unit = "g/s",
+                    rawPayloadHex = rawHex,
+                    dataBytes = dataBytes,
+                    isKnown = true
+                )
+            }
+
+            DecoderType.FUEL_PRESSURE_3_KPA -> {
+                val value = a * 3.0
+                DecodedResult(
+                    parameterName = pidDef.name,
+                    numericValue = value,
+                    displayValue = String.format(Locale.US, "%.0f", value),
+                    unit = "kPa",
+                    rawPayloadHex = rawHex,
+                    dataBytes = dataBytes,
+                    isKnown = true
+                )
+            }
+
+            DecoderType.MAF_100 -> {
+                val value = ((a * 256.0) + b) / 100.0
+                DecodedResult(
+                    parameterName = pidDef.name,
+                    numericValue = value,
+                    displayValue = String.format(Locale.US, "%.2f", value),
+                    unit = "g/s",
+                    rawPayloadHex = rawHex,
+                    dataBytes = dataBytes,
+                    isKnown = true
+                )
+            }
+
+            DecoderType.INJECTION_TIMING_128 -> {
+                val value = (((a * 256.0) + b) - 26880.0) / 128.0
+                DecodedResult(
+                    parameterName = pidDef.name,
+                    numericValue = value,
+                    displayValue = String.format(Locale.US, "%+.2f", value),
+                    unit = "°",
+                    rawPayloadHex = rawHex,
+                    dataBytes = dataBytes,
+                    isKnown = true
+                )
+            }
+
+            DecoderType.TRANSMISSION_GEAR_A4 -> {
+                // SAE J1979 PID 01A4:
+                // Byte A: Command/Status, Bytes B&C: Gear Ratio = ((B*256)+C)/1000.0
+                if (dataBytes.size >= 3) {
+                    val ratio = ((b * 256.0) + c) / 1000.0
+                    if (ratio in 0.2..15.0) {
+                        DecodedResult(
+                            parameterName = pidDef.name,
+                            numericValue = ratio,
+                            displayValue = String.format(Locale.US, "Ratio %.3f", ratio),
+                            unit = "ratio",
+                            rawPayloadHex = rawHex,
+                            dataBytes = dataBytes,
+                            isKnown = true
+                        )
+                    } else {
+                        DecodedResult(
+                            parameterName = pidDef.name,
+                            numericValue = null,
+                            displayValue = "Not available",
+                            unit = "",
+                            rawPayloadHex = rawHex,
+                            dataBytes = dataBytes,
+                            isKnown = true
+                        )
+                    }
+                } else {
+                    DecodedResult(
+                        parameterName = pidDef.name,
+                        numericValue = null,
+                        displayValue = "Not available",
+                        unit = "",
+                        rawPayloadHex = rawHex,
+                        dataBytes = dataBytes,
+                        isKnown = false
+                    )
+                }
+            }
+
             DecoderType.CUSTOM_EXPRESSION, DecoderType.RESEARCH_RAW -> {
                 DecodedResult(
                     parameterName = pidDef.name,

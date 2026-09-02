@@ -36,6 +36,11 @@ fun DrivingDashboardScreen(
     val connectionState by viewModel.connectionState.collectAsStateWithLifecycle()
     val liveDecodedMap by viewModel.liveDecodedMap.collectAsStateWithLifecycle()
 
+    val realtimeEconomy by viewModel.realtimeEconomy.collectAsStateWithLifecycle()
+    val tripEconomy by viewModel.tripEconomy.collectAsStateWithLifecycle()
+    val drivingState by viewModel.drivingState.collectAsStateWithLifecycle()
+    val transmissionState by viewModel.transmissionState.collectAsStateWithLifecycle()
+
     val isConnected = connectionState == ConnectionState.CONNECTED
 
     val rpm = liveDecodedMap["010C"] ?: "--"
@@ -98,6 +103,90 @@ fun DrivingDashboardScreen(
                 .padding(horizontal = 14.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
+            // Powertrain Intelligence Banner (Driving State, 6-AT Gear, Fuel Economy)
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                color = DarkSurface,
+                border = androidx.compose.foundation.BorderStroke(1.dp, CyberCyan.copy(alpha = 0.3f))
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Driving State & Brake Indicator
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        val stateColor = when (drivingState.state.name) {
+                            "FUEL_CUT_DECELERATION", "COASTING" -> NeonEmerald
+                            "CRUISING" -> CyberCyan
+                            "ACCELERATING" -> ElectricAmber
+                            "BRAKING" -> WarningRed
+                            else -> Color.White
+                        }
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(stateColor.copy(alpha = 0.2f))
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = drivingState.state.name.replace("_", " "),
+                                color = stateColor,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Black,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                        if (drivingState.isBrakeActive == true) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(WarningRed.copy(alpha = 0.2f))
+                                    .padding(horizontal = 6.dp, vertical = 4.dp)
+                            ) {
+                                Text("BRAKE", color = WarningRed, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+
+                    // Transmission Gear
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("GEAR: ", color = TextSecondaryDark, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        val gearText = when {
+                            transmissionState.actualGear != null -> "G${transmissionState.actualGear}"
+                            transmissionState.estimatedGear != null -> "G${transmissionState.estimatedGear} (Est)"
+                            else -> transmissionState.selectedRange.ifBlank { "—" }
+                        }
+                        Text(
+                            text = gearText,
+                            color = NeonEmerald,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+
+                    // Real-time Economy
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("ECON: ", color = TextSecondaryDark, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        val econText = if (realtimeEconomy.isIdle) {
+                            "${realtimeEconomy.idleConsumptionLh?.let { String.format(java.util.Locale.US, "%.1f", it) } ?: "—"} L/h"
+                        } else {
+                            realtimeEconomy.smoothedKmLDisplay
+                        }
+                        Text(
+                            text = econText,
+                            color = ElectricAmber,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
+            }
+
             // Speed & RPM Primary Cluster (Large Glanceable HUD)
             Row(
                 modifier = Modifier
