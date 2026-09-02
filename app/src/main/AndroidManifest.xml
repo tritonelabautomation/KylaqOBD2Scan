@@ -35,10 +35,12 @@
 
         <service
             android:name=".auto.ObdCarAppService"
+            android:icon="@mipmap/ic_launcher"
+            android:label="OBD Logger"
             android:exported="true">
             <intent-filter>
                 <action android:name="androidx.car.app.CarAppService" />
-                <category android:name="androidx.car.app.category.IOT" />
+                <category android:name="androidx.car.app.category.POI" />
             </intent-filter>
         </service>
 
@@ -46,6 +48,10 @@
             android:name="androidx.car.app.minCarApiLevel"
             android:value="1" />
             
+        <meta-data
+            android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
+
         <meta-data
             android:name="com.android.automotive"
             android:resource="@xml/automotive_app_desc" />

@@ -12,19 +12,21 @@ import com.example.bluetooth.ConnectionState
 import com.example.di.AppContainer
 import com.example.model.ProtocolHealth
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+import android.util.Log
+
 class ObdDashboardScreen(carContext: CarContext) : Screen(carContext) {
+    init { Log.i("OBDLogger/AndroidAuto", "DashboardScreen created") }
 
     private var rpm: String = "--"
     private var speed: String = "--"
     private var load: String = "--"
+    private var throttle: String = "--"
     private var mapStr: String = "--"
-    private var iat: String = "--"
     private var coolant: String = "--"
-    private var fuelLevel: String = "--"
     private var fuelRate: String = "--"
-    private var ethanol: String = "--"
     
     private var connectionState: ConnectionState = ConnectionState.DISCONNECTED
     private var protocolHealth: ProtocolHealth = ProtocolHealth.UNKNOWN
@@ -32,6 +34,7 @@ class ObdDashboardScreen(carContext: CarContext) : Screen(carContext) {
     private var isSubscribed = false
 
     override fun onGetTemplate(): Template {
+        Log.i("OBDLogger/AndroidAuto", "onGetTemplate called, connection: $connectionState, protocol: $protocolHealth")
         // AppContainer must be initialized
         AppContainer.init(carContext)
         
@@ -42,57 +45,49 @@ class ObdDashboardScreen(carContext: CarContext) : Screen(carContext) {
 
         val paneBuilder = Pane.Builder()
 
-        val statusText = when {
-            connectionState != ConnectionState.CONNECTED -> "OBD DISCONNECTED"
-            protocolHealth == ProtocolHealth.UNKNOWN || protocolHealth == ProtocolHealth.TESTING -> "OBD NOT VERIFIED"
-            protocolHealth == ProtocolHealth.NO_RESPONSE -> "ECU NOT RESPONDING"
-            else -> "OBD CONNECTED • ECU WORKING"
-        }
-        
-        paneBuilder.addRow(
-            Row.Builder()
-                .setTitle("STATUS")
-                .addText(statusText)
-                .build()
-        )
-
         // Only show live values if connected and verified
         if (connectionState == ConnectionState.CONNECTED && (protocolHealth == ProtocolHealth.WORKING || protocolHealth == ProtocolHealth.PARTIAL)) {
             paneBuilder.addRow(
                 Row.Builder()
-                    .setTitle("ENGINE")
-                    .addText("$rpm rpm • $speed km/h • Load: $load %")
+                    .setTitle("RPM: $rpm")
+                    .addText("Speed: $speed km/h")
                     .build()
             )
             paneBuilder.addRow(
                 Row.Builder()
-                    .setTitle("AIR")
-                    .addText("MAP: $mapStr kPa • IAT: $iat °C")
+                    .setTitle("Load: $load %")
+                    .addText("Throttle: $throttle %")
                     .build()
             )
             paneBuilder.addRow(
                 Row.Builder()
-                    .setTitle("TEMPERATURE")
+                    .setTitle("MAP: $mapStr kPa")
                     .addText("Coolant: $coolant °C")
                     .build()
             )
             paneBuilder.addRow(
                 Row.Builder()
-                    .setTitle("FUEL & ETHANOL")
-                    .addText("Lvl: $fuelLevel % • Rate: $fuelRate L/h • Eth: $ethanol")
+                    .setTitle("Fuel Rate: $fuelRate L/h")
+                    .addText("OBD CONNECTED • ECU RESPONDING")
                     .build()
             )
         } else {
+            val statusText = when {
+                connectionState != ConnectionState.CONNECTED -> "OBD DISCONNECTED\nConnect adapter from phone"
+                protocolHealth == ProtocolHealth.UNKNOWN || protocolHealth == ProtocolHealth.TESTING -> "OBD NOT VERIFIED\nVerify protocol on phone"
+                protocolHealth == ProtocolHealth.NO_RESPONSE -> "ECU NO RESPONSE"
+                else -> "Awaiting telemetry..."
+            }
             paneBuilder.addRow(
                 Row.Builder()
-                    .setTitle("TELEMETRY")
-                    .addText("Awaiting connection and protocol verification...")
+                    .setTitle("STATUS")
+                    .addText(statusText)
                     .build()
             )
         }
 
         return PaneTemplate.Builder(paneBuilder.build())
-            .setTitle("OBD LOGGER")
+            .setTitle("OBD LOGGER - KYLAQ 1.0 TSI")
             .setHeaderAction(Action.APP_ICON)
             .build()
     }
@@ -118,20 +113,14 @@ class ObdDashboardScreen(carContext: CarContext) : Screen(carContext) {
                 rpm = formatValue(map, "010C")
                 speed = formatValue(map, "010D")
                 load = formatValue(map, "0104")
+                throttle = formatValue(map, "0111")
                 mapStr = formatValue(map, "010B")
-                iat = formatValue(map, "010F")
                 coolant = formatValue(map, "0105")
-                fuelLevel = formatValue(map, "012F")
                 fuelRate = formatValue(map, "019D")
                 
-                val rawEthanol = map["0152"]
-                ethanol = if (rawEthanol == null || isError(rawEthanol)) {
-                    "Unavailable"
-                } else {
-                    "$rawEthanol %"
-                }
-                
                 invalidate()
+                // Throttle updates to ~2 per second to avoid flooding Android Auto
+                delay(500)
             }
         }
     }
