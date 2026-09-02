@@ -48,6 +48,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val recordingManager = AppContainer.recordingManager
     val bluetoothManager = AppContainer.bluetoothManager
     val obdScheduler = AppContainer.obdScheduler
+    val cloudBackupManager = AppContainer.cloudBackupManager
 
     var activeTransport: ElmTransport? = null
         private set
@@ -459,6 +460,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             recordingTimerJob?.cancel()
             gpsManager.stopTracking()
             recordingManager.stopRecording()
+            // Auto-backup to cloud if enabled
+            cloudBackupManager.performAutoBackupIfNeeded()
         }
     }
 
@@ -468,6 +471,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun deleteRecording(sessionId: String) {
         recordingManager.deleteRecording(sessionId)
+    }
+
+    private val _importStatusMessage = MutableStateFlow<String?>(null)
+    val importStatusMessage: StateFlow<String?> = _importStatusMessage.asStateFlow()
+
+    private val _isImporting = MutableStateFlow(false)
+    val isImporting: StateFlow<Boolean> = _isImporting.asStateFlow()
+
+    fun clearImportStatusMessage() {
+        _importStatusMessage.value = null
+    }
+
+    fun importZipUris(uris: List<android.net.Uri>) {
+        if (uris.isEmpty()) return
+        viewModelScope.launch {
+            _isImporting.value = true
+            try {
+                val results = recordingManager.importZipFiles(uris)
+                val successCount = results.count { it.success }
+                val failCount = results.size - successCount
+                if (failCount == 0) {
+                    _importStatusMessage.value = "Successfully imported $successCount trip log(s)."
+                } else {
+                    _importStatusMessage.value = "Imported $successCount of ${results.size} trip(s). $failCount failed."
+                }
+            } catch (e: Exception) {
+                _importStatusMessage.value = "Import error: ${e.localizedMessage ?: e.message}"
+            } finally {
+                _isImporting.value = false
+            }
+        }
     }
 
     fun setPollingSpeedMode(mode: PollingSpeedMode) {

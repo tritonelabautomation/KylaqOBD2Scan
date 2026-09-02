@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -42,6 +44,8 @@ fun RecordingsScreen(
     val coroutineScope = rememberCoroutineScope()
     val savedRecordings by viewModel.savedRecordings.collectAsState()
     val isRecording by viewModel.isRecording.collectAsState()
+    val isImporting by viewModel.isImporting.collectAsState()
+    val importStatusMessage by viewModel.importStatusMessage.collectAsState()
     val tripRepo = viewModel.recordingManager.tripRepository
 
     var renamingRecording by remember { mutableStateOf<SavedRecording?>(null) }
@@ -49,8 +53,24 @@ fun RecordingsScreen(
     var storageStats by remember { mutableStateOf<StorageStats?>(null) }
     var showStorageDialog by remember { mutableStateOf(false) }
 
+    // SAF Open Multiple Documents Launcher
+    val zipPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
+            viewModel.importZipUris(uris)
+        }
+    }
+
     LaunchedEffect(savedRecordings) {
         storageStats = tripRepo.getStorageStats()
+    }
+
+    LaunchedEffect(importStatusMessage) {
+        importStatusMessage?.let {
+            Toast.makeText(context, it, Toast.LENGTH_LONG).show()
+            viewModel.clearImportStatusMessage()
+        }
     }
 
     Column(
@@ -86,14 +106,24 @@ fun RecordingsScreen(
                 }
             }
 
-            IconButton(onClick = { showStorageDialog = true }) {
-                Icon(Icons.Default.Storage, contentDescription = "Storage", tint = CyberCyan)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(
+                    onClick = {
+                        zipPickerLauncher.launch(arrayOf("application/zip", "application/x-zip-compressed", "*/*"))
+                    },
+                    modifier = Modifier.testTag("btn_import_zip")
+                ) {
+                    Icon(Icons.Default.FileDownload, contentDescription = "Import ZIP", tint = CyberCyan)
+                }
+                IconButton(onClick = { showStorageDialog = true }) {
+                    Icon(Icons.Default.Storage, contentDescription = "Storage", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
         }
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // Storage & Retention Banner
+        // Import & Storage Actions Banner
         Surface(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(12.dp),
@@ -107,17 +137,32 @@ fun RecordingsScreen(
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Icon(Icons.Default.Security, contentDescription = null, tint = NeonEmerald, modifier = Modifier.size(18.dp))
                     Text(
-                        text = "Policy: Persist Until User Deletes (Safe)",
+                        text = "Policy: Persist Until User Deletes",
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                 }
-                Text(
-                    text = "${storageStats?.sampleCount ?: 0} samples",
-                    fontSize = 11.sp,
-                    color = CyberCyan,
-                    fontWeight = FontWeight.Bold
-                )
+
+                Button(
+                    onClick = {
+                        zipPickerLauncher.launch(arrayOf("application/zip", "application/x-zip-compressed", "*/*"))
+                    },
+                    modifier = Modifier.height(34.dp).testTag("btn_import_logs_zip"),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = CyberCyanDark),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                    enabled = !isImporting
+                ) {
+                    if (isImporting) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Importing...", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    } else {
+                        Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(15.dp), tint = Color.White)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Import ZIP", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                }
             }
         }
 
@@ -134,11 +179,22 @@ fun RecordingsScreen(
                     Icon(Icons.Default.FolderOpen, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(48.dp))
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
-                        text = "No saved recording runs yet.\nStart a diagnostic recording from the Dashboard to record trips.",
+                        text = "No saved recording runs yet.\nStart a diagnostic recording from Dashboard or import existing ZIP log bundles.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
                     )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    OutlinedButton(
+                        onClick = {
+                            zipPickerLauncher.launch(arrayOf("application/zip", "application/x-zip-compressed", "*/*"))
+                        },
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Icon(Icons.Default.FileDownload, contentDescription = null, tint = CyberCyan, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Select .ZIP File to Import", color = CyberCyan)
+                    }
                 }
             }
         } else {

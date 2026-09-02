@@ -360,6 +360,30 @@ class RecordingManager(
             tripRepository.deleteAllTrips()
         }
     }
+
+    /**
+     * Imports a single ZIP archive from a content URI.
+     */
+    suspend fun importZipFile(uri: android.net.Uri): ZipImportResult {
+        val result = ZipImporter.importTripZip(context, uri, recordingsDir, tripRepository)
+        if (result.success) {
+            loadSavedRecordings()
+        }
+        return result
+    }
+
+    /**
+     * Imports multiple ZIP archives sequentially and returns a combined summary.
+     */
+    suspend fun importZipFiles(uris: List<android.net.Uri>): List<ZipImportResult> {
+        val results = mutableListOf<ZipImportResult>()
+        for (uri in uris) {
+            val res = ZipImporter.importTripZip(context, uri, recordingsDir, tripRepository)
+            results.add(res)
+        }
+        loadSavedRecordings()
+        return results
+    }
 }
 
 

@@ -38,6 +38,35 @@ class SettingsRepository(private val context: Context) {
     private val _sppUuid = MutableStateFlow(prefs.getString("spp_uuid", "00001101-0000-1000-8000-00805F9B34FB") ?: "00001101-0000-1000-8000-00805F9B34FB")
     val sppUuid: StateFlow<String> = _sppUuid.asStateFlow()
 
+    // Cloud / Google Drive Backup Preferences
+    private val _googleAccountEmail = MutableStateFlow(prefs.getString("google_account_email", null))
+    val googleAccountEmail: StateFlow<String?> = _googleAccountEmail.asStateFlow()
+
+    private val _autoCloudBackup = MutableStateFlow(prefs.getBoolean("auto_cloud_backup", false))
+    val autoCloudBackup: StateFlow<Boolean> = _autoCloudBackup.asStateFlow()
+
+    private val _lastBackupTimestamp = MutableStateFlow(prefs.getLong("last_backup_timestamp", 0L))
+    val lastBackupTimestamp: StateFlow<Long> = _lastBackupTimestamp.asStateFlow()
+
+    fun setGoogleAccountEmail(email: String?) {
+        if (email != null) {
+            prefs.edit().putString("google_account_email", email).apply()
+        } else {
+            prefs.edit().remove("google_account_email").apply()
+        }
+        _googleAccountEmail.value = email
+    }
+
+    fun setAutoCloudBackup(enabled: Boolean) {
+        prefs.edit().putBoolean("auto_cloud_backup", enabled).apply()
+        _autoCloudBackup.value = enabled
+    }
+
+    fun setLastBackupTimestamp(timestamp: Long) {
+        prefs.edit().putLong("last_backup_timestamp", timestamp).apply()
+        _lastBackupTimestamp.value = timestamp
+    }
+
     private fun loadPollingMode(): PollingSpeedMode {
         val name = prefs.getString("polling_mode", PollingSpeedMode.NORMAL.name)
         return try {

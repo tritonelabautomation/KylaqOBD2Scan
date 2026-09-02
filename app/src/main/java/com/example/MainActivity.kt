@@ -56,6 +56,7 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector)
     }
     object PidConfig : Screen("pid_config", "Config", Icons.Default.Tune)
     object Profiles : Screen("profiles", "Profiles", Icons.Default.VerifiedUser)
+    object Settings : Screen("settings", "Settings", Icons.Default.Settings)
 }
 
 class MainActivity : ComponentActivity() {
@@ -184,6 +185,9 @@ fun MainApp(viewModel: MainViewModel) {
                     onNavigateToHud = {
                         navController.navigate(Screen.DrivingDashboard.route)
                     },
+                    onNavigateToSettings = {
+                        navController.navigate(Screen.Settings.route)
+                    },
                     onOpenConnectDialog = { showConnectionDialog = true }
                 )
             }
@@ -304,6 +308,13 @@ fun MainApp(viewModel: MainViewModel) {
                 ProfilesScreen(
                     viewModel = profilesViewModel,
                     mainViewModel = viewModel,
+                    onBack = { navController.popBackStack() }
+                )
+            }
+
+            composable(Screen.Settings.route) {
+                SettingsScreen(
+                    viewModel = viewModel,
                     onBack = { navController.popBackStack() }
                 )
             }

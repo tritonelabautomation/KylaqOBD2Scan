@@ -1,32 +1,66 @@
 package com.example.auto
 
 import android.content.Intent
-import android.content.pm.ApplicationInfo
+import android.util.Log
 import androidx.car.app.CarAppService
 import androidx.car.app.Screen
 import androidx.car.app.Session
+import androidx.car.app.SessionInfo
 import androidx.car.app.validation.HostValidator
 
-import android.util.Log
-
 class ObdCarAppService : CarAppService() {
-    init { Log.i("OBDLogger/AndroidAuto", "CarAppService created") }
+    init {
+        Log.i("OBDLogger/AndroidAuto", "CarAppService instantiated")
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        Log.i("OBDLogger/AndroidAuto", "CarAppService onCreate")
+    }
+
     override fun createHostValidator(): HostValidator {
-        return if (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0) {
-            HostValidator.ALLOW_ALL_HOSTS_VALIDATOR
-        } else {
-            HostValidator.ALLOW_ALL_HOSTS_VALIDATOR // Simplified for this environment
+        Log.i("OBDLogger/AndroidAuto", "CarAppService createHostValidator called")
+        return HostValidator.ALLOW_ALL_HOSTS_VALIDATOR
+    }
+
+    override fun onCreateSession(sessionInfo: SessionInfo): Session {
+        Log.i("OBDLogger/AndroidAuto", "CarAppService onCreateSession(sessionInfo=$sessionInfo)")
+        return try {
+            ObdCarSession()
+        } catch (t: Throwable) {
+            Log.e("OBDLogger/AndroidAuto", "Error creating ObdCarSession", t)
+            ObdCarSession()
         }
     }
 
     override fun onCreateSession(): Session {
-        return ObdCarSession()
+        Log.i("OBDLogger/AndroidAuto", "CarAppService onCreateSession() [no-arg]")
+        return try {
+            ObdCarSession()
+        } catch (t: Throwable) {
+            Log.e("OBDLogger/AndroidAuto", "Error creating ObdCarSession", t)
+            ObdCarSession()
+        }
+    }
+
+    override fun onDestroy() {
+        Log.i("OBDLogger/AndroidAuto", "CarAppService onDestroy")
+        super.onDestroy()
     }
 }
 
 class ObdCarSession : Session() {
-    init { Log.i("OBDLogger/AndroidAuto", "Session created") }
+    init {
+        Log.i("OBDLogger/AndroidAuto", "ObdCarSession instantiated")
+    }
+
     override fun onCreateScreen(intent: Intent): Screen {
-        return ObdDashboardScreen(carContext)
+        Log.i("OBDLogger/AndroidAuto", "ObdCarSession onCreateScreen with intent: $intent")
+        return try {
+            ObdDashboardScreen(carContext)
+        } catch (t: Throwable) {
+            Log.e("OBDLogger/AndroidAuto", "Error instantiating ObdDashboardScreen", t)
+            ObdDashboardScreen(carContext)
+        }
     }
 }

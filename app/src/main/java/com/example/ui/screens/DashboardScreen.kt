@@ -44,6 +44,7 @@ fun DashboardScreen(
     onNavigateToCarDoctor: () -> Unit,
     onNavigateToTrips: () -> Unit,
     onNavigateToHud: () -> Unit,
+    onNavigateToSettings: () -> Unit = {},
     onOpenConnectDialog: () -> Unit
 ) {
     val connectionState by viewModel.connectionState.collectAsState()
@@ -81,10 +82,17 @@ fun DashboardScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("OBD Logger & Diagnostics", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Column(horizontalAlignment = Alignment.End) {
-                Text("v${com.example.BuildConfig.VERSION_NAME} (Build ${com.example.BuildConfig.VERSION_CODE})", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("Commit: ${com.example.BuildConfig.GIT_COMMIT}", style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Column {
+                Text("OBD Logger & Diagnostics", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text("v${com.example.BuildConfig.VERSION_NAME} • EA211 India Platform", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(
+                    onClick = onNavigateToSettings,
+                    modifier = Modifier.testTag("btn_dashboard_settings")
+                ) {
+                    Icon(Icons.Default.Settings, contentDescription = "Settings", tint = CyberCyan)
+                }
             }
         }
         

@@ -23,6 +23,7 @@ object AppContainer {
     lateinit var recordingManager: RecordingManager
     lateinit var bluetoothManager: BluetoothManager
     lateinit var obdScheduler: ObdScheduler
+    lateinit var cloudBackupManager: com.example.backup.CloudBackupManager
     
     fun init(context: Context) {
         if (isInitialized) return
@@ -36,6 +37,7 @@ object AppContainer {
             recordingManager = RecordingManager(appContext, rawLogManager)
             bluetoothManager = BluetoothManager(appContext)
             obdScheduler = ObdScheduler(recordingManager, settingsRepository)
+            cloudBackupManager = com.example.backup.CloudBackupManager(appContext, settingsRepository, recordingManager)
             isInitialized = true
         }
     }
