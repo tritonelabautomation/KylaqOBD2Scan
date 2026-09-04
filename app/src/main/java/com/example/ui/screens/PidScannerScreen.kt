@@ -54,11 +54,15 @@ fun PidScannerScreen(
     val connectionState by viewModel.connectionState.collectAsState()
     val connectedDeviceName by viewModel.connectedDeviceName.collectAsState()
     val isScanning by viewModel.isPidScanning.collectAsState()
+    val isValidating by viewModel.isPidValidating.collectAsState()
     val scanStatus by viewModel.pidScanStatus.collectAsState()
     val progress by viewModel.pidScanProgress.collectAsState()
     val currentRangeText by viewModel.pidScanRangeText.collectAsState()
     val discoveredPids by viewModel.discoveredPids.collectAsState()
+    val validatedPids by viewModel.validatedPids.collectAsState()
     val supportedCount by viewModel.discoveredSupportedCount.collectAsState()
+    val validatedPidsCount by viewModel.validatedPidsCount.collectAsState()
+    val discoveredEcus by viewModel.discoveredEcus.collectAsState()
     val errorMessage by viewModel.pidScanErrorMessage.collectAsState()
     val rawLogs by viewModel.pidScanRawLogs.collectAsState()
     val discoveredRanges by viewModel.discoveredRanges.collectAsState()
@@ -67,6 +71,7 @@ fun PidScannerScreen(
     var filterMode by remember { mutableStateOf(PidFilterMode.ALL) }
     var showRawLogsDialog by remember { mutableStateOf(false) }
     var showApplySuccessDialog by remember { mutableStateOf(false) }
+    var showExportMenu by remember { mutableStateOf(false) }
     var appliedCount by remember { mutableStateOf(0) }
 
     val isConnected = connectionState == ConnectionState.CONNECTED
@@ -119,6 +124,42 @@ fun PidScannerScreen(
                     }
                 },
                 actions = {
+                    Box {
+                        IconButton(
+                            onClick = { showExportMenu = true },
+                            enabled = discoveredPids.isNotEmpty(),
+                            modifier = Modifier.testTag("btn_export_menu")
+                        ) {
+                            Icon(Icons.Default.Share, contentDescription = "Export Report", tint = CyberCyan)
+                        }
+                        DropdownMenu(
+                            expanded = showExportMenu,
+                            onDismissRequest = { showExportMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Copy JSON Report") },
+                                onClick = {
+                                    showExportMenu = false
+                                    val json = viewModel.exportDiscoveryReportJson()
+                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                    clipboard.setPrimaryClip(ClipData.newPlainText("PID Discovery JSON", json))
+                                    Toast.makeText(context, "Exported JSON to clipboard", Toast.LENGTH_SHORT).show()
+                                },
+                                leadingIcon = { Icon(Icons.Default.Code, contentDescription = null) }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Copy CSV Catalog") },
+                                onClick = {
+                                    showExportMenu = false
+                                    val csv = viewModel.exportDiscoveryReportCsv()
+                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                    clipboard.setPrimaryClip(ClipData.newPlainText("PID Catalog CSV", csv))
+                                    Toast.makeText(context, "Exported CSV to clipboard", Toast.LENGTH_SHORT).show()
+                                },
+                                leadingIcon = { Icon(Icons.Default.TableChart, contentDescription = null) }
+                            )
+                        }
+                    }
                     IconButton(
                         onClick = { showRawLogsDialog = true },
                         modifier = Modifier.testTag("btn_view_raw_logs")
@@ -127,7 +168,7 @@ fun PidScannerScreen(
                     }
                     IconButton(
                         onClick = { viewModel.clearPidScan() },
-                        enabled = !isScanning && discoveredPids.isNotEmpty(),
+                        enabled = !isScanning && !isValidating && discoveredPids.isNotEmpty(),
                         modifier = Modifier.testTag("btn_clear_scan")
                     ) {
                         Icon(Icons.Default.Refresh, contentDescription = "Reset Scan")
@@ -166,6 +207,7 @@ fun PidScannerScreen(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             val statusColor = when (scanStatus) {
                                 PidScanStatus.SCANNING -> CyberCyan
+                                PidScanStatus.VALIDATING -> ElectricAmber
                                 PidScanStatus.COMPLETED -> NeonEmerald
                                 PidScanStatus.ERROR -> WarningRed
                                 PidScanStatus.CANCELLED -> ElectricAmber
@@ -260,6 +302,30 @@ fun PidScannerScreen(
                         )
                     }
 
+                    if (discoveredEcus.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text("Responding ECUs:", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            discoveredEcus.forEach { ecuId ->
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = CyberCyan.copy(alpha = 0.15f)
+                                ) {
+                                    Text(
+                                        text = "ECU $ecuId",
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = CyberCyan
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     Spacer(modifier = Modifier.height(14.dp))
 
                     // Action buttons
@@ -299,21 +365,57 @@ fun PidScannerScreen(
                         }
 
                         if (!isScanning && supportedCount > 0) {
+                            if (isValidating) {
+                                OutlinedButton(
+                                    onClick = { viewModel.stopPidScan() },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(48.dp)
+                                        .testTag("btn_stop_pid_validation"),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = WarningRed),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, WarningRed),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Icon(Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Stop ($validatedPidsCount)", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                }
+                            } else {
+                                OutlinedButton(
+                                    onClick = { viewModel.startDirectValidation() },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(48.dp)
+                                        .testTag("btn_direct_validate_pids"),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = CyberCyan),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, CyberCyan),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Icon(Icons.Default.Verified, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        if (validatedPidsCount > 0) "Validated ($validatedPidsCount)" else "Validate",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.sp
+                                    )
+                                }
+                            }
+
                             Button(
                                 onClick = {
                                     appliedCount = viewModel.applyDiscoveredPidsToLiveData()
                                     showApplySuccessDialog = true
                                 },
                                 modifier = Modifier
-                                    .weight(1.2f)
+                                    .weight(1.1f)
                                     .height(48.dp)
                                     .testTag("btn_apply_pids_to_live"),
                                 colors = ButtonDefaults.buttonColors(containerColor = NeonEmerald, contentColor = Color.Black),
                                 shape = RoundedCornerShape(12.dp)
                             ) {
                                 Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Apply to Live", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Apply Live", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                             }
                         }
                     }
@@ -414,6 +516,7 @@ fun PidScannerScreen(
                     }
                 }
             } else {
+                val valMap = remember(validatedPids) { validatedPids.associateBy { it.hexPid.uppercase() } }
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxSize()
@@ -423,7 +526,10 @@ fun PidScannerScreen(
                     contentPadding = PaddingValues(bottom = 24.dp)
                 ) {
                     items(items = filteredPids, key = { it.id }) { pidDef ->
-                        DiscoveredPidCard(pidDef = pidDef)
+                        DiscoveredPidCard(
+                            pidDef = pidDef,
+                            validationResult = valMap[pidDef.hexPid.uppercase()]
+                        )
                     }
                 }
             }
@@ -475,7 +581,10 @@ fun PidScannerScreen(
 }
 
 @Composable
-fun DiscoveredPidCard(pidDef: PidDefinition) {
+fun DiscoveredPidCard(
+    pidDef: PidDefinition,
+    validationResult: com.example.discovery.PidValidationResult? = null
+) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -571,29 +680,51 @@ fun DiscoveredPidCard(pidDef: PidDefinition) {
 
             Spacer(modifier = Modifier.width(8.dp))
 
-            // Status Badge
-            Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = if (pidDef.supported) NeonEmerald.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant
+            // Status and Validation Badges Column
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (pidDef.supported) NeonEmerald.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant
                 ) {
-                    Icon(
-                        imageVector = if (pidDef.supported) Icons.Default.CheckCircle else Icons.Default.RemoveCircleOutline,
-                        contentDescription = null,
-                        modifier = Modifier.size(14.dp),
-                        tint = if (pidDef.supported) NeonEmerald else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = if (pidDef.supported) "SUPPORTED" else "NO",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 10.sp,
-                        color = if (pidDef.supported) NeonEmerald else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = if (pidDef.supported) Icons.Default.CheckCircle else Icons.Default.RemoveCircleOutline,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = if (pidDef.supported) NeonEmerald else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = if (pidDef.supported) "SUPPORTED" else "NO",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.sp,
+                            color = if (pidDef.supported) NeonEmerald else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                if (validationResult != null) {
+                    val isValOk = validationResult.directStatus == com.example.model.CapabilityStatus.SUPPORTED
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = if (isValOk) NeonEmerald.copy(alpha = 0.15f) else WarningRed.copy(alpha = 0.15f)
+                    ) {
+                        Text(
+                            text = if (isValOk) "VAL: ${validationResult.latencyMs}ms" else validationResult.directStatus.name,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 9.sp,
+                            color = if (isValOk) NeonEmerald else WarningRed
+                        )
+                    }
                 }
             }
         }

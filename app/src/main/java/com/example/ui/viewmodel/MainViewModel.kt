@@ -63,7 +63,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     val isPolling: StateFlow<Boolean> = obdScheduler.isPolling
 
-    private val _selectedCanProtocol = MutableStateFlow(com.example.model.CanProtocol.AUTO)
+    private val _selectedCanProtocol = MutableStateFlow(com.example.model.KylaqProtocolProfile.DEFAULT_CAN_PROTOCOL)
     val selectedCanProtocol: StateFlow<com.example.model.CanProtocol> = _selectedCanProtocol.asStateFlow()
 
     val protocolHealth: StateFlow<com.example.model.ProtocolHealth> = AppContainer.protocolHealth.asStateFlow()
@@ -151,10 +151,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val pidDiscoveryService = AppContainer.pidDiscoveryService
     val pidScanStatus = pidDiscoveryService.status
     val isPidScanning = pidDiscoveryService.isScanning
+    val isPidValidating = pidDiscoveryService.isValidating
     val pidScanProgress = pidDiscoveryService.progress
     val pidScanRangeText = pidDiscoveryService.currentRangeText
     val discoveredPids = pidDiscoveryService.discoveredPids
+    val validatedPids = pidDiscoveryService.validatedPids
     val discoveredSupportedCount = pidDiscoveryService.supportedPidsCount
+    val validatedPidsCount = pidDiscoveryService.validatedPidsCount
+    val discoveredEcus = pidDiscoveryService.discoveredEcus
     val pidScanErrorMessage = pidDiscoveryService.errorMessage
     val pidScanRawLogs = pidDiscoveryService.rawLogEntries
     val discoveredRanges = pidDiscoveryService.discoveredRanges
@@ -178,12 +182,40 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun startDirectValidation() {
+        val transport = activeTransport
+        if (transport == null || !transport.isConnected) {
+            pidDiscoveryService.startDirectValidation(
+                transport ?: SimulationTransport(),
+                viewModelScope
+            )
+            return
+        }
+
+        viewModelScope.launch {
+            val wasPolling = obdScheduler.isPolling.value
+            if (wasPolling) {
+                obdScheduler.stopPolling()
+            }
+            pidDiscoveryService.startDirectValidation(transport, viewModelScope)
+        }
+    }
+
     fun stopPidScan() {
         pidDiscoveryService.stopScan()
     }
 
     fun clearPidScan() {
         pidDiscoveryService.clearResults()
+    }
+
+    fun exportDiscoveryReportJson(): String {
+        val vin = vehicleVin.value?.takeIf { it.length == 17 } ?: obdScheduler.ecuDiscoveryManager.discoveryReport.value?.detectedEcus?.firstOrNull { !it.vin.isNullOrEmpty() }?.vin
+        return pidDiscoveryService.exportDiscoveryReportJson(vehicleVin = vin)
+    }
+
+    fun exportDiscoveryReportCsv(): String {
+        return pidDiscoveryService.exportDiscoveryReportCsv()
     }
 
     fun applyDiscoveredPidsToLiveData(): Int {

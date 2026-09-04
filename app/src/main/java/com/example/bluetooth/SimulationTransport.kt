@@ -108,14 +108,16 @@ class SimulationElmTransport(
                 lines.add("OK")
             }
 
-            // Supported PIDs Bitmasks for EA211 1.0 TSI
+            // Supported PIDs Bitmasks for EA211 1.0 TSI (Multi-ECU responses: 7E8 ECM + 7E9 TCU)
             cleanCmd == "0100" -> {
                 // PIDs 01-20: 04, 05, 06, 07, 0B, 0C, 0D, 0E, 0F, 11, etc.
                 lines.add("7E8 06 41 00 BE 3F B8 13")
+                lines.add("7E9 06 41 00 80 00 00 01")
             }
             cleanCmd == "0120" -> {
                 // PIDs 21-40: 2E, 2F, 33, 3C, etc.
                 lines.add("7E8 06 41 20 80 07 20 01")
+                lines.add("7E9 06 41 20 80 00 00 01")
             }
             cleanCmd == "0140" -> {
                 // PIDs 41-60: 42, 43, 44, 45, 46, 47, 49, 4A, 4C, 51, etc.
@@ -124,6 +126,48 @@ class SimulationElmTransport(
             cleanCmd == "0160" -> {
                 // PIDs 61-80: 62, 63, 67, 6D, 70, etc.
                 lines.add("7E8 06 41 60 70 00 00 00")
+            }
+            cleanCmd == "0180" -> {
+                lines.add("7E8 06 41 80 00 00 00 00")
+            }
+            cleanCmd == "01A0" -> {
+                lines.add("7E8 06 41 A0 00 00 00 00")
+            }
+            cleanCmd == "01C0" -> {
+                lines.add("7E8 06 41 C0 00 00 00 00")
+            }
+            cleanCmd == "01E0" -> {
+                lines.add("7E8 06 41 E0 00 00 00 00")
+            }
+
+            // Mode 02 Freeze Frame
+            cleanCmd == "020200" || cleanCmd == "0200" -> {
+                lines.add("7E8 03 42 02 00")
+            }
+
+            // Mode 03 Stored DTCs
+            cleanCmd == "03" -> {
+                lines.add("7E8 02 43 00")
+            }
+
+            // Mode 06 On-Board Monitoring
+            cleanCmd == "0600" -> {
+                lines.add("7E8 06 46 00 80 00 00 00")
+            }
+
+            // Mode 07 Pending DTCs
+            cleanCmd == "07" -> {
+                lines.add("7E8 02 47 00")
+            }
+
+            // Mode 09 Supported PIDs
+            cleanCmd == "0900" -> {
+                lines.add("7E8 06 49 00 54 40 00 00")
+            }
+
+            // Mode 0A Permanent DTCs
+            cleanCmd == "0A" -> {
+                lines.add("7E8 02 4A 00")
             }
 
             // Standard Mode 01 OBD PIDs for EA211 (Single Frame with 7E8 CAN header)
@@ -275,6 +319,12 @@ class SimulationElmTransport(
                 // Spare Part Number: 04C906027A
                 lines.add("7E8 10 0E 62 F1 87 30 34 43")
                 lines.add("7E8 21 39 30 36 30 32 37 41")
+            }
+            cleanCmd == "22F190" -> {
+                // VIN via UDS
+                lines.add("7E8 10 14 62 F1 90 54 4D 42")
+                lines.add("7E8 21 45 37 39 4E 31 35 53")
+                lines.add("7E8 22 30 30 31 32 33 34 00")
             }
             cleanCmd == "0162" -> {
                 // Actual Torque %: A - 125

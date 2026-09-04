@@ -102,11 +102,17 @@ data class TripEconomyStats(
 
 /**
  * Capability state for an OBD PID or diagnostic service
+ * Strictly distinguishes between explicit unsupported status and transport/timeout issues.
  */
 enum class CapabilityStatus {
     SUPPORTED,
     NOT_SUPPORTED,
     NOT_TESTED,
+    TIMEOUT,
+    NO_DATA,
+    MALFORMED_RESPONSE,
+    CAN_ERROR,
+    ADAPTER_ERROR,
     ERROR,
     TEMPORARILY_UNAVAILABLE
 }

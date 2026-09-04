@@ -1,7 +1,7 @@
 package com.example.protocol
 
 /**
- * Reconstructed message from ISO-TP CAN frames
+ * Reconstructed message from ISO-TP CAN frames (ISO 15765-2).
  */
 data class IsoTpMessage(
     val canId: String?,
@@ -9,17 +9,26 @@ data class IsoTpMessage(
     val reconstructedPayloadHex: String,
     val reconstructedBytes: List<Int>,
     val isComplete: Boolean,
-    val totalExpectedLength: Int
+    val totalExpectedLength: Int,
+    val isMalformed: Boolean = false,
+    val malformedReason: String? = null
 )
 
 /**
- * Reassembles ISO-TP multi-frame CAN responses into coherent OBD payloads
+ * Reassembles ISO-TP multi-frame CAN responses into coherent OBD payloads.
+ *
+ * Implements ISO 15765-2:
+ * - Single Frame (SF, 0x0_)
+ * - First Frame (FF, 0x1_)
+ * - Consecutive Frame (CF, 0x2_) with sequence number verification
+ * - Flow Control (FC, 0x3_)
+ * - Handles CAN ID grouping, padding bytes stripping, and malformed state reporting.
  */
 object IsoTpParser {
 
     /**
      * Reassembles a list of raw response lines from ELM327 into parsed ISO-TP messages.
-     * Can handle single or multiple lines from one or more ECUs (e.g. 7E8).
+     * Groups frames by CAN ID (e.g. 7E8, 7E9) and reassembles multi-frame payloads.
      */
     fun reassembleLines(lines: List<String>): List<IsoTpMessage> {
         val frames = lines.map { CanFrameParser.parseFrame(it) }
@@ -29,7 +38,7 @@ object IsoTpParser {
             return emptyList()
         }
 
-        // Group frames by CAN ID (or "UNKNOWN" if no header)
+        // Group frames by CAN ID (or "NO_HEADER" if no header)
         val groupedByCanId = frames.groupBy { it.canId ?: "NO_HEADER" }
         val results = mutableListOf<IsoTpMessage>()
 
@@ -40,33 +49,52 @@ object IsoTpParser {
             var expectedTotalLength = 0
             var payloadAccumulator = mutableListOf<Int>()
             var isMultiFrame = false
+            var expectedSequenceNumber = 1
+            var isCurrentMalformed = false
+            var currentMalformedReason: String? = null
 
             for (frame in canFrames) {
                 when (frame.pciType) {
                     IsoTpPciType.SINGLE_FRAME -> {
-                        // Flush any pending multi-frame
+                        // Flush any unfinalized multi-frame
                         if (currentFrames.isNotEmpty()) {
                             results.add(
                                 createIsoTpMessage(
                                     resolvedCanId,
                                     currentFrames,
                                     payloadAccumulator,
-                                    expectedTotalLength
+                                    expectedTotalLength,
+                                    isCurrentMalformed,
+                                    currentMalformedReason
                                 )
                             )
                             currentFrames = mutableListOf()
                             payloadAccumulator = mutableListOf()
+                            isMultiFrame = false
+                            isCurrentMalformed = false
+                            currentMalformedReason = null
                         }
-                        // Single frame is complete immediately
-                        val sfBytes = frame.payloadBytes
+
+                        // Single Frame handling: check length in lower nibble
+                        val sfLength = frame.dataBytes[0] and 0x0F
+                        val availableBytes = frame.dataBytes.size - 1
+                        val isSfMalformed = sfLength <= 0 || sfLength > availableBytes
+                        val sfBytes = if (isSfMalformed) {
+                            frame.payloadBytes
+                        } else {
+                            frame.dataBytes.subList(1, 1 + sfLength)
+                        }
+
                         results.add(
                             IsoTpMessage(
                                 canId = resolvedCanId,
                                 individualFrames = listOf(frame),
                                 reconstructedPayloadHex = sfBytes.joinToString("") { "%02X".format(it) },
                                 reconstructedBytes = sfBytes,
-                                isComplete = true,
-                                totalExpectedLength = sfBytes.size
+                                isComplete = !isSfMalformed,
+                                totalExpectedLength = sfLength,
+                                isMalformed = isSfMalformed,
+                                malformedReason = if (isSfMalformed) "Invalid single frame length: $sfLength (available: $availableBytes)" else null
                             )
                         )
                     }
@@ -78,27 +106,48 @@ object IsoTpParser {
                                     resolvedCanId,
                                     currentFrames,
                                     payloadAccumulator,
-                                    expectedTotalLength
+                                    expectedTotalLength,
+                                    isCurrentMalformed,
+                                    currentMalformedReason
                                 )
                             )
                             currentFrames = mutableListOf()
                             payloadAccumulator = mutableListOf()
                         }
+
                         isMultiFrame = true
+                        isCurrentMalformed = false
+                        currentMalformedReason = null
                         currentFrames.add(frame)
-                        // 12-bit length: (dataBytes[0] & 0x0F) << 8 | dataBytes[1]
+
+                        // 12-bit total message length: ((dataBytes[0] & 0x0F) << 8) | dataBytes[1]
                         expectedTotalLength = if (frame.dataBytes.size >= 2) {
                             ((frame.dataBytes[0] and 0x0F) shl 8) or (frame.dataBytes[1] and 0xFF)
                         } else {
                             0
                         }
+
+                        if (expectedTotalLength < 8) {
+                            isCurrentMalformed = true
+                            currentMalformedReason = "First Frame specifies invalid ISO-TP length < 8 ($expectedTotalLength)"
+                        }
+
+                        expectedSequenceNumber = 1
                         payloadAccumulator.addAll(frame.payloadBytes)
                     }
 
                     IsoTpPciType.CONSECUTIVE_FRAME -> {
                         if (isMultiFrame) {
                             currentFrames.add(frame)
+                            val actualSn = frame.dataBytes[0] and 0x0F
+                            if (actualSn != expectedSequenceNumber) {
+                                isCurrentMalformed = true
+                                currentMalformedReason = "ISO-TP sequence number mismatch: expected $expectedSequenceNumber, got $actualSn"
+                            }
+                            expectedSequenceNumber = (expectedSequenceNumber + 1) % 16
+
                             payloadAccumulator.addAll(frame.payloadBytes)
+
                             if (payloadAccumulator.size >= expectedTotalLength && expectedTotalLength > 0) {
                                 val trimmedPayload = payloadAccumulator.take(expectedTotalLength)
                                 results.add(
@@ -107,27 +156,40 @@ object IsoTpParser {
                                         individualFrames = currentFrames.toList(),
                                         reconstructedPayloadHex = trimmedPayload.joinToString("") { "%02X".format(it) },
                                         reconstructedBytes = trimmedPayload,
-                                        isComplete = true,
-                                        totalExpectedLength = expectedTotalLength
+                                        isComplete = !isCurrentMalformed,
+                                        totalExpectedLength = expectedTotalLength,
+                                        isMalformed = isCurrentMalformed,
+                                        malformedReason = currentMalformedReason
                                     )
                                 )
                                 currentFrames = mutableListOf()
                                 payloadAccumulator = mutableListOf()
                                 isMultiFrame = false
+                                isCurrentMalformed = false
+                                currentMalformedReason = null
                             }
                         } else {
-                            // Stray consecutive frame
-                            currentFrames.add(frame)
+                            // Stray consecutive frame without preceding First Frame
+                            results.add(
+                                IsoTpMessage(
+                                    canId = resolvedCanId,
+                                    individualFrames = listOf(frame),
+                                    reconstructedPayloadHex = frame.payloadBytes.joinToString("") { "%02X".format(it) },
+                                    reconstructedBytes = frame.payloadBytes,
+                                    isComplete = false,
+                                    totalExpectedLength = frame.payloadBytes.size,
+                                    isMalformed = true,
+                                    malformedReason = "Orphan consecutive frame received without preceding First Frame"
+                                )
+                            )
                         }
                     }
 
                     IsoTpPciType.FLOW_CONTROL -> {
-                        // Flow control acknowledgment frame
                         currentFrames.add(frame)
                     }
 
                     IsoTpPciType.NON_ISO_TP -> {
-                        // Regular unformatted OBD bytes
                         val bytes = frame.payloadBytes
                         results.add(
                             IsoTpMessage(
@@ -136,7 +198,9 @@ object IsoTpParser {
                                 reconstructedPayloadHex = bytes.joinToString("") { "%02X".format(it) },
                                 reconstructedBytes = bytes,
                                 isComplete = true,
-                                totalExpectedLength = bytes.size
+                                totalExpectedLength = bytes.size,
+                                isMalformed = false,
+                                malformedReason = null
                             )
                         )
                     }
@@ -150,14 +214,17 @@ object IsoTpParser {
                 } else {
                     payloadAccumulator
                 }
+                val isDone = (trimmed.size == expectedTotalLength && expectedTotalLength > 0)
                 results.add(
                     IsoTpMessage(
                         canId = resolvedCanId,
                         individualFrames = currentFrames,
                         reconstructedPayloadHex = trimmed.joinToString("") { "%02X".format(it) },
                         reconstructedBytes = trimmed,
-                        isComplete = (trimmed.size == expectedTotalLength && expectedTotalLength > 0),
-                        totalExpectedLength = expectedTotalLength
+                        isComplete = isDone && !isCurrentMalformed,
+                        totalExpectedLength = expectedTotalLength,
+                        isMalformed = isCurrentMalformed || (!isDone && expectedTotalLength > 0),
+                        malformedReason = currentMalformedReason ?: if (!isDone) "Incomplete multi-frame message: received ${trimmed.size}/$expectedTotalLength bytes" else null
                     )
                 )
             }
@@ -170,16 +237,21 @@ object IsoTpParser {
         canId: String?,
         frames: List<RawCanFrame>,
         payload: List<Int>,
-        expectedLength: Int
+        expectedLength: Int,
+        isMalformed: Boolean = false,
+        malformedReason: String? = null
     ): IsoTpMessage {
         val trimmed = if (expectedLength in 1..payload.size) payload.take(expectedLength) else payload
+        val isDone = (trimmed.size == expectedLength && expectedLength > 0)
         return IsoTpMessage(
             canId = canId,
             individualFrames = frames,
             reconstructedPayloadHex = trimmed.joinToString("") { "%02X".format(it) },
             reconstructedBytes = trimmed,
-            isComplete = (trimmed.size == expectedLength && expectedLength > 0),
-            totalExpectedLength = expectedLength
+            isComplete = isDone && !isMalformed,
+            totalExpectedLength = expectedLength,
+            isMalformed = isMalformed || (!isDone && expectedLength > 0),
+            malformedReason = malformedReason
         )
     }
 }
