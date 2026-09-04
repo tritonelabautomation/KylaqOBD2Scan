@@ -48,6 +48,7 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector)
     object RawMonitor : Screen("raw_monitor", "Raw Monitor", Icons.Default.FormatListBulleted)
     object Console : Screen("console", "Console", Icons.Default.Terminal)
     object Garage : Screen("garage", "Garage", Icons.Default.Garage)
+    object AddVehicle : Screen("add_vehicle", "Add Vehicle", Icons.Default.Add)
     object PidDetail : Screen("pid_detail/{pidId}", "Research", Icons.Default.Science) {
         fun createRoute(pidId: String) = "pid_detail/$pidId"
     }
@@ -239,40 +240,42 @@ fun MainApp(viewModel: MainViewModel) {
 
             composable(Screen.Garage.route) {
                 val allVehicles by viewModel.recordingManager.tripRepository.allVehiclesFlow.collectAsState(initial = emptyList())
-                val coroutineScope = rememberCoroutineScope()
-                var showAddDialog by remember { mutableStateOf(false) }
 
                 VehicleGarageScreen(
                     vehicles = allVehicles,
-                    onAddVehicle = { showAddDialog = true },
+                    onAddVehicle = { navController.navigate(Screen.AddVehicle.route) },
                     onSelectVehicle = { vehicle ->
-                        viewModel.setVehicleName("${vehicle.make} ${vehicle.model}")
+                        val name = if (vehicle.nickname.isNullOrBlank()) "${vehicle.make} ${vehicle.model}" else vehicle.nickname
+                        viewModel.setVehicleName(name)
                         navController.navigate(Screen.Dashboard.route) {
                             popUpTo(Screen.Dashboard.route) { inclusive = true }
                         }
                     }
                 )
+            }
 
-                if (showAddDialog) {
-                    AddVehicleDialog(
-                        onDismiss = { showAddDialog = false },
-                        onSave = { make, model, year, vin ->
-                            showAddDialog = false
-                            coroutineScope.launch {
-                                viewModel.recordingManager.tripRepository.insertVehicle(
-                                    com.example.data.db.entities.VehicleEntity(
-                                        id = java.util.UUID.randomUUID().toString(),
-                                        make = make,
-                                        model = model,
-                                        year = year,
-                                        vin = vin.takeIf { it.isNotBlank() },
-                                        defaultProtocol = null
-                                    )
+            composable(Screen.AddVehicle.route) {
+                val coroutineScope = rememberCoroutineScope()
+                AddVehicleScreen(
+                    catalogRepository = viewModel.catalogRepository,
+                    onBack = { navController.popBackStack() },
+                    onVehicleConfirmed = { make, model, year, variantId ->
+                        coroutineScope.launch {
+                            viewModel.recordingManager.tripRepository.insertVehicle(
+                                com.example.data.db.entities.VehicleEntity(
+                                    id = java.util.UUID.randomUUID().toString(),
+                                    make = make,
+                                    model = model,
+                                    year = year,
+                                    vin = null,
+                                    defaultProtocol = null,
+                                    catalogVariantId = variantId
                                 )
-                            }
+                            )
+                            navController.popBackStack()
                         }
-                    )
-                }
+                    }
+                )
             }
 
             composable(Screen.Recordings.route) {

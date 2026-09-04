@@ -17,9 +17,16 @@ import com.example.data.db.entities.*
         VehicleEntity::class,
         ProtocolTestResultEntity::class,
         DtcRecordEntity::class,
-        ServiceRecordEntity::class
+        ServiceRecordEntity::class,
+        CatalogMetadataEntity::class,
+        CatalogEngineEntity::class,
+        CatalogTransmissionEntity::class,
+        CatalogManufacturerEntity::class,
+        CatalogModelEntity::class,
+        CatalogGenerationEntity::class,
+        CatalogVariantEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -30,6 +37,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun diagnosticEventDao(): DiagnosticEventDao
     abstract fun aiAnalysisDao(): AiAnalysisDao
     abstract fun newEntitiesDao(): NewEntitiesDao // We'll create this DAO
+    abstract fun catalogDao(): CatalogDao // Create this next
 
     companion object {
         @Volatile
@@ -42,7 +50,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "obd_research_logger.db"
                 )
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .fallbackToDestructiveMigrationOnDowngrade()
                     .build()
                 INSTANCE = instance

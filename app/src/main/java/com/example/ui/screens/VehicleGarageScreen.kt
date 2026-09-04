@@ -32,9 +32,19 @@ fun VehicleGarageScreen(
                         colors = CardDefaults.cardColors(containerColor = DarkSurface)
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
-                            Text("${vehicle.make} ${vehicle.model}", style = MaterialTheme.typography.titleMedium, color = CyberCyan)
-                            Text("Year: ${vehicle.year}", style = MaterialTheme.typography.bodyMedium)
-                            Text("VIN: ${vehicle.vin ?: "Unknown"}", style = MaterialTheme.typography.bodySmall)
+                            val displayName = vehicle.nickname ?: "${vehicle.make} ${vehicle.model}"
+                            Text(displayName, style = MaterialTheme.typography.titleMedium, color = CyberCyan)
+                            if (vehicle.nickname != null) {
+                                Text("${vehicle.make} ${vehicle.model} (${vehicle.year})", style = MaterialTheme.typography.bodyMedium)
+                            } else {
+                                Text("Year: ${vehicle.year}", style = MaterialTheme.typography.bodyMedium)
+                            }
+                            if (vehicle.vin != null) {
+                                Text("VIN: ${vehicle.vin}", style = MaterialTheme.typography.bodySmall)
+                            }
+                            if (vehicle.catalogVariantId != null) {
+                                Text("Catalog Variant: ${vehicle.catalogVariantId}", style = MaterialTheme.typography.bodySmall, color = androidx.compose.ui.graphics.Color.Gray)
+                            }
                         }
                     }
                 }

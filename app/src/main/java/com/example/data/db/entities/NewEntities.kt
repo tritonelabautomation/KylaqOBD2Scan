@@ -12,7 +12,15 @@ data class VehicleEntity(
     val model: String,
     val year: String,
     val vin: String?,
-    val defaultProtocol: String?
+    val defaultProtocol: String?,
+    
+    // Catalog fields
+    val catalogVariantId: String? = null,
+    val nickname: String? = null,
+    val licensePlate: String? = null,
+    val odometerKm: Int? = null,
+    val isLegacy: Boolean = false,
+    val notes: String? = null
 )
 
 @Entity(tableName = "protocol_test_results")

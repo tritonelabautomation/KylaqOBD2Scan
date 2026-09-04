@@ -49,6 +49,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val bluetoothManager = AppContainer.bluetoothManager
     val obdScheduler = AppContainer.obdScheduler
     val cloudBackupManager = AppContainer.cloudBackupManager
+    val catalogRepository = AppContainer.catalogRepository
 
     var activeTransport: ElmTransport? = null
         private set
