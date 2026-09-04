@@ -40,10 +40,10 @@ class CatalogViewModel(private val repository: CatalogRepository) : ViewModel() 
         else flowOf(emptyList())
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val variants = _selectedGeneration.flatMapLatest { gen ->
-        if (gen != null) repository.getVariants(gen.id)
+    val variants = combine(_selectedGeneration, _selectedYear) { gen, year ->
+        if (gen != null && year != null) repository.getVariants(gen.id, year)
         else flowOf(emptyList())
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    }.flatMapLatest { it }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     fun selectManufacturer(manufacturer: CatalogManufacturerEntity) {
         _selectedManufacturer.value = manufacturer

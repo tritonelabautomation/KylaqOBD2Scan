@@ -1,4 +1,4 @@
-package com.example.ui.screens
+content = """package com.example.ui.screens
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -166,11 +166,11 @@ fun AddVehicleScreen(
                     modifier = Modifier.padding(bottom = 8.dp)
                 )
                 Text(
-                    "${selectedManufacturer?.name} ${selectedModel?.name}\n" +
-                    "${selectedGeneration?.name}\n" +
-                    "${selectedYear}\n" +
-                    "${selectedVariant?.name}\n" +
-                    (variantDetails?.engine?.let { "${it.name} ${it.fuelType ?: ""}\n" } ?: "") +
+                    "${selectedManufacturer?.name} ${selectedModel?.name}\\n" +
+                    "${selectedGeneration?.name}\\n" +
+                    "${selectedYear}\\n" +
+                    "${selectedVariant?.name}\\n" +
+                    (variantDetails?.engine?.let { "${it.name} ${it.fuelType ?: ""}\\n" } ?: "") +
                     (variantDetails?.transmission?.name ?: ""),
                     style = MaterialTheme.typography.bodyMedium,
                     color = TextPrimaryDark,
@@ -274,7 +274,7 @@ fun AddVehicleScreen(
             items = variants,
             itemText = { v -> 
                 val specs = listOfNotNull(v.bodyType, v.drivetrain).joinToString(" • ")
-                "${v.name}${if (specs.isNotEmpty()) "\n$specs" else ""}"
+                "${v.name}${if (specs.isNotEmpty()) "\\n$specs" else ""}"
             },
             onDismiss = { showVariantSheet = false },
             onSelect = { 
@@ -389,7 +389,7 @@ fun <T> SearchableBottomSheet(
                 LazyColumn(modifier = Modifier.fillMaxWidth()) {
                     items(filtered) { item ->
                         val text = itemText(item)
-                        val parts = text.split("\n")
+                        val parts = text.split("\\n")
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -410,3 +410,6 @@ fun <T> SearchableBottomSheet(
         }
     }
 }
+"""
+with open("app/src/main/java/com/example/ui/screens/AddVehicleScreen.kt", "w") as f:
+    f.write(content)

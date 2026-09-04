@@ -87,5 +87,7 @@ data class CatalogVariantEntity(
     val engineId: String?,
     val transmissionId: String?,
     val bodyType: String?,
-    val drivetrain: String?
+    val drivetrain: String?,
+    val startYear: Int? = null,
+    val endYear: Int? = null
 )

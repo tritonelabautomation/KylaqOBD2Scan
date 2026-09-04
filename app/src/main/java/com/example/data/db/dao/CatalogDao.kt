@@ -44,8 +44,14 @@ interface CatalogDao {
     @Query("SELECT * FROM catalog_generations WHERE modelId = :modelId ORDER BY name COLLATE NOCASE")
     fun getGenerationsForModel(modelId: String): Flow<List<CatalogGenerationEntity>>
 
-    @Query("SELECT * FROM catalog_variants WHERE generationId = :generationId ORDER BY name COLLATE NOCASE")
-    fun getVariantsForGeneration(generationId: String): Flow<List<CatalogVariantEntity>>
+    @Query("""
+        SELECT v.* FROM catalog_variants v
+        INNER JOIN catalog_generations g ON v.generationId = g.id
+        WHERE v.generationId = :generationId 
+        AND (:year BETWEEN ifnull(v.startYear, ifnull(g.startYear, 0)) AND ifnull(v.endYear, ifnull(g.endYear, 9999)))
+        ORDER BY v.name COLLATE NOCASE
+    """)
+    fun getVariantsForGenerationAndYear(generationId: String, year: Int): Flow<List<CatalogVariantEntity>>
 
     @Query("SELECT * FROM catalog_engines WHERE id = :engineId")
     suspend fun getEngine(engineId: String): CatalogEngineEntity?
