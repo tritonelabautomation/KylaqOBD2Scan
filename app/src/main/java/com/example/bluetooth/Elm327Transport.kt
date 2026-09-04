@@ -6,6 +6,12 @@ import com.example.protocol.SafetyValidator
 import com.example.protocol.ValidationResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.yield
+import kotlinx.coroutines.isActive
+
 import java.io.InputStream
 import java.io.OutputStream
 import java.text.SimpleDateFormat
@@ -45,6 +51,7 @@ interface ElmTransport {
 class BluetoothElmTransport(
     private val socket: BluetoothSocket
 ) : ElmTransport {
+    private val transportMutex = Mutex()
 
     private var inputStream: InputStream? = null
     private var outputStream: OutputStream? = null
@@ -91,6 +98,7 @@ class BluetoothElmTransport(
     }
 
     override suspend fun sendCommand(command: String, timeoutMs: Long): ElmResponse = withContext(Dispatchers.IO) {
+        transportMutex.withLock {
         // Enforce safety validator on all outgoing commands
         val validation = SafetyValidator.validateCommand(command)
         if (validation is ValidationResult.Rejected) {
@@ -134,7 +142,7 @@ class BluetoothElmTransport(
             val byteBuffer = ByteArray(256)
             var promptFound = false
 
-            while (SystemClock.elapsedRealtime() - startMonotonic < timeoutMs) {
+            while (isActive && SystemClock.elapsedRealtime() - startMonotonic < timeoutMs) {
                 if (inStream.available() > 0) {
                     val bytesRead = inStream.read(byteBuffer)
                     if (bytesRead > 0) {
@@ -146,7 +154,7 @@ class BluetoothElmTransport(
                         }
                     }
                 } else {
-                    Thread.sleep(10)
+                    kotlinx.coroutines.delay(10)
                 }
             }
 
@@ -177,6 +185,7 @@ class BluetoothElmTransport(
                 durationMs = duration,
                 errorMessage = e.localizedMessage
             )
+        }
         }
     }
 

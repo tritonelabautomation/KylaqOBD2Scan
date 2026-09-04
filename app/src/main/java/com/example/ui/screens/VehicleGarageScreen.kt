@@ -15,6 +15,7 @@ import com.example.ui.theme.DarkSurface
 fun VehicleGarageScreen(
     vehicles: List<VehicleEntity>,
     onAddVehicle: () -> Unit,
+    onAutoScan: () -> Unit,
     onSelectVehicle: (VehicleEntity) -> Unit
 ) {
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
@@ -52,8 +53,13 @@ fun VehicleGarageScreen(
         }
         
         Spacer(modifier = Modifier.height(16.dp))
-        Button(onClick = onAddVehicle, modifier = Modifier.fillMaxWidth()) {
-            Text("Add Vehicle")
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Button(onClick = onAddVehicle, modifier = Modifier.weight(1f)) {
+                Text("Manual Add")
+            }
+            OutlinedButton(onClick = onAutoScan, modifier = Modifier.weight(1f)) {
+                Text("Auto Scan (OBD)")
+            }
         }
     }
 }

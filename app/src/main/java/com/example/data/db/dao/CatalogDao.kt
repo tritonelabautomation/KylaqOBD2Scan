@@ -74,6 +74,34 @@ interface CatalogDao {
     @Query("SELECT COUNT(*) FROM catalog_variants")
     suspend fun getVariantCount(): Int
 
+
+    @Transaction
+    suspend fun replaceCatalog(
+        metadata: CatalogMetadataEntity,
+        engines: List<CatalogEngineEntity>,
+        transmissions: List<CatalogTransmissionEntity>,
+        manufacturers: List<CatalogManufacturerEntity>,
+        models: List<CatalogModelEntity>,
+        generations: List<CatalogGenerationEntity>,
+        variants: List<CatalogVariantEntity>
+    ) {
+        clearVariants()
+        clearGenerations()
+        clearModels()
+        clearManufacturers()
+        clearTransmissions()
+        clearEngines()
+        clearMetadata()
+
+        insertMetadata(metadata)
+        insertEngines(engines)
+        insertTransmissions(transmissions)
+        insertManufacturers(manufacturers)
+        insertModels(models)
+        insertGenerations(generations)
+        insertVariants(variants)
+    }
+
     @Transaction
     suspend fun clearCatalog() {
         clearVariants()

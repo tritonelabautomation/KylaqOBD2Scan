@@ -48,6 +48,10 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector)
     object RawMonitor : Screen("raw_monitor", "Raw Monitor", Icons.Default.FormatListBulleted)
     object Console : Screen("console", "Console", Icons.Default.Terminal)
     object Garage : Screen("garage", "Garage", Icons.Default.Garage)
+    object VehicleProfile : Screen("vehicle_profile/{vehicleId}", "Vehicle Profile", Icons.Default.DirectionsCar) {
+        fun createRoute(vehicleId: String) = "vehicle_profile/$vehicleId"
+    }
+    object DtcScanner : Screen("dtc_scanner", "DTC Scanner", Icons.Default.Warning)
     object AddVehicle : Screen("add_vehicle", "Add Vehicle", Icons.Default.Add)
     object PidDetail : Screen("pid_detail/{pidId}", "Research", Icons.Default.Science) {
         fun createRoute(pidId: String) = "pid_detail/$pidId"
@@ -200,6 +204,7 @@ fun MainApp(viewModel: MainViewModel) {
                         navController.navigate(Screen.TripDetail.createRoute(tripId))
                     },
                     onBack = { navController.popBackStack() }
+                    
                 )
             }
 
@@ -207,6 +212,7 @@ fun MainApp(viewModel: MainViewModel) {
                 DrivingDashboardScreen(
                     viewModel = viewModel,
                     onBack = { navController.popBackStack() }
+                    
                 )
             }
 
@@ -228,6 +234,7 @@ fun MainApp(viewModel: MainViewModel) {
                     pidIdParam = pidId,
                     viewModel = viewModel,
                     onBack = { navController.popBackStack() }
+                    
                 )
             }
 
@@ -235,30 +242,61 @@ fun MainApp(viewModel: MainViewModel) {
                 AdapterConsoleScreen(
                     viewModel = viewModel,
                     onBack = { navController.popBackStack() }
+                    
                 )
             }
 
-            composable(Screen.Garage.route) {
+                        composable(Screen.Garage.route) {
                 val allVehicles by viewModel.recordingManager.tripRepository.allVehiclesFlow.collectAsState(initial = emptyList())
-
                 VehicleGarageScreen(
                     vehicles = allVehicles,
                     onAddVehicle = { navController.navigate(Screen.AddVehicle.route) },
+                    onAutoScan = { navController.navigate("auto_scan_obd") },
                     onSelectVehicle = { vehicle ->
                         val name = if (vehicle.nickname.isNullOrBlank()) "${vehicle.make} ${vehicle.model}" else vehicle.nickname
                         viewModel.setVehicleName(name)
-                        navController.navigate(Screen.Dashboard.route) {
-                            popUpTo(Screen.Dashboard.route) { inclusive = true }
+                        navController.navigate(Screen.VehicleProfile.createRoute(vehicle.id))
+                    }
+                )
+            }
+            
+            composable(Screen.VehicleProfile.route) { backStackEntry ->
+                val vehicleId = backStackEntry.arguments?.getString("vehicleId")
+                val allVehicles by viewModel.recordingManager.tripRepository.allVehiclesFlow.collectAsState(initial = emptyList())
+                val vehicle = allVehicles.find { it.id == vehicleId }
+                com.example.ui.screens.VehicleProfileScreen(
+                    vehicle = vehicle,
+                    catalogRepository = viewModel.catalogRepository,
+                    onBack = { navController.popBackStack() },
+                    onNavigateToDtc = { navController.navigate(Screen.DtcScanner.route) }
+                )
+            }
+            
+            composable(Screen.DtcScanner.route) {
+                com.example.ui.screens.DtcScannerScreen(
+                    viewModel = viewModel,
+                    onBack = { navController.popBackStack() }
+                    
+                )
+            }
+            composable("auto_scan_obd") {
+                com.example.ui.screens.AutoScanObdScreen(
+                    viewModel = viewModel,
+                    onBack = { navController.popBackStack() }
+                    ,
+                    onManualSelect = { 
+                        navController.navigate(Screen.AddVehicle.route) {
+                            popUpTo(Screen.Garage.route) // clear auto scan from backstack
                         }
                     }
                 )
             }
-
             composable(Screen.AddVehicle.route) {
                 val coroutineScope = rememberCoroutineScope()
                 AddVehicleScreen(
                     catalogRepository = viewModel.catalogRepository,
-                    onBack = { navController.popBackStack() },
+                    onBack = { navController.popBackStack() }
+                    ,
                     onVehicleConfirmed = { make, model, year, variantId ->
                         coroutineScope.launch {
                             viewModel.recordingManager.tripRepository.insertVehicle(
@@ -267,9 +305,11 @@ fun MainApp(viewModel: MainViewModel) {
                                     make = make,
                                     model = model,
                                     year = year,
-                                    vin = null,
+                                    catalogVariantId = variantId,
+                                    catalogSource = "MANUAL",
+                                    catalogConfidence = "HIGH",
                                     defaultProtocol = null,
-                                    catalogVariantId = variantId
+                                    vin = viewModel.vehicleVin.value.takeIf { !it.isNullOrBlank() && !it.contains("Unavailable", ignoreCase = true) && !it.contains("Failed", ignoreCase = true) }
                                 )
                             )
                             navController.popBackStack()
@@ -285,6 +325,7 @@ fun MainApp(viewModel: MainViewModel) {
                         navController.navigate(Screen.TripDetail.createRoute(tripId))
                     },
                     onBack = { navController.popBackStack() }
+                    
                 )
             }
 
@@ -297,6 +338,7 @@ fun MainApp(viewModel: MainViewModel) {
                     tripId = tripId,
                     viewModel = viewModel,
                     onBack = { navController.popBackStack() }
+                    
                 )
             }
 
@@ -304,6 +346,7 @@ fun MainApp(viewModel: MainViewModel) {
                 PidConfigScreen(
                     viewModel = viewModel,
                     onBack = { navController.popBackStack() }
+                    
                 )
             }
             composable(Screen.Profiles.route) {
@@ -312,6 +355,7 @@ fun MainApp(viewModel: MainViewModel) {
                     viewModel = profilesViewModel,
                     mainViewModel = viewModel,
                     onBack = { navController.popBackStack() }
+                    
                 )
             }
 
@@ -319,6 +363,7 @@ fun MainApp(viewModel: MainViewModel) {
                 SettingsScreen(
                     viewModel = viewModel,
                     onBack = { navController.popBackStack() }
+                    
                 )
             }
         }

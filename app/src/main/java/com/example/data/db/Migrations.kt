@@ -116,3 +116,11 @@ val MIGRATION_3_4 = object : Migration(3, 4) {
         db.execSQL("ALTER TABLE `catalog_variants` ADD COLUMN `endYear` INTEGER")
     }
 }
+
+val MIGRATION_4_5 = object : Migration(4, 5) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `vehicles` ADD COLUMN `catalogSource` TEXT")
+        db.execSQL("ALTER TABLE `vehicles` ADD COLUMN `catalogConfidence` TEXT")
+        db.execSQL("ALTER TABLE `vehicles` ADD COLUMN `catalogEvidence` TEXT")
+    }
+}

@@ -16,6 +16,9 @@ data class VehicleEntity(
     
     // Catalog fields
     val catalogVariantId: String? = null,
+    val catalogSource: String? = null,
+    val catalogConfidence: String? = null,
+    val catalogEvidence: String? = null,
     val nickname: String? = null,
     val licensePlate: String? = null,
     val odometerKm: Int? = null,

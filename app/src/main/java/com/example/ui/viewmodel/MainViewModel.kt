@@ -27,6 +27,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
@@ -215,6 +216,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun executeProtocolVerification(transport: com.example.bluetooth.ElmTransport, proto: com.example.model.CanProtocol): com.example.model.ProtocolVerificationResult {
+        // Set protocol
+        transport.sendCommand(proto.atCommand, 1500L)
+        kotlinx.coroutines.delay(200)
+
         val pidsToTest = listOf("0100", "010C", "010D", "0105", "010B", "0111", "010F", "0142")
         var success = 0
         var timeout = 0
@@ -227,6 +232,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         
         val pidResults = mutableListOf<com.example.model.PidTestResult>()
         
+        // Warm up and negotiate
+        transport.sendCommand("0100", 3000L)
+        
+        // Find resolved protocol if Auto
+        var resolvedProto = proto
+        if (proto.atCommand == "ATSP0") {
+            val dpn = transport.sendCommand("ATDPN", 1000L)
+            var dpnVal = dpn.rawText.trim().replace(">", "").trim()
+            if (dpnVal.length > 0 && dpnVal.first().isLetter()) {
+                dpnVal = dpnVal.substring(1) // sometimes "A6" for auto 6
+            }
+            if (dpnVal.isNotEmpty()) {
+                val matched = com.example.model.CanProtocol.values().find { it.protocolNumber == dpnVal }
+                if (matched != null) {
+                    resolvedProto = matched
+                }
+            }
+        }
+
         for (pid in pidsToTest) {
             val resp = transport.sendCommand(pid, 2000L)
             val duration = resp.durationMs
@@ -301,7 +325,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val commit = com.example.BuildConfig.GIT_COMMIT
         
         return com.example.model.ProtocolVerificationResult(
-            protocol = proto,
+            protocol = resolvedProto,
             successCount = success,
             timeoutCount = timeout,
             unsupportedCount = unsupported,
@@ -475,6 +499,66 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 delay(1000)
                 _recordingDurationSeconds.value++
             }
+        }
+    }
+
+
+    fun fetchActiveDtcs() {
+        val transport = activeTransport ?: return
+        if (!transport.isConnected) return
+        
+        viewModelScope.launch {
+            val resp = transport.sendCommand("03", 5000L)
+            val isoTp = com.example.protocol.IsoTpParser.reassembleLines(resp.lines)
+            val allDtcs = mutableListOf<String>()
+            for (msg in isoTp) {
+                allDtcs.addAll(com.example.protocol.DtcDecoder.extractDtcs(msg.reconstructedPayloadHex))
+            }
+            saveDtcs(allDtcs.distinct(), "CONFIRMED")
+        }
+    }
+
+    fun fetchPendingDtcs() {
+        val transport = activeTransport ?: return
+        if (!transport.isConnected) return
+        
+        viewModelScope.launch {
+            val resp = transport.sendCommand("07", 5000L)
+            val isoTp = com.example.protocol.IsoTpParser.reassembleLines(resp.lines)
+            val allDtcs = mutableListOf<String>()
+            for (msg in isoTp) {
+                allDtcs.addAll(com.example.protocol.DtcDecoder.extractDtcs(msg.reconstructedPayloadHex))
+            }
+            saveDtcs(allDtcs.distinct(), "PENDING")
+        }
+    }
+
+    fun clearDtcs() {
+        val transport = activeTransport ?: return
+        if (!transport.isConnected) return
+        
+        viewModelScope.launch {
+            transport.sendCommand("04", 5000L)
+            // After clearing, fetch again to confirm
+            kotlinx.coroutines.delay(1000)
+            fetchActiveDtcs()
+        }
+    }
+
+    private suspend fun saveDtcs(dtcs: List<String>, status: String) {
+        val vehicleId = recordingManager.tripRepository.allVehiclesFlow.firstOrNull()?.firstOrNull()?.id // Simplified
+        val timestamp = System.currentTimeMillis()
+        
+        for (code in dtcs) {
+            val entity = com.example.data.db.entities.DtcRecordEntity(
+                vehicleId = vehicleId,
+                tripId = recordingManager.currentSessionMetadata.value?.sessionId,
+                timestamp = timestamp,
+                code = code,
+                description = "Diagnostic Trouble Code",
+                status = status
+            )
+            recordingManager.tripRepository.insertDtcRecord(entity)
         }
     }
 
