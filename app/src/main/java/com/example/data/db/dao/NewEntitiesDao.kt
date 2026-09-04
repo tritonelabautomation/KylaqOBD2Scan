@@ -8,6 +8,9 @@ import com.example.data.db.entities.VehicleEntity
 import com.example.data.db.entities.ProtocolTestResultEntity
 import com.example.data.db.entities.DtcRecordEntity
 import com.example.data.db.entities.ServiceRecordEntity
+import com.example.data.db.entities.ScanSessionEntity
+import com.example.data.db.entities.EcuTopologyEntity
+import com.example.data.db.entities.PidCapabilityEntity
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -35,4 +38,25 @@ interface NewEntitiesDao {
 
     @Query("SELECT * FROM service_records WHERE vehicleId = :vehicleId ORDER BY timestamp DESC")
     fun getServiceRecords(vehicleId: String): Flow<List<ServiceRecordEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertScanSession(session: ScanSessionEntity)
+
+    @Query("SELECT * FROM scan_sessions ORDER BY startedAt DESC")
+    fun getScanSessions(): Flow<List<ScanSessionEntity>>
+
+    @Query("SELECT * FROM scan_sessions WHERE id = :sessionId")
+    suspend fun getScanSession(sessionId: String): ScanSessionEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertEcuTopology(ecu: EcuTopologyEntity)
+
+    @Query("SELECT * FROM ecu_topologies WHERE vehicleId = :vehicleId")
+    fun getEcuTopologies(vehicleId: String): Flow<List<EcuTopologyEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertPidCapability(capability: PidCapabilityEntity)
+
+    @Query("SELECT * FROM pid_capabilities WHERE vehicleId = :vehicleId")
+    fun getPidCapabilities(vehicleId: String): Flow<List<PidCapabilityEntity>>
 }

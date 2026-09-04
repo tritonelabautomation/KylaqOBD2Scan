@@ -78,6 +78,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _vehicleVin = MutableStateFlow<String?>(null)
     val vehicleVin: StateFlow<String?> = _vehicleVin.asStateFlow()
+    
+    private val _vinDecodeResult = MutableStateFlow<com.example.protocol.VinDecodeResult?>(null)
+    val vinDecodeResult: StateFlow<com.example.protocol.VinDecodeResult?> = _vinDecodeResult.asStateFlow()
 
     fun fetchVehicleVin() {
         val transport = activeTransport ?: return
@@ -101,7 +104,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         i += 2
                     }
                     val vinMatch = Regex("[A-HJ-NPR-Z0-9]{17}").find(ascii.toString())
-                    _vehicleVin.value = vinMatch?.value ?: "VIN Decoded: $ascii"
+                    val extractedVin = vinMatch?.value
+                    _vehicleVin.value = extractedVin ?: "VIN Decoded: $ascii"
+                    if (extractedVin != null) {
+                        _vinDecodeResult.value = com.example.protocol.VinDecoder.decodeVin(extractedVin, catalogRepository)
+                    } else {
+                        _vinDecodeResult.value = null
+                    }
                 } catch (e: Exception) {
                     _vehicleVin.value = "Failed to parse VIN"
                 }

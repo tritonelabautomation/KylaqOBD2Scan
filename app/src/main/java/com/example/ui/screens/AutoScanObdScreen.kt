@@ -26,6 +26,7 @@ fun AutoScanObdScreen(
 ) {
     val connectionState by viewModel.connectionState.collectAsState()
     val vehicleVin by viewModel.vehicleVin.collectAsState()
+    val vinDecodeResult by viewModel.vinDecodeResult.collectAsState()
     
     LaunchedEffect(connectionState) {
         if (connectionState == ConnectionState.CONNECTED) {

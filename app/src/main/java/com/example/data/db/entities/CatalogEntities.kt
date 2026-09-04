@@ -25,7 +25,13 @@ data class CatalogEngineEntity(
     val aspiration: String?,
     val fuelType: String?,
     val powerPs: Int?,
-    val torqueNm: Int?
+    val torqueNm: Int?,
+    val source: String? = null,
+    val sourceUrl: String? = null,
+    val sourceDate: String? = null,
+    val market: String? = null,
+    val confidence: String? = null,
+    val verificationStatus: String? = null
 )
 
 @Entity(tableName = "catalog_transmissions")
@@ -33,13 +39,25 @@ data class CatalogTransmissionEntity(
     @PrimaryKey val id: String,
     val name: String,
     val type: String?,
-    val gearCount: Int?
+    val gearCount: Int?,
+    val source: String? = null,
+    val sourceUrl: String? = null,
+    val sourceDate: String? = null,
+    val market: String? = null,
+    val confidence: String? = null,
+    val verificationStatus: String? = null
 )
 
 @Entity(tableName = "catalog_manufacturers")
 data class CatalogManufacturerEntity(
     @PrimaryKey val id: String,
-    val name: String
+    val name: String,
+    val source: String? = null,
+    val sourceUrl: String? = null,
+    val sourceDate: String? = null,
+    val market: String? = null,
+    val confidence: String? = null,
+    val verificationStatus: String? = null
 )
 
 @Entity(
@@ -53,7 +71,13 @@ data class CatalogModelEntity(
     @PrimaryKey val id: String,
     val manufacturerId: String,
     val name: String,
-    val isCurrent: Boolean
+    val isCurrent: Boolean,
+    val source: String? = null,
+    val sourceUrl: String? = null,
+    val sourceDate: String? = null,
+    val market: String? = null,
+    val confidence: String? = null,
+    val verificationStatus: String? = null
 )
 
 @Entity(
@@ -68,7 +92,13 @@ data class CatalogGenerationEntity(
     val modelId: String,
     val name: String,
     val startYear: Int?,
-    val endYear: Int?
+    val endYear: Int?,
+    val source: String? = null,
+    val sourceUrl: String? = null,
+    val sourceDate: String? = null,
+    val market: String? = null,
+    val confidence: String? = null,
+    val verificationStatus: String? = null
 )
 
 @Entity(
@@ -89,5 +119,11 @@ data class CatalogVariantEntity(
     val bodyType: String?,
     val drivetrain: String?,
     val startYear: Int? = null,
-    val endYear: Int? = null
+    val endYear: Int? = null,
+    val source: String? = null,
+    val sourceUrl: String? = null,
+    val sourceDate: String? = null,
+    val market: String? = null,
+    val confidence: String? = null,
+    val verificationStatus: String? = null
 )

@@ -24,9 +24,12 @@ import com.example.data.db.entities.*
         CatalogManufacturerEntity::class,
         CatalogModelEntity::class,
         CatalogGenerationEntity::class,
-        CatalogVariantEntity::class
+        CatalogVariantEntity::class,
+        ScanSessionEntity::class,
+        EcuTopologyEntity::class,
+        PidCapabilityEntity::class
     ],
-    version = 5,
+    version = 8,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -50,7 +53,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "obd_research_logger.db"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
                     .fallbackToDestructiveMigrationOnDowngrade()
                     .build()
                 INSTANCE = instance

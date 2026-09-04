@@ -15,6 +15,12 @@ class CatalogRepository constructor(private val database: AppDatabase) {
     
     fun getVariants(generationId: String, year: Int): Flow<List<CatalogVariantEntity>> = dao.getVariantsForGenerationAndYear(generationId, year)
 
+    
+    suspend fun getAllVariants(): List<CatalogVariantEntity> = dao.getAllVariants()
+    suspend fun getAllGenerations(): List<CatalogGenerationEntity> = dao.getAllGenerations()
+    suspend fun getAllModels(): List<CatalogModelEntity> = dao.getAllModels()
+    suspend fun getAllManufacturers(): List<CatalogManufacturerEntity> = dao.getAllManufacturers()
+
     suspend fun getVariantDetails(variantId: String): CatalogVariantDetails? {
         val variant = dao.getVariant(variantId) ?: return null
         val generation = dao.getGeneration(variant.generationId) ?: return null

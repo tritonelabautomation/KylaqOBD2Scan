@@ -71,6 +71,19 @@ interface CatalogDao {
     @Query("SELECT * FROM catalog_manufacturers WHERE id = :manufacturerId")
     suspend fun getManufacturer(manufacturerId: String): CatalogManufacturerEntity?
 
+    
+    @Query("SELECT * FROM catalog_variants")
+    suspend fun getAllVariants(): List<CatalogVariantEntity>
+
+    @Query("SELECT * FROM catalog_generations")
+    suspend fun getAllGenerations(): List<CatalogGenerationEntity>
+
+    @Query("SELECT * FROM catalog_models")
+    suspend fun getAllModels(): List<CatalogModelEntity>
+
+    @Query("SELECT * FROM catalog_manufacturers")
+    suspend fun getAllManufacturers(): List<CatalogManufacturerEntity>
+
     @Query("SELECT COUNT(*) FROM catalog_variants")
     suspend fun getVariantCount(): Int
 

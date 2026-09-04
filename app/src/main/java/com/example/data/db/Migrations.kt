@@ -124,3 +124,92 @@ val MIGRATION_4_5 = object : Migration(4, 5) {
         db.execSQL("ALTER TABLE `vehicles` ADD COLUMN `catalogEvidence` TEXT")
     }
 }
+
+val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        val tables = listOf("catalog_engines", "catalog_transmissions", "catalog_manufacturers", "catalog_models", "catalog_generations", "catalog_variants")
+        for (table in tables) {
+            db.execSQL("ALTER TABLE `$table` ADD COLUMN `source` TEXT")
+            db.execSQL("ALTER TABLE `$table` ADD COLUMN `sourceUrl` TEXT")
+            db.execSQL("ALTER TABLE `$table` ADD COLUMN `sourceDate` TEXT")
+            db.execSQL("ALTER TABLE `$table` ADD COLUMN `market` TEXT")
+            db.execSQL("ALTER TABLE `$table` ADD COLUMN `confidence` TEXT")
+            db.execSQL("ALTER TABLE `$table` ADD COLUMN `verificationStatus` TEXT")
+        }
+    }
+}
+
+val MIGRATION_6_7 = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `vehicles` ADD COLUMN `catalogManufacturerId` TEXT")
+        db.execSQL("ALTER TABLE `vehicles` ADD COLUMN `catalogModelId` TEXT")
+        db.execSQL("ALTER TABLE `vehicles` ADD COLUMN `catalogGenerationId` TEXT")
+        db.execSQL("ALTER TABLE `vehicles` ADD COLUMN `catalogEngineId` TEXT")
+        db.execSQL("ALTER TABLE `vehicles` ADD COLUMN `catalogTransmissionId` TEXT")
+    }
+}
+
+val MIGRATION_7_8 = object : Migration(7, 8) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `scan_sessions` (
+                `id` TEXT NOT NULL,
+                `vehicleId` TEXT,
+                `startedAt` INTEGER NOT NULL,
+                `completedAt` INTEGER,
+                `connectionType` TEXT NOT NULL,
+                `adapterName` TEXT NOT NULL,
+                `adapterAddress` TEXT NOT NULL,
+                `protocol` TEXT,
+                `ecuCount` INTEGER NOT NULL,
+                `pidCount` INTEGER NOT NULL,
+                `dtcCount` INTEGER NOT NULL,
+                `readinessAvailable` INTEGER NOT NULL,
+                `completionStatus` TEXT NOT NULL,
+                `errorCount` INTEGER NOT NULL,
+                `warningCount` INTEGER NOT NULL,
+                `rawEvidenceReference` TEXT,
+                PRIMARY KEY(`id`)
+            )
+            """.trimIndent()
+        )
+        
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `ecu_topologies` (
+                `id` TEXT NOT NULL,
+                `vehicleId` TEXT,
+                `address` TEXT NOT NULL,
+                `name` TEXT NOT NULL,
+                `type` TEXT NOT NULL,
+                `protocol` TEXT,
+                `lastSeen` INTEGER NOT NULL,
+                `responseTime` INTEGER NOT NULL,
+                `supportedServices` TEXT NOT NULL,
+                `supportedPids` TEXT NOT NULL,
+                `dtcCount` INTEGER NOT NULL,
+                `confidence` TEXT NOT NULL,
+                `rawEvidence` TEXT,
+                PRIMARY KEY(`id`)
+            )
+            """.trimIndent()
+        )
+        
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `pid_capabilities` (
+                `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                `vehicleId` TEXT,
+                `ecuAddress` TEXT NOT NULL,
+                `pid` TEXT NOT NULL,
+                `supported` INTEGER NOT NULL,
+                `lastVerified` INTEGER NOT NULL,
+                `responseLatency` INTEGER NOT NULL,
+                `failureCount` INTEGER NOT NULL,
+                `confidence` TEXT NOT NULL
+            )
+            """.trimIndent()
+        )
+    }
+}
