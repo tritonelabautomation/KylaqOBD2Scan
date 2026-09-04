@@ -8,6 +8,7 @@ import com.example.bluetooth.BluetoothManager
 import com.example.bluetooth.ConnectionState
 import com.example.bluetooth.ElmResponse
 import com.example.bluetooth.ElmTransport
+import com.example.bluetooth.SimulationTransport
 import kotlinx.coroutines.flow.firstOrNull
 import com.example.data.PollingSpeedMode
 import com.example.data.RawLogEntry
@@ -144,6 +145,54 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             obdScheduler.ecuDiscoveryManager.runDiscovery(transport)
         }
+    }
+
+    // PID Discovery & Availability Scanner
+    val pidDiscoveryService = AppContainer.pidDiscoveryService
+    val pidScanStatus = pidDiscoveryService.status
+    val isPidScanning = pidDiscoveryService.isScanning
+    val pidScanProgress = pidDiscoveryService.progress
+    val pidScanRangeText = pidDiscoveryService.currentRangeText
+    val discoveredPids = pidDiscoveryService.discoveredPids
+    val discoveredSupportedCount = pidDiscoveryService.supportedPidsCount
+    val pidScanErrorMessage = pidDiscoveryService.errorMessage
+    val pidScanRawLogs = pidDiscoveryService.rawLogEntries
+    val discoveredRanges = pidDiscoveryService.discoveredRanges
+
+    fun startPidScan() {
+        val transport = activeTransport
+        if (transport == null || !transport.isConnected) {
+            pidDiscoveryService.startScan(
+                transport ?: SimulationTransport(),
+                viewModelScope
+            )
+            return
+        }
+
+        viewModelScope.launch {
+            val wasPolling = obdScheduler.isPolling.value
+            if (wasPolling) {
+                obdScheduler.stopPolling()
+            }
+            pidDiscoveryService.startScan(transport, viewModelScope)
+        }
+    }
+
+    fun stopPidScan() {
+        pidDiscoveryService.stopScan()
+    }
+
+    fun clearPidScan() {
+        pidDiscoveryService.clearResults()
+    }
+
+    fun applyDiscoveredPidsToLiveData(): Int {
+        val count = pidDiscoveryService.applySupportedPidsToLiveData(settingsRepository)
+        val transport = activeTransport
+        if (transport != null && transport.isConnected && !obdScheduler.isPolling.value) {
+            obdScheduler.startPolling(viewModelScope, transport)
+        }
+        return count
     }
 
     fun resetTripEconomy() {

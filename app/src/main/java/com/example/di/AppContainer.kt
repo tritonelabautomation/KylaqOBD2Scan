@@ -29,6 +29,7 @@ object AppContainer {
     lateinit var recordingManager: RecordingManager
     lateinit var bluetoothManager: BluetoothManager
     lateinit var obdScheduler: ObdScheduler
+    lateinit var pidDiscoveryService: com.example.discovery.PidDiscoveryService
     lateinit var cloudBackupManager: com.example.backup.CloudBackupManager
     lateinit var catalogRepository: CatalogRepository
     
@@ -52,6 +53,7 @@ object AppContainer {
             recordingManager = RecordingManager(appContext, rawLogManager)
             bluetoothManager = BluetoothManager(appContext)
             obdScheduler = ObdScheduler(recordingManager, settingsRepository)
+            pidDiscoveryService = com.example.discovery.PidDiscoveryService(obdScheduler.capabilityManager)
             cloudBackupManager = com.example.backup.CloudBackupManager(appContext, settingsRepository, recordingManager)
             isInitialized = true
         }

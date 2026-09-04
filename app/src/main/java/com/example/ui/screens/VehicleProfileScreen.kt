@@ -8,12 +8,15 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.CarRepair
 import androidx.compose.material.icons.filled.HealthAndSafety
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.data.catalog.CatalogRepository
 import com.example.data.catalog.CatalogVariantDetails
 import com.example.data.db.entities.VehicleEntity
@@ -25,7 +28,8 @@ fun VehicleProfileScreen(
     vehicle: VehicleEntity?,
     catalogRepository: CatalogRepository,
     onBack: () -> Unit,
-    onNavigateToDtc: () -> Unit
+    onNavigateToDtc: () -> Unit,
+    onNavigateToPidScanner: () -> Unit = {}
 ) {
     Scaffold(
         topBar = {
@@ -124,14 +128,28 @@ fun VehicleProfileScreen(
                     ProfileDetailRow("Active DTCs", "Unknown")
                     
                     Spacer(modifier = Modifier.height(16.dp))
-                    Button(
-                        onClick = onNavigateToDtc,
+                    Row(
                         modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(containerColor = CyberCyan)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Icon(Icons.Default.HealthAndSafety, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Diagnostic Scanner")
+                        Button(
+                            onClick = onNavigateToDtc,
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = CyberCyan, contentColor = Color.Black)
+                        ) {
+                            Icon(Icons.Default.HealthAndSafety, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("DTC Scanner", fontSize = 13.sp)
+                        }
+                        Button(
+                            onClick = onNavigateToPidScanner,
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = ResearchPurple, contentColor = Color.Black)
+                        ) {
+                            Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("PID Discovery", fontSize = 13.sp)
+                        }
                     }
                 }
             }

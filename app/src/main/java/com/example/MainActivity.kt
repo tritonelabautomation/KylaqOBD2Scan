@@ -60,6 +60,7 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector)
         fun createRoute(tripId: String) = "trip_detail/$tripId"
     }
     object PidConfig : Screen("pid_config", "Config", Icons.Default.Tune)
+    object PidScanner : Screen("pid_scanner", "PID Scanner", Icons.Default.Search)
     object Profiles : Screen("profiles", "Profiles", Icons.Default.VerifiedUser)
     object Settings : Screen("settings", "Settings", Icons.Default.Settings)
 }
@@ -193,6 +194,9 @@ fun MainApp(viewModel: MainViewModel) {
                     onNavigateToSettings = {
                         navController.navigate(Screen.Settings.route)
                     },
+                    onNavigateToPidScanner = {
+                        navController.navigate(Screen.PidScanner.route)
+                    },
                     onOpenConnectDialog = { showConnectionDialog = true }
                 )
             }
@@ -268,7 +272,8 @@ fun MainApp(viewModel: MainViewModel) {
                     vehicle = vehicle,
                     catalogRepository = viewModel.catalogRepository,
                     onBack = { navController.popBackStack() },
-                    onNavigateToDtc = { navController.navigate(Screen.DtcScanner.route) }
+                    onNavigateToDtc = { navController.navigate(Screen.DtcScanner.route) },
+                    onNavigateToPidScanner = { navController.navigate(Screen.PidScanner.route) }
                 )
             }
             
@@ -345,8 +350,14 @@ fun MainApp(viewModel: MainViewModel) {
             composable(Screen.PidConfig.route) {
                 PidConfigScreen(
                     viewModel = viewModel,
+                    onBack = { navController.popBackStack() },
+                    onNavigateToPidScanner = { navController.navigate(Screen.PidScanner.route) }
+                )
+            }
+            composable(Screen.PidScanner.route) {
+                com.example.ui.screens.PidScannerScreen(
+                    viewModel = viewModel,
                     onBack = { navController.popBackStack() }
-                    
                 )
             }
             composable(Screen.Profiles.route) {

@@ -45,6 +45,7 @@ fun DashboardScreen(
     onNavigateToTrips: () -> Unit,
     onNavigateToHud: () -> Unit,
     onNavigateToSettings: () -> Unit = {},
+    onNavigateToPidScanner: () -> Unit = {},
     onOpenConnectDialog: () -> Unit
 ) {
     val connectionState by viewModel.connectionState.collectAsState()
@@ -126,7 +127,8 @@ fun DashboardScreen(
             onCarDoctorClick = onNavigateToCarDoctor,
             onHudClick = onNavigateToHud,
             onTripsClick = onNavigateToTrips,
-            onRawMonitorClick = onNavigateToRawMonitor
+            onRawMonitorClick = onNavigateToRawMonitor,
+            onPidScannerClick = onNavigateToPidScanner
         )
 
         Spacer(modifier = Modifier.height(14.dp))
@@ -932,7 +934,8 @@ fun QuickAccessHub(
     onCarDoctorClick: () -> Unit,
     onHudClick: () -> Unit,
     onTripsClick: () -> Unit,
-    onRawMonitorClick: () -> Unit
+    onRawMonitorClick: () -> Unit,
+    onPidScannerClick: () -> Unit = {}
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(
@@ -961,12 +964,12 @@ fun QuickAccessHub(
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             QuickActionCard(
-                title = "Trips ($tripCount)",
-                subtitle = if (isRecording) "Recording in progress..." else "Room Database Storage",
-                icon = Icons.Default.Folder,
-                accentColor = ElectricAmber,
+                title = "PID Discovery",
+                subtitle = "Mode 01 Capability Scanner",
+                icon = Icons.Default.Search,
+                accentColor = ResearchPurple,
                 modifier = Modifier.weight(1f),
-                onClick = onTripsClick
+                onClick = onPidScannerClick
             )
             QuickActionCard(
                 title = "Raw CAN Stream",
@@ -975,6 +978,19 @@ fun QuickAccessHub(
                 accentColor = Color(0xFF81D4FA),
                 modifier = Modifier.weight(1f),
                 onClick = onRawMonitorClick
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            QuickActionCard(
+                title = "Trips ($tripCount)",
+                subtitle = if (isRecording) "Recording in progress..." else "Room Database Storage",
+                icon = Icons.Default.Folder,
+                accentColor = ElectricAmber,
+                modifier = Modifier.weight(1f),
+                onClick = onTripsClick
             )
         }
     }

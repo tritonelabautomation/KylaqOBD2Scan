@@ -4,6 +4,7 @@ import android.os.SystemClock
 import com.example.model.ResponseStatus
 import com.example.protocol.SafetyValidator
 import com.example.protocol.ValidationResult
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -19,7 +20,9 @@ import kotlin.random.Random
  * Emits real 11-bit CAN 500kbps ISO-TP frames (7E8) including dynamic RPM, boost, load, temperatures,
  * and realistic 016D/0170 research payloads with dynamic byte variance.
  */
-class SimulationElmTransport : ElmTransport {
+class SimulationElmTransport(
+    private val dispatcher: CoroutineDispatcher = Dispatchers.Default
+) : ElmTransport {
 
     @Volatile
     private var connected: Boolean = false
@@ -40,19 +43,19 @@ class SimulationElmTransport : ElmTransport {
         this.rawLogListener = listener
     }
 
-    override suspend fun connect(): Boolean = withContext(Dispatchers.Default) {
+    override suspend fun connect(): Boolean = withContext(dispatcher) {
         delay(150)
         connected = true
         logRaw(isTx = false, canId = null, text = "Simulation Mode Active [Škoda Kylaq EA211 1.0 TSI]", status = "INFO")
         true
     }
 
-    override suspend fun disconnect() = withContext(Dispatchers.Default) {
+    override suspend fun disconnect() = withContext(dispatcher) {
         connected = false
         logRaw(isTx = false, canId = null, text = "Simulation Disconnected", status = "INFO")
     }
 
-    override suspend fun sendCommand(command: String, timeoutMs: Long): ElmResponse = withContext(Dispatchers.Default) {
+    override suspend fun sendCommand(command: String, timeoutMs: Long): ElmResponse = withContext(dispatcher) {
         val validation = SafetyValidator.validateCommand(command)
         if (validation is ValidationResult.Rejected) {
             logRaw(isTx = true, canId = null, text = "$command [BLOCKED]", status = "BLOCKED")
@@ -438,3 +441,5 @@ class SimulationElmTransport : ElmTransport {
         )
     }
 }
+
+typealias SimulationTransport = SimulationElmTransport

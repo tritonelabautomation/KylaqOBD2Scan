@@ -1,6 +1,7 @@
 package com.example
 
 import com.example.data.catalog.CatalogRepository
+import com.example.data.db.AppDatabase
 import com.example.data.db.entities.*
 import com.example.ui.viewmodel.CatalogViewModel
 import kotlinx.coroutines.flow.flowOf
@@ -8,8 +9,11 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
-import org.mockito.Mockito.*
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 
+@RunWith(RobolectricTestRunner::class)
 class CatalogSelectionTest {
 
     private lateinit var repository: CatalogRepository
@@ -17,7 +21,9 @@ class CatalogSelectionTest {
 
     @Before
     fun setup() {
-        repository = mock(CatalogRepository::class.java)
+        val context = RuntimeEnvironment.getApplication()
+        val database = AppDatabase.getInstance(context)
+        repository = CatalogRepository(database)
         viewModel = CatalogViewModel(repository)
     }
 

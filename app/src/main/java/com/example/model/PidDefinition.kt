@@ -58,7 +58,12 @@ data class PidDefinition(
     val formulaDisplay: String = "",
     val isResearch: Boolean = false,
     val description: String = "",
-    val priority: PollingPriority = PollingPriority.MEDIUM
+    val priority: PollingPriority = PollingPriority.MEDIUM,
+    val hexPid: String = pid.uppercase(),
+    val mode: String = service,
+    val dataBytes: Int = 1,
+    val supported: Boolean = false,
+    val decoder: String = decoderType.name
 )
 
 object DefaultPidDefinitions {
@@ -684,4 +689,305 @@ object DefaultPidDefinitions {
             )
         )
     }
+}
+
+/**
+ * Comprehensive SAE J1979 standard OBD-II Mode 01 PID catalog.
+ * Provides metadata (name, description, unit, byte count, formula) for discovered PIDs.
+ */
+object StandardPidCatalog {
+
+    private val catalog: Map<String, PidDefinition> by lazy {
+        val list = mutableListOf<PidDefinition>()
+
+        // Include all default definitions first
+        list.addAll(DefaultPidDefinitions.getDefaults())
+
+        // Add additional standard SAE J1979 Mode 01 PIDs
+        val additional = listOf(
+            PidDefinition(
+                id = "0101", service = "01", pid = "01",
+                name = "Monitor Status Since DTCs Cleared",
+                shortName = "Monitors", unit = "Bitmask",
+                dataBytes = 4, description = "Status of OBD readiness monitors"
+            ),
+            PidDefinition(
+                id = "0102", service = "01", pid = "02",
+                name = "Freeze DTC",
+                shortName = "Freeze DTC", unit = "Code",
+                dataBytes = 2, description = "DTC that triggered freeze frame storage"
+            ),
+            PidDefinition(
+                id = "0107", service = "01", pid = "07",
+                name = "Long Term Fuel Trim Bank 1",
+                shortName = "LTFT B1", unit = "%",
+                dataBytes = 1, decoderType = DecoderType.FUEL_TRIM,
+                formulaDisplay = "(A - 128) * 100 / 128",
+                description = "Long-term secondary fuel adaptation trim for bank 1"
+            ),
+            PidDefinition(
+                id = "0108", service = "01", pid = "08",
+                name = "Short Term Fuel Trim Bank 2",
+                shortName = "STFT B2", unit = "%",
+                dataBytes = 1, decoderType = DecoderType.FUEL_TRIM,
+                formulaDisplay = "(A - 128) * 100 / 128",
+                description = "Short-term fuel trim for cylinder bank 2"
+            ),
+            PidDefinition(
+                id = "0109", service = "01", pid = "09",
+                name = "Long Term Fuel Trim Bank 2",
+                shortName = "LTFT B2", unit = "%",
+                dataBytes = 1, decoderType = DecoderType.FUEL_TRIM,
+                formulaDisplay = "(A - 128) * 100 / 128",
+                description = "Long-term fuel trim for cylinder bank 2"
+            ),
+            PidDefinition(
+                id = "010A", service = "01", pid = "0A",
+                name = "Fuel Pressure (Gauge)",
+                shortName = "Fuel Press", unit = "kPa",
+                dataBytes = 1, decoderType = DecoderType.FUEL_PRESSURE_3_KPA,
+                formulaDisplay = "A * 3",
+                description = "Low-pressure fuel system gauge pressure"
+            ),
+            PidDefinition(
+                id = "010E", service = "01", pid = "0E",
+                name = "Timing Advance",
+                shortName = "Timing", unit = "°",
+                dataBytes = 1, decoderType = DecoderType.TIMING_ADVANCE,
+                formulaDisplay = "A / 2 - 64",
+                description = "Ignition timing advance before top dead center (BTDC)"
+            ),
+            PidDefinition(
+                id = "0112", service = "01", pid = "12",
+                name = "Commanded Secondary Air Status",
+                shortName = "Sec Air", unit = "Status",
+                dataBytes = 1, description = "Secondary air injection status"
+            ),
+            PidDefinition(
+                id = "0113", service = "01", pid = "13",
+                name = "Oxygen Sensors Present (2 Banks)",
+                shortName = "O2 Present", unit = "Bitmask",
+                dataBytes = 1, description = "Bitmask indicating oxygen sensors present across 2 banks"
+            ),
+            PidDefinition(
+                id = "0114", service = "01", pid = "14",
+                name = "O2 Sensor 1 Voltage & Short Term Trim",
+                shortName = "O2 B1S1", unit = "V",
+                dataBytes = 2, description = "Bank 1 Sensor 1 oxygen sensor output voltage"
+            ),
+            PidDefinition(
+                id = "0115", service = "01", pid = "15",
+                name = "O2 Sensor 2 Voltage & Short Term Trim",
+                shortName = "O2 B1S2", unit = "V",
+                dataBytes = 2, description = "Bank 1 Sensor 2 post-cat oxygen sensor output"
+            ),
+            PidDefinition(
+                id = "011C", service = "01", pid = "1C",
+                name = "OBD Standard Conformance",
+                shortName = "OBD Std", unit = "Enum",
+                dataBytes = 1, description = "OBD standard requirements to which vehicle is certified"
+            ),
+            PidDefinition(
+                id = "011F", service = "01", pid = "1F",
+                name = "Run Time Since Engine Start",
+                shortName = "Run Time", unit = "s",
+                dataBytes = 2, description = "Accumulated engine running seconds since start"
+            ),
+            PidDefinition(
+                id = "0121", service = "01", pid = "21",
+                name = "Distance Traveled With MIL On",
+                shortName = "MIL Dist", unit = "km",
+                dataBytes = 2, description = "Cumulative distance driven while malfunction indicator lamp is active"
+            ),
+            PidDefinition(
+                id = "0122", service = "01", pid = "22",
+                name = "Fuel Rail Pressure (Vacuum Relative)",
+                shortName = "Rail Press Vac", unit = "kPa",
+                dataBytes = 2, description = "Fuel rail pressure relative to manifold vacuum"
+            ),
+            PidDefinition(
+                id = "0123", service = "01", pid = "23",
+                name = "Fuel Rail Gauge Pressure",
+                shortName = "Rail Press", unit = "kPa",
+                dataBytes = 2, decoderType = DecoderType.FUEL_RAIL_PRESSURE,
+                formulaDisplay = "((A * 256) + B) * 10",
+                description = "High-pressure direct injection rail pressure"
+            ),
+            PidDefinition(
+                id = "012C", service = "01", pid = "2C",
+                name = "Commanded EGR",
+                shortName = "Cmd EGR", unit = "%",
+                dataBytes = 1, decoderType = DecoderType.PERCENT_255,
+                formulaDisplay = "A * 100 / 255",
+                description = "Commanded exhaust gas recirculation valve position"
+            ),
+            PidDefinition(
+                id = "012D", service = "01", pid = "2D",
+                name = "EGR Error",
+                shortName = "EGR Error", unit = "%",
+                dataBytes = 1, description = "EGR system position error relative to setpoint"
+            ),
+            PidDefinition(
+                id = "012F", service = "01", pid = "2F",
+                name = "Fuel Tank Level Input",
+                shortName = "Fuel Level", unit = "%",
+                dataBytes = 1, decoderType = DecoderType.PERCENT_255,
+                formulaDisplay = "A * 100 / 255",
+                description = "Fuel level sender input from tank sender unit"
+            ),
+            PidDefinition(
+                id = "0130", service = "01", pid = "30",
+                name = "Warm-ups Since Codes Cleared",
+                shortName = "Warm-ups", unit = "Count",
+                dataBytes = 1, description = "Number of engine warm-up cycles since diagnostic memory reset"
+            ),
+            PidDefinition(
+                id = "0131", service = "01", pid = "31",
+                name = "Distance Traveled Since Codes Cleared",
+                shortName = "Clr Dist", unit = "km",
+                dataBytes = 2, description = "Odometer distance traveled since DTCs reset"
+            ),
+            PidDefinition(
+                id = "0132", service = "01", pid = "32",
+                name = "Evaporative System Vapor Pressure",
+                shortName = "EVAP Press", unit = "Pa",
+                dataBytes = 2, description = "Fuel tank evaporative emission pressure sensor"
+            ),
+            PidDefinition(
+                id = "013D", service = "01", pid = "3D",
+                name = "Catalyst Temperature Bank 2 Sensor 1",
+                shortName = "Cat B2S1", unit = "°C",
+                dataBytes = 2, decoderType = DecoderType.CATALYST_TEMP,
+                formulaDisplay = "((A * 256) + B) / 10 - 40",
+                description = "Cylinder bank 2 pre-catalyst bed temperature"
+            ),
+            PidDefinition(
+                id = "0141", service = "01", pid = "41",
+                name = "Monitor Status This Drive Cycle",
+                shortName = "Drive Monitors", unit = "Bitmask",
+                dataBytes = 4, description = "Readiness status of system monitors during current ignition drive cycle"
+            ),
+            PidDefinition(
+                id = "0143", service = "01", pid = "43",
+                name = "Absolute Load Value",
+                shortName = "Abs Load", unit = "%",
+                dataBytes = 2, decoderType = DecoderType.PERCENT_LOAD_255,
+                formulaDisplay = "((A * 256) + B) / 2.55",
+                description = "Normalized thermodynamic air charge mass per stroke"
+            ),
+            PidDefinition(
+                id = "0144", service = "01", pid = "44",
+                name = "Commanded Equivalence Ratio (Lambda)",
+                shortName = "Cmd Lambda", unit = "λ",
+                dataBytes = 2, decoderType = DecoderType.EQUIVALENCE_RATIO,
+                formulaDisplay = "((A * 256) + B) / 32768",
+                description = "Target air-fuel equivalence ratio commanded by ECU"
+            ),
+            PidDefinition(
+                id = "0145", service = "01", pid = "45",
+                name = "Relative Throttle Position",
+                shortName = "Rel Throttle", unit = "%",
+                dataBytes = 1, decoderType = DecoderType.PERCENT_255,
+                formulaDisplay = "A * 100 / 255",
+                description = "Relative throttle angle above learned idle stop"
+            ),
+            PidDefinition(
+                id = "0147", service = "01", pid = "47",
+                name = "Absolute Throttle Position B",
+                shortName = "Throttle B", unit = "%",
+                dataBytes = 1, decoderType = DecoderType.PERCENT_255,
+                formulaDisplay = "A * 100 / 255",
+                description = "Secondary throttle potentiometer sensor B"
+            ),
+            PidDefinition(
+                id = "0148", service = "01", pid = "48",
+                name = "Absolute Throttle Position C",
+                shortName = "Throttle C", unit = "%",
+                dataBytes = 1, decoderType = DecoderType.PERCENT_255,
+                formulaDisplay = "A * 100 / 255",
+                description = "Throttle angle channel C"
+            ),
+            PidDefinition(
+                id = "014C", service = "01", pid = "4C",
+                name = "Commanded Throttle Actuator",
+                shortName = "Cmd Throttle", unit = "%",
+                dataBytes = 1, decoderType = DecoderType.PERCENT_255,
+                formulaDisplay = "A * 100 / 255",
+                description = "Electronic throttle body drive motor commanded duty"
+            ),
+            PidDefinition(
+                id = "014D", service = "01", pid = "4D",
+                name = "Time Run With MIL On",
+                shortName = "MIL Time", unit = "min",
+                dataBytes = 2, description = "Engine operating minutes with check engine lamp illuminated"
+            ),
+            PidDefinition(
+                id = "014E", service = "01", pid = "4E",
+                name = "Time Since Trouble Codes Cleared",
+                shortName = "Clr Time", unit = "min",
+                dataBytes = 2, description = "Engine operating minutes accumulated since DTC memory clear"
+            ),
+            PidDefinition(
+                id = "015C", service = "01", pid = "5C",
+                name = "Engine Oil Temperature",
+                shortName = "Oil Temp", unit = "°C",
+                dataBytes = 1, decoderType = DecoderType.TEMP_MINUS_40,
+                formulaDisplay = "A - 40",
+                description = "Engine crankcase sump oil temperature"
+            ),
+            PidDefinition(
+                id = "015D", service = "01", pid = "5D",
+                name = "Fuel Injection Timing",
+                shortName = "Inj Timing", unit = "°",
+                dataBytes = 2, decoderType = DecoderType.INJECTION_TIMING_128,
+                formulaDisplay = "((A * 256 + B) - 26880) / 128",
+                description = "Main fuel injection pulse start angle relative to TDC"
+            ),
+            PidDefinition(
+                id = "01A4", service = "01", pid = "A4",
+                name = "Transmission Actual Gear Ratio",
+                shortName = "Gear Ratio", unit = "Ratio",
+                dataBytes = 4, decoderType = DecoderType.TRANSMISSION_GEAR_A4,
+                description = "SAE J1979 transmission gear ratio and status"
+            )
+        )
+
+        for (item in additional) {
+            if (list.none { it.id.equals(item.id, ignoreCase = true) }) {
+                list.add(item)
+            }
+        }
+
+        list.associateBy { it.hexPid }
+    }
+
+    /**
+     * Resolves a PidDefinition for a discovered hex PID (e.g. "0C", "010C").
+     */
+    fun lookup(hexPid: String, isSupported: Boolean = true): PidDefinition {
+        val clean = hexPid.uppercase().removePrefix("01").padStart(2, '0')
+        val fullId = "01$clean"
+
+        val found = catalog[clean] ?: catalog[fullId]
+        if (found != null) {
+            return found.copy(supported = isSupported)
+        }
+
+        // Generic fallback for any uncataloged standard PID
+        return PidDefinition(
+            id = fullId,
+            service = "01",
+            pid = clean,
+            name = "Mode 01 PID $clean",
+            shortName = "PID $clean",
+            unit = "RAW",
+            dataBytes = 1,
+            decoderType = DecoderType.RESEARCH_RAW,
+            formulaDisplay = "Raw Value",
+            supported = isSupported,
+            description = "Standard SAE J1979 OBD-II Mode 01 Parameter ($clean)"
+        )
+    }
+
+    fun getAllKnownPids(): List<PidDefinition> = catalog.values.toList()
 }

@@ -29,7 +29,8 @@ import com.example.ui.viewmodel.MainViewModel
 @Composable
 fun PidConfigScreen(
     viewModel: MainViewModel,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onNavigateToPidScanner: () -> Unit = {}
 ) {
     val pidDefinitions by viewModel.pidDefinitions.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
@@ -72,6 +73,55 @@ fun PidConfigScreen(
         }
 
         Spacer(modifier = Modifier.height(10.dp))
+
+        // PID Discovery Scanner Banner
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("banner_pid_discovery"),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Search, contentDescription = null, tint = CyberCyan, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "OBD-II PID Discovery",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "Probe ECU availability bitmaps (0100–01E0) to auto-configure supported channels.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 11.sp
+                    )
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Button(
+                    onClick = onNavigateToPidScanner,
+                    colors = ButtonDefaults.buttonColors(containerColor = CyberCyan, contentColor = Color.Black),
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    modifier = Modifier.testTag("btn_launch_pid_scanner")
+                ) {
+                    Text("Scan", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
 
         Text(
             text = "Configure passive request intervals and enabled channels for Škoda Kylaq. All requests are strictly verified by Safety Validator.",
