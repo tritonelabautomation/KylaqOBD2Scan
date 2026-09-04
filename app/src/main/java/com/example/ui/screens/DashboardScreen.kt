@@ -305,16 +305,15 @@ fun DashboardScreen(
                         Spacer(modifier = Modifier.height(8.dp))
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                         Spacer(modifier = Modifier.height(8.dp))
-                        val engineEcu = report.detectedEcus.firstOrNull { it.rxCanId == "7E8" } ?: report.detectedEcus.firstOrNull()
-                        val transmissionTcu = report.detectedEcus.firstOrNull { it.rxCanId == "7E9" }
+                        val primaryEcu = report.detectedEcus.firstOrNull { it.rxCanId == "7E8" } ?: report.detectedEcus.firstOrNull()
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Engine ECU:", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(engineEcu?.let { "${it.ecuName ?: it.ecuRole} (${it.rxCanId})" } ?: "Not detected", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                            Text("Primary ECU:", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(primaryEcu?.let { "${it.ecuName ?: it.ecuRole} (${it.rxCanId})" } ?: "Not detected", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
                         }
-                        if (engineEcu?.calibrationId != null) {
+                        if (primaryEcu?.calibrationId != null) {
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                 Text("Calibration ID:", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Text(engineEcu.calibrationId, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+                                Text(primaryEcu.calibrationId, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
                             }
                         }
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {

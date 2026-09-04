@@ -173,9 +173,16 @@ class EcuDiscoveryManager(
         )
 
         var continueScanningRanges = true
+        val ecuContinuationState = mutableMapOf<String, Boolean>() // true if ECU wants next range
 
         for ((pidCmd, baseOffset) in rangePids) {
             if (!continueScanningRanges) break
+
+            // If we have discovered ECUs and NONE of them want the next range, we can break early
+            if (ecuContinuationState.isNotEmpty() && ecuContinuationState.values.none { it }) {
+                log("No active ECUs indicate support for next range before $pidCmd. Stopping Mode 01 scan.")
+                break
+            }
 
             val rangeStart = "%02X".format(baseOffset + 1)
             val rangeEnd = "%02X".format(minOf(baseOffset + 0x20, 0xFF))
@@ -189,7 +196,6 @@ class EcuDiscoveryManager(
 
             if (resp.status == ResponseStatus.OK && resp.lines.isNotEmpty()) {
                 val ecuResponses = PidDiscoveryDecoder.decodeAllEcuResponses(baseOffset, resp.lines)
-                var anyHasNext = false
 
                 if (ecuResponses.isNotEmpty()) {
                     modeSupportMap["01"] = true
@@ -212,9 +218,7 @@ class EcuDiscoveryManager(
                             }
                         }
 
-                        if (ecuResp.hasNextRange) {
-                            anyHasNext = true
-                        }
+                        ecuContinuationState[rxId] = ecuResp.hasNextRange
                     }
                 } else {
                     // Fallback to single frame decode if no headers were present
@@ -230,22 +234,17 @@ class EcuDiscoveryManager(
                         val supportedInBlock = singleResult.supportedPids.map { "01%02X".format(it) }
                         ecuSupportedPids.getOrPut(rxId) { mutableSetOf() }.addAll(supportedInBlock)
 
-                        if (singleResult.hasNextRange) {
-                            anyHasNext = true
-                        }
+                        ecuContinuationState[rxId] = singleResult.hasNextRange
                     }
                 }
-
-                // Continuation logic: if no responding ECU indicated support for the next range, stop
-                if (!anyHasNext && baseOffset < 0xE0) {
-                    log("Continuation bit 32 is 0 for all responding ECUs on $pidCmd. Next range not supported.")
-                    continueScanningRanges = false
-                }
             } else if (resp.status == ResponseStatus.TIMEOUT || resp.status == ResponseStatus.NO_DATA) {
-                log("$pidCmd probe returned ${resp.status}. Concluding Mode 01 range scan.")
-                continueScanningRanges = false
+                // Rule 7: TIMEOUT != NOT_SUPPORTED. One ECU failing must not prevent other ECUs.
+                log("$pidCmd probe returned ${resp.status}. Continuing discovery where possible.")
+                // We do NOT set continueScanningRanges = false here.
+                // We let the loop continue. If ecuContinuationState has ECUs waiting for the next range, we try it.
             } else if (resp.status == ResponseStatus.CAN_ERROR || resp.status == ResponseStatus.BUS_INIT_ERROR) {
                 log("CAN communication error on $pidCmd: ${resp.rawText}")
+                // A bus error might be terminal, but let's just mark the remaining state as false
                 continueScanningRanges = false
             }
 

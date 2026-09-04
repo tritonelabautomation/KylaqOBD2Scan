@@ -89,7 +89,7 @@ class CloudBackupManager(
                     googleIdTokenCredential.id
                 }
                 else -> {
-                    "google_user@gmail.com"
+                    return@withContext Result.failure(Exception("Unsupported credential type"))
                 }
             }
 
@@ -99,17 +99,11 @@ class CloudBackupManager(
         } catch (e: GetCredentialCancellationException) {
             Result.failure(Exception("Sign-in was cancelled by user."))
         } catch (e: GetCredentialException) {
-            // If Google ID option fails on devices/emulators without configured client ID,
-            // fall back to connecting user email for offline cloud readiness
-            val fallbackEmail = "connected.driver@gmail.com"
-            settingsRepository.setGoogleAccountEmail(fallbackEmail)
-            _syncStatusMessage.value = "Connected Google Drive account: $fallbackEmail"
-            Result.success(fallbackEmail)
+            // Rule 28: DO NOT force a fallback email on failure
+            Result.failure(Exception("Sign-in failed: ${e.message}"))
         } catch (e: Exception) {
-            val fallbackEmail = "connected.driver@gmail.com"
-            settingsRepository.setGoogleAccountEmail(fallbackEmail)
-            _syncStatusMessage.value = "Connected account: $fallbackEmail"
-            Result.success(fallbackEmail)
+            // Rule 28: DO NOT force a fallback email on failure
+            Result.failure(Exception("Sign-in error: ${e.message}"))
         }
     }
 

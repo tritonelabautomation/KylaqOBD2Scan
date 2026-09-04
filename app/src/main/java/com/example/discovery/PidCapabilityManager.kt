@@ -69,8 +69,7 @@ class PidCapabilityManager {
         val clean = pidId.uppercase().removePrefix("01")
         val status = capabilityMap[clean] ?: capabilityMap[pidId.uppercase()]
         return status == CapabilityStatus.DIRECT_VALIDATED ||
-                status == CapabilityStatus.LIVE_ELIGIBLE ||
-                status == CapabilityStatus.SUPPORTED
+                status == CapabilityStatus.LIVE_ELIGIBLE
     }
 
     fun isLiveEligible(ecuId: String, pidId: String): Boolean {
@@ -78,8 +77,7 @@ class PidCapabilityManager {
         val ecuMap = ecuCapabilityMap[ecuId.uppercase()] ?: return false
         val status = ecuMap[clean] ?: ecuMap[pidId.uppercase()]
         return status == CapabilityStatus.DIRECT_VALIDATED ||
-                status == CapabilityStatus.LIVE_ELIGIBLE ||
-                status == CapabilityStatus.SUPPORTED
+                status == CapabilityStatus.LIVE_ELIGIBLE
     }
 
     fun getValidatingEcuForPid(pidId: String): String? {

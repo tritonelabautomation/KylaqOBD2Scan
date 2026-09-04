@@ -159,6 +159,7 @@ class PidDiscoveryService(
             val cumulativePids = mutableMapOf<String, PidDefinition>()
             val rangeResults = mutableListOf<DiscoveryRangeResult>()
             val respondingEcusSet = mutableSetOf<String>()
+            val ecuContinuationState = mutableMapOf<String, Boolean>()
 
             var blockIndex = 0
             val totalBlocks = standardBaseRanges.size
@@ -166,6 +167,12 @@ class PidDiscoveryService(
             try {
                 for (basePid in standardBaseRanges) {
                     if (!isActive) break
+
+                    // If we have discovered ECUs and NONE of them want the next range, we can break early
+                    if (ecuContinuationState.isNotEmpty() && ecuContinuationState.values.none { it }) {
+                        appendLog("No active ECUs indicate support for next range before 01%02X. Stopping scan.".format(basePid))
+                        break
+                    }
 
                     if (!transport.isConnected) {
                         throw IllegalStateException("OBD-II connection lost during PID scan.")
@@ -202,7 +209,9 @@ class PidDiscoveryService(
                                 capabilityManager.markPidStatus(hexPid, CapabilityStatus.TIMEOUT)
                             }
                         }
-                        break
+                        // Rule 7: TIMEOUT != NOT_SUPPORTED. One ECU failing must not prevent other ECUs.
+                        if (ecuContinuationState.isEmpty()) break
+                        else continue
                     } else if (response.status == ResponseStatus.NO_DATA) {
                         appendLog("Range $cmd returned NO DATA. Concluding range scan.")
                         for (offset in 1..32) {
@@ -212,7 +221,8 @@ class PidDiscoveryService(
                                 capabilityManager.markPidStatus(hexPid, CapabilityStatus.NO_DATA)
                             }
                         }
-                        break
+                        if (ecuContinuationState.isEmpty()) break
+                        else continue
                     } else if (response.status == ResponseStatus.CAN_ERROR || response.status == ResponseStatus.BUS_INIT_ERROR) {
                         appendLog("CAN communication error on $cmd: ${response.rawText}. Halting scan.")
                         _status.value = PidScanStatus.ERROR
@@ -231,7 +241,8 @@ class PidDiscoveryService(
                     val rangeResult = PidDiscoveryDecoder.decodeFromRawResponse(basePid, response.lines)
                     if (rangeResult == null) {
                         appendLog("No valid 4-byte capability bitmap found in response to $cmd. Halting discovery.")
-                        break
+                        if (ecuContinuationState.isEmpty()) break
+                        else continue
                     }
 
                     rangeResults.add(rangeResult)
@@ -242,11 +253,13 @@ class PidDiscoveryService(
                         for (ecuResp in rangeResult.ecuResponses) {
                             respondingEcusSet.add(ecuResp.rxCanId)
                             capabilityManager.parseCapabilityBitmap(basePid, ecuResp.bitmap.map { it.toInt() and 0xFF }, ecuResp.rxCanId)
+                            ecuContinuationState[ecuResp.rxCanId] = ecuResp.hasNextRange
                             appendLog("ECU ${ecuResp.rxCanId} Bitmap for $cmd: [${ecuResp.bitmapHex}] (${ecuResp.supportedPids.size} supported)")
                         }
                     } else if (rangeResult.rxCanId != null) {
                         respondingEcusSet.add(rangeResult.rxCanId)
                         capabilityManager.parseCapabilityBitmap(basePid, rangeResult.bitmap.map { it.toInt() and 0xFF }, rangeResult.rxCanId)
+                        ecuContinuationState[rangeResult.rxCanId] = rangeResult.hasNextRange
                     }
                     _discoveredEcus.value = respondingEcusSet.toList().sorted()
 
@@ -268,13 +281,7 @@ class PidDiscoveryService(
                     }
 
                     // Also record per-ECU bitmaps
-                    for (ecuResp in rangeResult.ecuResponses) {
-                        capabilityManager.parseCapabilityBitmap(
-                            basePid,
-                            ecuResp.bitmap.map { it.toInt() and 0xFF },
-                            ecuResp.rxCanId
-                        )
-                    }
+                    // (REMOVED redundant parseCapabilityBitmap per Rule 4)
 
                     // Publish updated state
                     val sortedList = cumulativePids.values.sortedBy { it.hexPid }
@@ -284,12 +291,12 @@ class PidDiscoveryService(
 
                     // Standard continuation rule: if bit 32 (basePid + 0x20) is NOT supported, stop!
                     // For base 0xE0, standard Mode 01 PID space ends at 0xFF
-                    if (!rangeResult.hasNextRange || basePid >= 0xE0) {
-                        if (basePid >= 0xE0) {
-                            appendLog("Completed final standard range (01E0–01FF).")
-                        } else {
-                            appendLog("Bit 32 of $cmd bitmap is 0. Next PID block (01%02X) is NOT supported according to SAE J1979.".format(basePid + 0x20))
-                        }
+                    if (basePid >= 0xE0) {
+                        appendLog("Completed final standard range (01E0–01FF).")
+                        break
+                    }
+                    if (ecuContinuationState.isNotEmpty() && ecuContinuationState.values.none { it }) {
+                        appendLog("Bit 32 of $cmd bitmap is 0 for all responding ECUs. Next PID block (01%02X) is NOT supported according to SAE J1979.".format(basePid + 0x20))
                         break
                     }
 
@@ -370,35 +377,60 @@ class PidDiscoveryService(
                     val latencyMs = SystemClock.elapsedRealtime() - startMs
                     val rxSummary = resp.lines.joinToString(" / ").ifEmpty { resp.rawText.trim() }
 
-                    val isPositive = resp.status == ResponseStatus.OK && resp.lines.any { it.contains("41 $cleanPid") || it.contains("41$cleanPid") }
+                    val reconstructed = try {
+                        com.example.protocol.IsoTpParser.reassembleLines(resp.lines)
+                    } catch (_: Exception) { emptyList() }
+
+                    var isPositive = false
+                    var respondingCanId: String? = null
+                    var decodedVal: String? = null
+                    var payloadBytes = emptyList<Int>()
+
+                    for (msg in reconstructed) {
+                        val bytes = msg.reconstructedBytes
+                        if (bytes.size >= 2 && bytes[0] == 0x41 && bytes[1] == cleanPid.toInt(16, 16)) {
+                            isPositive = true
+                            respondingCanId = msg.canId
+                            payloadBytes = bytes
+                            try {
+                                decodedVal = com.example.protocol.PidDecoder.decode(def, bytes).displayValue
+                            } catch (_: Exception) {}
+                            break
+                        }
+                    }
+
+                    val isNegative = !isPositive && reconstructed.any { msg ->
+                        val bytes = msg.reconstructedBytes
+                        bytes.size >= 3 && bytes[0] == 0x7F && bytes[1] == 0x01 && bytes[2] == cleanPid.toInt(16, 16)
+                    }
+
                     val status = when {
                         isPositive -> CapabilityStatus.DIRECT_VALIDATED
                         resp.status == ResponseStatus.TIMEOUT -> CapabilityStatus.TIMEOUT
                         resp.status == ResponseStatus.NO_DATA -> CapabilityStatus.NO_DATA
                         resp.status == ResponseStatus.CAN_ERROR -> CapabilityStatus.CAN_ERROR
-                        resp.lines.any { it.contains("7F") } -> CapabilityStatus.NOT_SUPPORTED
+                        isNegative || resp.lines.any { it.contains("7F") } -> CapabilityStatus.NOT_SUPPORTED
                         else -> CapabilityStatus.ERROR
                     }
 
-                    val respondingCanId = resp.lines.firstNotNullOfOrNull {
-                        com.example.protocol.CanFrameParser.parseFrame(it).canId
+                    // Fallback to naive first header if decoder failed but we want to log it
+                    if (respondingCanId == null) {
+                        respondingCanId = resp.lines.firstNotNullOfOrNull {
+                            com.example.protocol.CanFrameParser.parseFrame(it).canId
+                        }
                     }
 
                     if (respondingCanId != null) {
-                        capabilityManager.markPidValidated(respondingCanId, cleanPid, status)
+                        // Only mark the specific ECU if we actually proved it responded to THIS PID
+                        if (isPositive || isNegative) {
+                            capabilityManager.markPidValidated(respondingCanId, cleanPid, status)
+                        } else {
+                            // If we just got a timeout or error, mark global
+                            capabilityManager.markPidStatus(cleanPid, status)
+                        }
                     } else {
                         capabilityManager.markPidStatus(cleanPid, status)
                     }
-
-                    val payloadBytes = try {
-                        com.example.protocol.IsoTpParser.reassembleLines(resp.lines).firstOrNull()?.reconstructedBytes ?: emptyList()
-                    } catch (_: Exception) { emptyList() }
-
-                    val decodedVal = if (isPositive && payloadBytes.isNotEmpty()) {
-                        try {
-                            com.example.protocol.PidDecoder.decode(def, payloadBytes).displayValue
-                        } catch (_: Exception) { null }
-                    } else null
 
                     appendLog("PID $cleanPid Validation: status=$status (${latencyMs}ms) | Decoded: $decodedVal | Responding ECU: $respondingCanId")
 
