@@ -85,6 +85,12 @@ class PidCapabilityManager {
         return pidToValidatingEcuMap[clean] ?: pidToValidatingEcuMap[pidId.uppercase()]
     }
 
+    fun setValidatingEcuForPid(pidId: String, ecuId: String) {
+        val clean = pidId.uppercase().removePrefix("01")
+        pidToValidatingEcuMap[clean] = ecuId.uppercase()
+        pidToValidatingEcuMap[pidId.uppercase()] = ecuId.uppercase()
+    }
+
     fun getStatus(pidId: String): CapabilityStatus {
         val clean = pidId.uppercase().removePrefix("01")
         return capabilityMap[clean] ?: capabilityMap[pidId.uppercase()] ?: CapabilityStatus.NOT_TESTED

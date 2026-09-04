@@ -343,7 +343,7 @@ private fun HealthReviewTab(
                     DoctorDetailRow("Powertrain", "$vehicleName (EA211 1.0 TSI)")
                     DoctorDetailRow("Fuel Injection", "Direct Injection TSI (3-Cylinder Turbo)")
                     DoctorDetailRow("CAN Protocol", "ISO 15765-4 11-bit / 500k baud")
-                    DoctorDetailRow("Active ECU Nodes", report?.ecus?.joinToString { it.address } ?: "None discovered")
+                    DoctorDetailRow("Active ECU Nodes", report?.detectedEcus?.joinToString { it.rxCanId } ?: "None discovered")
                     DoctorDetailRow("Analysis Engine", "On-Device Rule-Based (Zero Cloud Dependency)")
                 }
             }

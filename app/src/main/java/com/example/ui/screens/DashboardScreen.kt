@@ -305,20 +305,30 @@ fun DashboardScreen(
                         Spacer(modifier = Modifier.height(8.dp))
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                         Spacer(modifier = Modifier.height(8.dp))
-                        val primaryEcu = report.detectedEcus.firstOrNull { it.rxCanId == "7E8" } ?: report.detectedEcus.firstOrNull()
+                        val engineEcu = report.detectedEcus.firstOrNull { it.rxCanId == "7E8" } ?: report.detectedEcus.firstOrNull()
+                        val transmissionTcu = report.detectedEcus.firstOrNull { it.rxCanId == "7E9" }
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("Primary ECU:", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(primaryEcu?.let { "${it.ecuName ?: it.ecuRole} (${it.rxCanId})" } ?: "Not detected", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                            Text(
+                                text = engineEcu?.let { "${it.ecuName ?: it.ecuRole} (${it.rxCanId})" } ?: "Not detected",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
-                        if (primaryEcu?.calibrationId != null) {
+                        if (engineEcu?.calibrationId != null) {
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                 Text("Calibration ID:", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Text(primaryEcu.calibrationId, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+                                Text(engineEcu.calibrationId, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
                             }
                         }
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("Transmission TCU:", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(transmissionTcu?.let { "${it.ecuName ?: it.ecuRole} (${it.rxCanId})" } ?: "Unified Gateway / Integrated", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+                            Text(
+                                text = transmissionTcu?.let { "${it.ecuName ?: it.ecuRole} (${it.rxCanId})" } ?: "Unified Gateway / Integrated",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace
+                            )
                         }
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("Verified Supported PIDs:", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
