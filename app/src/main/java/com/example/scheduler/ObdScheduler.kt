@@ -201,8 +201,9 @@ class ObdScheduler(
                 for (pidDef in prioritizedPids) {
                     if (!isActive || !transport.isConnected) break
 
-                    // Skip polling if the capability map confirms PID is unsupported
-                    if (capabilityManager.getStatus(pidDef.id) == CapabilityStatus.NOT_SUPPORTED) {
+                    // Rule 5: Live polling is allowed ONLY for PIDs that have been directly validated
+                    // Reject: NOT_TESTED, BITMAP_SUPPORTED, TIMEOUT, NO_DATA, CAN_ERROR, NOT_SUPPORTED
+                    if (!capabilityManager.isLiveEligible(pidDef.id)) {
                         continue
                     }
 
@@ -238,7 +239,15 @@ class ObdScheduler(
     }
 
     private suspend fun executePidQuery(transport: ElmTransport, pidDef: PidDefinition) {
-        val desiredHeader = if (pidDef.canHeader.isNotBlank()) pidDef.canHeader else settingsRepository.canHeader.value
+        // Resolve target ECU CAN addressing:
+        // Use verified validating ECU physical request address if known, else def.canHeader, else settings, else 7DF
+        val validatingEcu = capabilityManager.getValidatingEcuForPid(pidDef.id)
+        val desiredHeader = when {
+            validatingEcu != null -> com.example.model.KylaqProtocolProfile.getPhysicalRequestId(validatingEcu)
+            pidDef.canHeader.isNotBlank() -> pidDef.canHeader
+            settingsRepository.canHeader.value.isNotBlank() -> settingsRepository.canHeader.value
+            else -> com.example.model.KylaqProtocolProfile.FUNCTIONAL_REQUEST_ID
+        }
         if (desiredHeader.isNotBlank() && desiredHeader != currentCanHeader) {
             transport.sendCommand("ATSH $desiredHeader", timeoutMs = 1000L)
             currentCanHeader = desiredHeader
@@ -294,9 +303,19 @@ class ObdScheduler(
             recordingManager.recordTransaction(errorRecord)
             appendRawHistory(pidDef.id, errorRecord)
 
-            // If response is NO_DATA or UNABLE_TO_CONNECT, mark status
-            if (elmResponse.status == ResponseStatus.NO_DATA) {
-                capabilityManager.markPidStatus(pidDef.id, CapabilityStatus.NOT_SUPPORTED)
+            // Rule 6: NEVER interpret timeout or NO DATA as NOT_SUPPORTED!
+            val failureStatus = when (elmResponse.status) {
+                ResponseStatus.TIMEOUT -> CapabilityStatus.TIMEOUT
+                ResponseStatus.NO_DATA -> CapabilityStatus.NO_DATA
+                ResponseStatus.CAN_ERROR, ResponseStatus.BUS_INIT_ERROR -> CapabilityStatus.CAN_ERROR
+                ResponseStatus.UNABLE_TO_CONNECT -> CapabilityStatus.TIMEOUT
+                ResponseStatus.MALFORMED -> CapabilityStatus.MALFORMED_RESPONSE
+                else -> CapabilityStatus.ERROR
+            }
+            if (validatingEcu != null) {
+                capabilityManager.markPidStatus(validatingEcu, pidDef.id, failureStatus)
+            } else {
+                capabilityManager.markPidStatus(pidDef.id, failureStatus)
             }
 
             val telemetryItem = LiveTelemetryValue(
@@ -389,7 +408,11 @@ class ObdScheduler(
             _lastTransaction.value = rxRecord
             recordingManager.recordTransaction(rxRecord)
 
-            capabilityManager.markPidStatus(pidDef.id, CapabilityStatus.SUPPORTED)
+            if (rxCanId != null) {
+                capabilityManager.markPidValidated(rxCanId, pidDef.id, CapabilityStatus.DIRECT_VALIDATED)
+            } else {
+                capabilityManager.markPidStatus(pidDef.id, CapabilityStatus.DIRECT_VALIDATED)
+            }
 
             val source = if (pidDef.isResearch) ValueSource.RAW_OBSERVED else ValueSource.STANDARD_OBD
             val telemetryItem = LiveTelemetryValue(

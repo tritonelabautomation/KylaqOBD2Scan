@@ -95,6 +95,7 @@ data class EcuDiscoveryReport(
     val isComplete: Boolean,
     val summaryMessage: String,
     val modeSupportMap: Map<String, Boolean> = emptyMap(),
+    val modeCapabilityMap: Map<String, CapabilityStatus> = emptyMap(),
     val rawLogLines: List<String> = emptyList()
 )
 
@@ -277,8 +278,8 @@ class EcuDiscoveryManager(
         delay(80)
 
         // Note: Mode 04 (Clear DTCs) is NEVER automatically executed!
-        // We record that Mode 04 is a standard protocol feature available for user invocation.
-        modeSupportMap["04"] = true
+        // Rule 12: Must NOT be marked SUPPORTED without testing. Status is NOT_TESTED.
+        modeSupportMap["04"] = false
 
         // Step 4: Mode 06 On-Board Monitoring Support Check (Read-Only)
         _discoveryProgressText.value = "Checking Mode 06 On-Board Monitoring..."
@@ -449,6 +450,18 @@ class EcuDiscoveryManager(
         val totalSupported = discoveredEcus.sumOf { it.supportedPids.size }
         val totalScanned = rangePids.size * 32
 
+        val modeCapabilityMap = mutableMapOf<String, CapabilityStatus>()
+        modeCapabilityMap["01"] = CapabilityStatus.SUPPORTED
+        modeCapabilityMap["02"] = if (modeSupportMap["02"] == true) CapabilityStatus.SUPPORTED else CapabilityStatus.NOT_SUPPORTED
+        modeCapabilityMap["03"] = if (modeSupportMap["03"] == true) CapabilityStatus.SUPPORTED else CapabilityStatus.NOT_SUPPORTED
+        modeCapabilityMap["04"] = CapabilityStatus.NOT_TESTED // Rule 12: Never marked SUPPORTED without testing
+        modeCapabilityMap["06"] = if (modeSupportMap["06"] == true) CapabilityStatus.SUPPORTED else CapabilityStatus.NOT_SUPPORTED
+        modeCapabilityMap["07"] = if (modeSupportMap["07"] == true) CapabilityStatus.SUPPORTED else CapabilityStatus.NOT_SUPPORTED
+        modeCapabilityMap["08"] = CapabilityStatus.NOT_TESTED // Mode 08 actuator control is not executed in discovery
+        modeCapabilityMap["09"] = if (modeSupportMap["09"] == true) CapabilityStatus.SUPPORTED else CapabilityStatus.NOT_SUPPORTED
+        modeCapabilityMap["0A"] = if (modeSupportMap["0A"] == true) CapabilityStatus.SUPPORTED else CapabilityStatus.NOT_SUPPORTED
+        modeCapabilityMap["22"] = if (ecuUdsStatusMap.values.any { it == UdsSupportStatus.UDS_SUPPORTED }) CapabilityStatus.SUPPORTED else CapabilityStatus.NOT_SUPPORTED
+
         val report = EcuDiscoveryReport(
             timestampUtc = startTimeUtc,
             protocol = "${KylaqProtocolProfile.PROTOCOL_NAME} (${KylaqProtocolProfile.CAN_ID_TYPE} / ${KylaqProtocolProfile.BITRATE_DISPLAY})",
@@ -462,6 +475,7 @@ class EcuDiscoveryManager(
                 "No responding ECUs detected on CAN functional broadcast (7DF)"
             },
             modeSupportMap = modeSupportMap,
+            modeCapabilityMap = modeCapabilityMap,
             rawLogLines = logLines
         )
 

@@ -60,4 +60,17 @@ object KylaqProtocolProfile {
         CanProtocol.ISO_15765_29B_250K,
         CanProtocol.AUTO
     )
+
+    /**
+     * Resolves the physical CAN request address for an observed physical CAN response ID.
+     */
+    fun getPhysicalRequestId(rxCanId: String): String {
+        val upper = rxCanId.uppercase()
+        val idx = TYPICAL_RESPONSE_RANGE.indexOf(upper)
+        return if (idx in PHYSICAL_REQUEST_RANGE.indices) {
+            PHYSICAL_REQUEST_RANGE[idx]
+        } else {
+            FUNCTIONAL_REQUEST_ID
+        }
+    }
 }

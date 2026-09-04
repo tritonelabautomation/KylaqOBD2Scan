@@ -74,57 +74,75 @@ class ScanCoordinator(
         dtcs.clear()
 
         try {
-            // 1. Adapter Init & Protocol Detect (Assume transport is already connected, but we reset and detect)
-            _progress.value = ScanProgress(ScanPhase.INIT_ADAPTER, "Initializing ELM327...", 0.05f)
-            if (!safeCommand("ATZ", 2000)) return failScan("Reset failed")
-            delay(500)
-            if (!safeCommand("ATE0", 1000)) return failScan("Echo off failed")
-            if (!safeCommand("ATH1", 1000)) return failScan("Headers on failed")
-            if (!safeCommand("ATL0", 1000)) return failScan("Linefeeds off failed")
-
-            _progress.value = ScanProgress(ScanPhase.PROTOCOL_DETECT, "Detecting Protocol...", 0.1f)
-            val protocolResp = transport.sendCommand("0100", 3000)
-            if (protocolResp.status != com.example.model.ResponseStatus.OK) {
-                return failScan("Failed to connect to ECU / Protocol detect failed")
+            // 1. Adapter Init & Protocol Detect via DiagnosticSession
+            _progress.value = ScanProgress(ScanPhase.INIT_ADAPTER, "Initializing ELM327 for Škoda Kylaq...", 0.05f)
+            val initResult = com.example.protocol.DiagnosticSession.initialize(transport)
+            if (!initResult.isSuccess) {
+                return failScan("Adapter initialization failed")
             }
-            
-            val dpnResp = transport.sendCommand("ATDPN", 1000)
-            protocol = dpnResp.lines.firstOrNull() ?: "UNKNOWN"
+
+            _progress.value = ScanProgress(ScanPhase.PROTOCOL_DETECT, "Verifying ISO 15765-4 protocol...", 0.1f)
+            val verifyResult = com.example.protocol.DiagnosticSession.verifyProtocol(
+                transport,
+                com.example.model.KylaqProtocolProfile.DEFAULT_CAN_PROTOCOL
+            )
+
+            val activeProto = if (verifyResult.isVerified) {
+                com.example.model.KylaqProtocolProfile.DEFAULT_CAN_PROTOCOL
+            } else {
+                val fallbackReport = com.example.protocol.DiagnosticSession.attemptProtocolFallback(transport)
+                fallbackReport.verifiedProtocol ?: return failScan("Protocol verification failed: No ECU response")
+            }
+            protocol = activeProto.displayName
 
             if (isCancelled) return cancelScan()
 
             // 2. ECU Discovery
             _progress.value = ScanProgress(ScanPhase.ECU_DISCOVERY, "Discovering ECUs...", 0.2f)
-            // Simplified ECU discovery logic
             val capabilityManager = PidCapabilityManager()
             val ecuDiscovery = EcuDiscoveryManager(capabilityManager)
             val report = ecuDiscovery.runDiscovery(transport)
+
+            // Evidence-based ECU registration (Rule 2: Never guess ECU roles from CAN IDs)
             for (discovered in report.detectedEcus) {
                 val ecuAddress = discovered.rxCanId
+                val ecuRole = discovered.ecuRole
+                val ecuType = when {
+                    ecuRole.contains("Engine", ignoreCase = true) -> "ENGINE"
+                    ecuRole.contains("Transmission", ignoreCase = true) -> "TRANSMISSION"
+                    ecuRole.contains("Brake", ignoreCase = true) || ecuRole.contains("ABS", ignoreCase = true) -> "BRAKE"
+                    ecuRole.contains("Body", ignoreCase = true) -> "BODY"
+                    ecuRole.contains("Airbag", ignoreCase = true) -> "AIRBAG"
+                    else -> "OTHER"
+                }
+
                 ecus.add(
                     EcuTopologyEntity(
                         id = UUID.randomUUID().toString(),
                         vehicleId = vehicleId,
                         address = ecuAddress,
-                        name = if (ecuAddress == "7E8") "Engine" else if (ecuAddress == "7E9" || ecuAddress == "7EA") "Transmission" else "Unknown",
-                        type = if (ecuAddress == "7E8") "ENGINE" else if (ecuAddress == "7E9" || ecuAddress == "7EA") "TRANSMISSION" else "OTHER",
+                        name = ecuRole,
+                        type = ecuType,
                         protocol = protocol,
                         lastSeen = System.currentTimeMillis(),
-                        responseTime = 0,
-                        supportedServices = "01,03,07,09",
-                        supportedPids = "",
+                        responseTime = discovered.averageLatencyMs,
+                        supportedServices = discovered.supportedServices.joinToString(","),
+                        supportedPids = discovered.supportedPids.joinToString(","),
                         dtcCount = 0,
-                        confidence = "OBSERVED",
-                        rawEvidence = null
+                        confidence = if (ecuRole.contains("(")) "CONFIRMED" else "OBSERVED",
+                        rawEvidence = discovered.ecuName ?: discovered.calibrationId
                     )
                 )
+
+                if (vin == null && !discovered.vin.isNullOrBlank()) {
+                    vin = discovered.vin
+                }
             }
 
             if (isCancelled) return cancelScan()
 
             // 3. PID Discovery
             _progress.value = ScanProgress(ScanPhase.PID_DISCOVERY, "Checking Supported PIDs...", 0.3f)
-            // Save Pid Capabilities
             for (discovered in report.detectedEcus) {
                 for (pid in discovered.supportedPids) {
                     pidCapabilities.add(PidCapabilityEntity(

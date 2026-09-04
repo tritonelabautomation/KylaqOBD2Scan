@@ -105,9 +105,12 @@ data class TripEconomyStats(
  * Strictly distinguishes between explicit unsupported status and transport/timeout issues.
  */
 enum class CapabilityStatus {
+    NOT_TESTED,
+    BITMAP_SUPPORTED,
+    DIRECT_VALIDATED,
+    LIVE_ELIGIBLE,
     SUPPORTED,
     NOT_SUPPORTED,
-    NOT_TESTED,
     TIMEOUT,
     NO_DATA,
     MALFORMED_RESPONSE,

@@ -10,29 +10,71 @@ package com.example.protocol
  * Do not implement seed/key algorithms. Do not automatically enter diagnostic sessions
  * or security access. Only send explicitly allowed read-only OBD/AT commands.
  */
+/**
+ * Explicit service categories for diagnostic safety enforcement.
+ */
+enum class ServiceCategory {
+    READ_ONLY_OBD,   // 01, 02, 03, 05, 06, 07, 09, 0A
+    READ_ONLY_UDS,   // 22 (ReadDataByIdentifier)
+    CONTROL,         // 04 (Clear DTCs), 08 (Actuator / Bidirectional Control)
+    WRITE,           // 2E (WriteDataByIdentifier)
+    SECURITY,        // 27 (SecurityAccess / Seed-Key)
+    FLASH,           // 34, 35, 36, 37 (Programming / Transfer)
+    SESSION_CONTROL, // 10 (DiagnosticSessionControl), 28 (CommControl), 31 (RoutineControl), 85 (ControlDTCSetting)
+    UNKNOWN
+}
+
 object SafetyValidator {
 
-    // Allowed read-only OBD services:
+    // Read-only OBD services safe for passive logging and discovery:
     // 01: Current Powertrain Diagnostic Data
     // 02: Powertrain Freeze Frame Data
-    // 09: Vehicle Information (VIN, Calibration ID, etc.)
-    // 22: Read Data By Identifier (UDS)
-    private val ALLOWED_OBD_SERVICES = setOf("01", "02", "09", "22")
+    // 03: Emission-Related Diagnostic Trouble Codes
+    // 05: Oxygen Sensor Monitoring Test Results
+    // 06: On-Board Monitoring Test Results
+    // 07: Pending Diagnostic Trouble Codes
+    // 09: Vehicle Information (VIN, Calibration ID, ECU Name)
+    // 0A: Permanent Diagnostic Trouble Codes
+    private val READ_ONLY_OBD_SERVICES = setOf("01", "02", "03", "05", "06", "07", "09", "0A")
 
-    // Disallowed services explicitly blocked:
-    // 04: Clear DTCs / Reset Emission Data (BLOCKED)
-    // 08: Control Operation of On-Board Component (BLOCKED)
-    // 10: Diagnostic Session Control (BLOCKED)
-    // 27: Security Access / Seed-Key (BLOCKED)
-    // 2E: Write Data By Identifier (BLOCKED)
-    // 31: Routine Control (BLOCKED)
-    // 34: Request Download / Flash (BLOCKED)
-    // 35: Request Upload (BLOCKED)
-    // 36: Transfer Data / Flash Write (BLOCKED)
-    // 37: Request Transfer Exit (BLOCKED)
-    // 28: Communication Control (BLOCKED)
-    // 85: Control DTC Setting (BLOCKED)
-    private val BLOCKED_SERVICES = setOf("04", "08", "10", "27", "28", "2E", "31", "34", "35", "36", "37", "85")
+    // Read-only UDS services:
+    // 22: Read Data By Identifier
+    private val READ_ONLY_UDS_SERVICES = setOf("22")
+
+    // Control and clear services:
+    // 04: Clear/Reset DTCs and freeze frame
+    // 08: Actuator control / bidirectional component tests
+    private val CONTROL_SERVICES = setOf("04", "08")
+
+    // Dangerous write/flash/session/security services strictly blocked:
+    private val WRITE_SERVICES = setOf("2E")
+    private val SECURITY_SERVICES = setOf("27")
+    private val FLASH_SERVICES = setOf("34", "35", "36", "37")
+    private val SESSION_CONTROL_SERVICES = setOf("10", "28", "31", "85")
+
+    /**
+     * Resolves the safety category for a given 2-digit hex service identifier.
+     */
+    fun getServiceCategory(serviceHex: String): ServiceCategory {
+        val svc = serviceHex.uppercase()
+        return when {
+            READ_ONLY_OBD_SERVICES.contains(svc) -> ServiceCategory.READ_ONLY_OBD
+            READ_ONLY_UDS_SERVICES.contains(svc) -> ServiceCategory.READ_ONLY_UDS
+            CONTROL_SERVICES.contains(svc) -> ServiceCategory.CONTROL
+            WRITE_SERVICES.contains(svc) -> ServiceCategory.WRITE
+            SECURITY_SERVICES.contains(svc) -> ServiceCategory.SECURITY
+            FLASH_SERVICES.contains(svc) -> ServiceCategory.FLASH
+            SESSION_CONTROL_SERVICES.contains(svc) -> ServiceCategory.SESSION_CONTROL
+            else -> ServiceCategory.UNKNOWN
+        }
+    }
+
+    /**
+     * Returns true if a service category is safe for automatic execution.
+     */
+    fun isCategoryAutomaticallyAllowed(category: ServiceCategory): Boolean {
+        return category == ServiceCategory.READ_ONLY_OBD || category == ServiceCategory.READ_ONLY_UDS
+    }
 
     /**
      * Checks if a command is safe to send to the vehicle.
@@ -61,20 +103,36 @@ object SafetyValidator {
         }
 
         val service = cleanCmd.substring(0, 2)
+        val category = getServiceCategory(service)
 
-        if (BLOCKED_SERVICES.contains(service)) {
-            return ValidationResult.Rejected(
-                "SAFETY BLOCK: Service 0x$service is a write/control/flashing/clear service and is strictly prohibited in passive logging mode."
+        return when (category) {
+            ServiceCategory.READ_ONLY_OBD,
+            ServiceCategory.READ_ONLY_UDS -> ValidationResult.Allowed
+
+            ServiceCategory.CONTROL -> ValidationResult.Rejected(
+                "SAFETY BLOCK: Service 0x$service is a control/clear service (Category: CONTROL) and is blocked from automatic execution."
             )
-        }
 
-        if (!ALLOWED_OBD_SERVICES.contains(service)) {
-            return ValidationResult.Rejected(
+            ServiceCategory.WRITE -> ValidationResult.Rejected(
+                "SAFETY BLOCK: Service 0x$service is a write service (Category: WRITE) and is strictly prohibited."
+            )
+
+            ServiceCategory.SECURITY -> ValidationResult.Rejected(
+                "SAFETY BLOCK: Service 0x$service is a security access service (Category: SECURITY) and is strictly prohibited."
+            )
+
+            ServiceCategory.FLASH -> ValidationResult.Rejected(
+                "SAFETY BLOCK: Service 0x$service is a flash/programming service (Category: FLASH) and is strictly prohibited."
+            )
+
+            ServiceCategory.SESSION_CONTROL -> ValidationResult.Rejected(
+                "SAFETY BLOCK: Service 0x$service is a session control service (Category: SESSION_CONTROL) and is strictly prohibited."
+            )
+
+            ServiceCategory.UNKNOWN -> ValidationResult.Rejected(
                 "SAFETY BLOCK: Service 0x$service is not an approved passive read-only OBD service."
             )
         }
-
-        return ValidationResult.Allowed
     }
 
     private fun validateAtCommand(cmd: String): ValidationResult {

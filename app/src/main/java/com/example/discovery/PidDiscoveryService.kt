@@ -258,13 +258,22 @@ class PidDiscoveryService(
                         val hexPid = "%02X".format(pidInt)
                         val isSupported = supportedSet.contains(pidInt)
 
-                        // Update capability manager
-                        val status = if (isSupported) CapabilityStatus.SUPPORTED else CapabilityStatus.NOT_SUPPORTED
+                        // Update capability manager with bitmap discovery result
+                        val status = if (isSupported) CapabilityStatus.BITMAP_SUPPORTED else CapabilityStatus.NOT_SUPPORTED
                         capabilityManager.markPidStatus("01$hexPid", status)
                         capabilityManager.markPidStatus(hexPid, status)
 
                         val def = StandardPidCatalog.lookup(hexPid, isSupported = isSupported)
                         cumulativePids[hexPid] = def
+                    }
+
+                    // Also record per-ECU bitmaps
+                    for (ecuResp in rangeResult.ecuResponses) {
+                        capabilityManager.parseCapabilityBitmap(
+                            basePid,
+                            ecuResp.bitmap.map { it.toInt() and 0xFF },
+                            ecuResp.rxCanId
+                        )
                     }
 
                     // Publish updated state
@@ -363,7 +372,7 @@ class PidDiscoveryService(
 
                     val isPositive = resp.status == ResponseStatus.OK && resp.lines.any { it.contains("41 $cleanPid") || it.contains("41$cleanPid") }
                     val status = when {
-                        isPositive -> CapabilityStatus.SUPPORTED
+                        isPositive -> CapabilityStatus.DIRECT_VALIDATED
                         resp.status == ResponseStatus.TIMEOUT -> CapabilityStatus.TIMEOUT
                         resp.status == ResponseStatus.NO_DATA -> CapabilityStatus.NO_DATA
                         resp.status == ResponseStatus.CAN_ERROR -> CapabilityStatus.CAN_ERROR
@@ -373,6 +382,12 @@ class PidDiscoveryService(
 
                     val respondingCanId = resp.lines.firstNotNullOfOrNull {
                         com.example.protocol.CanFrameParser.parseFrame(it).canId
+                    }
+
+                    if (respondingCanId != null) {
+                        capabilityManager.markPidValidated(respondingCanId, cleanPid, status)
+                    } else {
+                        capabilityManager.markPidStatus(cleanPid, status)
                     }
 
                     val payloadBytes = try {
@@ -385,7 +400,7 @@ class PidDiscoveryService(
                         } catch (_: Exception) { null }
                     } else null
 
-                    appendLog("PID $cleanPid Validation: status=$status (${latencyMs}ms) | Decoded: $decodedVal")
+                    appendLog("PID $cleanPid Validation: status=$status (${latencyMs}ms) | Decoded: $decodedVal | Responding ECU: $respondingCanId")
 
                     val valResult = PidValidationResult(
                         hexPid = cleanPid,
@@ -399,7 +414,9 @@ class PidDiscoveryService(
                     )
                     results.add(valResult)
                     _validatedPids.value = results.toList()
-                    _validatedPidsCount.value = results.count { it.directStatus == CapabilityStatus.SUPPORTED }
+                    _validatedPidsCount.value = results.count {
+                        it.directStatus == CapabilityStatus.DIRECT_VALIDATED || it.directStatus == CapabilityStatus.SUPPORTED
+                    }
 
                     delay(80)
                 }

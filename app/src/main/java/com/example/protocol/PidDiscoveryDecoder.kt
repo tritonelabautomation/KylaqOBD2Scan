@@ -206,6 +206,13 @@ object PidDiscoveryDecoder {
     }
 
     /**
+     * Parses multi-ECU availability responses into a map keyed by ECU CAN ID (e.g. 7E8, 7E9).
+     */
+    fun parseMultiEcuResponses(basePid: Int, lines: List<String>): Map<String, EcuRangeResponse> {
+        return decodeAllEcuResponses(basePid, lines).associateBy { it.rxCanId }
+    }
+
+    /**
      * Decodes a discovery response directly from raw lines into structured discovery data.
      */
     fun decodeFromRawResponse(basePid: Int, responseLines: List<String>): DiscoveryRangeResult? {

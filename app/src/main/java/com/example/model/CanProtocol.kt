@@ -51,3 +51,19 @@ data class ProtocolVerificationResult(
     val buildNumber: Int = 0,
     val commitHash: String = ""
 )
+
+enum class ProtocolEvidenceStatus {
+    NOT_TESTED,
+    TESTED,
+    NO_RESPONSE,
+    INVALID_RESPONSE,
+    VERIFIED
+}
+
+data class ProtocolAttemptResult(
+    val protocol: CanProtocol,
+    val status: ProtocolEvidenceStatus,
+    val rawResponse: String,
+    val latencyMs: Long,
+    val isVerified: Boolean
+)

@@ -20,6 +20,9 @@ class PidCapabilityManager {
     // Granular per-ECU capability map: ECU CAN ID -> (PID -> Status)
     private val ecuCapabilityMap = ConcurrentHashMap<String, ConcurrentHashMap<String, CapabilityStatus>>()
 
+    // Explicit mapping of validated PID -> responding ECU CAN ID (e.g. "0C" -> "7E8")
+    private val pidToValidatingEcuMap = ConcurrentHashMap<String, String>()
+
     private val _capabilitiesFlow = MutableStateFlow<Map<String, CapabilityStatus>>(emptyMap())
     val capabilitiesFlow: StateFlow<Map<String, CapabilityStatus>> = _capabilitiesFlow.asStateFlow()
 
@@ -32,6 +35,7 @@ class PidCapabilityManager {
     fun reset() {
         capabilityMap.clear()
         ecuCapabilityMap.clear()
+        pidToValidatingEcuMap.clear()
         _capabilitiesFlow.value = emptyMap()
         _ecuCapabilitiesFlow.value = emptyMap()
         _discoveryInProgress.value = false
@@ -40,14 +44,47 @@ class PidCapabilityManager {
     fun isPidSupported(pidId: String): Boolean {
         val clean = pidId.uppercase().removePrefix("01")
         val status = capabilityMap[clean] ?: capabilityMap[pidId.uppercase()]
-        return status == CapabilityStatus.SUPPORTED || status == null // If not yet tested, allow initial probe
+        return status == CapabilityStatus.SUPPORTED ||
+                status == CapabilityStatus.BITMAP_SUPPORTED ||
+                status == CapabilityStatus.DIRECT_VALIDATED ||
+                status == CapabilityStatus.LIVE_ELIGIBLE
     }
 
     fun isPidSupported(ecuId: String, pidId: String): Boolean {
         val clean = pidId.uppercase().removePrefix("01")
         val ecuMap = ecuCapabilityMap[ecuId.uppercase()] ?: return isPidSupported(pidId)
         val status = ecuMap[clean] ?: ecuMap[pidId.uppercase()]
-        return status == CapabilityStatus.SUPPORTED
+        return status == CapabilityStatus.SUPPORTED ||
+                status == CapabilityStatus.BITMAP_SUPPORTED ||
+                status == CapabilityStatus.DIRECT_VALIDATED ||
+                status == CapabilityStatus.LIVE_ELIGIBLE
+    }
+
+    /**
+     * Strictly verifies whether a PID is eligible for live dashboard polling.
+     * Requires at least DIRECT_VALIDATED or LIVE_ELIGIBLE.
+     * Strictly rejects: BITMAP_SUPPORTED, NOT_TESTED, TIMEOUT, NO_DATA, CAN_ERROR, etc.
+     */
+    fun isLiveEligible(pidId: String): Boolean {
+        val clean = pidId.uppercase().removePrefix("01")
+        val status = capabilityMap[clean] ?: capabilityMap[pidId.uppercase()]
+        return status == CapabilityStatus.DIRECT_VALIDATED ||
+                status == CapabilityStatus.LIVE_ELIGIBLE ||
+                status == CapabilityStatus.SUPPORTED
+    }
+
+    fun isLiveEligible(ecuId: String, pidId: String): Boolean {
+        val clean = pidId.uppercase().removePrefix("01")
+        val ecuMap = ecuCapabilityMap[ecuId.uppercase()] ?: return false
+        val status = ecuMap[clean] ?: ecuMap[pidId.uppercase()]
+        return status == CapabilityStatus.DIRECT_VALIDATED ||
+                status == CapabilityStatus.LIVE_ELIGIBLE ||
+                status == CapabilityStatus.SUPPORTED
+    }
+
+    fun getValidatingEcuForPid(pidId: String): String? {
+        val clean = pidId.uppercase().removePrefix("01")
+        return pidToValidatingEcuMap[clean] ?: pidToValidatingEcuMap[pidId.uppercase()]
     }
 
     fun getStatus(pidId: String): CapabilityStatus {
@@ -107,16 +144,20 @@ class PidCapabilityManager {
             val bitMask = 1L shl (32 - i)
             val isSupported = (bitmap32 and bitMask) != 0L
 
-            val status = if (isSupported) CapabilityStatus.SUPPORTED else CapabilityStatus.NOT_SUPPORTED
+            // Bitmap presence strictly indicates BITMAP_SUPPORTED, not DIRECT_VALIDATED!
+            val status = if (isSupported) CapabilityStatus.BITMAP_SUPPORTED else CapabilityStatus.NOT_SUPPORTED
 
             if (targetEcuMap != null) {
                 targetEcuMap[pidHex] = status
                 targetEcuMap[fullId] = status
             }
 
-            // In global map, if any ECU supports the PID, it is marked SUPPORTED
+            // In global map, preserve higher validation status if already present
             val currentGlobal = capabilityMap[pidHex]
-            if (currentGlobal != CapabilityStatus.SUPPORTED) {
+            if (currentGlobal != CapabilityStatus.DIRECT_VALIDATED &&
+                currentGlobal != CapabilityStatus.LIVE_ELIGIBLE &&
+                currentGlobal != CapabilityStatus.SUPPORTED
+            ) {
                 capabilityMap[pidHex] = status
                 capabilityMap[fullId] = status
             }
@@ -142,14 +183,24 @@ class PidCapabilityManager {
         ecuMap[clean] = status
         ecuMap[pidId.uppercase()] = status
 
-        // Update global map if supported
-        if (status == CapabilityStatus.SUPPORTED) {
-            capabilityMap[clean] = CapabilityStatus.SUPPORTED
-            capabilityMap[pidId.uppercase()] = CapabilityStatus.SUPPORTED
+        if (status == CapabilityStatus.DIRECT_VALIDATED || status == CapabilityStatus.LIVE_ELIGIBLE) {
+            pidToValidatingEcuMap[clean] = ecuId.uppercase()
+            pidToValidatingEcuMap[pidId.uppercase()] = ecuId.uppercase()
+            capabilityMap[clean] = status
+            capabilityMap[pidId.uppercase()] = status
+        } else if (status == CapabilityStatus.BITMAP_SUPPORTED) {
+            if (capabilityMap[clean] != CapabilityStatus.DIRECT_VALIDATED && capabilityMap[clean] != CapabilityStatus.LIVE_ELIGIBLE) {
+                capabilityMap[clean] = status
+                capabilityMap[pidId.uppercase()] = status
+            }
         }
 
         _capabilitiesFlow.value = capabilityMap.toMap()
         _ecuCapabilitiesFlow.value = ecuCapabilityMap.mapValues { it.value.toMap() }
+    }
+
+    fun markPidValidated(ecuId: String, pidId: String, status: CapabilityStatus) {
+        markPidStatus(ecuId, pidId, status)
     }
 
     fun setDiscoveryInProgress(inProgress: Boolean) {
