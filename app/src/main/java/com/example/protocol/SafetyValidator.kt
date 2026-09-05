@@ -136,41 +136,25 @@ object SafetyValidator {
     }
 
     private fun validateAtCommand(cmd: String): ValidationResult {
-        // Safe configuration and query AT commands
-        val safeAtPrefixes = listOf(
-            "ATZ",      // Reset
-            "ATE0",     // Echo off
-            "ATE1",     // Echo on
-            "ATL0",     // Linefeeds off
-            "ATL1",     // Linefeeds on
-            "ATS0",     // Spaces off
-            "ATS1",     // Spaces on
-            "ATH0",     // Headers off
-            "ATH1",     // Headers on
-            "ATSP",     // Set protocol (e.g. ATSP6, ATSP0)
-            "ATDP",     // Describe protocol
-            "ATDPN",    // Describe protocol number
-            "ATRV",     // Read voltage
-            "ATSH",     // Set header (e.g. ATSH7DF, ATSH7E0)
-            "ATCRA",    // Set CAN Rx Address filter
-            "ATCAF",    // CAN Auto Format
-            "ATST",     // Set timeout
-            "ATAT",     // Adaptive timing
-            "ATBI",     // Bypass initialization
-            "ATBD",     // Buffer dump
-            "ATI",      // Identify chip
-            "AT@1",     // Device description
-            "ATPC",     // Protocol close
-            "ATCS",     // CAN status
-            "ATMA"      // Monitor all (handled with care, but passive)
+        // Safe configuration and query AT commands exact matches
+        val safeAtExact = listOf(
+            "ATZ", "ATE0", "ATE1", "ATL0", "ATL1", "ATS0", "ATS1", "ATH0", "ATH1",
+            "ATDP", "ATDPN", "ATRV", "ATBI", "ATBD", "ATI", "AT@1", "ATPC", "ATCS", "ATMA"
         )
 
-        val isSafe = safeAtPrefixes.any { cmd.startsWith(it) }
-        return if (isSafe) {
-            ValidationResult.Allowed
-        } else {
-            ValidationResult.Rejected("AT Command '$cmd' is not in the approved safe read-only configuration list.")
+        if (safeAtExact.contains(cmd)) {
+            return ValidationResult.Allowed
         }
+
+        // Pattern matched AT commands with strictly validated suffixes
+        if (cmd.matches(Regex("^ATSP[0-9A]$"))) return ValidationResult.Allowed
+        if (cmd.matches(Regex("^ATSH[0-9A-F]{3,8}$"))) return ValidationResult.Allowed
+        if (cmd.matches(Regex("^ATCRA[0-9A-F]{3,8}$"))) return ValidationResult.Allowed
+        if (cmd.matches(Regex("^ATCAF[01]$"))) return ValidationResult.Allowed
+        if (cmd.matches(Regex("^ATST[0-9A-F]{2}$"))) return ValidationResult.Allowed
+        if (cmd.matches(Regex("^ATAT[012]$"))) return ValidationResult.Allowed
+
+        return ValidationResult.Rejected("AT Command '$cmd' is not in the approved safe read-only configuration list or has malformed syntax.")
     }
 }
 

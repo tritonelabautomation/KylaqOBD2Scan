@@ -308,13 +308,8 @@ fun DashboardScreen(
                         val engineEcu = report.detectedEcus.firstOrNull { it.rxCanId == "7E8" } ?: report.detectedEcus.firstOrNull()
                         val transmissionTcu = report.detectedEcus.firstOrNull { it.rxCanId == "7E9" }
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Primary ECU:", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(
-                                text = engineEcu?.let { "${it.ecuName ?: it.ecuRole} (${it.rxCanId})" } ?: "Not detected",
-                                style = MaterialTheme.typography.bodySmall,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold
-                            )
+                            Text("Engine ECU:", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(engineEcu?.let { "${it.ecuName ?: it.ecuRole} (${it.rxCanId})" } ?: "Not detected", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
                         }
                         if (engineEcu?.calibrationId != null) {
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -324,11 +319,7 @@ fun DashboardScreen(
                         }
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("Transmission TCU:", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(
-                                text = transmissionTcu?.let { "${it.ecuName ?: it.ecuRole} (${it.rxCanId})" } ?: "Unified Gateway / Integrated",
-                                style = MaterialTheme.typography.bodySmall,
-                                fontFamily = FontFamily.Monospace
-                            )
+                            Text(transmissionTcu?.let { "${it.ecuName ?: it.ecuRole} (${it.rxCanId})" } ?: "Unified Gateway / Integrated", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
                         }
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("Verified Supported PIDs:", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

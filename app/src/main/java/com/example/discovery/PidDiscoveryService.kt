@@ -209,11 +209,11 @@ class PidDiscoveryService(
                                 capabilityManager.markPidStatus(hexPid, CapabilityStatus.TIMEOUT)
                             }
                         }
-                        // Rule 7: TIMEOUT != NOT_SUPPORTED. One ECU failing must not prevent other ECUs.
-                        if (ecuContinuationState.isEmpty()) break
-                        else continue
+                        // Rule 2: TIMEOUT != NOT_SUPPORTED. Before ECUs known or after, per-ECU continuation state governs.
+                        blockIndex++
+                        continue
                     } else if (response.status == ResponseStatus.NO_DATA) {
-                        appendLog("Range $cmd returned NO DATA. Concluding range scan.")
+                        appendLog("Range $cmd returned NO DATA.")
                         for (offset in 1..32) {
                             val pidNum = basePid + offset
                             if (pidNum <= 0xFF) {
@@ -221,8 +221,8 @@ class PidDiscoveryService(
                                 capabilityManager.markPidStatus(hexPid, CapabilityStatus.NO_DATA)
                             }
                         }
-                        if (ecuContinuationState.isEmpty()) break
-                        else continue
+                        blockIndex++
+                        continue
                     } else if (response.status == ResponseStatus.CAN_ERROR || response.status == ResponseStatus.BUS_INIT_ERROR) {
                         appendLog("CAN communication error on $cmd: ${response.rawText}. Halting scan.")
                         _status.value = PidScanStatus.ERROR
@@ -240,9 +240,9 @@ class PidDiscoveryService(
                     // Decode bitmap from response lines
                     val rangeResult = PidDiscoveryDecoder.decodeFromRawResponse(basePid, response.lines)
                     if (rangeResult == null) {
-                        appendLog("No valid 4-byte capability bitmap found in response to $cmd. Halting discovery.")
-                        if (ecuContinuationState.isEmpty()) break
-                        else continue
+                        appendLog("No valid 4-byte capability bitmap found in response to $cmd.")
+                        blockIndex++
+                        continue
                     }
 
                     rangeResults.add(rangeResult)
@@ -377,60 +377,54 @@ class PidDiscoveryService(
                     val latencyMs = SystemClock.elapsedRealtime() - startMs
                     val rxSummary = resp.lines.joinToString(" / ").ifEmpty { resp.rawText.trim() }
 
-                    val reconstructed = try {
+                    val expectedService = 0x41
+                    val expectedPidNum = cleanPid.toIntOrNull(16) ?: -1
+
+                    val reconstructedMessages = try {
                         com.example.protocol.IsoTpParser.reassembleLines(resp.lines)
                     } catch (_: Exception) { emptyList() }
 
-                    var isPositive = false
-                    var respondingCanId: String? = null
-                    var decodedVal: String? = null
-                    var payloadBytes = emptyList<Int>()
-
-                    for (msg in reconstructed) {
-                        val bytes = msg.reconstructedBytes
-                        if (bytes.size >= 2 && bytes[0] == 0x41 && bytes[1] == cleanPid.toInt(16, 16)) {
-                            isPositive = true
-                            respondingCanId = msg.canId
-                            payloadBytes = bytes
-                            try {
-                                decodedVal = com.example.protocol.PidDecoder.decode(def, bytes).displayValue
-                            } catch (_: Exception) {}
-                            break
-                        }
+                    // Structural correlation only (Section 3)
+                    val matchingPositiveMsg = reconstructedMessages.firstOrNull { msg ->
+                        !msg.isMalformed && msg.reconstructedBytes.size >= 2 &&
+                                msg.reconstructedBytes[0] == expectedService &&
+                                msg.reconstructedBytes[1] == expectedPidNum
                     }
 
-                    val isNegative = !isPositive && reconstructed.any { msg ->
-                        val bytes = msg.reconstructedBytes
-                        bytes.size >= 3 && bytes[0] == 0x7F && bytes[1] == 0x01 && bytes[2] == cleanPid.toInt(16, 16)
+                    val matchingNegativeMsg = reconstructedMessages.firstOrNull { msg ->
+                        !msg.isMalformed && msg.reconstructedBytes.size >= 3 &&
+                                msg.reconstructedBytes[0] == 0x7F &&
+                                msg.reconstructedBytes[1] == 0x01
                     }
+
+                    val isPositive = resp.status == ResponseStatus.OK && matchingPositiveMsg != null
+                    val isNegative = matchingNegativeMsg != null
 
                     val status = when {
                         isPositive -> CapabilityStatus.DIRECT_VALIDATED
                         resp.status == ResponseStatus.TIMEOUT -> CapabilityStatus.TIMEOUT
                         resp.status == ResponseStatus.NO_DATA -> CapabilityStatus.NO_DATA
                         resp.status == ResponseStatus.CAN_ERROR -> CapabilityStatus.CAN_ERROR
-                        isNegative || resp.lines.any { it.contains("7F") } -> CapabilityStatus.NOT_SUPPORTED
+                        isNegative -> CapabilityStatus.NOT_SUPPORTED
                         else -> CapabilityStatus.ERROR
                     }
 
-                    // Fallback to naive first header if decoder failed but we want to log it
-                    if (respondingCanId == null) {
-                        respondingCanId = resp.lines.firstNotNullOfOrNull {
-                            com.example.protocol.CanFrameParser.parseFrame(it).canId
-                        }
-                    }
+                    // ECU Ownership rule (Section 4): only associate ECU when correlation establishes ownership
+                    val respondingCanId = if (isPositive) matchingPositiveMsg?.canId else null
 
                     if (respondingCanId != null) {
-                        // Only mark the specific ECU if we actually proved it responded to THIS PID
-                        if (isPositive || isNegative) {
-                            capabilityManager.markPidValidated(respondingCanId, cleanPid, status)
-                        } else {
-                            // If we just got a timeout or error, mark global
-                            capabilityManager.markPidStatus(cleanPid, status)
-                        }
+                        capabilityManager.markPidValidated(respondingCanId, cleanPid, status)
                     } else {
                         capabilityManager.markPidStatus(cleanPid, status)
                     }
+
+                    val payloadBytes = matchingPositiveMsg?.reconstructedBytes ?: emptyList()
+
+                    val decodedVal = if (isPositive && payloadBytes.isNotEmpty()) {
+                        try {
+                            com.example.protocol.PidDecoder.decode(def, payloadBytes).displayValue
+                        } catch (_: Exception) { null }
+                    } else null
 
                     appendLog("PID $cleanPid Validation: status=$status (${latencyMs}ms) | Decoded: $decodedVal | Responding ECU: $respondingCanId")
 

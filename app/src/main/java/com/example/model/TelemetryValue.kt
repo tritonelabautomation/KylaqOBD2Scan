@@ -106,6 +106,7 @@ data class TripEconomyStats(
  */
 enum class CapabilityStatus {
     NOT_TESTED,
+    BLOCKED,
     BITMAP_SUPPORTED,
     DIRECT_VALIDATED,
     LIVE_ELIGIBLE,

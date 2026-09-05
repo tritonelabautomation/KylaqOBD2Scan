@@ -354,16 +354,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val expectedService = "41"
             val expectedPid = pid.substring(2)
             
-            val hasEcuResponse = resp.lines.any { line -> 
+            var respondingCanId: String? = null
+            val hasEcuResponse = try {
+                val reconstructed = com.example.protocol.IsoTpParser.reassembleLines(resp.lines)
+                val expectedAck = 0x41
+                val expectedPidInt = expectedPid.toIntOrNull(16) ?: -1
+                val validMsg = reconstructed.find { msg ->
+                    msg.reconstructedBytes.size >= 2 && msg.reconstructedBytes[0] == expectedAck && msg.reconstructedBytes[1] == expectedPidInt
+                }
+                if (validMsg != null) {
+                    respondingCanId = validMsg.canId ?: "7E8"
+                    true
+                } else {
+                    false
+                }
+            } catch (_: Exception) { false } || resp.lines.any { line -> 
                 val cleanLine = line.replace(" ", "").uppercase()
                 val expected = expectedService + expectedPid
                 val idx = cleanLine.indexOf(expected)
-                idx in 0..8
+                if (idx in 0..8) {
+                    val possibleCanId = cleanLine.substring(0, idx).takeLast(3)
+                    respondingCanId = if (possibleCanId.matches(Regex("^[0-9A-F]{3}$"))) possibleCanId else "7E8"
+                    true
+                } else false
             }
             
             val status = when {
                 hasEcuResponse -> {
                     success++
+                    if (expectedPid != "00") {
+                        val ecu = respondingCanId ?: "7E8"
+                        obdScheduler.capabilityManager.markPidValidated(ecu, expectedPid, com.example.model.CapabilityStatus.DIRECT_VALIDATED)
+                    }
                     com.example.model.PidTestStatus.ECU_RESPONSE
                 }
                 resp.status == com.example.model.ResponseStatus.NO_DATA -> {
@@ -529,7 +551,47 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (success && transport != null) {
                 activeTransport = transport
                 fetchAdapterInfo(transport)
+                performDashboardBootstrap(transport)
                 obdScheduler.startPolling(viewModelScope, transport)
+            }
+        }
+    }
+
+    private suspend fun performDashboardBootstrap(transport: ElmTransport) {
+        val pidsToTest = listOf("010C", "010D", "0105", "010B", "0111", "010F", "0142")
+        for (pid in pidsToTest) {
+            val resp = transport.sendCommand(pid, 1000L)
+            val expectedService = "41"
+            val expectedPid = pid.substring(2)
+            
+            var respondingCanId: String? = null
+            val hasEcuResponse = try {
+                val reconstructed = com.example.protocol.IsoTpParser.reassembleLines(resp.lines)
+                val expectedAck = 0x41
+                val expectedPidInt = expectedPid.toIntOrNull(16) ?: -1
+                val validMsg = reconstructed.find { msg ->
+                    msg.reconstructedBytes.size >= 2 && msg.reconstructedBytes[0] == expectedAck && msg.reconstructedBytes[1] == expectedPidInt
+                }
+                if (validMsg != null) {
+                    respondingCanId = validMsg.canId ?: "7E8"
+                    true
+                } else {
+                    false
+                }
+            } catch (_: Exception) { false } || resp.lines.any { line -> 
+                val cleanLine = line.replace(" ", "").uppercase()
+                val expected = expectedService + expectedPid
+                val idx = cleanLine.indexOf(expected)
+                if (idx in 0..8) {
+                    val possibleCanId = cleanLine.substring(0, idx).takeLast(3)
+                    respondingCanId = if (possibleCanId.matches(Regex("^[0-9A-F]{3}$"))) possibleCanId else "7E8"
+                    true
+                } else false
+            }
+            
+            if (hasEcuResponse) {
+                val ecu = respondingCanId ?: "7E8"
+                obdScheduler.capabilityManager.markPidValidated(ecu, expectedPid, com.example.model.CapabilityStatus.DIRECT_VALIDATED)
             }
         }
     }
@@ -552,6 +614,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (success) {
                 activeTransport = transport
                 fetchAdapterInfo(transport)
+                performDashboardBootstrap(transport)
                 obdScheduler.startPolling(viewModelScope, transport)
             }
         }

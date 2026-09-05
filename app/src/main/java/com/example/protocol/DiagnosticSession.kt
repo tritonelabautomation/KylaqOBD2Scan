@@ -96,11 +96,14 @@ object DiagnosticSession {
         val latency = SystemClock.elapsedRealtime() - startMs
         val raw = resp.lines.joinToString(" | ").ifEmpty { resp.rawText.trim() }
 
+        val reconstructed = try {
+            IsoTpParser.reassembleLines(resp.lines)
+        } catch (_: Exception) { emptyList() }
+
         val hasPositiveCanResponse = resp.status == ResponseStatus.OK &&
-                resp.lines.any { line ->
-                    (line.contains("41 00") || line.contains("4100")) &&
-                            !line.contains("7F") &&
-                            !line.contains("SEARCHING")
+                reconstructed.any { msg ->
+                    !msg.isMalformed && msg.reconstructedBytes.size >= 2 &&
+                            msg.reconstructedBytes[0] == 0x41 && msg.reconstructedBytes[1] == 0x00
                 }
 
         val status = when {

@@ -89,14 +89,15 @@ object PidDiscoveryDecoder {
             return null
         }
 
-        // Exclude negative response codes (0x7F)
-        if (trimmed.contains("7F")) {
-            return null
-        }
-
         val frame = CanFrameParser.parseFrame(trimmed)
         val canId = frame.canId
         val bytes = frame.payloadBytes.ifEmpty { frame.dataBytes }
+
+        // Negative response check: 7F 01 <NRC> (ISO 14229 / SAE J1979 Service 01)
+        val negIdx = bytes.indexOfFirst { it == 0x7F }
+        if (negIdx != -1 && negIdx + 1 < bytes.size && bytes[negIdx + 1] == 0x01) {
+            return null
+        }
 
         val expectedService = 0x41
         val expectedPid = basePid and 0xFF

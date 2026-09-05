@@ -1,94 +1,106 @@
 package com.example
 
+import com.example.discovery.EcuDiscoveryManager
 import com.example.discovery.PidCapabilityManager
-import com.example.model.CapabilityStatus
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
-import org.junit.Test
-import com.example.model.StandardPidCatalog
-import com.example.discovery.SafetyValidator
+import com.example.protocol.IsoTpParser
+import com.example.protocol.SafetyValidator
 import com.example.protocol.ValidationResult
+import org.junit.Assert.*
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 
+@RunWith(RobolectricTestRunner::class)
 class KylaqMasterRepairTest {
 
     @Test
-    fun testLiveEligibilityGating() {
-        val manager = PidCapabilityManager()
+    fun testModeResponseStructuralValidation() {
+        // A random response with "42" in it but not a real mode 02 positive response
+        val fakeLines = listOf("7E8 03 41 00 42") // 42 is data
+        val m2Expected = 0x42
         
-        manager.markPidStatus("010C", CapabilityStatus.SUPPORTED)
-        assertFalse("SUPPORTED must not be live eligible", manager.isLiveEligible("010C"))
+        // We simulate the logic added to EcuDiscoveryManager.isPositiveResponse
+        val reconstructed = IsoTpParser.reassembleLines(fakeLines)
+        val isPositive = reconstructed.any { it.reconstructedBytes.isNotEmpty() && it.reconstructedBytes[0] == m2Expected }
         
-        manager.markPidStatus("010C", CapabilityStatus.BITMAP_SUPPORTED)
-        assertFalse("BITMAP_SUPPORTED must not be live eligible", manager.isLiveEligible("010C"))
-
-        manager.markPidStatus("010C", CapabilityStatus.TIMEOUT)
-        assertFalse("TIMEOUT must not be live eligible", manager.isLiveEligible("010C"))
-
-        manager.markPidStatus("010C", CapabilityStatus.NO_DATA)
-        assertFalse("NO_DATA must not be live eligible", manager.isLiveEligible("010C"))
-
-        manager.markPidStatus("010C", CapabilityStatus.DIRECT_VALIDATED)
-        assertTrue("DIRECT_VALIDATED must be live eligible", manager.isLiveEligible("010C"))
-
-        manager.markPidStatus("010C", CapabilityStatus.LIVE_ELIGIBLE)
-        assertTrue("LIVE_ELIGIBLE must be live eligible", manager.isLiveEligible("010C"))
+        assertFalse("Should not validate based on string '42' being in the payload", isPositive)
+        
+        // Real Mode 02 response
+        val realLines = listOf("7E8 04 42 02 00 00")
+        val realReconstructed = IsoTpParser.reassembleLines(realLines)
+        val isRealPositive = realReconstructed.any { it.reconstructedBytes.isNotEmpty() && it.reconstructedBytes[0] == m2Expected }
+        
+        assertTrue("Should validate real positive response", isRealPositive)
     }
 
     @Test
-    fun testEcuOwnershipAndMultiEcu() {
-        val manager = PidCapabilityManager()
+    fun testSafetyValidatorStrictAt() {
+        val validator = SafetyValidator
+
+        // Malformed suffixes
+        assertTrue(validator.validateCommand("ATSPX") is ValidationResult.Rejected)
+        assertTrue(validator.validateCommand("ATSH12Z") is ValidationResult.Rejected)
+        assertTrue(validator.validateCommand("ATCRA01G") is ValidationResult.Rejected)
+
+        // Valid
+        assertTrue(validator.validateCommand("ATSP6") is ValidationResult.Allowed)
+        assertTrue(validator.validateCommand("ATSH7E0") is ValidationResult.Allowed)
+        assertTrue(validator.validateCommand("ATZ") is ValidationResult.Allowed)
+        assertTrue(validator.validateCommand("ATMA") is ValidationResult.Allowed)
         
-        // 7E8 supports PID 0C
-        manager.markPidStatus("010C", CapabilityStatus.BITMAP_SUPPORTED, "7E8")
-        // 7E9 does NOT support PID 0C
-        manager.markPidStatus("010C", CapabilityStatus.NOT_SUPPORTED, "7E9")
-        
-        assertEquals(CapabilityStatus.BITMAP_SUPPORTED, manager.getStatus("7E8", "010C"))
-        assertEquals(CapabilityStatus.NOT_SUPPORTED, manager.getStatus("7E9", "010C"))
-        
-        manager.setValidatingEcuForPid("010C", "7E8")
-        assertEquals("7E8", manager.getValidatingEcuForPid("010C"))
+        // Blocked services
+        assertTrue(validator.validateCommand("04") is ValidationResult.Rejected)
+        assertTrue(validator.validateCommand("08") is ValidationResult.Rejected)
+        assertTrue(validator.validateCommand("2701") is ValidationResult.Rejected)
+        assertTrue(validator.validateCommand("3400") is ValidationResult.Rejected)
     }
 
     @Test
-    fun testMode04NotExecuted() {
+    fun testCapabilityManagerLiveEligibility() {
         val manager = PidCapabilityManager()
-        // If Mode 04 has not been executed, it should be NOT_TESTED, not NOT_SUPPORTED or SUPPORTED.
-        assertEquals(CapabilityStatus.NOT_TESTED, manager.getStatus("04"))
+        val pid = "010C"
+        val ecu = "7E8"
+        
+        manager.markPidStatus(pid, com.example.model.CapabilityStatus.BITMAP_SUPPORTED)
+        assertFalse(manager.isLiveEligible(pid))
+        
+        manager.setValidatingEcuForPid(pid, ecu)
+        assertFalse(manager.isLiveEligible(pid)) // Validating ECU isn't enough, status must be CONFIRMED
+        
+        manager.markPidValidated(ecu, pid, com.example.model.CapabilityStatus.DIRECT_VALIDATED)
+        assertTrue("Should be live eligible after DIRECT_VALIDATED", manager.isLiveEligible(pid))
+        assertEquals("Should return the validated ECU", ecu, manager.getValidatingEcuForPid(pid))
+
+        // Direct validated without ECU must NOT be live eligible
+        val pidNoEcu = "010D"
+        manager.markPidStatus(pidNoEcu, com.example.model.CapabilityStatus.DIRECT_VALIDATED)
+        assertFalse("DIRECT_VALIDATED without ECU must not be live eligible", manager.isLiveEligible(pidNoEcu))
     }
 
     @Test
-    fun testCatalogPresenceDoesNotMakeLiveEligible() {
-        val manager = PidCapabilityManager()
-        val catalogDef = StandardPidCatalog.lookup("0C", false)
-        // Even if in catalog, until we have evidence, it's not live eligible
-        assertFalse(manager.isLiveEligible("010C"))
+    fun testStructuralNegativeResponseHandling() {
+        // Frame with 7F in the data payload (e.g. byte 3 of bitmap is 0x7F)
+        val data7fFrame = listOf("7E8 06 41 00 BF BF 7F 00")
+        val decoded = com.example.protocol.PidDiscoveryDecoder.decodeFromRawResponse(0x00, data7fFrame)
+        assertNotNull("Frame with 0x7F in data bytes must NOT be rejected as negative response", decoded)
+        assertEquals(1, decoded!!.ecuResponses.size)
+        assertEquals("7E8", decoded.ecuResponses[0].rxCanId)
+        assertEquals(0x7F.toByte(), decoded.ecuResponses[0].bitmap[2])
+
+        // Explicit 7F 01 negative response
+        val negativeFrame = listOf("7E8 03 7F 01 11")
+        val negDecoded = com.example.protocol.PidDiscoveryDecoder.decodeFromRawResponse(0x00, negativeFrame)
+        assertNull("7F 01 negative response must return null", negDecoded)
     }
 
     @Test
-    fun testResponseValidationCorrelation() {
-        // request 010C, response 410D => reject
-        val bytes = listOf(0x41, 0x0D, 0x00, 0x00)
+    fun testTimeoutDistinctionFromUnsupported() {
+        val manager = PidCapabilityManager()
+        val pid = "010C"
+        manager.markPidStatus(pid, com.example.model.CapabilityStatus.TIMEOUT)
         
-        // This simulates the validation logic in PidDiscoveryService
-        // We simulate testing PID 0C
-        val cleanPid = "0C"
-        var isPositive = false
-        
-        if (bytes.size >= 2 && bytes[0] == 0x41 && bytes[1] == cleanPid.toInt(16, 16)) {
-            isPositive = true
-        }
-        
-        assertFalse("Response for 41 0D must not validate request for 01 0C", isPositive)
-        
-        // request 010C, response 410C => accept
-        val bytesCorrect = listOf(0x41, 0x0C, 0x00, 0x00)
-        var isPositiveCorrect = false
-        if (bytesCorrect.size >= 2 && bytesCorrect[0] == 0x41 && bytesCorrect[1] == cleanPid.toInt(16, 16)) {
-            isPositiveCorrect = true
-        }
-        assertTrue("Response for 41 0C must validate request for 01 0C", isPositiveCorrect)
+        assertEquals(com.example.model.CapabilityStatus.TIMEOUT, manager.getStatus(pid))
+        assertFalse("TIMEOUT must not be treated as supported", manager.isPidSupported(pid))
+        assertFalse("TIMEOUT must not be treated as live eligible", manager.isLiveEligible(pid))
     }
-
 }

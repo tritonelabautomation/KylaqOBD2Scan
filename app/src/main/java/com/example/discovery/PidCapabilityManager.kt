@@ -62,22 +62,24 @@ class PidCapabilityManager {
 
     /**
      * Strictly verifies whether a PID is eligible for live dashboard polling.
-     * Requires at least DIRECT_VALIDATED or LIVE_ELIGIBLE.
+     * Requires both direct validation (DIRECT_VALIDATED or LIVE_ELIGIBLE) AND a known validated ECU.
      * Strictly rejects: BITMAP_SUPPORTED, NOT_TESTED, TIMEOUT, NO_DATA, CAN_ERROR, etc.
      */
     fun isLiveEligible(pidId: String): Boolean {
         val clean = pidId.uppercase().removePrefix("01")
         val status = capabilityMap[clean] ?: capabilityMap[pidId.uppercase()]
-        return status == CapabilityStatus.DIRECT_VALIDATED ||
-                status == CapabilityStatus.LIVE_ELIGIBLE
+        val validatingEcu = pidToValidatingEcuMap[clean] ?: pidToValidatingEcuMap[pidId.uppercase()]
+        return (status == CapabilityStatus.DIRECT_VALIDATED || status == CapabilityStatus.LIVE_ELIGIBLE) &&
+                !validatingEcu.isNullOrBlank()
     }
 
     fun isLiveEligible(ecuId: String, pidId: String): Boolean {
         val clean = pidId.uppercase().removePrefix("01")
         val ecuMap = ecuCapabilityMap[ecuId.uppercase()] ?: return false
         val status = ecuMap[clean] ?: ecuMap[pidId.uppercase()]
-        return status == CapabilityStatus.DIRECT_VALIDATED ||
-                status == CapabilityStatus.LIVE_ELIGIBLE
+        val validatingEcu = pidToValidatingEcuMap[clean] ?: pidToValidatingEcuMap[pidId.uppercase()]
+        return (status == CapabilityStatus.DIRECT_VALIDATED || status == CapabilityStatus.LIVE_ELIGIBLE) &&
+                validatingEcu.equals(ecuId, ignoreCase = true)
     }
 
     fun getValidatingEcuForPid(pidId: String): String? {

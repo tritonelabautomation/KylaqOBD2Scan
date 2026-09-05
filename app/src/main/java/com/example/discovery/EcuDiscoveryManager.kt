@@ -256,7 +256,7 @@ class EcuDiscoveryManager(
         _discoveryProgressText.value = "Checking Mode 02 Freeze Frame support..."
         val m2Resp = transport.sendCommand("020200", timeoutMs = 2000L)
         log("TX: 020200 -> RX: [${m2Resp.status}] ${m2Resp.lines.joinToString(" | ")}")
-        if (m2Resp.status == ResponseStatus.OK && m2Resp.lines.any { it.contains("42") }) {
+        if (m2Resp.status == ResponseStatus.OK && isPositiveResponse(m2Resp.lines, 0x02)) {
             modeSupportMap["02"] = true
             parseEcuFromLines(m2Resp.lines)?.let { ecuSupportedServices.getOrPut(it) { mutableSetOf() }.add("02") }
         } else {
@@ -268,9 +268,9 @@ class EcuDiscoveryManager(
         _discoveryProgressText.value = "Checking Mode 03 Stored DTCs..."
         val m3Resp = transport.sendCommand("03", timeoutMs = 2500L)
         log("TX: 03 -> RX: [${m3Resp.status}] ${m3Resp.lines.joinToString(" | ")}")
-        if (m3Resp.status == ResponseStatus.OK && m3Resp.lines.any { it.contains("43") }) {
+        if (m3Resp.status == ResponseStatus.OK && isPositiveResponse(m3Resp.lines, 0x03)) {
             modeSupportMap["03"] = true
-            parseEcuFromLines(m3Resp.lines)?.let { ecuSupportedServices.getOrPut(it) { mutableSetOf() }.add("03") }
+            parseEcuFromPositiveResponse(m3Resp.lines, 0x03)?.let { ecuSupportedServices.getOrPut(it) { mutableSetOf() }.add("03") }
         } else {
             modeSupportMap["03"] = false
         }
@@ -284,9 +284,9 @@ class EcuDiscoveryManager(
         _discoveryProgressText.value = "Checking Mode 06 On-Board Monitoring..."
         val m6Resp = transport.sendCommand("0600", timeoutMs = 2500L)
         log("TX: 0600 -> RX: [${m6Resp.status}] ${m6Resp.lines.joinToString(" | ")}")
-        if (m6Resp.status == ResponseStatus.OK && m6Resp.lines.any { it.contains("46") }) {
+        if (m6Resp.status == ResponseStatus.OK && isPositiveResponse(m6Resp.lines, 0x06)) {
             modeSupportMap["06"] = true
-            parseEcuFromLines(m6Resp.lines)?.let { ecuSupportedServices.getOrPut(it) { mutableSetOf() }.add("06") }
+            parseEcuFromPositiveResponse(m6Resp.lines, 0x06)?.let { ecuSupportedServices.getOrPut(it) { mutableSetOf() }.add("06") }
         } else {
             modeSupportMap["06"] = false
         }
@@ -296,9 +296,9 @@ class EcuDiscoveryManager(
         _discoveryProgressText.value = "Checking Mode 07 Pending DTCs..."
         val m7Resp = transport.sendCommand("07", timeoutMs = 2500L)
         log("TX: 07 -> RX: [${m7Resp.status}] ${m7Resp.lines.joinToString(" | ")}")
-        if (m7Resp.status == ResponseStatus.OK && m7Resp.lines.any { it.contains("47") }) {
+        if (m7Resp.status == ResponseStatus.OK && isPositiveResponse(m7Resp.lines, 0x07)) {
             modeSupportMap["07"] = true
-            parseEcuFromLines(m7Resp.lines)?.let { ecuSupportedServices.getOrPut(it) { mutableSetOf() }.add("07") }
+            parseEcuFromPositiveResponse(m7Resp.lines, 0x07)?.let { ecuSupportedServices.getOrPut(it) { mutableSetOf() }.add("07") }
         } else {
             modeSupportMap["07"] = false
         }
@@ -310,7 +310,7 @@ class EcuDiscoveryManager(
         // Step 6: Mode 09 Vehicle Information (VIN, CALID, ECU Name)
         _discoveryProgressText.value = "Reading Mode 09 Identifiers (VIN, CALID, ECU Name)..."
         val m9SupportedResp = transport.sendCommand("0900", timeoutMs = 2500L)
-        if (m9SupportedResp.status == ResponseStatus.OK && m9SupportedResp.lines.any { it.contains("49") }) {
+        if (m9SupportedResp.status == ResponseStatus.OK && isPositiveResponse(m9SupportedResp.lines, 0x09)) {
             modeSupportMap["09"] = true
         }
 
@@ -360,7 +360,7 @@ class EcuDiscoveryManager(
         _discoveryProgressText.value = "Checking Mode 0A Permanent DTCs..."
         val maResp = transport.sendCommand("0A", timeoutMs = 2500L)
         log("TX: 0A -> RX: [${maResp.status}] ${maResp.lines.joinToString(" | ")}")
-        if (maResp.status == ResponseStatus.OK && maResp.lines.any { it.contains("4A") }) {
+        if (maResp.status == ResponseStatus.OK && isPositiveResponse(maResp.lines, 0x0A)) {
             modeSupportMap["0A"] = true
             parseEcuFromLines(maResp.lines)?.let { ecuSupportedServices.getOrPut(it) { mutableSetOf() }.add("0A") }
         } else {
@@ -384,8 +384,15 @@ class EcuDiscoveryManager(
                 ecuUdsStatusMap[canId] = UdsSupportStatus.UDS_SUPPORTED
                 log("UDS SW Version from $canId: $sw")
             }
-            if (swResp.lines.any { it.contains("7F") }) {
-                parseEcuFromLines(swResp.lines)?.let { ecuUdsStatusMap.putIfAbsent(it, UdsSupportStatus.UDS_NEGATIVE_RESPONSE) }
+            val udsNegResponses = try {
+                IsoTpParser.reassembleLines(swResp.lines).filter { msg ->
+                    !msg.isMalformed && msg.reconstructedBytes.size >= 2 &&
+                            msg.reconstructedBytes[0] == 0x7F && msg.reconstructedBytes[1] == 0x22
+                }
+            } catch (_: Exception) { emptyList() }
+            udsNegResponses.forEach { msg ->
+                val ecuId = msg.canId ?: "7E8"
+                ecuUdsStatusMap.putIfAbsent(ecuId, UdsSupportStatus.UDS_NEGATIVE_RESPONSE)
             }
         } else if (swResp.status == ResponseStatus.TIMEOUT || swResp.status == ResponseStatus.NO_DATA) {
             ecuSupportedPids.keys.forEach { ecuUdsStatusMap.putIfAbsent(it, UdsSupportStatus.UDS_NO_RESPONSE) }
@@ -522,6 +529,38 @@ class EcuDiscoveryManager(
         for (line in lines) {
             val frame = com.example.protocol.CanFrameParser.parseFrame(line)
             if (frame.canId != null) return frame.canId
+        }
+        return null
+    }
+
+    private fun isPositiveResponse(lines: List<String>, requestedService: Int): Boolean {
+        if (lines.isEmpty()) return false
+        val reconstructed = try {
+            IsoTpParser.reassembleLines(lines)
+        } catch (_: Exception) { emptyList() }
+        
+        val expectedAck = requestedService + 0x40
+        for (msg in reconstructed) {
+            val bytes = msg.reconstructedBytes
+            if (bytes.isNotEmpty() && bytes[0] == expectedAck) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun parseEcuFromPositiveResponse(lines: List<String>, requestedService: Int): String? {
+        if (lines.isEmpty()) return null
+        val reconstructed = try {
+            IsoTpParser.reassembleLines(lines)
+        } catch (_: Exception) { emptyList() }
+
+        val expectedAck = requestedService + 0x40
+        for (msg in reconstructed) {
+            val bytes = msg.reconstructedBytes
+            if (bytes.isNotEmpty() && bytes[0] == expectedAck) {
+                return msg.canId
+            }
         }
         return null
     }
