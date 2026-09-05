@@ -385,6 +385,39 @@ class ObdScheduler(
         }
 
         for (msg in sortedMessages) {
+            // FIX P0-2: Malformed response trust gate.
+            // Any ISO-TP message flagged as structurally malformed must NOT be used for:
+            //   - telemetry display (avoids garbage values like corrupted coolant temperature)
+            //   - capability promotion (a malformed response is not a confirmed VALIDATED state)
+            //   - LIVE_ELIGIBLE promotion
+            // The raw evidence is still recorded in the transaction log for diagnostics,
+            // but the PID retains its prior capability state. This prevents a single bad frame
+            // from incorrectly elevating a PID to LIVE_ELIGIBLE.
+            if (msg.isMalformed) {
+                val malformedRecord = TransactionRecord(
+                    timestampUtc = rxUtc,
+                    timestampMonotonic = rxMonotonic,
+                    direction = Direction.RX,
+                    elmCommand = requestHex,
+                    canTxId = desiredHeader,
+                    canRxId = msg.canId ?: pidDef.expectedRxId,
+                    requestHex = requestHex,
+                    responseHex = msg.reconstructedPayloadHex,
+                    service = pidDef.service,
+                    pid = pidDef.pid,
+                    rawPayload = msg.reconstructedPayloadHex,
+                    decodedParameter = pidDef.name,
+                    decodedValue = null,
+                    decodedValueDisplay = "MALFORMED: ${msg.malformedReason ?: "unknown"}",
+                    unit = pidDef.unit,
+                    responseStatus = ResponseStatus.ERROR
+                )
+                _transactionCount.value++
+                _lastTransaction.value = malformedRecord
+                recordingManager.recordTransaction(malformedRecord)
+                continue // Skip this message; do NOT mark as VALIDATED or promote to LIVE_ELIGIBLE
+            }
+
             val decoded = PidDecoder.decode(pidDef, msg.reconstructedBytes)
             val rxCanId = msg.canId ?: pidDef.expectedRxId
 

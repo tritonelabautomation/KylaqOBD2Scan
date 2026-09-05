@@ -20,8 +20,16 @@ class PidCapabilityManager {
     // Granular per-ECU capability map: ECU CAN ID -> (PID -> Status)
     private val ecuCapabilityMap = ConcurrentHashMap<String, ConcurrentHashMap<String, CapabilityStatus>>()
 
-    // Explicit mapping of validated PID -> responding ECU CAN ID (e.g. "0C" -> "7E8")
-    private val pidToValidatingEcuMap = ConcurrentHashMap<String, String>()
+    // FIX P1-1: PID -> Set of validating ECUs.
+    // Real-world trace f39f1ebd shows 7E8 AND 7E9 both answer the same generic OBD PID (e.g. 010C,
+    // 010D, 0111, 0105, 010F, 0142, 010B). The previous single-ECU map was overwritten by whichever
+    // ECU happened to answer last ("last ECU wins"), which caused:
+    //   - dashboard jitter (RPM 978 vs 974 depending on response ordering)
+    //   - capability state loss (an ECU known to support 010C was silently demoted when another
+    //     ECU also answered)
+    //   - ECU ownership ambiguity for downstream scheduler / dashboard
+    // We now retain ALL validating ECUs and choose a preferred one deterministically.
+    private val pidToValidatingEcuMap = ConcurrentHashMap<String, java.util.concurrent.ConcurrentHashMap.KeySetView<String, Boolean>>()
 
     private val _capabilitiesFlow = MutableStateFlow<Map<String, CapabilityStatus>>(emptyMap())
     val capabilitiesFlow: StateFlow<Map<String, CapabilityStatus>> = _capabilitiesFlow.asStateFlow()
@@ -40,6 +48,12 @@ class PidCapabilityManager {
         _ecuCapabilitiesFlow.value = emptyMap()
         _discoveryInProgress.value = false
     }
+
+    /**
+     * FIX P1-1: Returns the preferred ECU for live polling, or null if no validating ECU exists.
+     * Convenience overload that delegates to getPreferredEcuForPid.
+     */
+    fun getPreferredEcuForLivePolling(pidId: String): String? = getPreferredEcuForPid(pidId)
 
     fun isPidSupported(pidId: String): Boolean {
         val clean = pidId.uppercase().removePrefix("01")
@@ -72,29 +86,36 @@ class PidCapabilityManager {
     fun isLiveEligible(pidId: String): Boolean {
         val clean = pidId.uppercase().removePrefix("01")
         val status = capabilityMap[clean] ?: capabilityMap[pidId.uppercase()]
-        val validatingEcu = pidToValidatingEcuMap[clean] ?: pidToValidatingEcuMap[pidId.uppercase()]
+        val validatingEcus = pidToValidatingEcuMap[clean] ?: pidToValidatingEcuMap[pidId.uppercase()]
         return (status == CapabilityStatus.DIRECT_VALIDATED || status == CapabilityStatus.LIVE_ELIGIBLE) &&
-                !validatingEcu.isNullOrBlank()
+                (validatingEcus != null && validatingEcus.isNotEmpty())
     }
 
     fun isLiveEligible(ecuId: String, pidId: String): Boolean {
         val clean = pidId.uppercase().removePrefix("01")
         val ecuMap = ecuCapabilityMap[ecuId.uppercase()] ?: return false
         val status = ecuMap[clean] ?: ecuMap[pidId.uppercase()]
-        val validatingEcu = pidToValidatingEcuMap[clean] ?: pidToValidatingEcuMap[pidId.uppercase()]
+        val validatingEcus = pidToValidatingEcuMap[clean] ?: pidToValidatingEcuMap[pidId.uppercase()]
         return (status == CapabilityStatus.DIRECT_VALIDATED || status == CapabilityStatus.LIVE_ELIGIBLE) &&
-                validatingEcu.equals(ecuId, ignoreCase = true)
+                (validatingEcus != null && validatingEcus.any { it.equals(ecuId, ignoreCase = true) })
     }
 
-    fun getValidatingEcuForPid(pidId: String): String? {
-        val clean = pidId.uppercase().removePrefix("01")
-        return pidToValidatingEcuMap[clean] ?: pidToValidatingEcuMap[pidId.uppercase()]
-    }
+    /**
+     * Legacy single-ECU accessor retained for backward compatibility.
+     * Now returns the preferred ECU (deterministic) rather than the last-ECU-wins answer.
+     */
+    fun getValidatingEcuForPid(pidId: String): String? = getPreferredEcuForPid(pidId)
 
+    /**
+     * Legacy single-ECU setter retained for backward compatibility.
+     * Now adds to the validating-ECU set instead of overwriting.
+     * Use markPidStatus() for new code.
+     */
     fun setValidatingEcuForPid(pidId: String, ecuId: String) {
         val clean = pidId.uppercase().removePrefix("01")
-        pidToValidatingEcuMap[clean] = ecuId.uppercase()
-        pidToValidatingEcuMap[pidId.uppercase()] = ecuId.uppercase()
+        val upperEcu = ecuId.uppercase()
+        pidToValidatingEcuMap.getOrPut(clean) { ConcurrentHashMap.newKeySet() }.add(upperEcu)
+        pidToValidatingEcuMap.getOrPut(pidId.uppercase()) { ConcurrentHashMap.newKeySet() }.add(upperEcu)
     }
 
     fun getStatus(pidId: String): CapabilityStatus {
@@ -189,13 +210,17 @@ class PidCapabilityManager {
 
     fun markPidStatus(ecuId: String, pidId: String, status: CapabilityStatus) {
         val clean = pidId.uppercase().removePrefix("01")
-        val ecuMap = ecuCapabilityMap.getOrPut(ecuId.uppercase()) { ConcurrentHashMap() }
+        val upperEcu = ecuId.uppercase()
+        val ecuMap = ecuCapabilityMap.getOrPut(upperEcu) { ConcurrentHashMap() }
         ecuMap[clean] = status
         ecuMap[pidId.uppercase()] = status
 
         if (status == CapabilityStatus.DIRECT_VALIDATED || status == CapabilityStatus.LIVE_ELIGIBLE) {
-            pidToValidatingEcuMap[clean] = ecuId.uppercase()
-            pidToValidatingEcuMap[pidId.uppercase()] = ecuId.uppercase()
+            // FIX P1-2: Stop "last ECU wins". Multiple ECUs may legitimately validate the same PID.
+            // We now ADD to the set rather than overwriting. The preferred ECU is chosen
+            // deterministically via getPreferredEcuForPid() below.
+            pidToValidatingEcuMap.getOrPut(clean) { ConcurrentHashMap.newKeySet() }.add(upperEcu)
+            pidToValidatingEcuMap.getOrPut(pidId.uppercase()) { ConcurrentHashMap.newKeySet() }.add(upperEcu)
             capabilityMap[clean] = status
             capabilityMap[pidId.uppercase()] = status
         } else if (status == CapabilityStatus.BITMAP_SUPPORTED) {
@@ -207,6 +232,39 @@ class PidCapabilityManager {
 
         _capabilitiesFlow.value = capabilityMap.toMap()
         _ecuCapabilitiesFlow.value = ecuCapabilityMap.mapValues { it.value.toMap() }
+    }
+
+    /**
+     * FIX P1-1: Returns ALL ECU CAN IDs that have validated the given PID.
+     * Empty list if no ECU has validated it yet.
+     */
+    fun getValidatingEcusForPid(pidId: String): List<String> {
+        val clean = pidId.uppercase().removePrefix("01")
+        val set = pidToValidatingEcuMap[clean] ?: pidToValidatingEcuMap[pidId.uppercase()]
+        return set?.toList()?.sorted() ?: emptyList()
+    }
+
+    /**
+     * FIX P1-1: Returns the preferred ECU for the given PID, deterministically chosen from
+     * the set of validating ECUs.
+     *
+     * Selection priority (first match wins):
+     *  1. Engine CAN ID (7E8) — primary ECU for powertrain PIDs in VW/Škoda MQB platform.
+     *  2. Transmission CAN ID (7E1) — secondary; used for some 01-series PIDs.
+     *  3. Alphabetically smallest CAN ID — deterministic fallback.
+     *
+     * The result is cached for the lifetime of the PID's first validation to avoid
+     * re-computing on every poll.
+     */
+    fun getPreferredEcuForPid(pidId: String): String? {
+        val ecus = getValidatingEcusForPid(pidId)
+        if (ecus.isEmpty()) return null
+        // 1. Engine ECU
+        if ("7E8" in ecus) return "7E8"
+        // 2. Transmission ECU
+        if ("7E1" in ecus) return "7E1"
+        // 3. Deterministic fallback
+        return ecus.first()
     }
 
     fun markPidValidated(ecuId: String, pidId: String, status: CapabilityStatus) {

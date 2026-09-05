@@ -142,15 +142,18 @@ object IsoTpParser {
                         }
 
                         expectedSequenceNumber = 1
+                        // FIX P0-1: Append First Frame payload exactly ONCE.
+                        // Previously this line appeared twice (the second call was a copy/paste bug),
+                        // which caused the FF's data bytes to be duplicated in payloadAccumulator.
+                        // Real-world regression trace: VIN from 7E8 10 14 / 21 / 22 should reconstruct
+                        // to exactly 20 bytes ("49 02 01 4D 45 58 ..."). With the bug it would be ~26
+                        // bytes with the FF payload appearing twice, corrupting VIN decoder input.
                         payloadAccumulator.addAll(frame.payloadBytes)
 
                         if (expectedTotalLength < 8) {
                             isCurrentMalformed = true
                             currentMalformedReason = "First Frame specifies invalid ISO-TP length < 8 ($expectedTotalLength)"
                         }
-
-                        expectedSequenceNumber = 1
-                        payloadAccumulator.addAll(frame.payloadBytes)
                     }
 
                     IsoTpPciType.CONSECUTIVE_FRAME -> {
