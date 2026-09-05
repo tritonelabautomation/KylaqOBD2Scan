@@ -713,7 +713,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // CRITICAL: This is a read-only diagnostic app.
         // Mode 04 is blocked by SafetyValidator at the transport layer.
         // This function only clears local UI state, NOT vehicle memory.
-        cloudBackupManager.syncStatusMessage.value = "Local DTC cache cleared. Note: Vehicle DTC memory is READ-ONLY in this app."
+        // Cloud sync message is a read-only StateFlow from outside the manager;
+        // route the update through the new public setter to keep encapsulation intact.
+        cloudBackupManager.setStatusMessage("Local DTC cache cleared. Note: Vehicle DTC memory is READ-ONLY in this app.")
     }
 
     private suspend fun saveDtcs(dtcs: List<String>, status: String) {

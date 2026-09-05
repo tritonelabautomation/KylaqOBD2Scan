@@ -811,8 +811,13 @@ class EcuDiscoveryManager(
         for (line in lines) {
             val trimmed = line.trim().uppercase()
             if (trimmed.contains("7F")) {
-                // Try to extract NRC after 7F and service byte
-                val parts = trimmed.replace("7F", " ").split().filter { it.isNotEmpty() }
+                // Try to extract NRC after 7F and service byte.
+                // Use an explicit Regex split to disambiguate Kotlin's
+                // CharSequence.split(vararg Char/String, ...) overload set.
+                val parts: List<String> = trimmed
+                    .replace("7F", " ")
+                    .split(Regex("\\s+"))
+                    .filter { it.isNotEmpty() }
                 if (parts.size >= 2) {
                     try {
                         val serviceByte = parts[0].toInt(16)

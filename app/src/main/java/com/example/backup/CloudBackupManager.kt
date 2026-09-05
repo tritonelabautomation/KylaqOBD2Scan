@@ -56,6 +56,15 @@ class CloudBackupManager(
     }
 
     /**
+     * Sets the sync status message. Thread-safe via MutableStateFlow.
+     * Allows callers (e.g. UI events) to surface status updates without
+     * needing direct access to the private MutableStateFlow.
+     */
+    fun setStatusMessage(message: String?) {
+        _syncStatusMessage.value = message
+    }
+
+    /**
      * Reads the Google Web Client ID from strings.xml resource or BuildConfig.
      * Returns null if not configured, which disables Google Sign-In gracefully
      * rather than silently trusting whatever account the SDK has access to.
