@@ -32,30 +32,48 @@ object DtcDecoder {
 
     /**
      * Decodes a Mode 03 or Mode 07 payload into a list of DTC strings.
-     * Payload expected without the service byte (e.g. if ECU replied 43 01 04, payload is 0104)
+     * Payload expected WITHOUT the service byte (e.g. if ECU replied 43 01 04, payload is 0104).
+     *
+     * FIX P0-5: Strictly validates the response shape before decoding to prevent
+     * garbage/numeric interpretation of malformed or non-positive responses.
+     *
+     * @param payloadHex hex payload (with or without service byte 43/47)
+     * @param mode 0x03 for active DTCs, 0x07 for pending DTCs. Used to determine the
+     *             expected positive response service byte.
+     * @return list of decoded DTC codes; empty list if the response is invalid or negative.
      */
-    fun extractDtcs(payloadHex: String): List<String> {
-        val cleanHex = payloadHex.replace(" ", "")
-        val dtcs = mutableListOf<String>()
-        
-        // Skip service byte if present (43 for Mode 03, 47 for Mode 07)
-        val dataHex = if (cleanHex.startsWith("43") || cleanHex.startsWith("47")) {
-            cleanHex.substring(2)
-        } else {
-            cleanHex
+    fun extractDtcs(payloadHex: String, mode: Int = 0x03): List<String> {
+        val cleanHex = payloadHex.replace(" ", "").uppercase()
+        if (cleanHex.length < 2) return emptyList()
+
+        // Reject negative responses (7F service NRC) and any response that doesn't start
+        // with the expected positive service byte (43 for Mode 03, 47 for Mode 07).
+        val expectedAck = (mode + 0x40) and 0xFF
+        val expectedAckHex = "%02X".format(expectedAck)
+        if (cleanHex.startsWith("7F")) {
+            // Negative response - caller should handle NRC separately.
+            return emptyList()
+        }
+        if (!cleanHex.startsWith(expectedAckHex)) {
+            // Not a positive response for the requested mode. Don't decode.
+            return emptyList()
         }
 
-        // Often the first byte is the number of DTCs? Actually Mode 03/07 does NOT contain the count byte.
-        // It's just a raw list of DTCs.
-        
-        for (i in 0 until (dataHex.length - 3) step 4) {
+        val dtcs = mutableListOf<String>()
+        val dataHex = cleanHex.substring(2)
+
+        // Mode 03 / 07 payload is a raw list of 2-byte DTCs; no count byte.
+        // Also reject zero-padded pairs (00 00) so we don't emit bogus DTCs.
+        var i = 0
+        while (i + 4 <= dataHex.length) {
             val chunk = dataHex.substring(i, i + 4)
             val dtc = decodeDtcHex(chunk)
             if (dtc != null) {
                 dtcs.add(dtc)
             }
+            i += 4
         }
-        
+
         return dtcs.distinct()
     }
 }

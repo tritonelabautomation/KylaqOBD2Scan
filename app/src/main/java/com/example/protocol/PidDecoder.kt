@@ -46,15 +46,40 @@ object PidDecoder {
         val expectedServiceAck = (pidDef.service.toIntOrNull(16) ?: 1) + 0x40
         val expectedPid = pidDef.pid.toIntOrNull(16) ?: 0
 
-        val dataBytes: List<Int>
-        if (payloadBytes.size >= 2 && payloadBytes[0] == expectedServiceAck && payloadBytes[1] == expectedPid) {
-            // Standard format: [41, PID, A, B, C, D, ...]
-            dataBytes = payloadBytes.drop(2)
-        } else if (payloadBytes.size >= 1 && payloadBytes[0] == expectedServiceAck) {
-            dataBytes = payloadBytes.drop(1)
-        } else {
-            // Direct data bytes
-            dataBytes = payloadBytes
+        // FIX P0-2: For non-research PIDs we REQUIRE the payload to start with the exact
+        // positive service ack and the exact requested PID. A negative response (0x7F) is
+        // never a valid payload. A permissive "Direct data bytes" fallback was previously
+        // allowing malformed/unexpected responses to be silently decoded as telemetry.
+        val isResearch = pidDef.isResearch || pidDef.decoderType == DecoderType.RESEARCH_RAW
+
+        val dataBytes: List<Int> = when {
+            payloadBytes.size >= 2 &&
+                payloadBytes[0] == expectedServiceAck &&
+                payloadBytes[1] == expectedPid -> {
+                // Standard format: [41, PID, A, B, C, D, ...]
+                payloadBytes.drop(2)
+            }
+            isResearch && payloadBytes.size >= 1 && payloadBytes[0] == expectedServiceAck -> {
+                // Research PIDs may legitimately have a different PID byte; only require
+                // the positive service ack when the caller has marked the PID as research.
+                payloadBytes.drop(1)
+            }
+            isResearch -> {
+                // Research fallback: treat the raw payload as data bytes.
+                payloadBytes
+            }
+            else -> {
+                // Strict path: refuse to decode malformed/unexpected responses.
+                return DecodedResult(
+                    parameterName = pidDef.name,
+                    numericValue = null,
+                    displayValue = "INVALID_RESPONSE",
+                    unit = pidDef.unit,
+                    rawPayloadHex = rawHex,
+                    dataBytes = emptyList(),
+                    isKnown = false
+                )
+            }
         }
 
         val a = dataBytes.getOrNull(0) ?: 0

@@ -52,7 +52,11 @@ class PidCapabilityManager {
 
     fun isPidSupported(ecuId: String, pidId: String): Boolean {
         val clean = pidId.uppercase().removePrefix("01")
-        val ecuMap = ecuCapabilityMap[ecuId.uppercase()] ?: return isPidSupported(pidId)
+        // FIX P0-3: Per-ECU queries must NOT fall back to the global capability map.
+        // Returning global capability for an unknown ECU is dangerous because it implies
+        // "this specific ECU supports the PID" when in fact the ECU was never tested.
+        // Callers that want a global aggregate view should use the no-ECU overload.
+        val ecuMap = ecuCapabilityMap[ecuId.uppercase()] ?: return false
         val status = ecuMap[clean] ?: ecuMap[pidId.uppercase()]
         return status == CapabilityStatus.SUPPORTED ||
                 status == CapabilityStatus.BITMAP_SUPPORTED ||

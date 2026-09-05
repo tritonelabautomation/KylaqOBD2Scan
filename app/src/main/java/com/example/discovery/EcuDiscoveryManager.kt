@@ -806,27 +806,28 @@ class EcuDiscoveryManager(
     /**
      * Extracts the Negative Response Code (NRC) from a negative response line.
      * Format: 7F <service> <NRC> or with CAN ID: <canId> 7F <service> <NRC>
+     *
+     * FIX P0-4: Use a strict whitespace-delimited token match so that legitimate
+     * CAN IDs (e.g. "7F8") and data bytes that happen to contain the byte 0x7F
+     * are not mistaken for negative responses.
      */
     private fun extractNrcFromLines(lines: List<String>, service: Int, did: String): Int? {
+        val serviceHex = "%02X".format(service and 0xFF)
         for (line in lines) {
-            val trimmed = line.trim().uppercase()
-            if (trimmed.contains("7F")) {
-                // Try to extract NRC after 7F and service byte.
-                // Use an explicit Regex split to disambiguate Kotlin's
-                // CharSequence.split(vararg Char/String, ...) overload set.
-                val parts: List<String> = trimmed
-                    .replace("7F", " ")
-                    .split(Regex("\\s+"))
-                    .filter { it.isNotEmpty() }
-                if (parts.size >= 2) {
-                    try {
-                        val serviceByte = parts[0].toInt(16)
-                        val nrc = parts[1].toInt(16)
-                        if (serviceByte == service) {
-                            return nrc
-                        }
-                    } catch (_: Exception) {}
-                }
+            val tokens = line.trim().uppercase()
+                .split(Regex("\\s+"))
+                .filter { it.isNotEmpty() }
+            if (tokens.size < 3) continue
+
+            // A negative response token sequence is: [optional canId] 7F <service> <nrc>
+            // Walk the token list to find a 7F followed by the expected service byte.
+            for (i in tokens.indices) {
+                if (tokens[i] != "7F") continue
+                val serviceToken = tokens.getOrNull(i + 1) ?: continue
+                val nrcToken = tokens.getOrNull(i + 2) ?: continue
+                if (serviceToken != serviceHex) continue
+                val nrc = nrcToken.toIntOrNull(16) ?: continue
+                return nrc
             }
         }
         return null

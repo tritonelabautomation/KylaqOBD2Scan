@@ -59,10 +59,13 @@ class SimulationElmTransport(
         val validation = SafetyValidator.validateCommand(command)
         if (validation is ValidationResult.Rejected) {
             logRaw(isTx = true, canId = null, text = "$command [BLOCKED]", status = "BLOCKED")
+            // FIX P0-8: Use the semantically accurate ResponseStatus.BLOCKED instead of MALFORMED.
+            // MALFORMED implies a bad response was received; BLOCKED communicates that the
+            // safety layer refused to transmit the command in the first place.
             return@withContext ElmResponse(
                 rawText = "",
                 lines = emptyList(),
-                status = ResponseStatus.MALFORMED,
+                status = ResponseStatus.BLOCKED,
                 isPromptReceived = false,
                 durationMs = 0L,
                 errorMessage = "SAFETY BLOCK: ${validation.reason}"

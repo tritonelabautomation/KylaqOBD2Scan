@@ -23,7 +23,14 @@ enum class ResponseStatus {
     BUS_INIT_ERROR,
     TIMEOUT,
     MALFORMED,
-    UNKNOWN
+    UNKNOWN,
+    /**
+     * FIX P0-8: The command was blocked by SafetyValidator before reaching the vehicle.
+     * Semantically distinct from MALFORMED (which implies a bad response) and from
+     * UNKNOWN (which implies an unrecognized status from the ELM327). Carries the
+     * safety reason in the transaction record's errorMessage field.
+     */
+    BLOCKED
 }
 
 /**

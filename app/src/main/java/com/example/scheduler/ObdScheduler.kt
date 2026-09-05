@@ -377,8 +377,11 @@ class ObdScheduler(
         _canResponseCount.value += isoTpMessages.size
 
         // 4. Decode each reassembled response (prioritizing expected ECU e.g. 7E8)
+        // FIX P0-7: Expected ECU must sort FIRST (0 = lowest sort key = processed first in ascending sort).
+        // Previously "1 else 0" incorrectly placed expected ECU AFTER other ECUs, allowing other
+        // ECUs' responses to be decoded first and contaminate the per-PID validated ECU state.
         val sortedMessages = isoTpMessages.sortedBy { msg ->
-            if (msg.canId.equals(pidDef.expectedRxId, ignoreCase = true) || msg.canId.equals("7E8", ignoreCase = true)) 1 else 0
+            if (msg.canId.equals(pidDef.expectedRxId, ignoreCase = true) || msg.canId.equals("7E8", ignoreCase = true)) 0 else 1
         }
 
         for (msg in sortedMessages) {

@@ -194,7 +194,8 @@ class ScanCoordinator(
             // Mode 03 (Current)
             val mode03 = transport.sendCommand("03", 3000)
             if (mode03.status == com.example.model.ResponseStatus.OK) {
-                val codes = dtcDecoder.extractDtcs(mode03.lines.joinToString(""))
+                // FIX P0-5: pass mode=0x03 so DtcDecoder requires positive ack 0x43
+                val codes = dtcDecoder.extractDtcs(mode03.lines.joinToString(""), mode = 0x03)
                 codes.forEach { code ->
                     dtcs.add(DtcRecordEntity(vehicleId = vehicleId, tripId = sessionId, timestamp = System.currentTimeMillis(), code = code, description = "Active Fault", status = "ACTIVE"))
                 }
@@ -203,16 +204,18 @@ class ScanCoordinator(
             // Mode 07 (Pending)
             val mode07 = transport.sendCommand("07", 3000)
             if (mode07.status == com.example.model.ResponseStatus.OK) {
-                val codes = dtcDecoder.extractDtcs(mode07.lines.joinToString(""))
+                // FIX P0-5: pass mode=0x07 so DtcDecoder requires positive ack 0x47
+                val codes = dtcDecoder.extractDtcs(mode07.lines.joinToString(""), mode = 0x07)
                 codes.forEach { code ->
                     dtcs.add(DtcRecordEntity(vehicleId = vehicleId, tripId = sessionId, timestamp = System.currentTimeMillis(), code = code, description = "Pending Fault", status = "PENDING"))
                 }
             }
-            
+
             // Mode 0A (Permanent)
             val mode0A = transport.sendCommand("0A", 3000)
             if (mode0A.status == com.example.model.ResponseStatus.OK) {
-                val codes = dtcDecoder.extractDtcs(mode0A.lines.joinToString(""))
+                // FIX P0-5: pass mode=0x0A so DtcDecoder requires positive ack 0x4A
+                val codes = dtcDecoder.extractDtcs(mode0A.lines.joinToString(""), mode = 0x0A)
                 codes.forEach { code ->
                     dtcs.add(DtcRecordEntity(vehicleId = vehicleId, tripId = sessionId, timestamp = System.currentTimeMillis(), code = code, description = "Permanent Fault", status = "PERMANENT"))
                 }

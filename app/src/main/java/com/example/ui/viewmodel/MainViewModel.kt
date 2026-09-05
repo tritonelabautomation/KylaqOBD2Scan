@@ -679,7 +679,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val isoTp = com.example.protocol.IsoTpParser.reassembleLines(resp.lines)
             val allDtcs = mutableListOf<String>()
             for (msg in isoTp) {
-                allDtcs.addAll(com.example.protocol.DtcDecoder.extractDtcs(msg.reconstructedPayloadHex))
+                // FIX P0-5: Pass mode=0x03 so DtcDecoder validates response is 43 (positive Mode 03 ack)
+                allDtcs.addAll(com.example.protocol.DtcDecoder.extractDtcs(msg.reconstructedPayloadHex, mode = 0x03))
             }
             saveDtcs(allDtcs.distinct(), "CONFIRMED")
         }
@@ -688,13 +689,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun fetchPendingDtcs() {
         val transport = activeTransport ?: return
         if (!transport.isConnected) return
-        
+
         viewModelScope.launch {
             val resp = transport.sendCommand("07", 5000L)
             val isoTp = com.example.protocol.IsoTpParser.reassembleLines(resp.lines)
             val allDtcs = mutableListOf<String>()
             for (msg in isoTp) {
-                allDtcs.addAll(com.example.protocol.DtcDecoder.extractDtcs(msg.reconstructedPayloadHex))
+                // FIX P0-5: Pass mode=0x07 so DtcDecoder validates response is 47 (positive Mode 07 ack)
+                allDtcs.addAll(com.example.protocol.DtcDecoder.extractDtcs(msg.reconstructedPayloadHex, mode = 0x07))
             }
             saveDtcs(allDtcs.distinct(), "PENDING")
         }
@@ -719,16 +721,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun saveDtcs(dtcs: List<String>, status: String) {
-        // CRITICAL FIX: Use current session's vehicle ID, NOT "first vehicle in database"
-        // Previously this caused DTC records to be associated with the wrong vehicle
-        // if multiple vehicles were registered in the garage.
+        // FIX P0-6: Use the explicitly known vehicle (current session → active selection).
+        // Do NOT silently fall back to "first vehicle in the database" - that previously caused
+        // DTCs read from one vehicle to be associated with another vehicle in a multi-vehicle garage.
         val currentSession = recordingManager.currentSessionMetadata.value
-        val vehicleId = currentSession?.vehicleId
-            ?: activeVehicleId.value
-            ?: recordingManager.tripRepository.allVehiclesFlow.firstOrNull()?.firstOrNull()?.id
+        val vehicleId: Long? = currentSession?.vehicleId ?: activeVehicleId.value
+
+        if (vehicleId == null) {
+            // No active vehicle context. Refuse to silently attach diagnostic data to an
+            // arbitrary vehicle. Surface a user-visible message instead.
+            android.util.Log.w(
+                "MainViewModel",
+                "saveDtcs: No active vehicle - ${dtcs.size} DTC(s) NOT saved to avoid misattribution."
+            )
+            return
+        }
+
         val tripId = currentSession?.sessionId
         val timestamp = System.currentTimeMillis()
-        
+
         for (code in dtcs) {
             val entity = com.example.data.db.entities.DtcRecordEntity(
                 vehicleId = vehicleId,
