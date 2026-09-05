@@ -1,7 +1,22 @@
 import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
+import java.time.Instant
 
+// Auto-increment versionCode using git commit count for unique APK tracking
+val gitCommit = providers.exec {
+    workingDir(rootDir)
+    commandLine("git", "rev-parse", "--short=8", "HEAD")
+}.standardOutput.asText.get().trim().ifEmpty { "unknown" }
 
-val gitCommit = "unknown"
+val gitCommitCount = providers.exec {
+    workingDir(rootDir)
+    commandLine("git", "rev-list", "--count", "HEAD")
+}.standardOutput.asText.get().trim().toIntOrNull() ?: 1
+
+// Build timestamp for uniqueness within same commit (seconds % 100)
+val buildTimestamp = Instant.now().epochSecond % 100
+
+// versionCode: base 100 + commit_count * 100 + timestamp -> e.g. commit 42 -> 4200+ts
+val computedVersionCode = 100 + gitCommitCount * 100 + buildTimestamp.toInt()
 
 plugins {
   alias(libs.plugins.android.application)
@@ -20,10 +35,11 @@ android {
     applicationId = "com.aistudio.obdlogger.kxmpzq"
     minSdk = 24
     targetSdk = 36
-    versionCode = 100
-    versionName = "1.0.0"
+    versionCode = computedVersionCode
+    versionName = "1.0.0.${gitCommitCount}+${gitCommit}"
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     buildConfigField("String", "GIT_COMMIT", "\"${gitCommit}\"")
+    buildConfigField("int", "GIT_COMMIT_COUNT", gitCommitCount)
   }
 
   signingConfigs {

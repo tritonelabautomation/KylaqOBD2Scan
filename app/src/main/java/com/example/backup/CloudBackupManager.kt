@@ -96,7 +96,7 @@ class CloudBackupManager(
      * After successful Google identity retrieval, exchanges the ID token with Firebase
      * so the user is actually authenticated against Firebase services (Firestore, etc.).
      */
-    suspend fun signInWithGoogle(activityContext: Context): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun signInWithGoogle(activity: android.app.Activity): Result<String> = withContext(Dispatchers.Main) {
         try {
             // Build GoogleIdOption
             val rawNonce = UUID.randomUUID().toString()
@@ -139,7 +139,7 @@ class CloudBackupManager(
                 .build()
 
             val response: GetCredentialResponse = credentialManager.getCredential(
-                context = activityContext,
+                context = activity,
                 request = request
             )
 

@@ -136,16 +136,18 @@ fun MainApp(viewModel: MainViewModel) {
                 tonalElevation = 8.dp
             ) {
                 bottomNavItems.forEach { screen ->
-                    val isSelected = currentRoute == screen.route ||
+                    // FIX (bug: tab highlight inconsistent on nested screens)
+                    val isCurrentScreen = currentRoute == screen.route ||
                             (screen.route == Screen.PidDetail.route && currentRoute?.startsWith("pid_detail") == true) ||
-                            (screen.route == Screen.Recordings.route && currentRoute?.startsWith("trip_detail") == true)
+                            (screen.route == Screen.Recordings.route && currentRoute?.startsWith("trip_detail") == true) ||
+                            (screen.route == Screen.Garage.route && (currentRoute?.startsWith("vehicle_profile") == true || currentRoute?.startsWith("add_vehicle") == true))
 
                     NavigationBarItem(
                         icon = { Icon(screen.icon, contentDescription = screen.title) },
-                        label = { Text(screen.title, fontSize = 10.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) },
-                        selected = isSelected,
+                        label = { Text(screen.title, fontSize = 10.sp, fontWeight = if (isCurrentScreen) FontWeight.Bold else FontWeight.Normal) },
+                        selected = isCurrentScreen,
                         onClick = {
-                            if (currentRoute != screen.route) {
+                            if (!isCurrentScreen) {
                                 navController.navigate(screen.route) {
                                     popUpTo(Screen.Dashboard.route) {
                                         saveState = true

@@ -34,6 +34,16 @@ fun SettingsScreen(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
+    // FIX (bug: Google sign-in button did nothing): Credential Manager requires an
+    // Activity context. LocalContext.current may be the Activity, a ContextWrapper, or
+    // (in tests/previews) a non-Activity context. Resolve defensively.
+    val activity: Activity? = remember(context) {
+        var ctx: Context? = context
+        while (ctx is android.content.ContextWrapper && ctx !is Activity) {
+            ctx = ctx.baseContext
+        }
+        ctx as? Activity
+    }
     val coroutineScope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
 
@@ -231,8 +241,15 @@ fun SettingsScreen(
 
                         Button(
                             onClick = {
+                                if (activity == null) {
+                                    Toast.makeText(context, "Cannot sign in: Activity not available.", Toast.LENGTH_LONG).show()
+                                    return@Button
+                                }
                                 coroutineScope.launch {
-                                    cloudManager.signInWithGoogle(context)
+                                    val result = cloudManager.signInWithGoogle(activity)
+                                    result.onFailure { err ->
+                                        Toast.makeText(context, "Google Sign-In failed: ${err.localizedMessage ?: err.message}", Toast.LENGTH_LONG).show()
+                                    }
                                 }
                             },
                             modifier = Modifier.fillMaxWidth().testTag("btn_google_sign_in"),
