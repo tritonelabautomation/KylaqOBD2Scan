@@ -941,14 +941,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     ))
     val aiChatHistory: StateFlow<List<com.example.model.ChatMessage>> = _aiChatHistory.asStateFlow()
 
-    // FIX P0-3: Wrap provider instantiation so that a misconfigured Firebase / Gemini
-    // build (missing API key, missing Firebase app, etc.) can never crash the
-    // ViewModel constructor. If FirebaseAiDoctorProvider throws during init, we fall
-    // back to StubAiDoctorProvider which returns a clear "AI Doctor unavailable"
-    // message instead of crashing the entire app at startup.
+    // FIX P0-3 + AI-not-configured UX: Resilient provider chain.
+    //  1) Try FirebaseAiDoctorProvider (Gemini API) — works when GEMINI_API_KEY is set
+    //     in BuildConfig and the user has configured a valid key.
+    //  2) Fall back to RuleBasedChatProvider — uses the on-device RuleBasedAnalysisEngine
+    //     over the user's recorded trip data. Works for ALL users out of the box, no
+    //     API key required, no internet required. Provides full conversational vehicle
+    //     diagnostics by mapping free-form queries to subsystem analyses.
+    //  3) Final safety net: StubAiDoctorProvider (only reached if both above fail).
+    //
+    // This fixes the "AI provider is not configured. A valid GEMINI_API_KEY is required"
+    // wall that previously greeted every user without a paid Gemini key. The Rule-Based
+    // provider is fully featured enough to replace the cloud model for routine diagnostics.
     private val aiProvider: com.example.ai.AiDoctorProvider by lazy {
         runCatching { com.example.ai.FirebaseAiDoctorProvider() }
-            .getOrElse { com.example.ai.StubAiDoctorProvider() }
+            .getOrElse {
+                runCatching { com.example.ai.RuleBasedChatProvider(recordingManager.tripRepository) }
+                    .getOrElse { com.example.ai.StubAiDoctorProvider() }
+            }
     }
 
     fun sendAiMessage(query: String) {

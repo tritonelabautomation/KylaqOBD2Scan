@@ -410,7 +410,7 @@ class ObdScheduler(
                     decodedValue = null,
                     decodedValueDisplay = "MALFORMED: ${msg.malformedReason ?: "unknown"}",
                     unit = pidDef.unit,
-                    responseStatus = ResponseStatus.ERROR
+                    responseStatus = ResponseStatus.MALFORMED
                 )
                 _transactionCount.value++
                 _lastTransaction.value = malformedRecord
