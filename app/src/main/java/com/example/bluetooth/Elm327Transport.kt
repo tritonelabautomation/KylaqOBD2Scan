@@ -11,6 +11,8 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.yield
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.TimeoutCancellationException
 
 import java.io.InputStream
 import java.io.OutputStream
@@ -51,6 +53,11 @@ interface ElmTransport {
 class BluetoothElmTransport(
     private val socket: BluetoothSocket
 ) : ElmTransport {
+    companion object {
+        /** 15 seconds — long enough for a healthy RFCOMM handshake, short enough to avoid user-perceived freeze on a dead peer. */
+        private const val CONNECT_TIMEOUT_MS = 15_000L
+    }
+
     private val transportMutex = Mutex()
 
     private var inputStream: InputStream? = null
@@ -70,12 +77,28 @@ class BluetoothElmTransport(
     override suspend fun connect(): Boolean = withContext(Dispatchers.IO) {
         try {
             if (!socket.isConnected) {
-                socket.connect()
+                // FIX P0-1: Bound RFCOMM connect() with a 15s timeout.
+                // A stale or unresponsive peer (paired but out of range, half-open
+                // socket, or zombie ELM327) can otherwise hang the call for ~30s
+                // (Android BluetoothSocket default) or indefinitely, freezing the
+                // entire transport layer and every dependent subsystem (scheduler,
+                // discovery, dashboard). 15s is long enough for a healthy peer
+                // (typical 1-3s) and short enough to surface the failure to the
+                // user before they assume the app is dead.
+                withTimeout(CONNECT_TIMEOUT_MS) {
+                    socket.connect()
+                }
             }
             inputStream = socket.inputStream
             outputStream = socket.outputStream
             connected = true
             true
+        } catch (e: TimeoutCancellationException) {
+            connected = false
+            logRaw(isTx = false, canId = null, text = "Connection timeout after ${CONNECT_TIMEOUT_MS}ms (peer may be unreachable)", status = "TIMEOUT")
+            // Best-effort cleanup of the stuck socket so the next attempt starts fresh
+            try { socket.close() } catch (_: Exception) {}
+            false
         } catch (e: Exception) {
             connected = false
             logRaw(isTx = false, canId = null, text = "Connection failed: ${e.localizedMessage}", status = "ERROR")

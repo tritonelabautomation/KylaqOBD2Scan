@@ -941,7 +941,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     ))
     val aiChatHistory: StateFlow<List<com.example.model.ChatMessage>> = _aiChatHistory.asStateFlow()
 
-    private val aiProvider: com.example.ai.AiDoctorProvider = com.example.ai.FirebaseAiDoctorProvider()
+    // FIX P0-3: Wrap provider instantiation so that a misconfigured Firebase / Gemini
+    // build (missing API key, missing Firebase app, etc.) can never crash the
+    // ViewModel constructor. If FirebaseAiDoctorProvider throws during init, we fall
+    // back to StubAiDoctorProvider which returns a clear "AI Doctor unavailable"
+    // message instead of crashing the entire app at startup.
+    private val aiProvider: com.example.ai.AiDoctorProvider by lazy {
+        runCatching { com.example.ai.FirebaseAiDoctorProvider() }
+            .getOrElse { com.example.ai.StubAiDoctorProvider() }
+    }
 
     fun sendAiMessage(query: String) {
         val userMsg = com.example.model.ChatMessage(sender = com.example.model.MessageSender.USER, text = query)

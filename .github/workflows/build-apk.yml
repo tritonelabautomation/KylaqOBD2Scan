@@ -43,3 +43,24 @@ jobs:
         with:
           name: KylaqOBD2Scan-debug-apk
           path: app/build/outputs/apk/debug/*.apk
+
+      # FIX: Self-report build outcome to the commit so the commits page shows
+      # a green/red badge. Without this step the Actions run passes/fails but
+      # the commit status API returns empty - making CI look unproven to humans
+      # and to branch protection rules.
+      - name: Report commit status
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            STATE="success"
+            DESC="Build passed"
+          else
+            STATE="failure"
+            DESC="Build failed"
+          fi
+          gh api "repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -f state="$STATE" \
+            -f description="$DESC" \
+            -f context="ci/build-apk" || echo "Status report failed (non-fatal)"

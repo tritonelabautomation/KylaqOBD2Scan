@@ -126,6 +126,23 @@ object IsoTpParser {
                         } else {
                             0
                         }
+                        // FIX P0-2: ISO 15765-2 limits the 12-bit length field to 4095 bytes.
+                        // A frame advertising more than 4095 bytes is structurally impossible on
+                        // standard CAN (max 4095 data bytes for extended addressing, 4095 for
+                        // normal — the latter is already at the protocol maximum).
+                        // Accepting it unchallenged would cause unbounded growth of
+                        // payloadAccumulator and potential OOM on malicious/malformed ECUs.
+                        if (expectedTotalLength > 4095) {
+                            isCurrentMalformed = true
+                            currentMalformedReason = "First Frame length field ($expectedTotalLength) exceeds ISO 15765-2 maximum of 4095 — rejecting as malformed"
+                            expectedTotalLength = 0
+                            payloadAccumulator.clear()
+                            currentFrames.add(frame)
+                            continue
+                        }
+
+                        expectedSequenceNumber = 1
+                        payloadAccumulator.addAll(frame.payloadBytes)
 
                         if (expectedTotalLength < 8) {
                             isCurrentMalformed = true
