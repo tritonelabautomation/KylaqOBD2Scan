@@ -32,6 +32,18 @@ class FirebaseAiDoctorProvider : AiDoctorProvider {
     override val providerName: String = "Gemini API (REST)"
     override val modelName: String = "gemini-1.5-flash"
 
+    init {
+        // Fail fast at construction time when the API key is missing or still the
+        // placeholder. This allows the MainViewModel fallback chain to skip this
+        // provider and try the on-device RuleBasedChatProvider instead. Without
+        // this, the no-key error would be returned at runtime and the offline
+        // fallback would never be reached.
+        val apiKey = BuildConfig.GEMINI_API_KEY
+        if (apiKey.isBlank() || apiKey == "MY_GEMINI_API_KEY") {
+            throw IllegalStateException("GEMINI_API_KEY not configured")
+        }
+    }
+
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
@@ -41,7 +53,7 @@ class FirebaseAiDoctorProvider : AiDoctorProvider {
     override suspend fun analyze(request: AiDoctorRequest): AiDoctorResponse = withContext(Dispatchers.IO) {
         val apiKey = BuildConfig.GEMINI_API_KEY
         if (apiKey.isBlank() || apiKey == "MY_GEMINI_API_KEY") {
-            return@withContext AiDoctorResponse("AI provider is not configured. A valid GEMINI_API_KEY is required in your Secrets.", false)
+            throw IllegalStateException("GEMINI_API_KEY not configured")
         }
 
         try {

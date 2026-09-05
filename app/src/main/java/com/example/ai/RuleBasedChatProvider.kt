@@ -22,8 +22,8 @@ class RuleBasedChatProvider(
             val trips = tripRepository.allTripsFlow.first()
             val latestTrip = trips.lastOrNull()
             val report = if (latestTrip != null) {
-                val samples = tripRepository.getTelemetrySamplesForTrip(latestTrip.id)
-                val events = tripRepository.getDiagnosticEventsForTrip(latestTrip.id)
+                val samples = tripRepository.getSamplesForTrip(latestTrip.id)
+                val events = tripRepository.getEventsForTrip(latestTrip.id)
                 RuleBasedAnalysisEngine().analyzeTrip(latestTrip, samples, events)
             } else null
             val responseText = buildChatResponse(request.latestQuery, request.context, report)
