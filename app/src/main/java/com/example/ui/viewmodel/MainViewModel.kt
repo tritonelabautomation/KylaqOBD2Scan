@@ -725,7 +725,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // Do NOT silently fall back to "first vehicle in the database" - that previously caused
         // DTCs read from one vehicle to be associated with another vehicle in a multi-vehicle garage.
         val currentSession = recordingManager.currentSessionMetadata.value
-        val vehicleId: Long? = currentSession?.vehicleId ?: activeVehicleId.value
+        val vehicleId: String? = currentSession?.vehicleId ?: activeVehicleId.value
 
         if (vehicleId == null) {
             // No active vehicle context. Refuse to silently attach diagnostic data to an
