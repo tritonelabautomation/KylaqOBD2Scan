@@ -11,7 +11,10 @@ import com.example.data.RecordingManager
 import com.example.data.SettingsRepository
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.GoogleAuthProvider
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -90,6 +93,8 @@ class CloudBackupManager(
 
     /**
      * Initiates modern Google Sign-In using AndroidX Credential Manager.
+     * After successful Google identity retrieval, exchanges the ID token with Firebase
+     * so the user is actually authenticated against Firebase services (Firestore, etc.).
      */
     suspend fun signInWithGoogle(activityContext: Context): Result<String> = withContext(Dispatchers.IO) {
         try {
@@ -138,19 +143,33 @@ class CloudBackupManager(
                 request = request
             )
 
+            // FIX: Extract idToken at function scope so Firebase auth can use it
             val credential = response.credential
-            val email = when {
-                credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL -> {
-                    val googleIdTokenCredential = GoogleIdTokenCredential.createFrom(credential.data)
-                    googleIdTokenCredential.id
-                }
-                else -> {
-                    return@withContext Result.failure(Exception("Unsupported credential type"))
-                }
+            if (credential !is androidx.credentials.CustomCredential ||
+                credential.type != GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
+                return@withContext Result.failure(Exception("Unexpected credential type: ${credential::class.java.simpleName}"))
+            }
+            val googleIdTokenCredential = GoogleIdTokenCredential.createFrom(credential.data)
+            val email = googleIdTokenCredential.id
+            val idToken = googleIdTokenCredential.idToken
+            settingsRepository.setGoogleAccountEmail(email)
+
+            // FIX: Exchange Google ID token for a Firebase auth credential so Firebase
+            // services (Firestore rules, AppCheck, AI backend) actually know the user.
+            // Without this step, googleAccountEmail is saved but Firebase remains unauthenticated.
+            try {
+                val firebaseCredential = GoogleAuthProvider.getCredential(idToken, null)
+                FirebaseAuth.getInstance().signInWithCredential(firebaseCredential).await()
+                _syncStatusMessage.value = "Signed in to Google & Firebase as $email"
+            } catch (fbErr: Exception) {
+                // Don't fail the whole sign-in — local email is still saved.
+                // Surface the Firebase error so the user knows sync may be limited.
+                _syncStatusMessage.value =
+                    "Signed in to Google as $email, but Firebase auth failed: ${fbErr.localizedMessage ?: fbErr.message}"
             }
 
-            settingsRepository.setGoogleAccountEmail(email)
-            _syncStatusMessage.value = "Signed in as $email"
+
+
             Result.success(email)
         } catch (e: GetCredentialCancellationException) {
             Result.failure(Exception("Sign-in was cancelled by user."))
