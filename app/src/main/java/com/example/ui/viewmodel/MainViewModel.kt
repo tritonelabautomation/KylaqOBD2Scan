@@ -1021,7 +1021,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             dtcs = dtcString,
             appVersion = com.example.BuildConfig.VERSION_NAME,
             buildNumber = com.example.BuildConfig.VERSION_CODE,
-            gitCommit = "Unknown" // Could be injected via BuildConfig if configured
+            gitCommit = com.example.BuildConfig.GIT_COMMIT
         )
     }
 }

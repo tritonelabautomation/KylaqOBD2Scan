@@ -30,26 +30,65 @@ jobs:
         with:
           gradle-version: '9.3.1'
 
-
-      - name: Inject Git Commit
-        run: |
-          sed -i "s/val gitCommit = \"unknown\"/val gitCommit = \"${GITHUB_SHA::7}\"/" app/build.gradle.kts
       - name: Build debug APK
         run: gradle assembleDebug --stacktrace
 
+      # Extract actual evaluated version metadata from the built APK using aapt.
+      # This is the only reliable way to get the evaluated versionName and versionCode
+      # since Gradle templates in build.gradle.kts are not evaluated until build time.
+      - name: Extract APK metadata
+        id: apk-meta
+        run: |
+          # Install aapt (part of Android SDK build-tools)
+          sudo apt-get update -qq && sudo apt-get install -y -qq android-sdk-build-tools > /dev/null 2>&1 || true
 
+          APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
+          if [ -f "$APK_PATH" ]; then
+            echo "version_name=$(aapt dump badging "$APK_PATH" 2>/dev/null | grep "versionName" | sed 's/.*versionName='"'"'\([^'"'"']*\)'"'"'.*/\1/')" >> $GITHUB_OUTPUT
+            echo "version_code=$(aapt dump badging "$APK_PATH" 2>/dev/null | grep "versionCode" | sed 's/.*versionCode='"'"'\([^'"'"']*\)'"'"'.*/\1/')" >> $GITHUB_OUTPUT
+            echo "pkg_name=$(aapt dump badging "$APK_PATH" 2>/dev/null | grep "package: name=" | sed 's/.*name='"'"'\([^'"'"']*\)'"'"'.*/\1/')" >> $GITHUB_OUTPUT
+            echo "sha_short=${GITHUB_SHA::8}" >> $GITHUB_OUTPUT
+            echo "run_number=${GITHUB_RUN_NUMBER}" >> $GITHUB_OUTPUT
+          else
+            echo "version_name=unknown" >> $GITHUB_OUTPUT
+            echo "version_code=0" >> $GITHUB_OUTPUT
+            echo "pkg_name=unknown" >> $GITHUB_OUTPUT
+            echo "sha_short=${GITHUB_SHA::8}" >> $GITHUB_OUTPUT
+            echo "run_number=${GITHUB_RUN_NUMBER}" >> $GITHUB_OUTPUT
+          fi
+
+      # Rename APK to a deterministic, traceable name.
+      # Format: KylaqOBD2Scan-{versionName}-r{runNumber}-{git-sha}-debug.apk
       - name: Rename APK
         run: |
-          VERSION_NAME=$(grep 'versionName =' app/build.gradle.kts | awk -F'"' '{print $2}')
-          VERSION_CODE=$(grep 'versionCode =' app/build.gradle.kts | awk '{print $3}')
-          mv app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/OBDLogger-v${VERSION_NAME}-build${VERSION_CODE}-debug.apk || true
+          APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
+          if [ -f "$APK_PATH" ]; then
+            VN="${{ steps.apk-meta.outputs.version_name }}"
+            VC="${{ steps.apk-meta.outputs.version_code }}"
+            RN="${{ steps.apk-meta.outputs.run_number }}"
+            SHA="${{ steps.apk-meta.outputs.sha_short }}"
+            NEW_NAME="KylaqOBD2Scan-${VN}-r${RN}-${SHA}-debug.apk"
+            mv "$APK_PATH" "app/build/outputs/apk/debug/$NEW_NAME"
+            echo "Renamed to: $NEW_NAME"
+          fi
+
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
           name: KylaqOBD2Scan-debug-apk
           path: app/build/outputs/apk/debug/*.apk
 
-      # FIX: Self-report build outcome to the commit so the commits page shows
+      - name: Build summary
+        run: |
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| Package | ${{ steps.apk-meta.outputs.pkg_name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | ${{ steps.apk-meta.outputs.version_name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Version Code | ${{ steps.apk-meta.outputs.version_code }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| CI Run | #${{ steps.apk-meta.outputs.run_number }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Commit | \`${{ steps.apk-meta.outputs.sha_short }}\` |" >> $GITHUB_STEP_SUMMARY
+
+      # Self-report build outcome to the commit so the commits page shows
       # a green/red badge. Without this step the Actions run passes/fails but
       # the commit status API returns empty - making CI look unproven to humans
       # and to branch protection rules.

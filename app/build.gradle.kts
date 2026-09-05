@@ -1,7 +1,9 @@
 import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
-import java.time.Instant
 
-// Auto-increment versionCode using git commit count for unique APK tracking
+// Git metadata — available in both CI and local builds.
+// gitCommitCount is intentionally NOT used as the canonical versionCode because
+// Git history can change via rebase/squash/shallow-clone/fork, which would silently
+// change the build number of an identical source tree.
 val gitCommit = providers.exec {
     workingDir(rootDir)
     commandLine("git", "rev-parse", "--short=8", "HEAD")
@@ -12,11 +14,16 @@ val gitCommitCount = providers.exec {
     commandLine("git", "rev-list", "--count", "HEAD")
 }.standardOutput.asText.get().trim().toIntOrNull() ?: 1
 
-// Build timestamp for uniqueness within same commit (seconds % 100)
-val buildTimestamp = Instant.now().epochSecond % 100
-
-// versionCode: base 100 + commit_count * 100 + timestamp -> e.g. commit 42 -> 4200+ts
-val computedVersionCode = 100 + gitCommitCount * 100 + buildTimestamp.toInt()
+// CI monotonically increasing build number, falls back to gitCommitCount for local builds.
+// Play Store requires versionCode to never decrease: CI builds start at 10000+ so they
+// never collide with any pre-existing published versionCode (< 10000 assumed).
+val githubRunNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 0
+val computedVersionCode = if (githubRunNumber > 0) {
+    10000 + githubRunNumber
+} else {
+    // Local build: use gitCommitCount as a rough proxy (non-monotonic, but deterministic per checkout)
+    100 + gitCommitCount
+}
 
 plugins {
   alias(libs.plugins.android.application)
@@ -36,10 +43,11 @@ android {
     minSdk = 24
     targetSdk = 36
     versionCode = computedVersionCode
-    versionName = "1.0.0.${gitCommitCount}+${gitCommit}"
+    versionName = "1.0.0"
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     buildConfigField("String", "GIT_COMMIT", "\"${gitCommit}\"")
-    buildConfigField("String", "GIT_COMMIT_COUNT", "\"$gitCommitCount\"")
+    buildConfigField("String", "GIT_COMMIT_COUNT", "\"${gitCommitCount}\"")
+    buildConfigField("String", "GITHUB_RUN_NUMBER", "\"${githubRunNumber}\"")
   }
 
   signingConfigs {
