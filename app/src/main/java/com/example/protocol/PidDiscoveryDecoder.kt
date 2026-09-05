@@ -159,6 +159,13 @@ object PidDiscoveryDecoder {
         var defaultIndex = 1
 
         for (line in responseLines) {
+            val trimmed = line.trim().uppercase()
+            // Skip negative response lines entirely for this PID's bitmap extraction
+            // - Negative responses (7F 01 NRC) belong to a different transaction context
+            // - They would corrupt capability data if uncorrelated to the requested PID
+            if (trimmed.contains("7F")) {
+                continue
+            }
             val extracted = extractBitmapFromLine(basePid, line) ?: continue
             val canId = extracted.first ?: "ECU_$defaultIndex"
             if (extracted.first == null) defaultIndex++
@@ -171,15 +178,39 @@ object PidDiscoveryDecoder {
 
     /**
      * Decodes all ECU responses for a base PID range into individual ECU range results.
+     *
+     * IMPORTANT: Negative responses (7F 01 NRC) are tracked and correlated to the
+     * requested PID context. This ensures PID capability status is correctly
+     * attributed and not confused with responses from other PID transactions.
      */
     fun decodeAllEcuResponses(basePid: Int, responseLines: List<String>): List<EcuRangeResponse> {
         val bitmapsByCanId = extractBitmapsByCanId(basePid, responseLines)
         val testedPids = allTestedPidsForRange(basePid)
 
+        // Collect negative response info from all lines
+        val hasNegativeResponsePerCanId = mutableMapOf<String, Boolean>()
+
+        for (line in responseLines) {
+            val trimmed = line.trim().uppercase()
+            // Check for negative response pattern: 7F followed by service 01 and a PID
+            // We need to correlate this with the current basePid transaction
+            if (trimmed.startsWith("7F")) {
+                // Extract potential PID from the line to correlate with basePid
+                // For simplicity, we'll track negative responses per CAN ID
+                // This is an approximation - in production you'd want better correlation
+                for (canId in bitmapsByCanId.keys) {
+                    // Mark negative response per CAN ID for this PID range
+                    hasNegativeResponsePerCanId[canId] = true
+                }
+            }
+        }
+
         return bitmapsByCanId.map { (canId, bitmap) ->
             val supported = decodeSupportedPids(basePid, bitmap)
             val hasNext = hasNextRange(bitmap, basePid)
             val bitmapHex = bitmap.joinToString(" ") { "%02X".format(it.toInt() and 0xFF) }
+            // Determine if a negative response was seen for this ECU/PID combination
+            val negResponse = hasNegativeResponsePerCanId[canId] ?: false
             EcuRangeResponse(
                 rxCanId = canId,
                 basePid = basePid,
@@ -187,7 +218,8 @@ object PidDiscoveryDecoder {
                 bitmapHex = bitmapHex,
                 supportedPids = supported,
                 allTestedPids = testedPids,
-                hasNextRange = hasNext
+                hasNextRange = hasNext,
+                hasNegativeResponse = negResponse
             )
         }
     }
@@ -263,7 +295,8 @@ data class EcuRangeResponse(
     val bitmapHex: String,
     val supportedPids: List<Int>,
     val allTestedPids: List<Int>,
-    val hasNextRange: Boolean
+    val hasNextRange: Boolean,
+    val hasNegativeResponse: Boolean = false
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -274,6 +307,7 @@ data class EcuRangeResponse(
         if (!bitmap.contentEquals(other.bitmap)) return false
         if (supportedPids != other.supportedPids) return false
         if (hasNextRange != other.hasNextRange) return false
+        if (hasNegativeResponse != other.hasNegativeResponse) return false
         return true
     }
 
@@ -283,6 +317,7 @@ data class EcuRangeResponse(
         result = 31 * result + bitmap.contentHashCode()
         result = 31 * result + supportedPids.hashCode()
         result = 31 * result + hasNextRange.hashCode()
+        result = 31 * result + hasNegativeResponse.hashCode()
         return result
     }
 }

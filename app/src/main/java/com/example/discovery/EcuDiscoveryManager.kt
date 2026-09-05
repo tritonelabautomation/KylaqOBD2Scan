@@ -29,6 +29,40 @@ enum class UdsSupportStatus {
 }
 
 /**
+ * Per-DID UDS Result that preserves granular evidence:
+ * - service (e.g. 0x22)
+ * - DID (e.g. F189)
+ * - response status (POSITIVE, NEGATIVE, NOT_TESTED)
+ * - NRC (Negative Response Code) for negative responses
+ * - value (for positive responses)
+ * - ECU CAN ID
+ */
+data class UdsDidResult(
+    val ecuCanId: String,
+    val service: Int,
+    val did: String,
+    val status: UdsDidResponseStatus,
+    val nrc: Int? = null,       // Negative Response Code if status == NEGATIVE
+    val value: String? = null   // Decoded value if status == POSITIVE
+) {
+    /** 2-byte UDS DID as an integer (e.g. 0xF189 -> 61833) */
+    fun didInt(): Int {
+        val high = did.substring(0, 2).toInt(16)
+        val low = did.substring(2, 4).toInt(16)
+        return (high shl 8) or low
+    }
+}
+
+/**
+ * Granular UDS DID response status - distinguishes service observation from DID acceptance.
+ */
+enum class UdsDidResponseStatus {
+    POSITIVE,          // ECU returned 0x62 + DID + data
+    NEGATIVE,          // ECU returned 0x7F + service + NRC
+    NOT_TESTED         // No query issued for this DID on this ECU
+}
+
+/**
  * Detailed discovery result for a specific vehicle ECU on the CAN bus.
  *
  * Each responding CAN ID maintains its own independent capability state.
@@ -68,7 +102,8 @@ data class DiscoveredEcuInfo(
     val averageLatencyMs: Long = 0L,
     val udsSupported: UdsSupportStatus = UdsSupportStatus.UDS_UNKNOWN,
     val bitmapResults: Map<String, String> = emptyMap(),
-    val supportedServices: List<String> = emptyList()
+    val supportedServices: List<String> = emptyList(),
+    val udsResults: List<UdsDidResult> = emptyList()
 ) {
     fun toDiscoveryResult(): EcuDiscoveryResult = EcuDiscoveryResult(
         rxCanId = rxCanId,
@@ -93,9 +128,11 @@ data class EcuDiscoveryReport(
     val totalSupportedPids: Int,
     val totalScannedPids: Int,
     val isComplete: Boolean,
+    val completionReason: String = "UNKNOWN",
     val summaryMessage: String,
     val modeSupportMap: Map<String, Boolean> = emptyMap(),
     val modeCapabilityMap: Map<String, CapabilityStatus> = emptyMap(),
+    val perEcuModeStatus: Map<String, Map<String, CapabilityStatus>> = emptyMap(),
     val rawLogLines: List<String> = emptyList()
 )
 
@@ -155,6 +192,9 @@ class EcuDiscoveryManager(
         val ecuSwVerMap = mutableMapOf<String, String>()
         val ecuPartNumMap = mutableMapOf<String, String>()
         val ecuUdsStatusMap = mutableMapOf<String, UdsSupportStatus>()
+        
+        // FIX #7: Per-DID UDS results preserving granular evidence (DID + NRC + status)
+        val udsResults = mutableMapOf<String, MutableList<UdsDidResult>>()
 
         val modeSupportMap = mutableMapOf<String, Boolean>()
 
@@ -417,7 +457,34 @@ class EcuDiscoveryManager(
         // CRITICAL: DO NOT guess ECU roles from CAN IDs!
         // Display as "ECU at 7E8", "ECU at 7E9" unless identification data proves ECM/TCU/ABS.
         // NEVER invent ECU names or roles!
-        val allDiscoveredCanIds = (ecuSupportedPids.keys + latencyMap.keys + ecuVinMap.keys).distinct().sorted()
+        // FIX #2: Include EVERY source of ECU evidence to ensure no ECU is lost
+        // Mode 01 responders, latency, VIN, CALID, ECU Name, Part Number, SW Version, UDS status
+        val allDiscoveredCanIds = (
+            ecuSupportedPids.keys +
+            latencyMap.keys +
+            ecuVinMap.keys +
+            ecuCalIdMap.keys +
+            ecuNameMap.keys +
+            ecuPartNumMap.keys +
+            ecuSwVerMap.keys +
+            ecuUdsStatusMap.keys +
+            ecuSupportedServices.keys
+        ).distinct().sorted()
+
+        // Track which discovery methods yielded evidence per ECU for completion tracking
+        val ecuDiscoveryMethods = mutableMapOf<String, MutableSet<String>>()
+        for (rxId in allDiscoveredCanIds) {
+            ecuDiscoveryMethods[rxId] = mutableSetOf()
+            if (ecuSupportedPids.containsKey(rxId)) ecuDiscoveryMethods[rxId]?.add("MODE_01")
+            if (latencyMap.containsKey(rxId)) ecuDiscoveryMethods[rxId]?.add("LATENCY")
+            if (ecuVinMap.containsKey(rxId)) ecuDiscoveryMethods[rxId]?.add("VIN")
+            if (ecuCalIdMap.containsKey(rxId)) ecuDiscoveryMethods[rxId]?.add("CALID")
+            if (ecuNameMap.containsKey(rxId)) ecuDiscoveryMethods[rxId]?.add("NAME")
+            if (ecuPartNumMap.containsKey(rxId)) ecuDiscoveryMethods[rxId]?.add("PART_NUMBER")
+            if (ecuSwVerMap.containsKey(rxId)) ecuDiscoveryMethods[rxId]?.add("SW_VERSION")
+            if (ecuUdsStatusMap.containsKey(rxId)) ecuDiscoveryMethods[rxId]?.add("UDS")
+        }
+
         val discoveredEcus = mutableListOf<DiscoveredEcuInfo>()
 
         for (rxId in allDiscoveredCanIds) {
@@ -432,8 +499,9 @@ class EcuDiscoveryManager(
             val bitmaps = ecuBitmaps[rxId] ?: emptyMap()
             val services = (ecuSupportedServices[rxId] ?: emptySet()).toList().sorted()
 
-            // Derive role strictly based on genuine identification data
-            val role = inferEcuRole(rxId, ecuName, calId)
+            // FIX #3: Role inference now includes ECU Name, Part Number, CALID, SW identifier
+            // but NOT VIN as role evidence (VIN identifies vehicle, not ECU type)
+            val role = inferEcuRole(rxId, ecuName, calId, partNum, swVer)
 
             discoveredEcus.add(
                 DiscoveredEcuInfo(
@@ -448,25 +516,73 @@ class EcuDiscoveryManager(
                     averageLatencyMs = avgLat,
                     udsSupported = udsStatus,
                     bitmapResults = bitmaps,
-                    supportedServices = services
+                    supportedServices = services,
+                    udsResults = udsResults[rxId]?.toList() ?: emptyList()
                 )
             )
         }
 
+        // FIX #4: Calculate actual scanned PID count from ranges actually queried
+        val actualTestedPids = mutableSetOf<Int>()
+        for (i in rangePids.indices) {
+            val baseOffset = rangePids[i].second
+            val isE0Range = baseOffset == 0xE0
+            val pidsInRange = if (isE0Range) 31 else 32
+            for (p in 0 until pidsInRange) {
+                val pidNum = baseOffset + p + 1
+                if (pidNum <= 0xFF) {
+                    actualTestedPids.add(pidNum)
+                }
+            }
+        }
+        val totalScanned = actualTestedPids.size
         val totalSupported = discoveredEcus.sumOf { it.supportedPids.size }
-        val totalScanned = rangePids.size * 32
 
+        // FIX #5: Determine actual completion state
+        val isComplete = discoveredEcus.isNotEmpty() &&
+            rangePids.all { (pidCmd, _) -> ecuSupportedPids.isNotEmpty() } &&
+            modeSupportMap["01"] == true &&
+            !(ecuContinuationState.isNotEmpty() && ecuContinuationState.values.none { it })
+
+        val completionReason = when {
+            discoveredEcus.isEmpty() -> "NO_ECUS_RESPONDED"
+            !isComplete && ecuContinuationState.isNotEmpty() && ecuContinuationState.values.none { it } -> "EARLY_TERMINATION_NO_CONTINUATION"
+            !isComplete -> "INCOMPLETE_SCAN"
+            else -> "COMPLETE"
+        }
+
+        // Build per-ECU mode status map
+        val perEcuModeStatus = mutableMapOf<String, Map<String, CapabilityStatus>>()
+        for (rxId in allDiscoveredCanIds) {
+            val perEcuModes = mutableMapOf<String, CapabilityStatus>()
+            perEcuModes["01"] = if (ecuSupportedPids.containsKey(rxId)) CapabilityStatus.SUPPORTED else CapabilityStatus.NOT_SUPPORTED
+            perEcuModes["02"] = if (ecuSupportedServices[rxId]?.contains("02") == true) CapabilityStatus.SUPPORTED else CapabilityStatus.NOT_SUPPORTED
+            perEcuModes["03"] = if (ecuSupportedServices[rxId]?.contains("03") == true) CapabilityStatus.SUPPORTED else CapabilityStatus.NOT_SUPPORTED
+            perEcuModes["06"] = if (ecuSupportedServices[rxId]?.contains("06") == true) CapabilityStatus.SUPPORTED else CapabilityStatus.NOT_SUPPORTED
+            perEcuModes["07"] = if (ecuSupportedServices[rxId]?.contains("07") == true) CapabilityStatus.SUPPORTED else CapabilityStatus.NOT_SUPPORTED
+            perEcuModes["09"] = if (ecuSupportedServices[rxId]?.contains("09") == true) CapabilityStatus.SUPPORTED else CapabilityStatus.NOT_SUPPORTED
+            perEcuModes["0A"] = if (ecuSupportedServices[rxId]?.contains("0A") == true) CapabilityStatus.SUPPORTED else CapabilityStatus.NOT_SUPPORTED
+            perEcuModes["22"] = when (ecuUdsStatusMap[rxId]) {
+                UdsSupportStatus.UDS_SUPPORTED -> CapabilityStatus.SUPPORTED
+                UdsSupportStatus.UDS_NEGATIVE_RESPONSE -> CapabilityStatus.SUPPORTED  // UDS service is observed but DID rejected
+                UdsSupportStatus.UDS_NO_RESPONSE -> CapabilityStatus.NOT_SUPPORTED
+                else -> CapabilityStatus.NOT_SUPPORTED
+            }
+            perEcuModeStatus[rxId] = perEcuModes.toMap()
+        }
+
+        // Global mode support remains as summary but is now distinct from per-ECU status
         val modeCapabilityMap = mutableMapOf<String, CapabilityStatus>()
         modeCapabilityMap["01"] = CapabilityStatus.SUPPORTED
         modeCapabilityMap["02"] = if (modeSupportMap["02"] == true) CapabilityStatus.SUPPORTED else CapabilityStatus.NOT_SUPPORTED
         modeCapabilityMap["03"] = if (modeSupportMap["03"] == true) CapabilityStatus.SUPPORTED else CapabilityStatus.NOT_SUPPORTED
-        modeCapabilityMap["04"] = CapabilityStatus.NOT_TESTED // Rule 12: Never marked SUPPORTED without testing
+        modeCapabilityMap["04"] = CapabilityStatus.NOT_TESTED
         modeCapabilityMap["06"] = if (modeSupportMap["06"] == true) CapabilityStatus.SUPPORTED else CapabilityStatus.NOT_SUPPORTED
         modeCapabilityMap["07"] = if (modeSupportMap["07"] == true) CapabilityStatus.SUPPORTED else CapabilityStatus.NOT_SUPPORTED
-        modeCapabilityMap["08"] = CapabilityStatus.NOT_TESTED // Mode 08 actuator control is not executed in discovery
+        modeCapabilityMap["08"] = CapabilityStatus.NOT_TESTED
         modeCapabilityMap["09"] = if (modeSupportMap["09"] == true) CapabilityStatus.SUPPORTED else CapabilityStatus.NOT_SUPPORTED
         modeCapabilityMap["0A"] = if (modeSupportMap["0A"] == true) CapabilityStatus.SUPPORTED else CapabilityStatus.NOT_SUPPORTED
-        modeCapabilityMap["22"] = if (ecuUdsStatusMap.values.any { it == UdsSupportStatus.UDS_SUPPORTED }) CapabilityStatus.SUPPORTED else CapabilityStatus.NOT_SUPPORTED
+        modeCapabilityMap["22"] = if (ecuUdsStatusMap.values.any { it == UdsSupportStatus.UDS_SUPPORTED || it == UdsSupportStatus.UDS_NEGATIVE_RESPONSE }) CapabilityStatus.SUPPORTED else CapabilityStatus.NOT_SUPPORTED
 
         val report = EcuDiscoveryReport(
             timestampUtc = startTimeUtc,
@@ -474,14 +590,17 @@ class EcuDiscoveryManager(
             detectedEcus = discoveredEcus,
             totalSupportedPids = totalSupported,
             totalScannedPids = totalScanned,
-            isComplete = true,
+            isComplete = isComplete,
+            completionReason = completionReason,
             summaryMessage = if (discoveredEcus.isNotEmpty()) {
-                "Discovered ${discoveredEcus.size} responding ECU(s) [${discoveredEcus.joinToString { it.rxCanId }}], $totalSupported supported PIDs"
+                val ecuSummary = discoveredEcus.joinToString { "${it.rxCanId} (${it.ecuRole})" }
+                "Discovered ${discoveredEcus.size} responding ECU(s) [$ecuSummary], $totalSupported supported PIDs across $totalScanned scanned PIDs"
             } else {
                 "No responding ECUs detected on CAN functional broadcast (7DF)"
             },
             modeSupportMap = modeSupportMap,
             modeCapabilityMap = modeCapabilityMap,
+            perEcuModeStatus = perEcuModeStatus,
             rawLogLines = logLines
         )
 
@@ -494,33 +613,66 @@ class EcuDiscoveryManager(
     }
 
     /**
-     * Infers ECU role strictly from evidence. If no identification evidence is present,
-     * returns "ECU at $rxCanId" to prevent guessing roles purely based on CAN IDs.
+     * Infers ECU role strictly from ECU identification evidence.
+     *
+     * Uses the hierarchy of evidence strength:
+     * Strong: ECU Name, Part Number, Calibration ID, Known ECU software identifiers
+     * Supporting: Software Version
+     * NEVER: VIN (vehicle identifier, not ECU role identifier)
+     *
+     * @param rxCanId The CAN ID of the ECU
+     * @param ecuName ECU Name from Mode 090A
+     * @param calId Calibration ID from Mode 0904
+     * @param partNum Part Number from UDS 22F187
+     * @param swVer Software Version from UDS 22F189
+     * @return The inferred ECU role string
      */
-    private fun inferEcuRole(rxCanId: String, ecuName: String?, calId: String?): String {
-        val combined = "${ecuName ?: ""} ${calId ?: ""}".uppercase()
+    private fun inferEcuRole(
+        rxCanId: String,
+        ecuName: String?,
+        calId: String?,
+        partNum: String?,
+        swVer: String?
+    ): String {
+        // Build comprehensive identification string from STRONG evidence sources only
+        // VIN is deliberately EXCLUDED as it identifies the vehicle, not the ECU role
+        val combined = "${ecuName ?: ""} ${calId ?: ""} ${partNum ?: ""} ${swVer ?: ""}".uppercase()
 
         return when {
+            // Engine Control Module - looks for engine-specific terms
             combined.contains("ECM") || combined.contains("ENGINE") || combined.contains("MED17") ||
                     combined.contains("SIMOS") || combined.contains("EA211") || combined.contains("DME") -> {
                 "ECU at $rxCanId (Engine Control Module)"
             }
+            // Transmission Control Module
             combined.contains("TCU") || combined.contains("TRANSMISSION") || combined.contains("GEARBOX") ||
                     combined.contains("DSG") || combined.contains("AQ250") -> {
                 "ECU at $rxCanId (Transmission Control Module)"
             }
+            // Brake / ABS modules
             combined.contains("ABS") || combined.contains("BRAKE") || combined.contains("ESP") || combined.contains("ESC") -> {
                 "ECU at $rxCanId (Brake / ABS Module)"
             }
+            // Body Control Module
             combined.contains("BCM") || combined.contains("BODY") -> {
                 "ECU at $rxCanId (Body Control Module)"
             }
+            // Airbag / SRS module
             combined.contains("AIRBAG") || combined.contains("SRS") -> {
                 "ECU at $rxCanId (Airbag / SRS Module)"
             }
+            // Network/Communication modules
+            combined.contains("CAN") || combined.contains("NETWORK") || combined.contains("COMMUNICATION") -> {
+                "ECU at $rxCanId (Network / Communication Module)"
+            }
+            // Generic fallback - no strong identification evidence
             else -> {
-                // Strict user mandate: Do not guess roles from CAN IDs!
-                "ECU at $rxCanId"
+                // Still provide some context even when uncertain
+                if (combined.contains("ECU")) {
+                    "ECU at $rxCanId (Generic ECU)"
+                } else {
+                    "ECU at $rxCanId"
+                }
             }
         }
     }
@@ -560,6 +712,30 @@ class EcuDiscoveryManager(
             val bytes = msg.reconstructedBytes
             if (bytes.isNotEmpty() && bytes[0] == expectedAck) {
                 return msg.canId
+            }
+        }
+        return null
+    }
+
+    /**
+     * Extracts the Negative Response Code (NRC) from a negative response line.
+     * Format: 7F <service> <NRC> or with CAN ID: <canId> 7F <service> <NRC>
+     */
+    private fun extractNrcFromLines(lines: List<String>, service: Int, did: String): Int? {
+        for (line in lines) {
+            val trimmed = line.trim().uppercase()
+            if (trimmed.contains("7F")) {
+                // Try to extract NRC after 7F and service byte
+                val parts = trimmed.replace("7F", " ").split().filter { it.isNotEmpty() }
+                if (parts.size >= 2) {
+                    try {
+                        val serviceByte = parts[0].toInt(16)
+                        val nrc = parts[1].toInt(16)
+                        if (serviceByte == service) {
+                            return nrc
+                        }
+                    } catch (_: Exception) {}
+                }
             }
         }
         return null
