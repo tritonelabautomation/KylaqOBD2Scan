@@ -39,7 +39,7 @@ android {
     versionName = "1.0.0.${gitCommitCount}+${gitCommit}"
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     buildConfigField("String", "GIT_COMMIT", "\"${gitCommit}\"")
-    buildConfigField("int", "GIT_COMMIT_COUNT", gitCommitCount)
+    buildConfigField("String", "GIT_COMMIT_COUNT", "\"$gitCommitCount\"")
   }
 
   signingConfigs {
