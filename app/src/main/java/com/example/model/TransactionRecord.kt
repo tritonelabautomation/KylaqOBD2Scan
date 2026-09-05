@@ -94,6 +94,7 @@ data class RecordingMetadata(
     val sessionId: String,
     var sessionName: String,
     val vehicle: String = "Škoda Kylaq 1.0 TSI (EA211)",
+    val vehicleId: String? = null,  // CRITICAL FIX: Added vehicleId for proper DTC/trip association
     val profile: String = "India-Market 1.0 TSI 6MT/6AT",
     val adapter: String = "ELM327 v1.5 Bluetooth Classic",
     val protocol: String = "ISO 15765-4 CAN 11-bit 500kbps",

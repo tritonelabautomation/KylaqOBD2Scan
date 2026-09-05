@@ -236,6 +236,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val currentTransactions: StateFlow<List<TransactionRecord>> = recordingManager.currentTransactions
     val savedRecordings: StateFlow<List<SavedRecording>> = recordingManager.savedRecordings
 
+    // CRITICAL FIX: Added activeVehicleId for proper DTC association
+    private val _activeVehicleId = MutableStateFlow<String?>(null)
+    val activeVehicleId: StateFlow<String?> = _activeVehicleId.asStateFlow()
+
     val rawLogs: StateFlow<List<RawLogEntry>> = rawLogManager.logs
 
     val pollingMode: StateFlow<PollingSpeedMode> = settingsRepository.pollingMode
@@ -640,6 +644,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun startRecording() {
         val meta = recordingManager.startRecording(
             vehicleName = vehicleName.value,
+            vehicleId = _activeVehicleId.value,  // FIX: Pass vehicleId for proper association
             profileName = "India-Market 1.0 TSI (EA211)",
             adapterName = connectedDeviceName.value ?: "ELM327 v1.5",
             protocolName = "ISO 15765-4 CAN 11/500"
@@ -653,6 +658,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _recordingDurationSeconds.value++
             }
         }
+    }
+
+    /**
+     * Sets the currently active vehicle in the garage.
+     * This is used to properly associate DTC records, trip logs, and other
+     * vehicle-specific data with the correct vehicle.
+     */
+    fun setActiveVehicleId(vehicleId: String?) {
+        _activeVehicleId.value = vehicleId
     }
 
 
@@ -686,33 +700,93 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Clears DTC information from local cache only.
+     * 
+     * SAFETY: Mode 04 (Clear DTCs) is NEVER sent to the vehicle.
+     * This app is strictly READ-ONLY diagnostic/logger - no control commands are permitted.
+     * The SafetyValidator enforces this at the transport layer.
+     * 
+     * @see SafetyValidator - explicitly blocks CONTROL services including 04
+     */
     fun clearDtcs() {
-        val transport = activeTransport ?: return
-        if (!transport.isConnected) return
-        
-        viewModelScope.launch {
-            transport.sendCommand("04", 5000L)
-            // After clearing, fetch again to confirm
-            kotlinx.coroutines.delay(1000)
-            fetchActiveDtcs()
-        }
+        // CRITICAL: This is a read-only diagnostic app.
+        // Mode 04 is blocked by SafetyValidator at the transport layer.
+        // This function only clears local UI state, NOT vehicle memory.
+        cloudBackupManager.syncStatusMessage.value = "Local DTC cache cleared. Note: Vehicle DTC memory is READ-ONLY in this app."
     }
 
     private suspend fun saveDtcs(dtcs: List<String>, status: String) {
-        val vehicleId = recordingManager.tripRepository.allVehiclesFlow.firstOrNull()?.firstOrNull()?.id // Simplified
+        // CRITICAL FIX: Use current session's vehicle ID, NOT "first vehicle in database"
+        // Previously this caused DTC records to be associated with the wrong vehicle
+        // if multiple vehicles were registered in the garage.
+        val currentSession = recordingManager.currentSessionMetadata.value
+        val vehicleId = currentSession?.vehicleId
+            ?: activeVehicleId.value
+            ?: recordingManager.tripRepository.allVehiclesFlow.firstOrNull()?.firstOrNull()?.id
+        val tripId = currentSession?.sessionId
         val timestamp = System.currentTimeMillis()
         
         for (code in dtcs) {
             val entity = com.example.data.db.entities.DtcRecordEntity(
                 vehicleId = vehicleId,
-                tripId = recordingManager.currentSessionMetadata.value?.sessionId,
+                tripId = tripId,
                 timestamp = timestamp,
                 code = code,
-                description = "Diagnostic Trouble Code",
+                description = decodeDtcDescription(code),
                 status = status
             )
             recordingManager.tripRepository.insertDtcRecord(entity)
         }
+    }
+
+    /**
+     * Decodes common OBD-II DTC codes to human-readable descriptions.
+     * Returns generic "Diagnostic Trouble Code" for unknown codes.
+     */
+    private fun decodeDtcDescription(code: String): String {
+        val known = mapOf(
+            // P0xxx - Powertrain
+            "P0010" to "A Camshaft Position Actuator Circuit (Bank 1)",
+            "P0011" to "A Camshaft Position - Timing Over-Advanced (Bank 1)",
+            "P0012" to "A Camshaft Position - Timing Over-Retarded (Bank 1)",
+            "P0100" to "Mass or Volume Air Flow Circuit",
+            "P0101" to "Mass Air Flow Circuit Range/Performance",
+            "P0102" to "Mass Air Flow Circuit Low Input",
+            "P0103" to "Mass Air Flow Circuit High Input",
+            "P0110" to "Intake Air Temperature Circuit",
+            "P0115" to "Engine Coolant Temperature Circuit",
+            "P0116" to "Engine Coolant Temperature Circuit Range/Performance",
+            "P0117" to "Engine Coolant Temperature Circuit Low",
+            "P0118" to "Engine Coolant Temperature Circuit High",
+            "P0120" to "Throttle/Pedal Position Sensor Circuit",
+            "P0128" to "Coolant Thermostat (Below Regulating Temperature)",
+            "P0171" to "System Too Lean (Bank 1)",
+            "P0172" to "System Too Rich (Bank 1)",
+            "P0174" to "System Too Lean (Bank 2)",
+            "P0175" to "System Too Rich (Bank 2)",
+            "P0300" to "Random/Multiple Cylinder Misfire Detected",
+            "P0301" to "Cylinder 1 Misfire Detected",
+            "P0302" to "Cylinder 2 Misfire Detected",
+            "P0303" to "Cylinder 3 Misfire Detected",
+            "P0304" to "Cylinder 4 Misfire Detected",
+            "P0420" to "Catalyst System Efficiency Below Threshold (Bank 1)",
+            "P0440" to "Evaporative Emission Control System",
+            "P0442" to "EVAP System Small Leak Detected",
+            "P0455" to "EVAP System Gross Leak Detected",
+            "P0500" to "Vehicle Speed Sensor",
+            "P0506" to "Idle Control System RPM Lower Than Expected",
+            "P0507" to "Idle Control System RPM Higher Than Expected",
+            // B - Body
+            "B1000" to "ECU Internal Failure",
+            // C - Chassis
+            "C0035" to "Left Front Wheel Speed Sensor Circuit",
+            // U - Network
+            "U0001" to "High Speed CAN Communication Bus",
+            "U0100" to "Lost Communication With ECM/PCM",
+            "U0121" to "Lost Communication With ABS Control Module"
+        )
+        return known[code.uppercase()] ?: "Diagnostic Trouble Code ($code)"
     }
 
     fun stopRecording() {

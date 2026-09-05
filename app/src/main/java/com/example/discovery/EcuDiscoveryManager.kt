@@ -214,6 +214,7 @@ class EcuDiscoveryManager(
 
         var continueScanningRanges = true
         val ecuContinuationState = mutableMapOf<String, Boolean>() // true if ECU wants next range
+        var probedRangeCount = 0  // FIX: Track how many PID ranges were actually queried
 
         for ((pidCmd, baseOffset) in rangePids) {
             if (!continueScanningRanges) break
@@ -233,6 +234,9 @@ class EcuDiscoveryManager(
             val resp = transport.sendCommand(pidCmd, timeoutMs = 2500L)
             val duration = SystemClock.elapsedRealtime() - startMs
             log("RX: [${resp.status}] ${resp.lines.joinToString(" | ")}")
+
+            // FIX: Track that this range was actually queried (success or fail)
+            probedRangeCount++
 
             if (resp.status == ResponseStatus.OK && resp.lines.isNotEmpty()) {
                 val ecuResponses = PidDiscoveryDecoder.decodeAllEcuResponses(baseOffset, resp.lines)
@@ -422,6 +426,13 @@ class EcuDiscoveryManager(
             swResults.forEach { (canId, sw) ->
                 ecuSwVerMap[canId] = sw
                 ecuUdsStatusMap[canId] = UdsSupportStatus.UDS_SUPPORTED
+                // FIX: Populate udsResults map with positive results
+                udsResults.getOrPut(canId) { mutableListOf() }.add(
+                    UdsDidResult(
+                        ecuCanId = canId, service = 0x22, did = "F189",
+                        status = UdsDidResponseStatus.POSITIVE, value = sw
+                    )
+                )
                 log("UDS SW Version from $canId: $sw")
             }
             val udsNegResponses = try {
@@ -433,6 +444,14 @@ class EcuDiscoveryManager(
             udsNegResponses.forEach { msg ->
                 val ecuId = msg.canId ?: "7E8"
                 ecuUdsStatusMap.putIfAbsent(ecuId, UdsSupportStatus.UDS_NEGATIVE_RESPONSE)
+                // FIX: Record negative UDS result with NRC
+                val nrc = if (msg.reconstructedBytes.size >= 3) msg.reconstructedBytes[2].toInt() and 0xFF else null
+                udsResults.getOrPut(ecuId) { mutableListOf() }.add(
+                    UdsDidResult(
+                        ecuCanId = ecuId, service = 0x22, did = "F189",
+                        status = UdsDidResponseStatus.NEGATIVE, nrc = nrc
+                    )
+                )
             }
         } else if (swResp.status == ResponseStatus.TIMEOUT || swResp.status == ResponseStatus.NO_DATA) {
             ecuSupportedPids.keys.forEach { ecuUdsStatusMap.putIfAbsent(it, UdsSupportStatus.UDS_NO_RESPONSE) }
@@ -448,7 +467,31 @@ class EcuDiscoveryManager(
             partResults.forEach { (canId, part) ->
                 ecuPartNumMap[canId] = part
                 ecuUdsStatusMap[canId] = UdsSupportStatus.UDS_SUPPORTED
+                // FIX: Populate udsResults map with positive results
+                udsResults.getOrPut(canId) { mutableListOf() }.add(
+                    UdsDidResult(
+                        ecuCanId = canId, service = 0x22, did = "F187",
+                        status = UdsDidResponseStatus.POSITIVE, value = part
+                    )
+                )
                 log("UDS Part Number from $canId: $part")
+            }
+            val udsNegResponses = try {
+                IsoTpParser.reassembleLines(partResp.lines).filter { msg ->
+                    !msg.isMalformed && msg.reconstructedBytes.size >= 2 &&
+                            msg.reconstructedBytes[0] == 0x7F && msg.reconstructedBytes[1] == 0x22
+                }
+            } catch (_: Exception) { emptyList() }
+            udsNegResponses.forEach { msg ->
+                val ecuId = msg.canId ?: "7E8"
+                ecuUdsStatusMap.putIfAbsent(ecuId, UdsSupportStatus.UDS_NEGATIVE_RESPONSE)
+                val nrc = if (msg.reconstructedBytes.size >= 3) msg.reconstructedBytes[2].toInt() and 0xFF else null
+                udsResults.getOrPut(ecuId) { mutableListOf() }.add(
+                    UdsDidResult(
+                        ecuCanId = ecuId, service = 0x22, did = "F187",
+                        status = UdsDidResponseStatus.NEGATIVE, nrc = nrc
+                    )
+                )
             }
         }
         delay(100)
@@ -523,8 +566,11 @@ class EcuDiscoveryManager(
         }
 
         // FIX #4: Calculate actual scanned PID count from ranges actually queried
+        // Only count PIDs from ranges that were actually queried (not all 8 ranges).
+        // probedRangeCount reflects ranges the loop actually entered; it stops on
+        // early termination when no ECU wants further continuation.
         val actualTestedPids = mutableSetOf<Int>()
-        for (i in rangePids.indices) {
+        for (i in 0 until probedRangeCount) {
             val baseOffset = rangePids[i].second
             val isE0Range = baseOffset == 0xE0
             val pidsInRange = if (isE0Range) 31 else 32
@@ -539,10 +585,22 @@ class EcuDiscoveryManager(
         val totalSupported = discoveredEcus.sumOf { it.supportedPids.size }
 
         // FIX #5: Determine actual completion state
+        // The isComplete flag must be TRUE for a normal successful scan. It is FALSE only when:
+        //   - No ECUs responded, OR
+        //   - Mode 01 is not supported at all, OR
+        //   - We did NOT iterate through all defined PID ranges (early break occurred), OR
+        //   - The transport errored out before completing.
+        // The continuation state condition was previously inverted, marking normal scans as incomplete.
+        val allRangesProbed = (0 until rangePids.size).all { i ->
+            val baseOffset = rangePids[i].second
+            // The range was probed if the continuation check didn't short-circuit before it
+            // We use a proxy: if ecuSupportedPids is non-empty for that offset's range
+            // a more robust check is whether we made it past that range index
+            probedRangeCount > i
+        }
         val isComplete = discoveredEcus.isNotEmpty() &&
-            rangePids.all { (pidCmd, _) -> ecuSupportedPids.isNotEmpty() } &&
             modeSupportMap["01"] == true &&
-            !(ecuContinuationState.isNotEmpty() && ecuContinuationState.values.none { it })
+            probedRangeCount >= rangePids.size
 
         val completionReason = when {
             discoveredEcus.isEmpty() -> "NO_ECUS_RESPONDED"
@@ -555,18 +613,46 @@ class EcuDiscoveryManager(
         val perEcuModeStatus = mutableMapOf<String, Map<String, CapabilityStatus>>()
         for (rxId in allDiscoveredCanIds) {
             val perEcuModes = mutableMapOf<String, CapabilityStatus>()
-            perEcuModes["01"] = if (ecuSupportedPids.containsKey(rxId)) CapabilityStatus.SUPPORTED else CapabilityStatus.NOT_SUPPORTED
-            perEcuModes["02"] = if (ecuSupportedServices[rxId]?.contains("02") == true) CapabilityStatus.SUPPORTED else CapabilityStatus.NOT_SUPPORTED
-            perEcuModes["03"] = if (ecuSupportedServices[rxId]?.contains("03") == true) CapabilityStatus.SUPPORTED else CapabilityStatus.NOT_SUPPORTED
-            perEcuModes["06"] = if (ecuSupportedServices[rxId]?.contains("06") == true) CapabilityStatus.SUPPORTED else CapabilityStatus.NOT_SUPPORTED
-            perEcuModes["07"] = if (ecuSupportedServices[rxId]?.contains("07") == true) CapabilityStatus.SUPPORTED else CapabilityStatus.NOT_SUPPORTED
-            perEcuModes["09"] = if (ecuSupportedServices[rxId]?.contains("09") == true) CapabilityStatus.SUPPORTED else CapabilityStatus.NOT_SUPPORTED
-            perEcuModes["0A"] = if (ecuSupportedServices[rxId]?.contains("0A") == true) CapabilityStatus.SUPPORTED else CapabilityStatus.NOT_SUPPORTED
+            perEcuModes["01"] = when {
+                ecuSupportedPids.containsKey(rxId) -> CapabilityStatus.SUPPORTED
+                modeSupportMap["01"] == true -> CapabilityStatus.NOT_SUPPORTED
+                else -> CapabilityStatus.NOT_TESTED
+            }
+            perEcuModes["02"] = when {
+                ecuSupportedServices[rxId]?.contains("02") == true -> CapabilityStatus.SUPPORTED
+                modeSupportMap["02"] == true -> CapabilityStatus.NOT_SUPPORTED
+                else -> CapabilityStatus.NOT_TESTED
+            }
+            perEcuModes["03"] = when {
+                ecuSupportedServices[rxId]?.contains("03") == true -> CapabilityStatus.SUPPORTED
+                modeSupportMap["03"] == true -> CapabilityStatus.NOT_SUPPORTED
+                else -> CapabilityStatus.NOT_TESTED
+            }
+            perEcuModes["06"] = when {
+                ecuSupportedServices[rxId]?.contains("06") == true -> CapabilityStatus.SUPPORTED
+                modeSupportMap["06"] == true -> CapabilityStatus.NOT_SUPPORTED
+                else -> CapabilityStatus.NOT_TESTED
+            }
+            perEcuModes["07"] = when {
+                ecuSupportedServices[rxId]?.contains("07") == true -> CapabilityStatus.SUPPORTED
+                modeSupportMap["07"] == true -> CapabilityStatus.NOT_SUPPORTED
+                else -> CapabilityStatus.NOT_TESTED
+            }
+            perEcuModes["09"] = when {
+                ecuSupportedServices[rxId]?.contains("09") == true -> CapabilityStatus.SUPPORTED
+                modeSupportMap["09"] == true -> CapabilityStatus.NOT_SUPPORTED
+                else -> CapabilityStatus.NOT_TESTED
+            }
+            perEcuModes["0A"] = when {
+                ecuSupportedServices[rxId]?.contains("0A") == true -> CapabilityStatus.SUPPORTED
+                modeSupportMap["0A"] == true -> CapabilityStatus.NOT_SUPPORTED
+                else -> CapabilityStatus.NOT_TESTED
+            }
             perEcuModes["22"] = when (ecuUdsStatusMap[rxId]) {
                 UdsSupportStatus.UDS_SUPPORTED -> CapabilityStatus.SUPPORTED
-                UdsSupportStatus.UDS_NEGATIVE_RESPONSE -> CapabilityStatus.SUPPORTED  // UDS service is observed but DID rejected
-                UdsSupportStatus.UDS_NO_RESPONSE -> CapabilityStatus.NOT_SUPPORTED
-                else -> CapabilityStatus.NOT_SUPPORTED
+                UdsSupportStatus.UDS_NEGATIVE_RESPONSE -> CapabilityStatus.NOT_SUPPORTED  // Service supported but DID rejected
+                UdsSupportStatus.UDS_NO_RESPONSE -> CapabilityStatus.TIMEOUT
+                else -> CapabilityStatus.NOT_TESTED
             }
             perEcuModeStatus[rxId] = perEcuModes.toMap()
         }

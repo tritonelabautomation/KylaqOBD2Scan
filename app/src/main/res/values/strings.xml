@@ -1,3 +1,18 @@
 <resources>
     <string name="app_name">OBD Logger</string>
+
+    <!--
+    Google Sign-In / Drive Backup Configuration:
+    To enable Google Drive backup, you must configure a real Google Cloud project.
+    See app/src/main/java/com/example/backup/CloudBackupManager.kt for detailed setup instructions.
+
+    1. Create a Google Cloud project: https://console.cloud.google.com
+    2. Enable "Google Identity" API
+    3. Create an OAuth 2.0 Web Client ID
+    4. Add your Android package name + SHA-1 fingerprint to the OAuth client
+    5. Set the Web Client ID below (or in local.properties as GOOGLE_WEB_CLIENT_ID)
+
+    Until configured, Google Sign-In and Drive backup are DISABLED.
+    -->
+    <string name="google_web_client_id">YOUR_GOOGLE_WEB_CLIENT_ID.apps.googleusercontent.com</string>
 </resources>

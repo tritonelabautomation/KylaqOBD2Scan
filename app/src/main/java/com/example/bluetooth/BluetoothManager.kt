@@ -139,16 +139,38 @@ class BluetoothManager(private val context: Context) {
             val initResults = transport.initializeAdapter(initSequence)
             val lastInitStatus = initResults.lastOrNull()?.second?.status
 
-            if (lastInitStatus == com.example.model.ResponseStatus.OK || initResults.isNotEmpty()) {
+            // FIX: Properly validate adapter initialization. Previous check accepted
+            // `initResults.isNotEmpty()` as a pass condition even if ALL AT commands
+            // failed. We now require:
+            //  - ATZ (reset) responded OK
+            //  - ATE0 (echo off) responded OK
+            //  - ATSP6 (CAN 11-bit 500kbps) responded OK
+            val resetOk = initResults.firstOrNull { it.first.equals("ATZ", ignoreCase = true) }
+                ?.second?.status == com.example.model.ResponseStatus.OK
+            val echoOffOk = initResults.firstOrNull { it.first.equals("ATE0", ignoreCase = true) }
+                ?.second?.status == com.example.model.ResponseStatus.OK
+            val protocolOk = initResults.firstOrNull { it.first.equals("ATSP6", ignoreCase = true) }
+                ?.second?.status == com.example.model.ResponseStatus.OK
+
+            val initSuccessful = (lastInitStatus == com.example.model.ResponseStatus.OK ||
+                    initResults.any { it.second.status == com.example.model.ResponseStatus.OK }) &&
+                    resetOk && echoOffOk && protocolOk
+
+            if (initSuccessful) {
                 activeTransport = transport
                 isSimulationMode = false
                 _connectionState.value = ConnectionState.CONNECTED
                 _statusMessage.value = "Connected to $deviceName"
                 return@withContext Pair(true, transport)
             } else {
+                val failureReasons = buildList {
+                    if (!resetOk) add("ATZ failed")
+                    if (!echoOffOk) add("ATE0 failed")
+                    if (!protocolOk) add("ATSP6 failed")
+                }.joinToString(", ")
                 transport.disconnect()
                 _connectionState.value = ConnectionState.ERROR
-                _statusMessage.value = "Adapter failed initialization sequence"
+                _statusMessage.value = "Adapter failed initialization: $failureReasons. Check ELM327 clone compatibility."
                 return@withContext Pair(false, null)
             }
         } catch (e: Exception) {

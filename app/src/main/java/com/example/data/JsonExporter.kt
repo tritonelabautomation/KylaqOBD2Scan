@@ -21,6 +21,7 @@ object JsonExporter {
             put("sessionId", metadata.sessionId)
             put("sessionName", metadata.sessionName)
             put("vehicle", metadata.vehicle)
+            put("vehicleId", metadata.vehicleId ?: JSONObject.NULL)  // FIX: Include vehicleId
             put("profile", metadata.profile)
             put("adapter", metadata.adapter)
             put("protocol", metadata.protocol)

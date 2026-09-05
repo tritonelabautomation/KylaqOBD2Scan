@@ -11,6 +11,23 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
+/**
+ * SECURITY WARNING: This provider calls the Gemini REST API directly using an API key
+ * embedded in BuildConfig (i.e. compiled into the APK as a string literal).
+ *
+ * Any client-side API key is extractable by decompiling the APK. This is acceptable
+ * only for:
+ *   - Research/development builds
+ *   - Low-traffic personal use
+ *
+ * For production deployment, you MUST:
+ *   1. Move the Gemini call to a backend proxy server that holds the key
+ *   2. Or use restricted API keys with Android app signing-key + package name restriction
+ *      (https://cloud.google.com/docs/authentication/api-keys#api_key_restrictions)
+ *   3. Or use the Firebase AI Logic SDK with App Check for token-based auth
+ *
+ * The current key is only read from BuildConfig and never written to disk or logs.
+ */
 class FirebaseAiDoctorProvider : AiDoctorProvider {
     override val providerName: String = "Gemini API (REST)"
     override val modelName: String = "gemini-1.5-flash"

@@ -73,6 +73,7 @@ class RecordingManager(
 
     fun startRecording(
         vehicleName: String = "Škoda Kylaq 1.0 TSI (EA211)",
+        vehicleId: String? = null,  // CRITICAL FIX: VehicleId for proper DTC/trip association
         profileName: String = "India-Market 1.0 TSI",
         adapterName: String = "ELM327 v1.5 Bluetooth Classic",
         protocolName: String = "ISO 15765-4 CAN 11-bit 500kbps"
@@ -90,6 +91,7 @@ class RecordingManager(
             sessionId = sessionId,
             sessionName = defaultName,
             vehicle = vehicleName,
+            vehicleId = vehicleId,
             profile = profileName,
             adapter = adapterName,
             protocol = protocolName,

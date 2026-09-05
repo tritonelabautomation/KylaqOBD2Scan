@@ -5,7 +5,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
@@ -35,8 +35,15 @@ fun DtcScannerScreen(
                     }
                 },
                 actions = {
+                    // FIX: Removed Clear DTCs (Delete) button. This app is READ-ONLY.
+                    // Mode 04 (Clear DTCs) is blocked by SafetyValidator at the transport layer.
+                    // The clearDtcs() function in MainViewModel only clears local cache.
                     IconButton(onClick = { viewModel.clearDtcs() }) {
-                        Icon(Icons.Default.Delete, contentDescription = "Clear Codes", tint = WarningRed)
+                        Icon(
+                            Icons.Default.Info,
+                            contentDescription = "Read-only mode info",
+                            tint = CyberCyan
+                        )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(

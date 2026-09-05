@@ -195,7 +195,8 @@ class BluetoothElmTransport(
             val resp = sendCommand(cmd, timeoutMs = 2500L)
             results.add(Pair(cmd, resp))
             // Brief pause between init commands for ELM327 microcontrollers
-            Thread.sleep(100)
+            // FIX: Use delay() in coroutine context instead of Thread.sleep() which causes ANR
+            kotlinx.coroutines.delay(100)
         }
         return results
     }

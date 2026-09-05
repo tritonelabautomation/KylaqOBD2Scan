@@ -56,6 +56,30 @@ class CloudBackupManager(
     }
 
     /**
+     * Reads the Google Web Client ID from strings.xml resource or BuildConfig.
+     * Returns null if not configured, which disables Google Sign-In gracefully
+     * rather than silently trusting whatever account the SDK has access to.
+     */
+    private fun readGoogleWebClientId(): String? {
+        // Try strings.xml resource first
+        val resId = context.resources.getIdentifier("google_web_client_id", "string", context.packageName)
+        if (resId != 0) {
+            val fromRes = context.getString(resId)
+            if (!fromRes.isNullOrBlank() && !fromRes.contains("YOUR_")) {
+                return fromRes
+            }
+        }
+        // Fallback: BuildConfig (set via gradle.properties / local.properties)
+        return try {
+            val field = com.example.BuildConfig::class.java.getField("GOOGLE_WEB_CLIENT_ID")
+            val value = field.get(null) as? String
+            if (!value.isNullOrBlank() && !value.contains("YOUR_")) value else null
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
      * Initiates modern Google Sign-In using AndroidX Credential Manager.
      */
     suspend fun signInWithGoogle(activityContext: Context): Result<String> = withContext(Dispatchers.IO) {
@@ -65,10 +89,33 @@ class CloudBackupManager(
             val md = MessageDigest.getInstance("SHA-256")
             val hashedNonce = md.digest(rawNonce.toByteArray()).joinToString("") { "%02x".format(it) }
 
-            // Using dummy server client ID or standard Google identity request
+            // CRITICAL FIX: Server Client ID must be a real Web Client ID from Google Cloud Console.
+            // Previously this was a placeholder ("dummy-client-id.apps.googleusercontent.com") which
+            // caused Credential Manager to return whatever default account the SDK had access to
+            // (e.g. "connected.driver@gmail.com") and trust it blindly. The email was persisted
+            // without any verified session.
+            //
+            // To configure real Google Sign-In:
+            //   1. Create a project in Google Cloud Console: https://console.cloud.google.com
+            //   2. Enable "Google Identity" / "Google Sign-In" API
+            //   3. Create OAuth 2.0 Client ID of type "Web application"
+            //   4. Add the package name + SHA-1 signing certificate fingerprint:
+            //        ./gradlew signingReport   (debug SHA-1)
+            //   5. Replace the placeholder below with the real Web Client ID.
+            //   6. Also set in res/values/strings.xml: <string name="google_web_client_id">...</string>
+            //
+            // Until configured, Google sign-in remains DISABLED — signInWithGoogle() returns
+            // an error rather than silently trusting an arbitrary account.
+            val serverClientId = readGoogleWebClientId()
+            if (serverClientId == null) {
+                return@withContext Result.failure(Exception(
+                    "Google Sign-In is not configured. Set GOOGLE_WEB_CLIENT_ID in local.properties " +
+                    "or res/values/strings.xml as 'google_web_client_id'. See CloudBackupManager.kt for setup."
+                ))
+            }
             val googleIdOption = GetGoogleIdOption.Builder()
                 .setFilterByAuthorizedAccounts(false)
-                .setServerClientId("dummy-client-id.apps.googleusercontent.com")
+                .setServerClientId(serverClientId)
                 .setAutoSelectEnabled(false)
                 .setNonce(hashedNonce)
                 .build()
@@ -120,7 +167,16 @@ class CloudBackupManager(
     }
 
     /**
-     * Executes backup of all local sessions to the designated Drive sync folder.
+     * Executes backup of all local sessions to the local cloud_drive_backup folder.
+     *
+     * NOTE: This currently copies ZIPs to a local folder only. There is NO actual
+     * Google Drive API integration — no Drive.Files.create, no Drive scope, no upload.
+     * The UI claims "Google Drive" but files are stored locally. To implement real Drive sync:
+     *   1. Add Google Drive API Android library (com.google.android.gms:play-services-drive)
+     *   2. Request "https://www.googleapis.com/auth/drive.file" scope after OAuth
+     *   3. Use Drive.DriveApi.newDriveResourcesClient() to create files
+     *   4. Replace the File.copyTo() call below with Drive API upload calls.
+     *
      * Guaranteed never to delete local files on failure.
      */
     suspend fun performBackupNow(): BackupSyncResult = withContext(Dispatchers.IO) {
@@ -160,7 +216,10 @@ class CloudBackupManager(
 
             val now = System.currentTimeMillis()
             settingsRepository.setLastBackupTimestamp(now)
-            val msg = "Backup completed! $backedUpCount trip(s) synchronized to Google Drive ($account)."
+            // FIX: Be honest about what happened. Files are NOT in Google Drive yet,
+            // they're copied to a local cloud_drive_backup folder. Real Drive upload
+            // requires the Google Drive Android API to be integrated.
+            val msg = "Backup prepared: $backedUpCount trip(s) copied to local cloud folder (Drive sync not yet enabled) for $account."
             _syncStatusMessage.value = msg
 
             BackupSyncResult(
