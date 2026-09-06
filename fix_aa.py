@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-content = '''<?xml version="1.0" encoding="utf-8"?>
+# Fix 1: Revert AndroidManifest.xml - NAVIGATION and minCarApiLevel
+manifest_content = '''<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
@@ -45,13 +46,12 @@ content = '''<?xml version="1.0" encoding="utf-8"?>
             <intent-filter>
                 <action android:name="androidx.car.app.CarAppService" />
                 <category android:name="androidx.car.app.category.IOT" />
-                <category android:name="androidx.car.app.category.NAVIGATION" />
             </intent-filter>
         </service>
 
         <meta-data
             android:name="androidx.car.app.minCarApiLevel"
-            android:value="7" />
+            android:value="1" />
             
         <meta-data
             android:name="com.google.android.gms.car.application"
@@ -72,5 +72,41 @@ content = '''<?xml version="1.0" encoding="utf-8"?>
 '''
 
 with open('app/src/main/AndroidManifest.xml', 'w', encoding='utf-8') as f:
-    f.write(content)
-print('AndroidManifest.xml updated successfully')
+    f.write(manifest_content)
+print('Fixed AndroidManifest.xml: reverted NAVIGATION, minCarApiLevel=1')
+
+# Fix 2: Fix isInitialized bug in ObdDashboardScreen.kt
+with open('app/src/main/java/com/example/auto/ObdDashboardScreen.kt', 'r', encoding='utf-8') as f:
+    screen_content = f.read()
+
+old_init = '''    private fun initializeOnce() {
+        if (isInitialized) return
+        isInitialized = true
+        
+        try {
+            AppContainer.init(carContext.applicationContext)
+            subscribeToTelemetry()
+        } catch (t: Throwable) {
+            Log.e("OBDLogger/AndroidAuto", "Failed to initialize AppContainer or subscribe to telemetry: ${t.message}", t)
+        }
+    }'''
+
+new_init = '''    private fun initializeOnce() {
+        if (isInitialized) return
+        
+        try {
+            AppContainer.init(carContext.applicationContext)
+            subscribeToTelemetry()
+            isInitialized = true  // Set AFTER successful initialization
+            Log.i("OBDLogger/AndroidAuto", "initializeOnce: success")
+        } catch (t: Throwable) {
+            // Do NOT set isInitialized = true on failure - allow retry
+            Log.e("OBDLogger/AndroidAuto", "initializeOnce: failed - will retry on next onCreate: ${t.message}", t)
+        }
+    }'''
+
+screen_content = screen_content.replace(old_init, new_init)
+
+with open('app/src/main/java/com/example/auto/ObdDashboardScreen.kt', 'w', encoding='utf-8') as f:
+    f.write(screen_content)
+print('Fixed ObdDashboardScreen.kt: isInitialized now set AFTER success')

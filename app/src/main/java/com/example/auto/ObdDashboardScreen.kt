@@ -128,13 +128,15 @@ class ObdDashboardScreen(carContext: CarContext) : Screen(carContext) {
 
     private fun initializeOnce() {
         if (isInitialized) return
-        isInitialized = true
         
         try {
             AppContainer.init(carContext.applicationContext)
             subscribeToTelemetry()
+            isInitialized = true  // Set AFTER successful initialization
+            Log.i("OBDLogger/AndroidAuto", "initializeOnce: success")
         } catch (t: Throwable) {
-            Log.e("OBDLogger/AndroidAuto", "Failed to initialize AppContainer or subscribe to telemetry: ${t.message}", t)
+            // Do NOT set isInitialized = true on failure - allow retry
+            Log.e("OBDLogger/AndroidAuto", "initializeOnce: failed - will retry on next onCreate: ${t.message}", t)
         }
     }
 

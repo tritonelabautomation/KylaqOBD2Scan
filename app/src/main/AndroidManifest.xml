@@ -44,13 +44,12 @@
             <intent-filter>
                 <action android:name="androidx.car.app.CarAppService" />
                 <category android:name="androidx.car.app.category.IOT" />
-                <category android:name="androidx.car.app.category.NAVIGATION" />
             </intent-filter>
         </service>
 
         <meta-data
             android:name="androidx.car.app.minCarApiLevel"
-            android:value="7" />
+            android:value="1" />
             
         <meta-data
             android:name="com.google.android.gms.car.application"
