@@ -15,6 +15,10 @@ enum class ValueSource {
 
 /**
  * High-fidelity live telemetry value with trust source and staleness tracking
+ *
+ * FIX P0-3: Added sourceEcuId to enable per-ECU telemetry isolation.
+ * When multiple ECUs respond to the same PID (e.g., 7E8 and 7E9 both responding to 010C),
+ * each ECU's value is tracked independently, preventing data collision.
  */
 data class LiveTelemetryValue(
     val parameterName: String,
@@ -26,8 +30,16 @@ data class LiveTelemetryValue(
     val isValid: Boolean = false,
     val isStale: Boolean = false,
     val sourcePid: String? = null,
+    /** FIX P0-3: Source ECU CAN ID for multi-ECU telemetry isolation */
+    val sourceEcuId: String? = null,
     val rawBytes: List<Int>? = null
-)
+) {
+    /**
+     * FIX P0-3: Composite key for ECU-aware telemetry storage.
+     * Format: "ECU_PID" (e.g., "7E8_010C")
+     */
+    fun ecuAwareKey(): String = "${sourceEcuId ?: "UNKNOWN"}_${sourcePid ?: "UNKNOWN"}"
+}
 
 /**
  * Central vehicle driving state classification

@@ -1,23 +1,18 @@
 package com.example.model
 
+import android.util.Log
+
 /**
- * Authoritative protocol profile for the Škoda Kylaq 1.0 TSI (EA211).
+ * Authoritative protocol profile for the Skoda Kylaq 1.0 TSI (EA211).
  *
- * Experimentally confirmed CAN configuration:
- * - Vehicle: Škoda Kylaq
- * - Engine: 1.0 TSI (EA211)
- * - Protocol: ISO 15765-4 CAN
- * - CAN identifier: 11-bit (Standard)
- * - Bitrate: 500,000 baud (500 kbit/s)
- * - ELM327 protocol: ATSP6
- * - Functional request ID: 0x7DF
- * - Physical request range: 0x7E0–0x7E7
- * - Typical physical response range: 0x7E8–0x7EF
- * - ISO-TP: enabled (multi-frame reassembly)
- * - Addressing: Normal 11-bit addressing
+ * FIX P0-2: Extended ECU mapping to handle non-standard CAN IDs.
+ * The original implementation defaulted to 7DF for unknown ECUs, which caused
+ * broadcast requests instead of targeted requests to specific ECUs.
  */
 object KylaqProtocolProfile {
-    const val VEHICLE_NAME = "Škoda Kylaq"
+    private const val TAG = "KylaqProtocolProfile"
+
+    const val VEHICLE_NAME = "Skoda Kylaq"
     const val ENGINE_NAME = "1.0 TSI (EA211)"
     const val PROTOCOL_NAME = "ISO 15765-4 CAN"
     const val CAN_ID_TYPE = "11-bit"
@@ -35,25 +30,32 @@ object KylaqProtocolProfile {
     const val NORMAL_ADDRESSING = true
 
     /**
-     * Safe adapter initialization sequence for ELM327 communicating with Škoda Kylaq.
+     * FIX P0-2: Standard ECU mapping for VW Group MQB platform.
      */
-    val DEFAULT_INIT_SEQUENCE = listOf(
-        "ATZ",   // Reset adapter
-        "ATE0",  // Echo off
-        "ATL0",  // Linefeeds off
-        "ATS0",  // Spaces off (cleaner throughput)
-        "ATH1",  // Headers on (required for CAN ID identification: 7E8, 7E9, etc.)
-        "ATSP6"  // Force ISO 15765-4 CAN (11-bit / 500k)
+    val STANDARD_ECU_MAPPING = mapOf(
+        "7E8" to "7E0",
+        "7E9" to "7E1",
+        "7EA" to "7E2",
+        "7EB" to "7E3",
+        "7EC" to "7E4",
+        "7ED" to "7E5",
+        "7EE" to "7E6",
+        "7EF" to "7E7"
     )
 
-    /**
-     * Harmless standard OBD request used to verify protocol communication with the vehicle.
-     */
+    private val dynamicEcuMapping = mutableMapOf<String, String>()
+
+    val DEFAULT_INIT_SEQUENCE = listOf(
+        "ATZ",
+        "ATE0",
+        "ATL0",
+        "ATS0",
+        "ATH1",
+        "ATSP6"
+    )
+
     const val PROTOCOL_VERIFICATION_COMMAND = "0100"
 
-    /**
-     * Fallback protocols available if ATSP6 communication fails to verify.
-     */
     val FALLBACK_PROTOCOLS = listOf(
         CanProtocol.ISO_15765_29B_500K,
         CanProtocol.ISO_15765_11B_250K,
@@ -61,16 +63,46 @@ object KylaqProtocolProfile {
         CanProtocol.AUTO
     )
 
-    /**
-     * Resolves the physical CAN request address for an observed physical CAN response ID.
-     */
+    fun registerEcuMapping(rxCanId: String, txCanId: String) {
+        val rx = rxCanId.uppercase()
+        val tx = txCanId.uppercase()
+        if (rx != tx) {
+            dynamicEcuMapping[rx] = tx
+            Log.d(TAG, "Registered dynamic ECU mapping: $rx -> $tx")
+        }
+    }
+
+    fun clearDynamicMappings() {
+        dynamicEcuMapping.clear()
+    }
+
+    fun getAllEcuMappings(): Map<String, String> {
+        return STANDARD_ECU_MAPPING + dynamicEcuMapping.toMap()
+    }
+
     fun getPhysicalRequestId(rxCanId: String): String {
         val upper = rxCanId.uppercase()
+        STANDARD_ECU_MAPPING[upper]?.let { return it }
+        dynamicEcuMapping[upper]?.let { return it }
         val idx = TYPICAL_RESPONSE_RANGE.indexOf(upper)
-        return if (idx in PHYSICAL_REQUEST_RANGE.indices) {
-            PHYSICAL_REQUEST_RANGE[idx]
-        } else {
-            FUNCTIONAL_REQUEST_ID
+        if (idx in PHYSICAL_REQUEST_RANGE.indices) {
+            return PHYSICAL_REQUEST_RANGE[idx]
         }
+        Log.w(TAG, "No TX mapping for ECU at $rxCanId, using functional broadcast (7DF)")
+        return FUNCTIONAL_REQUEST_ID
+    }
+
+    fun calculateRequestIdFromResponse(rxCanId: String): String? {
+        val upper = rxCanId.uppercase()
+        if (upper !in TYPICAL_RESPONSE_RANGE) return null
+        val idx = TYPICAL_RESPONSE_RANGE.indexOf(upper)
+        return PHYSICAL_REQUEST_RANGE.getOrNull(idx)
+    }
+
+    fun isKnownResponseId(canId: String): Boolean {
+        val upper = canId.uppercase()
+        return upper in TYPICAL_RESPONSE_RANGE ||
+               upper in STANDARD_ECU_MAPPING.keys ||
+               upper in dynamicEcuMapping.keys
     }
 }

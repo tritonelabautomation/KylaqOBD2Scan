@@ -155,17 +155,22 @@ class ObdScheduler(
         _isPolling.value = true
 
         // Launch periodic staleness check supervisor
+        // FIX P0-3: Per-ECU-PID staleness tracking
+        // Now handles composite keys like "7E8_010C" and "7E9_010C" independently
         stalenessJob = scope.launch(Dispatchers.Default) {
             while (isActive && _isPolling.value) {
                 delay(1000L)
                 val nowMonotonic = SystemClock.elapsedRealtime()
                 var updated = false
                 telemetryValues.forEach { (id, item) ->
-                    val staleThresholdMs = when (id) {
+                    // FIX P0-3: Extract PID from composite key (e.g., "7E8_010C" -> "010C")
+                    val pidId = if (id.contains("_")) id.substringAfter("_") else id
+                    val staleThresholdMs = when (pidId) {
                         "010C", "010D", "0111", "0149", "0162" -> 2500L // Fast items
                         "015E", "019D", "0104", "010B", "0110", "0105" -> 5000L // Medium items
                         else -> 15000L // Slow items
                     }
+                    // FIX P0-3: Each ECU's telemetry is independently checked for staleness
                     if (!item.isStale && (nowMonotonic - item.timestampMonotonic > staleThresholdMs)) {
                         telemetryValues[id] = item.copy(isStale = true)
                         updated = true
@@ -376,12 +381,21 @@ class ObdScheduler(
 
         _canResponseCount.value += isoTpMessages.size
 
-        // 4. Decode each reassembled response (prioritizing expected ECU e.g. 7E8)
-        // FIX P0-7: Expected ECU must sort FIRST (0 = lowest sort key = processed first in ascending sort).
-        // Previously "1 else 0" incorrectly placed expected ECU AFTER other ECUs, allowing other
-        // ECUs' responses to be decoded first and contaminate the per-PID validated ECU state.
+        // 4. Decode each reassembled response (prioritizing evidence-based preferred ECU)
+        // FIX P0-2: Sort by evidence-based ECU selection, not hardcoded 7E8.
+        // The preferred ECU is now determined by the capability manager based on actual
+        // discovery evidence (engine > transmission > alphabetical), not a global default.
+        val preferredEcu = capabilityManager.getPreferredEcuForPid(pidDef.id)
         val sortedMessages = isoTpMessages.sortedBy { msg ->
-            if (msg.canId.equals(pidDef.expectedRxId, ignoreCase = true) || msg.canId.equals("7E8", ignoreCase = true)) 0 else 1
+            val msgEcu = msg.canId?.uppercase() ?: ""
+            // Priority 1: Evidence-based preferred ECU (from capability discovery)
+            // Priority 2: Canonical engine ECU 7E8 (MQB standard)
+            // Priority 3: Any other responding ECU
+            when {
+                preferredEcu != null && msgEcu == preferredEcu.uppercase() -> 0
+                msgEcu == "7E8" -> 1
+                else -> 2
+            }
         }
 
         for (msg in sortedMessages) {
@@ -451,6 +465,7 @@ class ObdScheduler(
             }
 
             val source = if (pidDef.isResearch) ValueSource.RAW_OBSERVED else ValueSource.STANDARD_OBD
+            // FIX P0-3: Include ECU source ID for multi-ECU telemetry isolation
             val telemetryItem = LiveTelemetryValue(
                 parameterName = pidDef.name,
                 numericValue = decoded.numericValue,
@@ -461,11 +476,13 @@ class ObdScheduler(
                 isValid = decoded.isKnown,
                 isStale = false,
                 sourcePid = pidDef.id,
+                sourceEcuId = rxCanId,
                 rawBytes = msg.reconstructedBytes
             )
 
             val displayString = "${decoded.displayValue} ${decoded.unit}".trim()
-            updateTelemetry(pidDef.id, telemetryItem, displayString, decoded.numericValue)
+            // FIX P0-3: Pass ECU ID to updateTelemetry for ECU-aware storage
+            updateTelemetry(pidDef.id, telemetryItem, displayString, decoded.numericValue, rxCanId)
             appendRawHistory(pidDef.id, rxRecord)
 
             // Trigger powertrain cross-signal synthesis
@@ -473,22 +490,31 @@ class ObdScheduler(
         }
     }
 
+    /**
+     * FIX P0-3: Update telemetry with ECU-aware storage.
+     * When ecuId is provided, uses composite key "ECU_PID" for isolation.
+     * Falls back to PID-only key for backward compatibility.
+     */
     private fun updateTelemetry(
         pidId: String,
         telemetryItem: LiveTelemetryValue,
         displayString: String,
-        numericValue: Double? = null
+        numericValue: Double? = null,
+        ecuId: String? = null
     ) {
-        telemetryValues[pidId] = telemetryItem
+        // FIX P0-3: Use composite ECU-aware key for multi-ECU isolation
+        val ecuAwareKey = "${ecuId ?: "DEFAULT"}_$pidId"
+        telemetryValues[ecuAwareKey] = telemetryItem
         _liveTelemetryMap.value = telemetryValues.toMap()
 
+        // Update display maps with composite key
         val currDecoded = _liveDecodedMap.value.toMutableMap()
-        currDecoded[pidId] = displayString
+        currDecoded[ecuAwareKey] = displayString
         _liveDecodedMap.value = currDecoded
 
         if (numericValue != null) {
             val currNum = _liveNumericMap.value.toMutableMap()
-            currNum[pidId] = numericValue
+            currNum[ecuAwareKey] = numericValue
             _liveNumericMap.value = currNum
         }
     }
