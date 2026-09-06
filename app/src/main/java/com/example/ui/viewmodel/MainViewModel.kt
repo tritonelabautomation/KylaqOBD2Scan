@@ -111,69 +111,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 // 7E8 22 ...
                 //
                 // ISO-TP ensures frames from different CAN IDs are kept separate.
-                // Mode 09 uses functional addressing (7DF), so any ECU may respond.
-                // Architecture: accept first valid VIN from any responding ECU.
-                // This is consistent with EcuDiscoveryManager.parseMultiEcuAscii().
+                // VIN ECU Authority Model: Only 7E8 (Engine) and 7E1 (Transmission)
+                // are authoritative for VIN. Other ECUs cannot provide VIN.
 
-                val vinMessage = com.example.protocol.IsoTpParser
-                    .reassembleLines(resp.lines)
-                    .firstOrNull { message ->
-                        message.isComplete &&
-                        !message.isMalformed &&
-                        message.reconstructedBytes.size == 20 &&
-                        message.reconstructedBytes[0] == 0x49 &&
-                        message.reconstructedBytes[1] == 0x02 &&
-                        message.reconstructedBytes[2] == 0x01
+                val allMessages = com.example.protocol.IsoTpParser.reassembleLines(resp.lines)
+
+                // Collect all valid VIN candidates with their source ECU
+                val candidates = com.example.protocol.VinAuthority.collectVinCandidates(allMessages)
+
+                // Apply VIN ECU authority policy
+                val result = com.example.protocol.VinAuthority.selectVinByAuthority(candidates)
+
+                when (result) {
+                    is com.example.protocol.VinSelectionResult.Success -> {
+                        _vehicleVin.value = result.vin
+                        _vinDecodeResult.value = com.example.protocol.VinDecoder.decodeVin(result.vin, catalogRepository)
                     }
-
-                if (vinMessage == null) {
-                    _vehicleVin.value = "VIN Unavailable"
-                    _vinDecodeResult.value = null
-                    return@launch
+                    is com.example.protocol.VinSelectionResult.Ambiguous -> {
+                        _vehicleVin.value = "VIN Ambiguous"
+                        _vinDecodeResult.value = null
+                    }
+                    is com.example.protocol.VinSelectionResult.Unavailable -> {
+                        _vehicleVin.value = "VIN Unavailable"
+                        _vinDecodeResult.value = null
+                    }
                 }
-
-                val bytes = vinMessage.reconstructedBytes
-
-                // Extract 17 VIN bytes (positions 3-19)
-                val vinBytes = bytes.slice(3..19)
-
-                // Strict VIN character validation:
-                // VIN characters are: A-H, J-N, P-R, S-Z, 0-9
-                // Excluded: I, O, Q (to avoid ambiguity with 1, 0)
-                val validVinChars = Regex("^[A-HJ-NPR-Z0-9]$")
-                val vinChars = vinBytes.map { it.toChar() }
-
-                // Verify ALL 17 bytes are valid VIN ASCII characters
-                val allCharsValid = vinChars.all { ch ->
-                    ch.code in 0..127 && ch.toString().matches(validVinChars)
-                }
-
-                if (!allCharsValid) {
-                    _vehicleVin.value = "VIN Unavailable"
-                    _vinDecodeResult.value = null
-                    return@launch
-                }
-
-                // Construct VIN - already uppercase per VIN standard
-                val vin = vinChars.joinToString("")
-
-                // Final consistency check: regex validates format
-                // This is NOT the discovery mechanism, just validation
-                val validVinFormat = vin.matches(Regex("^[A-HJ-NPR-Z0-9]{17}$"))
-
-                if (!validVinFormat) {
-                    _vehicleVin.value = "VIN Unavailable"
-                    _vinDecodeResult.value = null
-                    return@launch
-                }
-
-                _vehicleVin.value = vin
-
-                _vinDecodeResult.value =
-                    com.example.protocol.VinDecoder.decodeVin(
-                        vin,
-                        catalogRepository
-                    )
 
             } catch (e: Exception) {
                 _vehicleVin.value = "Failed to parse VIN"
@@ -181,7 +143,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
-
     val transactionCount: StateFlow<Long> = obdScheduler.transactionCount
     val canResponseCount: StateFlow<Long> = obdScheduler.canResponseCount
     val errorCount: StateFlow<Long> = obdScheduler.errorCount

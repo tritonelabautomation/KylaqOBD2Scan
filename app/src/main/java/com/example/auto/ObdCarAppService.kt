@@ -25,21 +25,28 @@ class ObdCarAppService : CarAppService() {
 
     override fun onCreateSession(sessionInfo: SessionInfo): Session {
         Log.i("OBDLogger/AndroidAuto", "CarAppService onCreateSession(sessionInfo=$sessionInfo)")
+        // FIX TD-1: Previous code caught the throwable, logged it, and then
+        // immediately retried the SAME construction. If construction fails (e.g. DI
+        // container not initialized in the new process), the second attempt fails the
+        // same way, silently swallowing the error. We now propagate the failure so
+        // Android Auto can show a meaningful error and we never appear to "succeed"
+        // with a broken session.
         return try {
             ObdCarSession()
         } catch (t: Throwable) {
-            Log.e("OBDLogger/AndroidAuto", "Error creating ObdCarSession", t)
-            ObdCarSession()
+            Log.e("OBDLogger/AndroidAuto", "Error creating ObdCarSession — rethrowing", t)
+            throw t
         }
     }
 
     override fun onCreateSession(): Session {
         Log.i("OBDLogger/AndroidAuto", "CarAppService onCreateSession() [no-arg]")
+        // FIX TD-1: See above. No silent retry on the same broken path.
         return try {
             ObdCarSession()
         } catch (t: Throwable) {
-            Log.e("OBDLogger/AndroidAuto", "Error creating ObdCarSession", t)
-            ObdCarSession()
+            Log.e("OBDLogger/AndroidAuto", "Error creating ObdCarSession — rethrowing", t)
+            throw t
         }
     }
 
@@ -56,11 +63,12 @@ class ObdCarSession : Session() {
 
     override fun onCreateScreen(intent: Intent): Screen {
         Log.i("OBDLogger/AndroidAuto", "ObdCarSession onCreateScreen with intent: $intent")
+        // FIX TD-1: Propagate error instead of silently retrying the same broken path.
         return try {
             ObdDashboardScreen(carContext)
         } catch (t: Throwable) {
-            Log.e("OBDLogger/AndroidAuto", "Error instantiating ObdDashboardScreen", t)
-            ObdDashboardScreen(carContext)
+            Log.e("OBDLogger/AndroidAuto", "Error instantiating ObdDashboardScreen — rethrowing", t)
+            throw t
         }
     }
 }

@@ -14,6 +14,7 @@ import com.example.protocol.SafetyValidator
 import com.example.protocol.ValidationResult
 import com.example.protocol.PidDecoder
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -73,7 +74,9 @@ class ProfilesViewModel(application: Application) : AndroidViewModel(application
                 _testProgress.value = (index + 1) / totalRequests.toFloat()
                 
                 // Small delay between requests to not overwhelm ECU
-                withContext(Dispatchers.IO) { Thread.sleep(150) }
+                // FIX TD-2: Use delay() (suspends the coroutine without blocking a thread)
+                // instead of Thread.sleep() on Dispatchers.IO (which blocks a thread-pool thread).
+                delay(150L)
             }
 
             _isRunningTest.value = false

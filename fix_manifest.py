@@ -1,4 +1,5 @@
-<?xml version="1.0" encoding="utf-8"?>
+#!/usr/bin/env python3
+content = '''<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
@@ -68,3 +69,8 @@
     </application>
 
 </manifest>
+'''
+
+with open('app/src/main/AndroidManifest.xml', 'w', encoding='utf-8') as f:
+    f.write(content)
+print('AndroidManifest.xml updated successfully')

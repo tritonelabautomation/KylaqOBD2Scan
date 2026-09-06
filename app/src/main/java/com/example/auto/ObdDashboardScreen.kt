@@ -19,11 +19,14 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 class ObdDashboardScreen(carContext: CarContext) : Screen(carContext) {
+    
+    private var isInitialized = false
     init {
         Log.i("OBDLogger/AndroidAuto", "ObdDashboardScreen created")
         lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onCreate(owner: LifecycleOwner) {
                 Log.i("OBDLogger/AndroidAuto", "ObdDashboardScreen lifecycle onCreate")
+                initializeOnce()
             }
             override fun onStart(owner: LifecycleOwner) {
                 Log.i("OBDLogger/AndroidAuto", "ObdDashboardScreen lifecycle onStart")
@@ -54,22 +57,10 @@ class ObdDashboardScreen(carContext: CarContext) : Screen(carContext) {
     private var connectionState: ConnectionState = ConnectionState.DISCONNECTED
     private var protocolHealth: ProtocolHealth = ProtocolHealth.UNKNOWN
     
-    private var isSubscribed = false
 
     override fun onGetTemplate(): Template {
         try {
             Log.i("OBDLogger/AndroidAuto", "onGetTemplate called, connection: $connectionState, protocol: $protocolHealth")
-            
-            // AppContainer initialization in try-catch so it never blocks or prevents template return
-            try {
-                AppContainer.init(carContext.applicationContext)
-                if (!isSubscribed) {
-                    isSubscribed = true
-                    subscribeToTelemetry()
-                }
-            } catch (t: Throwable) {
-                Log.e("OBDLogger/AndroidAuto", "Failed to initialize AppContainer or subscribe to telemetry: ${t.message}", t)
-            }
 
             val paneBuilder = Pane.Builder()
 
@@ -132,6 +123,18 @@ class ObdDashboardScreen(carContext: CarContext) : Screen(carContext) {
                 .setTitle("OBD LOGGER")
                 .setHeaderAction(Action.APP_ICON)
                 .build()
+        }
+    }
+
+    private fun initializeOnce() {
+        if (isInitialized) return
+        isInitialized = true
+        
+        try {
+            AppContainer.init(carContext.applicationContext)
+            subscribeToTelemetry()
+        } catch (t: Throwable) {
+            Log.e("OBDLogger/AndroidAuto", "Failed to initialize AppContainer or subscribe to telemetry: ${t.message}", t)
         }
     }
 

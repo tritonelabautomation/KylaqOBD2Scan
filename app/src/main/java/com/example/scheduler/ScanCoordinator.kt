@@ -10,6 +10,8 @@ import com.example.data.db.AppDatabase
 import com.example.protocol.SafetyValidator
 import com.example.protocol.DtcDecoder
 import com.example.protocol.IsoTpParser
+import com.example.protocol.VinAuthority
+import com.example.protocol.VinSelectionResult
 import com.example.discovery.EcuDiscoveryManager
 import com.example.discovery.PidCapabilityManager
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -83,7 +85,7 @@ class ScanCoordinator(
 
         try {
             // 1. Adapter Init & Protocol Detect via DiagnosticSession
-            _progress.value = ScanProgress(ScanPhase.INIT_ADAPTER, "Initializing ELM327 for Škoda Kylaq...", 0.05f)
+            _progress.value = ScanProgress(ScanPhase.INIT_ADAPTER, "Initializing ELM327 for Ã…Â koda Kylaq...", 0.05f)
             val initResult = com.example.protocol.DiagnosticSession.initialize(transport)
             if (!initResult.isSuccess) {
                 return failScan("Adapter initialization failed")
@@ -169,45 +171,31 @@ class ScanCoordinator(
             if (isCancelled) return cancelScan()
 
             // 4. VIN
+            // VIN ECU Authority Model: Only 7E8 (Engine) and 7E1 (Transmission)
+            // are authoritative for VIN. Other ECUs cannot provide VIN.
             _progress.value = ScanProgress(ScanPhase.READ_VIN, "Reading VIN...", 0.4f)
             val vinResp = transport.sendCommand("0902", 3000)
             if (vinResp.status == ResponseStatus.OK && vinResp.lines.isNotEmpty()) {
                 try {
-                    // Mode 09 PID 02 response structure (SAE J1979):
-                    // Byte 0 = 0x49, Byte 1 = 0x02, Byte 2 = 0x01
-                    // Bytes 3-19 = 17 ASCII VIN characters (exactly 20 bytes total)
-                    val vinMessage = IsoTpParser
-                        .reassembleLines(vinResp.lines)
-                        .firstOrNull { msg ->
-                            msg.isComplete &&
-                            !msg.isMalformed &&
-                            msg.reconstructedBytes.size == 20 &&
-                            msg.reconstructedBytes[0] == 0x49 &&
-                            msg.reconstructedBytes[1] == 0x02 &&
-                            msg.reconstructedBytes[2] == 0x01
-                        }
+                    val allMessages = IsoTpParser.reassembleLines(vinResp.lines)
+                    val candidates = VinAuthority.collectVinCandidates(allMessages)
+                    val result = VinAuthority.selectVinByAuthority(candidates)
                     
-                    if (vinMessage != null) {
-                        val vinBytes = vinMessage.reconstructedBytes.slice(3..19)
-                        val validVinChars = Regex("^[A-HJ-NPR-Z0-9]$")
-                        val vinChars = vinBytes.map { it.toChar() }
-                        
-                        val allCharsValid = vinChars.all { ch ->
-                            ch.code in 0..127 && ch.toString().matches(validVinChars)
+                    when (result) {
+                        is VinSelectionResult.Success -> {
+                            vin = result.vin
                         }
-                        
-                        if (allCharsValid) {
-                            val candidateVin = vinChars.joinToString("")
-                            if (candidateVin.matches(Regex("^[A-HJ-NPR-Z0-9]{17}$"))) {
-                                vin = candidateVin
-                            }
+                        is VinSelectionResult.Ambiguous -> {
+                            vin = "VIN Ambiguous"
+                        }
+                        is VinSelectionResult.Unavailable -> {
+                            // VIN not available or not from authoritative ECU
                         }
                     }
                 } catch (e: Exception) {
                     // Ignore parsing errors
                 }
             }
-
             if (isCancelled) return cancelScan()
 
             // 5. Readiness
@@ -336,3 +324,5 @@ class ScanCoordinator(
         )
     }
 }
+
+

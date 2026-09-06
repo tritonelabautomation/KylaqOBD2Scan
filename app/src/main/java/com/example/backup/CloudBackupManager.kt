@@ -77,7 +77,7 @@ class CloudBackupManager(
         val resId = context.resources.getIdentifier("google_web_client_id", "string", context.packageName)
         if (resId != 0) {
             val fromRes = context.getString(resId)
-            if (!fromRes.isNullOrBlank() && !fromRes.contains("YOUR_")) {
+                        if (!fromRes.isNullOrBlank()) {
                 return fromRes
             }
         }
@@ -85,7 +85,7 @@ class CloudBackupManager(
         return try {
             val field = com.example.BuildConfig::class.java.getField("GOOGLE_WEB_CLIENT_ID")
             val value = field.get(null) as? String
-            if (!value.isNullOrBlank() && !value.contains("YOUR_")) value else null
+            if (!value.isNullOrBlank()) value else null
         } catch (_: Exception) {
             null
         }

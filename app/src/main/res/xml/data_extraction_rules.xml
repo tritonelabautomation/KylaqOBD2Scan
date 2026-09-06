@@ -5,11 +5,15 @@
 -->
 <data-extraction-rules>
     <cloud-backup>
-        <include domain="database" path="obd_research_logger.db" />
-        <include domain="file" path="recordings" />
+        <!-- FIX MED-1: Exclude large data from cloud backup to prevent timeouts and
+             excessive storage usage. Only shared preferences (user settings, profiles)
+             are included in cloud backup. -->
+        <exclude domain="database" path="obd_research_logger.db" />
+        <exclude domain="file" path="recordings" />
         <include domain="sharedpref" path="." />
     </cloud-backup>
     <device-transfer>
+        <!-- Device-to-device transfer: include everything (local only, no cloud impact). -->
         <include domain="database" path="obd_research_logger.db" />
         <include domain="file" path="recordings" />
         <include domain="sharedpref" path="." />

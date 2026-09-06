@@ -1,0 +1,26 @@
+﻿            // 4. VIN
+            // VIN ECU Authority Model: Only 7E8 (Engine) and 7E1 (Transmission)
+            // are authoritative for VIN. Other ECUs cannot provide VIN.
+            _progress.value = ScanProgress(ScanPhase.READ_VIN, "Reading VIN...", 0.4f)
+            val vinResp = transport.sendCommand("0902", 3000)
+            if (vinResp.status == ResponseStatus.OK && vinResp.lines.isNotEmpty()) {
+                try {
+                    val allMessages = IsoTpParser.reassembleLines(vinResp.lines)
+                    val candidates = VinAuthority.collectVinCandidates(allMessages)
+                    val result = VinAuthority.selectVinByAuthority(candidates)
+                    
+                    when (result) {
+                        is VinSelectionResult.Success -> {
+                            vin = result.vin
+                        }
+                        is VinSelectionResult.Ambiguous -> {
+                            vin = "VIN Ambiguous"
+                        }
+                        is VinSelectionResult.Unavailable -> {
+                            // VIN not available or not from authoritative ECU
+                        }
+                    }
+                } catch (e: Exception) {
+                    // Ignore parsing errors
+                }
+            }

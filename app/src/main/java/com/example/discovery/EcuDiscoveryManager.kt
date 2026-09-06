@@ -898,4 +898,57 @@ class EcuDiscoveryManager(
         } catch (_: Exception) {}
         return results
     }
+    /**
+     * Returns the authoritative VIN ECU CAN ID based on ECU discovery results.
+     *
+     * VIN authority policy:
+     * 1. If engine ECU (7E8) was discovered and responded, it is authoritative.
+     * 2. If engine ECU is not available but transmission ECU (7E1) was discovered,
+     *    it is a secondary authoritative source for VIN.
+     * 3. If neither was discovered but other ECUs responded, return null
+     *    (ambiguous - caller must handle multi-ECU case).
+     * 4. If no ECUs were discovered, return null (no authority established).
+     *
+     * @return The authoritative VIN ECU CAN ID, or null if authority cannot be determined.
+     */
+    fun getAuthoritativeVinEcuId(): String? {
+        val report = _discoveryReport.value ?: return null
+        val discoveredCanIds = report.detectedEcus.map { it.rxCanId.uppercase() }
+
+        // Priority 1: Engine ECU (7E8) - primary authoritative source
+        if ("7E8" in discoveredCanIds) {
+            return "7E8"
+        }
+
+        // Priority 2: Transmission ECU (7E1) - secondary authoritative source
+        if ("7E1" in discoveredCanIds) {
+            return "7E1"
+        }
+
+        // No authoritative ECU found in discovered ECUs
+        return null
+    }
+
+    /**
+     * Returns all ECU CAN IDs discovered during the last ECU discovery run.
+     * Used by VIN authority policy to detect ambiguous multi-ECU scenarios.
+     *
+     * @return List of discovered ECU CAN IDs, or empty list if no discovery run.
+     */
+    fun getDiscoveredEcuIds(): List<String> {
+        return _discoveryReport.value?.detectedEcus?.map { it.rxCanId } ?: emptyList()
+    }
+
+    /**
+     * Checks if a given CAN ID corresponds to an authoritative VIN ECU.
+     * Authoritative ECUs are: 7E8 (Engine), 7E1 (Transmission).
+     *
+     * @param canId The CAN ID to check.
+     * @return true if the CAN ID is an authoritative VIN ECU.
+     */
+    fun isAuthoritativeVinEcu(canId: String?): Boolean {
+        if (canId == null) return false
+        val upper = canId.uppercase()
+        return upper == "7E8" || upper == "7E1"
+    }
 }
