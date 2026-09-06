@@ -1,4 +1,4 @@
-package com.example.ui.viewmodel
+﻿package com.example.ui.viewmodel
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
@@ -97,22 +97,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             try {
-                // Mode 09 PID 02 response:
-                // 49 02 01 + 17 ASCII VIN bytes
+                // Mode 09 PID 02 response structure (SAE J1979):
+                // Byte 0 = 0x49 (Mode 09 + 0x40)
+                // Byte 1 = 0x02 (PID for VIN)
+                // Byte 2 = 0x01 (VIN record indicator)
+                // Bytes 3-19 = exactly 17 ASCII VIN characters
                 //
-                // The response may arrive as ISO-TP:
+                // Total payload: exactly 20 bytes.
+                //
+                // Response may arrive as ISO-TP multi-frame:
                 // 7E8 10 14 49 02 01 ...
                 // 7E8 21 ...
                 // 7E8 22 ...
                 //
-                // NEVER ASCII-decode the CAN ID or ISO-TP PCI bytes.
+                // ISO-TP ensures frames from different CAN IDs are kept separate.
+                // Mode 09 uses functional addressing (7DF), so any ECU may respond.
+                // Architecture: accept first valid VIN from any responding ECU.
+                // This is consistent with EcuDiscoveryManager.parseMultiEcuAscii().
 
                 val vinMessage = com.example.protocol.IsoTpParser
                     .reassembleLines(resp.lines)
                     .firstOrNull { message ->
                         message.isComplete &&
                         !message.isMalformed &&
-                        message.reconstructedBytes.size >= 20 &&
+                        message.reconstructedBytes.size == 20 &&
                         message.reconstructedBytes[0] == 0x49 &&
                         message.reconstructedBytes[1] == 0x02 &&
                         message.reconstructedBytes[2] == 0x01
@@ -126,20 +134,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 val bytes = vinMessage.reconstructedBytes
 
-                // 49 02 01 followed by exactly 17 VIN characters.
-                val vin = bytes
-                    .drop(3)
-                    .take(17)
-                    .map { it.toChar() }
-                    .joinToString("")
-                    .uppercase()
+                // Extract 17 VIN bytes (positions 3-19)
+                val vinBytes = bytes.slice(3..19)
 
-                // VIN validation:
-                // 17 chars, excludes I/O/Q according to VIN rules.
-                val validVin = vin.length == 17 &&
-                        vin.matches(Regex("^[A-HJ-NPR-Z0-9]{17}$"))
+                // Strict VIN character validation:
+                // VIN characters are: A-H, J-N, P-R, S-Z, 0-9
+                // Excluded: I, O, Q (to avoid ambiguity with 1, 0)
+                val validVinChars = Regex("^[A-HJ-NPR-Z0-9]$")
+                val vinChars = vinBytes.map { it.toChar() }
 
-                if (!validVin) {
+                // Verify ALL 17 bytes are valid VIN ASCII characters
+                val allCharsValid = vinChars.all { ch ->
+                    ch.code in 0..127 && ch.toString().matches(validVinChars)
+                }
+
+                if (!allCharsValid) {
+                    _vehicleVin.value = "VIN Unavailable"
+                    _vinDecodeResult.value = null
+                    return@launch
+                }
+
+                // Construct VIN - already uppercase per VIN standard
+                val vin = vinChars.joinToString("")
+
+                // Final consistency check: regex validates format
+                // This is NOT the discovery mechanism, just validation
+                val validVinFormat = vin.matches(Regex("^[A-HJ-NPR-Z0-9]{17}$"))
+
+                if (!validVinFormat) {
                     _vehicleVin.value = "VIN Unavailable"
                     _vinDecodeResult.value = null
                     return@launch
@@ -760,7 +782,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun saveDtcs(dtcs: List<String>, status: String) {
-        // FIX P0-6: Use the explicitly known vehicle (current session → active selection).
+        // FIX P0-6: Use the explicitly known vehicle (current session â†’ active selection).
         // Do NOT silently fall back to "first vehicle in the database" - that previously caused
         // DTCs read from one vehicle to be associated with another vehicle in a multi-vehicle garage.
         val currentSession = recordingManager.currentSessionMetadata.value
@@ -981,9 +1003,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val aiChatHistory: StateFlow<List<com.example.model.ChatMessage>> = _aiChatHistory.asStateFlow()
 
     // FIX P0-3 + AI-not-configured UX: Resilient provider chain.
-    //  1) Try FirebaseAiDoctorProvider (Gemini API) — works when GEMINI_API_KEY is set
+    //  1) Try FirebaseAiDoctorProvider (Gemini API) â€” works when GEMINI_API_KEY is set
     //     in BuildConfig and the user has configured a valid key.
-    //  2) Fall back to RuleBasedChatProvider — uses the on-device RuleBasedAnalysisEngine
+    //  2) Fall back to RuleBasedChatProvider â€” uses the on-device RuleBasedAnalysisEngine
     //     over the user's recorded trip data. Works for ALL users out of the box, no
     //     API key required, no internet required. Provides full conversational vehicle
     //     diagnostics by mapping free-form queries to subsystem analyses.

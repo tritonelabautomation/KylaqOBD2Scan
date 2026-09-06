@@ -1,6 +1,7 @@
 package com.example.scheduler
 
 import com.example.bluetooth.ElmTransport
+import com.example.model.ResponseStatus
 import com.example.data.db.entities.ScanSessionEntity
 import com.example.data.db.entities.EcuTopologyEntity
 import com.example.data.db.entities.PidCapabilityEntity
@@ -8,6 +9,7 @@ import com.example.data.db.entities.DtcRecordEntity
 import com.example.data.db.AppDatabase
 import com.example.protocol.SafetyValidator
 import com.example.protocol.DtcDecoder
+import com.example.protocol.IsoTpParser
 import com.example.discovery.EcuDiscoveryManager
 import com.example.discovery.PidCapabilityManager
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -44,6 +46,12 @@ class ScanCoordinator(
     private val database: AppDatabase,
     private val vehicleId: String? = null
 ) {
+    /**
+     * Captures the adapter's MAC address at coordinator construction time.
+     * Falls back to the synthetic "SIM:..." or "UNKNOWN" address if the transport
+     * (e.g. an older or third-party one) does not implement the property.
+     */
+    private val adapterAddress: String = transport.deviceAddress ?: "UNKNOWN"
     private val _progress = MutableStateFlow(ScanProgress(ScanPhase.IDLE, "Ready", 0f))
     val progress: StateFlow<ScanProgress> = _progress.asStateFlow()
 
@@ -163,19 +171,40 @@ class ScanCoordinator(
             // 4. VIN
             _progress.value = ScanProgress(ScanPhase.READ_VIN, "Reading VIN...", 0.4f)
             val vinResp = transport.sendCommand("0902", 3000)
-            if (vinResp.status == com.example.model.ResponseStatus.OK) {
-                val hexString = vinResp.lines.joinToString("") { it.replace(" ", "") }
+            if (vinResp.status == ResponseStatus.OK && vinResp.lines.isNotEmpty()) {
                 try {
-                    val ascii = StringBuilder()
-                    var i = 0
-                    while (i < hexString.length - 1) {
-                        val num = hexString.substring(i, i + 2).toIntOrNull(16)
-                        if (num != null && num in 32..126) ascii.append(num.toChar())
-                        i += 2
+                    // Mode 09 PID 02 response structure (SAE J1979):
+                    // Byte 0 = 0x49, Byte 1 = 0x02, Byte 2 = 0x01
+                    // Bytes 3-19 = 17 ASCII VIN characters (exactly 20 bytes total)
+                    val vinMessage = IsoTpParser
+                        .reassembleLines(vinResp.lines)
+                        .firstOrNull { msg ->
+                            msg.isComplete &&
+                            !msg.isMalformed &&
+                            msg.reconstructedBytes.size == 20 &&
+                            msg.reconstructedBytes[0] == 0x49 &&
+                            msg.reconstructedBytes[1] == 0x02 &&
+                            msg.reconstructedBytes[2] == 0x01
+                        }
+                    
+                    if (vinMessage != null) {
+                        val vinBytes = vinMessage.reconstructedBytes.slice(3..19)
+                        val validVinChars = Regex("^[A-HJ-NPR-Z0-9]$")
+                        val vinChars = vinBytes.map { it.toChar() }
+                        
+                        val allCharsValid = vinChars.all { ch ->
+                            ch.code in 0..127 && ch.toString().matches(validVinChars)
+                        }
+                        
+                        if (allCharsValid) {
+                            val candidateVin = vinChars.joinToString("")
+                            if (candidateVin.matches(Regex("^[A-HJ-NPR-Z0-9]{17}$"))) {
+                                vin = candidateVin
+                            }
+                        }
                     }
-                    vin = Regex("[A-HJ-NPR-Z0-9]{17}").find(ascii.toString())?.value
                 } catch (e: Exception) {
-                    // Ignore
+                    // Ignore parsing errors
                 }
             }
 
@@ -239,7 +268,7 @@ class ScanCoordinator(
                 completedAt = System.currentTimeMillis(),
                 connectionType = "BLUETOOTH",
                 adapterName = "ELM327",
-                adapterAddress = "00:00:00:00:00:00",
+                adapterAddress = adapterAddress, // FIX CR-1: real BT MAC, was hardcoded zero
                 protocol = protocol,
                 ecuCount = ecus.size,
                 pidCount = pidCapabilities.size,
@@ -294,7 +323,7 @@ class ScanCoordinator(
             completedAt = System.currentTimeMillis(),
             connectionType = "BLUETOOTH",
             adapterName = "ELM327",
-            adapterAddress = "00:00:00:00:00:00",
+            adapterAddress = adapterAddress, // FIX CR-1: real BT MAC, was hardcoded zero
             protocol = protocol,
             ecuCount = ecus.size,
             pidCount = pidCapabilities.size,
