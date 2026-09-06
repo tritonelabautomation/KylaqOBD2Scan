@@ -88,35 +88,74 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (!transport.isConnected) return
 
         viewModelScope.launch {
-            val resp = transport.sendCommand("0902", 3000)
-            if (resp.status == com.example.model.ResponseStatus.OK && resp.lines.isNotEmpty()) {
-                // Decode VIN (simplified decoder, actual Mode 0902 decoding requires parsing multi-frame ASCII)
-                val cleanLines = resp.lines.map { it.replace(" ", "") }
-                val hexString = cleanLines.joinToString("")
-                try {
-                    val ascii = StringBuilder()
-                    var i = 0
-                    while (i < hexString.length - 1) {
-                        val str = hexString.substring(i, i + 2)
-                        val num = str.toIntOrNull(16)
-                        if (num != null && num in 32..126) {
-                            ascii.append(num.toChar())
-                        }
-                        i += 2
-                    }
-                    val vinMatch = Regex("[A-HJ-NPR-Z0-9]{17}").find(ascii.toString())
-                    val extractedVin = vinMatch?.value
-                    _vehicleVin.value = extractedVin ?: "VIN Decoded: $ascii"
-                    if (extractedVin != null) {
-                        _vinDecodeResult.value = com.example.protocol.VinDecoder.decodeVin(extractedVin, catalogRepository)
-                    } else {
-                        _vinDecodeResult.value = null
-                    }
-                } catch (e: Exception) {
-                    _vehicleVin.value = "Failed to parse VIN"
-                }
-            } else {
+            val resp = transport.sendCommand("0902", 3000L)
+
+            if (resp.status != com.example.model.ResponseStatus.OK || resp.lines.isEmpty()) {
                 _vehicleVin.value = "VIN Unavailable"
+                _vinDecodeResult.value = null
+                return@launch
+            }
+
+            try {
+                // Mode 09 PID 02 response:
+                // 49 02 01 + 17 ASCII VIN bytes
+                //
+                // The response may arrive as ISO-TP:
+                // 7E8 10 14 49 02 01 ...
+                // 7E8 21 ...
+                // 7E8 22 ...
+                //
+                // NEVER ASCII-decode the CAN ID or ISO-TP PCI bytes.
+
+                val vinMessage = com.example.protocol.IsoTpParser
+                    .reassembleLines(resp.lines)
+                    .firstOrNull { message ->
+                        message.isComplete &&
+                        !message.isMalformed &&
+                        message.reconstructedBytes.size >= 20 &&
+                        message.reconstructedBytes[0] == 0x49 &&
+                        message.reconstructedBytes[1] == 0x02 &&
+                        message.reconstructedBytes[2] == 0x01
+                    }
+
+                if (vinMessage == null) {
+                    _vehicleVin.value = "VIN Unavailable"
+                    _vinDecodeResult.value = null
+                    return@launch
+                }
+
+                val bytes = vinMessage.reconstructedBytes
+
+                // 49 02 01 followed by exactly 17 VIN characters.
+                val vin = bytes
+                    .drop(3)
+                    .take(17)
+                    .map { it.toChar() }
+                    .joinToString("")
+                    .uppercase()
+
+                // VIN validation:
+                // 17 chars, excludes I/O/Q according to VIN rules.
+                val validVin = vin.length == 17 &&
+                        vin.matches(Regex("^[A-HJ-NPR-Z0-9]{17}$"))
+
+                if (!validVin) {
+                    _vehicleVin.value = "VIN Unavailable"
+                    _vinDecodeResult.value = null
+                    return@launch
+                }
+
+                _vehicleVin.value = vin
+
+                _vinDecodeResult.value =
+                    com.example.protocol.VinDecoder.decodeVin(
+                        vin,
+                        catalogRepository
+                    )
+
+            } catch (e: Exception) {
+                _vehicleVin.value = "Failed to parse VIN"
+                _vinDecodeResult.value = null
             }
         }
     }
