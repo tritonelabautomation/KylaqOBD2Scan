@@ -36,6 +36,11 @@ class SimulationElmTransport(
     private var boostKpa: Double = 101.0
     private var fuelRailMpa: Double = 15.0
 
+    /** Simulation has no real Bluetooth device. The synthetic address is prefixed
+     *  with "SIM:" so it is obvious in scan session records and distinguishable
+     *  from any real adapter that might later share this address space. */
+    override val deviceAddress: String = "SIM:EA211-Simulator"
+
     override val isConnected: Boolean
         get() = connected
 

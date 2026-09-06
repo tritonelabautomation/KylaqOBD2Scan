@@ -40,6 +40,8 @@ interface RawLogListener {
  */
 interface ElmTransport {
     val isConnected: Boolean
+    /** The Bluetooth device MAC address used for this connection, or null for simulation. */
+    val deviceAddress: String?
     suspend fun connect(): Boolean
     suspend fun disconnect()
     suspend fun sendCommand(command: String, timeoutMs: Long = 1500L): ElmResponse
@@ -66,6 +68,11 @@ class BluetoothElmTransport(
 
     @Volatile
     private var connected: Boolean = false
+
+    /** Captures the Bluetooth device MAC address at construction time so it can be
+     *  stored in scan session records — fixing the regression where all sessions had
+     *  adapterAddress = "00:00:00:00:00:00". */
+    override val deviceAddress: String = socket.remoteDevice.address
 
     override val isConnected: Boolean
         get() = connected && socket.isConnected
