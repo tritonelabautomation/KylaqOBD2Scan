@@ -42,6 +42,22 @@ object PidDecoder {
             )
         }
 
+        // FIX: a negative response (7F <service> <NRC>) is never telemetry — not even for
+        // research PIDs. The permissive research path below used to accept it and render
+        // "7F 01 11" as if it were a live raw value, which the dashboard then displayed
+        // as data. Reject it before any decoding strategy runs.
+        if ((payloadBytes[0] and 0xFF) == 0x7F) {
+            return DecodedResult(
+                parameterName = pidDef.name,
+                numericValue = null,
+                displayValue = "INVALID_RESPONSE",
+                unit = pidDef.unit,
+                rawPayloadHex = rawHex,
+                dataBytes = emptyList(),
+                isKnown = false
+            )
+        }
+
         // Standard OBD response check: First byte is (service + 0x40), second byte is PID
         val expectedServiceAck = (pidDef.service.toIntOrNull(16) ?: 1) + 0x40
         val expectedPid = pidDef.pid.toIntOrNull(16) ?: 0

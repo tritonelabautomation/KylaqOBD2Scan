@@ -144,13 +144,25 @@ class BluetoothManager(private val context: Context) {
             // failed. We now require:
             //  - ATZ (reset) responded OK
             //  - ATE0 (echo off) responded OK
-            //  - ATSP6 (CAN 11-bit 500kbps) responded OK
+            //  - the configured protocol command responded OK
+            //
+            // FIX (2nd pass): the protocol command is user configurable — see
+            // SettingsRepository "init_commands" and CanProtocol: ATSP0 (auto detect),
+            // ATSP6/ATSP7 (11/29-bit @ 500k), ATSP8/ATSP9 (11/29-bit @ 250k). Matching the
+            // literal string "ATSP6" declared every other selection a failure
+            // ("Adapter failed initialization: ATSP6 failed") even when the adapter answered
+            // OK to everything it was actually sent. Any ATSP* command is now accepted, and
+            // a sequence without one is not treated as a protocol failure.
             val resetOk = initResults.firstOrNull { it.first.equals("ATZ", ignoreCase = true) }
                 ?.second?.status == com.example.model.ResponseStatus.OK
             val echoOffOk = initResults.firstOrNull { it.first.equals("ATE0", ignoreCase = true) }
                 ?.second?.status == com.example.model.ResponseStatus.OK
-            val protocolOk = initResults.firstOrNull { it.first.equals("ATSP6", ignoreCase = true) }
-                ?.second?.status == com.example.model.ResponseStatus.OK
+            val protocolResult = initResults.firstOrNull {
+                it.first.trim().uppercase().startsWith("ATSP")
+            }
+            val protocolCommand = protocolResult?.first?.trim()?.uppercase()
+            val protocolOk = protocolCommand == null ||
+                protocolResult?.second?.status == com.example.model.ResponseStatus.OK
 
             val initSuccessful = (lastInitStatus == com.example.model.ResponseStatus.OK ||
                     initResults.any { it.second.status == com.example.model.ResponseStatus.OK }) &&
@@ -166,7 +178,7 @@ class BluetoothManager(private val context: Context) {
                 val failureReasons = buildList {
                     if (!resetOk) add("ATZ failed")
                     if (!echoOffOk) add("ATE0 failed")
-                    if (!protocolOk) add("ATSP6 failed")
+                    if (!protocolOk) add((protocolCommand ?: "ATSP") + " failed")
                 }.joinToString(", ")
                 transport.disconnect()
                 _connectionState.value = ConnectionState.ERROR

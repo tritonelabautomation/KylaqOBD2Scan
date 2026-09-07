@@ -2,11 +2,70 @@ name: Build Android APK
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches:
+      - main
   push:
     branches:
       - main
 
 jobs:
+  # FIX (CI never ran the tests): this workflow only executed `assembleDebug`, so a whole
+  # batch of failing and self-contradictory unit tests shipped unnoticed. Unit tests now run
+  # as their own job with their own commit status context (`ci/unit-tests`) so results are
+  # visible on every push and pull request without blocking APK artifacts. Once the suite is
+  # confirmed green, add `needs: unit-tests` to the `build` job to make it a hard gate.
+  unit-tests:
+    runs-on: ubuntu-latest
+
+    permissions:
+      statuses: write
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle 9.3.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+
+      - name: Run unit tests
+        run: gradle testDebugUnitTest --stacktrace --continue
+
+      - name: Upload unit test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-reports
+          path: |
+            app/build/reports/tests/
+            app/build/test-results/
+          if-no-files-found: ignore
+
+      - name: Report commit status
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            STATE="success"
+            DESC="Unit tests passed"
+          else
+            STATE="failure"
+            DESC="Unit tests failed"
+          fi
+          gh api "repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -f state="$STATE" \
+            -f description="$DESC" \
+            -f context="ci/unit-tests" || echo "Status report failed (non-fatal)"
+
   build:
     runs-on: ubuntu-latest
 

@@ -743,7 +743,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun saveDtcs(dtcs: List<String>, status: String) {
-        // FIX P0-6: Use the explicitly known vehicle (current session â†’ active selection).
+        // FIX P0-6: Use the explicitly known vehicle (current session -> active selection).
         // Do NOT silently fall back to "first vehicle in the database" - that previously caused
         // DTCs read from one vehicle to be associated with another vehicle in a multi-vehicle garage.
         val currentSession = recordingManager.currentSessionMetadata.value
@@ -964,9 +964,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val aiChatHistory: StateFlow<List<com.example.model.ChatMessage>> = _aiChatHistory.asStateFlow()
 
     // FIX P0-3 + AI-not-configured UX: Resilient provider chain.
-    //  1) Try FirebaseAiDoctorProvider (Gemini API) â€” works when GEMINI_API_KEY is set
+    //  1) Try FirebaseAiDoctorProvider (Gemini API) - works when GEMINI_API_KEY is set
     //     in BuildConfig and the user has configured a valid key.
-    //  2) Fall back to RuleBasedChatProvider â€” uses the on-device RuleBasedAnalysisEngine
+    //  2) Fall back to RuleBasedChatProvider - uses the on-device RuleBasedAnalysisEngine
     //     over the user's recorded trip data. Works for ALL users out of the box, no
     //     API key required, no internet required. Provides full conversational vehicle
     //     diagnostics by mapping free-form queries to subsystem analyses.

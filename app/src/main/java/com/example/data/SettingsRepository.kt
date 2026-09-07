@@ -111,6 +111,38 @@ class SettingsRepository(private val context: Context) {
         _initCommands.value = commands
     }
 
+    /**
+     * Resolves a stored decoder type, falling back to the shipped default for that PID.
+     *
+     * FIX: `DecoderType.valueOf()` throws on any unknown/renamed value, and because the
+     * whole load runs inside one try/catch a single corrupt entry used to discard every
+     * user PID customisation.
+     */
+    private fun parseDecoderType(stored: String, pidId: String): com.example.model.DecoderType {
+        if (stored.isNotBlank()) {
+            try {
+                return com.example.model.DecoderType.valueOf(stored)
+            } catch (_: IllegalArgumentException) {
+                // fall through to the shipped default
+            }
+        }
+        return DefaultPidDefinitions.getDefaults().firstOrNull { it.id == pidId }?.decoderType
+            ?: com.example.model.DecoderType.RESEARCH_RAW
+    }
+
+    /** Resolves a stored polling priority, falling back to the shipped default for that PID. */
+    private fun parsePriority(stored: String, pidId: String): com.example.model.PollingPriority {
+        if (stored.isNotBlank()) {
+            try {
+                return com.example.model.PollingPriority.valueOf(stored)
+            } catch (_: IllegalArgumentException) {
+                // fall through to the shipped default
+            }
+        }
+        return DefaultPidDefinitions.getDefaults().firstOrNull { it.id == pidId }?.priority
+            ?: com.example.model.PollingPriority.MEDIUM
+    }
+
     private fun loadPidDefinitions(): List<PidDefinition> {
         val jsonStr = prefs.getString("pid_definitions_json", null)
         if (jsonStr == null) {
@@ -134,10 +166,15 @@ class SettingsRepository(private val context: Context) {
                         expectedRxId = obj.optString("expectedRxId", "7E8"),
                         defaultIntervalMs = obj.optLong("defaultIntervalMs", 500L),
                         enabled = obj.optBoolean("enabled", true),
-                        decoderType = com.example.model.DecoderType.valueOf(obj.optString("decoderType", "RESEARCH_RAW")),
+                        decoderType = parseDecoderType(obj.optString("decoderType", ""), obj.optString("id")),
                         formulaDisplay = obj.optString("formulaDisplay", ""),
                         isResearch = obj.optBoolean("isResearch", false),
-                        description = obj.optString("description", "")
+                        description = obj.optString("description", ""),
+                        // FIX: polling priority was never persisted, so every saved PID came
+                        // back as MEDIUM and the scheduler lost its FAST-first ordering after
+                        // the first settings write (RPM/speed then refreshed as slowly as the
+                        // 5 s research PIDs).
+                        priority = parsePriority(obj.optString("priority", ""), obj.optString("id"))
                     )
                 )
             }
@@ -174,6 +211,7 @@ class SettingsRepository(private val context: Context) {
                     put("formulaDisplay", pid.formulaDisplay)
                     put("isResearch", pid.isResearch)
                     put("description", pid.description)
+                    put("priority", pid.priority.name)
                 }
                 arr.put(obj)
             }
