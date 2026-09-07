@@ -55,6 +55,15 @@ class BluetoothManager(private val context: Context) {
     var isSimulationMode: Boolean = false
         private set
 
+    /**
+     * The transport of the currently open adapter connection, or null when disconnected.
+     *
+     * A second entry point into the app - the Android Auto dashboard - needs this so it can resume
+     * live polling on a socket the phone UI already opened instead of racing it for the single
+     * RFCOMM channel the ELM327 exposes.
+     */
+    fun currentTransport(): ElmTransport? = activeTransport
+
     val isBluetoothAvailable: Boolean
         get() = bluetoothAdapter != null
 
