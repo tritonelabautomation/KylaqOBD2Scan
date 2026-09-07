@@ -20,6 +20,8 @@ jobs:
 
     permissions:
       statuses: write
+      # Needed to post the test-failure digest back onto the pull request.
+      pull-requests: write
 
     steps:
       - name: Checkout source
@@ -36,8 +38,35 @@ jobs:
         with:
           gradle-version: '9.3.1'
 
+      # continue-on-error so the reporting steps below always run; the job is still
+      # failed at the end by "Fail the job when tests failed".
       - name: Run unit tests
-        run: gradle testDebugUnitTest --stacktrace --continue
+        id: unit-tests
+        continue-on-error: true
+        shell: bash
+        run: gradle testDebugUnitTest --stacktrace --continue 2>&1 | tee /tmp/unit-tests.log
+
+      # Actions logs and artifacts are served from domains that are not reachable from
+      # every environment that has to triage a red run, so the digest is parsed here and
+      # posted back to the pull request instead.
+      - name: Build test failure digest
+        if: always()
+        run: python3 tools/ci/collect_test_failures.py --log /tmp/unit-tests.log > /tmp/test-report.md
+
+      - name: Comment digest on the pull request
+        if: always() && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -s /tmp/test-report.md ]; then
+            gh pr comment "${{ github.event.pull_request.number }}" --body-file /tmp/test-report.md
+          fi
+
+      - name: Fail the job when tests failed
+        if: always() && steps.unit-tests.outcome == 'failure'
+        run: |
+          echo "Unit tests failed - see the pull-request comment and the unit-test-reports artifact."
+          exit 1
 
       - name: Upload unit test reports
         if: always()
