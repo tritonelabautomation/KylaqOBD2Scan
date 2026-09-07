@@ -67,6 +67,41 @@ class SettingsRepository(private val context: Context) {
         _lastBackupTimestamp.value = timestamp
     }
 
+    /**
+     * OAuth 2.0 **Web application** client ID used by Google Sign-In (Credential Manager).
+     *
+     * Stored on-device so sign-in can be configured without rebuilding the app: the value
+     * committed in `res/values/strings.xml` is a placeholder, and Google Play services
+     * rejects any request whose `serverClientId` is not registered for this exact package
+     * name + signing SHA-1 (ApiException 10 / DEVELOPER_ERROR).
+     */
+    private val _googleWebClientId = MutableStateFlow(prefs.getString("google_web_client_id", null))
+    val googleWebClientId: StateFlow<String?> = _googleWebClientId.asStateFlow()
+
+    /** Display name of the signed-in Google account (null when signed out). */
+    private val _googleAccountName = MutableStateFlow(prefs.getString("google_account_name", null))
+    val googleAccountName: StateFlow<String?> = _googleAccountName.asStateFlow()
+
+    fun setGoogleWebClientId(clientId: String?) {
+        val clean = clientId?.trim()?.takeIf { it.isNotEmpty() }
+        if (clean != null) {
+            prefs.edit().putString("google_web_client_id", clean).apply()
+        } else {
+            prefs.edit().remove("google_web_client_id").apply()
+        }
+        _googleWebClientId.value = clean
+    }
+
+    fun setGoogleAccountName(name: String?) {
+        if (!name.isNullOrBlank()) {
+            prefs.edit().putString("google_account_name", name.trim()).apply()
+            _googleAccountName.value = name.trim()
+        } else {
+            prefs.edit().remove("google_account_name").apply()
+            _googleAccountName.value = null
+        }
+    }
+
     private fun loadPollingMode(): PollingSpeedMode {
         val name = prefs.getString("polling_mode", PollingSpeedMode.NORMAL.name)
         return try {
