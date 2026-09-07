@@ -67,7 +67,8 @@ class VinAuthorityTestB {
     }
 
     @Test fun controlChar_rejected() {
-        val bytes = listOf(0x49,0x02,0x01)+"1234567890\x00156789".map{it.code}
+        // Kotlin has no \xNN escape: a NUL inside the VIN payload is written \u0000.
+        val bytes = listOf(0x49,0x02,0x01)+"1234567890\u0000156789".map{it.code}
         val m = mk("7E8", bytes)
         assertTrue(VinAuthority.collectVinCandidates(listOf(m)).isEmpty())
     }
