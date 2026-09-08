@@ -44,10 +44,21 @@ fun MaintenanceScreen(
     var odoText by remember { mutableStateOf(repo.currentOdometerKm()?.let { String.format("%.0f", it) } ?: "") }
     var logTarget by remember { mutableStateOf<MaintenanceCatalog.ServiceItem?>(null) }
     var pickItem by remember { mutableStateOf(false) }
+    var query by remember { mutableStateOf("") }
+    var statusFilter by remember { mutableStateOf("All") }
+    var showTrackDialog by remember { mutableStateOf(false) }
+    var whyTarget by remember { mutableStateOf<MaintenanceCatalog.DueState?>(null) }
 
     LaunchedEffect(Unit) { if (viewModel.takeQuickAdd("service")) pickItem = true }
 
+    val tracked = remember(refresh) { repo.trackedItemIds() }
+    val logs = remember(refresh) { repo.logs() }
     val counts = states.groupingBy { it.status }.eachCount()
+    val filtered = states.filter { st ->
+        (tracked.isEmpty() || st.item.id in tracked) &&
+            (query.isBlank() || st.item.label.contains(query, true) || st.item.category.contains(query, true)) &&
+            (statusFilter == "All" || st.status.name == statusFilter)
+    }
 
     Scaffold(
         topBar = {
@@ -56,6 +67,11 @@ fun MaintenanceScreen(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = CyberCyan)
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { showTrackDialog = true }) {
+                        Icon(Icons.Default.Tune, contentDescription = "Items I track", tint = CyberCyan)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -78,6 +94,37 @@ fun MaintenanceScreen(
                     CountChip("${counts[MaintenanceCatalog.DueStatus.DUE_SOON] ?: 0} due soon", ElectricAmber, Modifier.weight(1f))
                     CountChip("${counts[MaintenanceCatalog.DueStatus.GOOD] ?: 0} good", NeonEmerald, Modifier.weight(1f))
                     CountChip("${counts[MaintenanceCatalog.DueStatus.UNKNOWN] ?: 0} unknown", TextSecondaryDark, Modifier.weight(1f))
+                }
+            }
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Search oil, brakes, tyres...", fontSize = 12.sp) },
+                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = TextSecondaryDark) }
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf("All", "OVERDUE", "DUE_SOON", "GOOD").forEach { f ->
+                            FilterChip(
+                                selected = statusFilter == f,
+                                onClick = { statusFilter = f },
+                                label = {
+                                    Text(
+                                        when (f) {
+                                            "OVERDUE" -> "Overdue"
+                                            "DUE_SOON" -> "Due soon"
+                                            "GOOD" -> "Good"
+                                            else -> "All"
+                                        },
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            )
+                        }
+                    }
                 }
             }
             item {
@@ -114,7 +161,7 @@ fun MaintenanceScreen(
                     }
                 }
             }
-            items(states, key = { it.item.id }) { state ->
+            items(filtered, key = { it.item.id }) { state ->
                 Card(
                     shape = RoundedCornerShape(12.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
@@ -154,7 +201,49 @@ fun MaintenanceScreen(
                                 fontSize = 11.sp, fontWeight = FontWeight.Bold
                             )
                         }
-                        TextButton(onClick = { logTarget = state.item }) { Text("Log") }
+                        Column(horizontalAlignment = Alignment.End) {
+                            TextButton(onClick = { logTarget = state.item }) { Text("Log") }
+                            if (state.status == MaintenanceCatalog.DueStatus.OVERDUE ||
+                                state.status == MaintenanceCatalog.DueStatus.DUE_SOON
+                            ) {
+                                TextButton(onClick = { whyTarget = state }) {
+                                    Text("Why?", fontSize = 11.sp, color = TextSecondaryDark)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if (logs.isNotEmpty()) {
+                item {
+                    Text("Recent services", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                }
+                items(logs.take(8), key = { "${it.itemId}_${it.dateMs}" }) { l ->
+                    val label = MaintenanceCatalog.KYLAQ_ITEMS.firstOrNull { it.id == l.itemId }?.label ?: l.itemId
+                    Card(
+                        shape = RoundedCornerShape(10.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                    ) {
+                        Column(modifier = Modifier.fillMaxWidth().padding(10.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(label, color = Color.White, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                                if (l.rating != null) {
+                                    Text("★".repeat(l.rating), color = ElectricAmber, fontSize = 12.sp)
+                                }
+                                Text(l.dateUtc.take(10), color = TextSecondaryDark, fontSize = 10.sp)
+                            }
+                            Text(
+                                buildString {
+                                    l.odometerKm?.let { append(String.format("%.0f km", it)); append(" · ") }
+                                    l.cost?.let { append(String.format("₹%.0f", it)) }
+                                    if (l.notes.isNotBlank()) {
+                                        if (isNotEmpty()) append(" · ")
+                                        append(l.notes)
+                                    }
+                                },
+                                color = TextSecondaryDark, fontSize = 10.sp
+                            )
+                        }
                     }
                 }
             }
@@ -186,12 +275,101 @@ fun MaintenanceScreen(
         )
     }
 
+    whyTarget?.let { st ->
+        val odo = repo.currentOdometerKm()
+        AlertDialog(
+            onDismissRequest = { whyTarget = null },
+            title = { Text("Why is this flagged?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(st.item.label, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        st.last?.let {
+                            "Last logged ${it.dateUtc.take(10)}" +
+                                (it.odometerKm?.let { o -> " at ${String.format("%.0f", o)} km" } ?: " (no odometer)")
+                        } ?: "Never logged - the item starts UNKNOWN and ages from first tracking.",
+                        fontSize = 12.sp, color = TextSecondaryDark
+                    )
+                    Text(
+                        "Interval: ${String.format("%.0f", st.item.intervalKm / 1000.0)}k km" +
+                            (if (st.item.intervalDays > 0) " / ${st.item.intervalDays} days" else "") +
+                            ". Current odometer: ${odo?.let { String.format("%.0f km", it) } ?: "not set"}.",
+                        fontSize = 12.sp, color = TextSecondaryDark
+                    )
+                    st.kmRemaining?.let {
+                        Text(
+                            if (it < 0) "You are ${String.format("%.0f", -it)} km PAST the distance deadline."
+                            else "${String.format("%.0f", it)} km left before the distance deadline.",
+                            fontSize = 12.sp,
+                            color = if (it < 0) WarningRed else NeonEmerald
+                        )
+                    }
+                    st.daysRemaining?.let {
+                        Text(
+                            if (it < 0) "You are ${-it} days PAST the time deadline."
+                            else "$it days left before the time deadline.",
+                            fontSize = 12.sp,
+                            color = if (it < 0) WarningRed else NeonEmerald
+                        )
+                    }
+                    Text(
+                        if (st.status == MaintenanceCatalog.DueStatus.OVERDUE) {
+                            "Either limit crossed -> OVERDUE. Log the service to reset both counters."
+                        } else {
+                            "A limit is close (<=1500 km or <=30 days) -> DUE_SOON."
+                        },
+                        fontSize = 11.sp, color = TextSecondaryDark
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { whyTarget = null; logTarget = st.item }) { Text("Log it now") }
+            },
+            dismissButton = { TextButton(onClick = { whyTarget = null }) { Text("Close") } }
+        )
+    }
+
+    if (showTrackDialog) {
+        AlertDialog(
+            onDismissRequest = { showTrackDialog = false },
+            title = { Text("Items I track") },
+            text = {
+                Column {
+                    Text(
+                        if (tracked.isEmpty()) "Tracking all items. Tick to narrow the board." else "${tracked.size} item(s) selected.",
+                        fontSize = 11.sp, color = TextSecondaryDark
+                    )
+                    MaintenanceCatalog.KYLAQ_ITEMS.forEach { item ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(
+                                checked = tracked.isEmpty() || item.id in tracked,
+                                onCheckedChange = { on ->
+                                    val base = if (tracked.isEmpty()) MaintenanceCatalog.KYLAQ_ITEMS.map { it.id }.toSet() else tracked
+                                    val next = if (on) base + item.id else base - item.id
+                                    repo.setTrackedItemIds(if (next.size == MaintenanceCatalog.KYLAQ_ITEMS.size) emptySet() else next)
+                                    refresh++
+                                }
+                            )
+                            Text(item.label, fontSize = 12.sp)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { repo.setTrackedItemIds(emptySet()); refresh++; showTrackDialog = false }) {
+                    Text("Track all")
+                }
+            },
+            dismissButton = { TextButton(onClick = { showTrackDialog = false }) { Text("Done") } }
+        )
+    }
+
     logTarget?.let { item ->
         ServiceDialog(
             item = item,
             defaultOdo = odoText,
             onDismiss = { logTarget = null },
-            onSave = { odo, cost ->
+            onSave = { odo, cost, rating, notes ->
                 val now = System.currentTimeMillis()
                 val utc = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
                     .apply { timeZone = TimeZone.getTimeZone("UTC") }
@@ -199,7 +377,7 @@ fun MaintenanceScreen(
                 repo.log(
                     MaintenanceCatalog.ServiceLog(
                         itemId = item.id, dateUtc = utc, dateMs = now,
-                        odometerKm = odo, cost = cost
+                        odometerKm = odo, cost = cost, rating = rating, notes = notes
                     )
                 )
                 odo?.let { repo.setCurrentOdometerKm(it); odoText = String.format("%.0f", it) }
@@ -233,10 +411,12 @@ private fun ServiceDialog(
     item: MaintenanceCatalog.ServiceItem,
     defaultOdo: String,
     onDismiss: () -> Unit,
-    onSave: (Double?, Double?) -> Unit
+    onSave: (Double?, Double?, Int?, String) -> Unit
 ) {
     var odo by remember { mutableStateOf(defaultOdo) }
     var cost by remember { mutableStateOf("") }
+    var rating by remember { mutableStateOf(0) }
+    var notes by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Log service: ${item.label}") },
@@ -245,10 +425,24 @@ private fun ServiceDialog(
                 Text("Recorded now (${SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date())}).", fontSize = 11.sp, color = TextSecondaryDark)
                 OutlinedTextField(value = odo, onValueChange = { odo = it }, label = { Text("Odometer km") }, singleLine = true)
                 OutlinedTextField(value = cost, onValueChange = { cost = it }, label = { Text("Cost ₹ (optional)") }, singleLine = true)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Workshop rating", fontSize = 12.sp, color = TextSecondaryDark, modifier = Modifier.weight(1f))
+                    (1..5).forEach { n ->
+                        IconButton(onClick = { rating = if (rating == n) 0 else n }, modifier = Modifier.size(32.dp)) {
+                            Icon(
+                                Icons.Default.Star,
+                                contentDescription = "$n star",
+                                tint = if (n <= rating) ElectricAmber else TextSecondaryDark,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
+                OutlinedTextField(value = notes, onValueChange = { notes = it }, label = { Text("Pre-service notes (optional)") }, singleLine = true)
             }
         },
         confirmButton = {
-            TextButton(onClick = { onSave(odo.toDoubleOrNull(), cost.toDoubleOrNull()) }) { Text("Save") }
+            TextButton(onClick = { onSave(odo.toDoubleOrNull(), cost.toDoubleOrNull(), rating.takeIf { it > 0 }, notes.trim()) }) { Text("Save") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )

@@ -39,7 +39,11 @@ object MaintenanceCatalog {
         val dateUtc: String,
         val dateMs: Long,
         val odometerKm: Double?,
-        val cost: Double?
+        val cost: Double?,
+        /** Workshop rating 1-5 (null = unrated). */
+        val rating: Int? = null,
+        /** Pre-service / workshop notes, sanitized on encode. */
+        val notes: String = ""
     )
 
     enum class DueStatus { UNKNOWN, GOOD, DUE_SOON, OVERDUE }
@@ -135,6 +139,13 @@ class MaintenanceRepository(context: Context) {
     fun setCurrentOdometerKm(km: Double) =
         prefs.edit().putString("odometer_km", String.format(java.util.Locale.US, "%.1f", km)).apply()
 
+    /** VehIQ "items I track": empty set = track everything. */
+    fun trackedItemIds(): Set<String> =
+        prefs.getString("tracked_items", null)?.split('|')?.filter { it.isNotBlank() }?.toSet() ?: emptySet()
+
+    fun setTrackedItemIds(ids: Set<String>) =
+        prefs.edit().putString("tracked_items", ids.joinToString("|")).apply()
+
     fun dueStates(nowMs: Long = System.currentTimeMillis()): List<MaintenanceCatalog.DueState> {
         val lastMap = lastPerItem()
         val odo = currentOdometerKm()
@@ -146,19 +157,24 @@ class MaintenanceRepository(context: Context) {
     private fun encode(l: MaintenanceCatalog.ServiceLog): String = listOf(
         "s1", l.itemId, l.dateUtc, l.dateMs.toString(),
         l.odometerKm?.let { String.format(java.util.Locale.US, "%.1f", it) } ?: "-",
-        l.cost?.let { String.format(java.util.Locale.US, "%.2f", it) } ?: "-"
+        l.cost?.let { String.format(java.util.Locale.US, "%.2f", it) } ?: "-",
+        l.rating?.toString() ?: "-",
+        l.notes.replace("|", "/").replace("\n", " ").trim().take(140)
     ).joinToString("|")
 
     private fun decode(line: String): MaintenanceCatalog.ServiceLog? {
         val p = line.split('|')
-        if (p.size != 6 || p[0] != "s1") return null
+        // 6 fields = v1 logs (rating/notes added later); tolerate both.
+        if (p.size < 6 || p.size > 8 || p[0] != "s1") return null
         return try {
             MaintenanceCatalog.ServiceLog(
                 itemId = p[1],
                 dateUtc = p[2],
                 dateMs = p[3].toLong(),
                 odometerKm = p[4].toDoubleOrNull(),
-                cost = p[5].toDoubleOrNull()
+                cost = p[5].toDoubleOrNull(),
+                rating = p.getOrNull(6)?.toIntOrNull(),
+                notes = p.getOrNull(7) ?: ""
             )
         } catch (e: NumberFormatException) {
             null
