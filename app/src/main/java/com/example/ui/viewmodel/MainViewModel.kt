@@ -49,6 +49,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val rawLogManager = AppContainer.rawLogManager
     val gpsManager = AppContainer.gpsManager
 
+    val gpsData = gpsManager.gpsData
+    val settingsRepository = AppContainer.settingsRepository
+    val recordingManager = AppContainer.recordingManager
+    val bluetoothManager = AppContainer.bluetoothManager
+    val obdScheduler = AppContainer.obdScheduler
+
     init {
         // Elevation logging for the ride X-ray: GPS altitude when available, silent otherwise.
         obdScheduler.altitudeSource = {
@@ -56,11 +62,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (g.isAvailable) g.altitudeMeters else null
         }
     }
-    val gpsData = gpsManager.gpsData
-    val settingsRepository = AppContainer.settingsRepository
-    val recordingManager = AppContainer.recordingManager
-    val bluetoothManager = AppContainer.bluetoothManager
-    val obdScheduler = AppContainer.obdScheduler
     val cloudBackupManager = AppContainer.cloudBackupManager
     val catalogRepository = AppContainer.catalogRepository
 
