@@ -64,6 +64,7 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector)
     object PidScanner : Screen("pid_scanner", "PID Scanner", Icons.Default.Search)
     object Profiles : Screen("profiles", "Profiles", Icons.Default.VerifiedUser)
     object Settings : Screen("settings", "Settings", Icons.Default.Settings)
+    object About : Screen("about", "About & Fuel Guide", Icons.Default.Info)
 }
 
 class MainActivity : ComponentActivity() {
@@ -390,8 +391,15 @@ fun MainApp(viewModel: MainViewModel) {
             composable(Screen.Settings.route) {
                 SettingsScreen(
                     viewModel = viewModel,
+                    onBack = { navController.popBackStack() },
+                    onOpenAbout = { navController.navigate(Screen.About.route) }
+                )
+            }
+
+            composable(Screen.About.route) {
+                AboutScreen(
+                    viewModel = viewModel,
                     onBack = { navController.popBackStack() }
-                    
                 )
             }
         }

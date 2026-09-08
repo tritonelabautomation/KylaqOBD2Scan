@@ -117,6 +117,19 @@ class SettingsRepository(private val context: Context) {
         _autoRecord.value = enabled
     }
 
+    private val _midDisplayKmL = MutableStateFlow(
+        if (prefs.contains("mid_display_km_l")) prefs.getFloat("mid_display_km_l", 0f).toDouble() else null
+    )
+    val midDisplayKmL: StateFlow<Double?> = _midDisplayKmL.asStateFlow()
+
+    /** What the instrument cluster (MID/MFA) showed for the trip, for the About comparison. */
+    fun setMidDisplayKmL(value: Double?) {
+        val editor = prefs.edit()
+        if (value == null) editor.remove("mid_display_km_l") else editor.putFloat("mid_display_km_l", value.toFloat())
+        editor.apply()
+        _midDisplayKmL.value = value
+    }
+
     fun setGoogleAccountName(name: String?) {
         if (!name.isNullOrBlank()) {
             prefs.edit().putString("google_account_name", name.trim()).apply()
