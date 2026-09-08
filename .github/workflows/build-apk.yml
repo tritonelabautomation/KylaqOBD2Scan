@@ -44,7 +44,16 @@ jobs:
         id: unit-tests
         continue-on-error: true
         shell: bash
-        run: gradle testDebugUnitTest -PciExcludeRobolectric=1 --stacktrace --continue 2>&1 | tee /tmp/unit-tests.log
+        run: |
+          set -o pipefail
+          gradle testDebugUnitTest -PciExcludeRobolectric=1 --stacktrace --continue 2>&1 | tee /tmp/unit-tests.log
+          STATUS=$?
+          if [ $STATUS -ne 0 ] && grep -q "ApplicationManager.getApplication() is null" /tmp/unit-tests.log; then
+            echo "KSP2 worker-init NPE flake detected - retrying once with ksp.incremental=false..."
+            gradle testDebugUnitTest -PciExcludeRobolectric=1 --stacktrace --continue -Pksp.incremental=false 2>&1 | tee /tmp/unit-tests.log
+            STATUS=$?
+          fi
+          exit $STATUS
 
       # Actions logs and artifacts are served from domains that are not reachable from
       # every environment that has to triage a red run, so the digest is parsed here and
@@ -52,6 +61,22 @@ jobs:
       - name: Build test failure digest
         if: always()
         run: python3 tools/ci/collect_test_failures.py --log /tmp/unit-tests.log > /tmp/test-report.md
+
+      # Oracle guarantee: when gradle fails before/without parseable test results
+      # (compile errors, infra failures), post the raw log tail so a red run is
+      # ALWAYS diagnosable from the PR without touching the blocked log host.
+      - name: Fallback digest from log tail
+        if: always() && steps.unit-tests.outcome == 'failure'
+        run: |
+          if [ ! -s /tmp/test-report.md ]; then
+            {
+              echo "### CI failure tail (no parseable test report)"
+              echo ""
+              echo '```'
+              tail -n 100 /tmp/unit-tests.log
+              echo '```'
+            } > /tmp/test-report.md
+          fi
 
       - name: Comment digest on the pull request
         if: always() && github.event_name == 'pull_request'
@@ -119,7 +144,17 @@ jobs:
           gradle-version: '9.3.1'
 
       - name: Build debug APK
-        run: gradle assembleDebug --stacktrace
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle assembleDebug --stacktrace 2>&1 | tee /tmp/build.log
+          STATUS=$?
+          if [ $STATUS -ne 0 ] && grep -q "ApplicationManager.getApplication() is null" /tmp/build.log; then
+            echo "KSP2 worker-init NPE flake detected - retrying once with ksp.incremental=false..."
+            gradle assembleDebug --stacktrace -Pksp.incremental=false 2>&1 | tee /tmp/build.log
+            STATUS=$?
+          fi
+          exit $STATUS
 
       # Extract actual evaluated version metadata from the built APK using aapt.
       # This is the only reliable way to get the evaluated versionName and versionCode
