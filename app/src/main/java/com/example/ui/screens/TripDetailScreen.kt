@@ -66,6 +66,13 @@ fun TripDetailScreen(
     var rawFilter by remember { mutableStateOf("ALL") }
     var selectedTrendPid by remember { mutableStateOf("010C") } // RPM default
 
+    // "Log fuel" for this trip: fuel rate integrated over the stored samples.
+    val fuelSummary = remember(samples) {
+        com.example.analysis.TripFuelSummary.summarize(
+            samples.map { com.example.analysis.TripFuelSummary.SamplePoint(it.pid, it.timestamp, it.numericValue) }
+        )
+    }
+
     LaunchedEffect(tripId) {
         trip = tripRepo.getTripById(tripId)
         samples = tripRepo.getSamplesForTrip(tripId)
@@ -162,7 +169,10 @@ fun TripDetailScreen(
 
             when (selectedTab) {
                 TripDetailTab.OVERVIEW -> {
-                    TripOverviewView(trip = trip, sampleCount = samples.size, rawCount = rawLogs.size, analysis = aiAnalysis)
+                    Column {
+                        TripFuelLogCard(fuelSummary)
+                        TripOverviewView(trip = trip, sampleCount = samples.size, rawCount = rawLogs.size, analysis = aiAnalysis)
+                    }
                 }
                 TripDetailTab.TRENDS -> {
                     TripTrendsView(
@@ -798,5 +808,70 @@ private fun shareFileSafely(context: Context, file: File, mimeType: String) {
         context.startActivity(chooser)
     } catch (e: Exception) {
         Toast.makeText(context, "Share error: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+    }
+}
+
+@Composable
+private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summary) {
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(12.dp),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = DarkSurface)
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Text(
+                "Log fuel (integrated from PID 015E/019D)",
+                color = CyberCyan,
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Row {
+                Column(modifier = Modifier.padding(end = 18.dp)) {
+                    Text(String.format("%.2f L", summary.fuelLiters), color = NeonEmerald, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text("FUEL BURNED", color = TextSecondaryDark, fontSize = 10.sp)
+                }
+                Column(modifier = Modifier.padding(end = 18.dp)) {
+                    Text(String.format("%.1f km", summary.distanceKm), color = NeonEmerald, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text("DISTANCE", color = TextSecondaryDark, fontSize = 10.sp)
+                }
+                Column(modifier = Modifier.padding(end = 18.dp)) {
+                    Text(summary.kmPerLiter?.let { String.format("%.1f", it) } ?: "--", color = ElectricAmber, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text("KM/L", color = TextSecondaryDark, fontSize = 10.sp)
+                }
+                Column {
+                    Text(summary.litersPer100Km?.let { String.format("%.1f", it) } ?: "--", color = ElectricAmber, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text("L/100KM", color = TextSecondaryDark, fontSize = 10.sp)
+                }
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                "Avg ${String.format("%.0f", summary.averageSpeedKmh)} km/h (moving " +
+                    "${String.format("%.0f", summary.movingAverageSpeedKmh)}), max " +
+                    "${String.format("%.0f", summary.maxSpeedKmh)} km/h • coasting " +
+                    "${String.format("%.0f", summary.coastSeconds)} s • idling " +
+                    "${String.format("%.0f", summary.idleSeconds)} s",
+                color = TextSecondaryDark,
+                fontSize = 11.sp
+            )
+            if (summary.speedHistogram.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    "Time by speed band: " + summary.speedHistogram.joinToString("  ") {
+                        "${it.first}-${it.first + 10}: ${String.format("%.0f", it.second / 60.0)}m"
+                    },
+                    color = TextSecondaryDark,
+                    fontSize = 11.sp
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                "Compare this card across trips on your daily route: same distance, different " +
+                    "technique, different fuel. Coasting seconds and idle minutes are the two " +
+                    "biggest levers.",
+                color = TextSecondaryDark,
+                fontSize = 10.sp
+            )
+        }
     }
 }
