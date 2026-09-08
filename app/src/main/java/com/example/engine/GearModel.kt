@@ -77,6 +77,33 @@ class Aq250GearModel {
     /** Returns gear 1-6 with confidence, or null when the ratio falls between gears. */
     fun estimate(rpmPerKmh: Double): Pair<Int, Boolean>? = estimateInternal(rpmPerKmh)
 
+    /**
+     * Factory-model expected engine rpm in [gear] (1-based) at [speedKmh], using the CURRENT
+     * learned scale for that gear. This is the "expected behaviour" half of the
+     * expected-vs-actual comparison the dashboard shows as converter slip.
+     */
+    fun expectedRpm(gear: Int, speedKmh: Double): Double? =
+        gearScale.getOrNull(gear - 1)?.let { it * speedKmh }
+
+    /**
+     * Closest gear to [rpmPerKmh] even when OUTSIDE the confidence tolerance, paired with the
+     * relative deviation (0.0 = exact). Used to quantify converter slip / launch behaviour
+     * when no gear matches (estimate() returns null).
+     */
+    fun nearestGear(rpmPerKmh: Double): Pair<Int, Double>? {
+        if (rpmPerKmh <= 5.0) return null
+        var best = -1
+        var bestDelta = Double.MAX_VALUE
+        for (i in 0..5) {
+            val delta = abs(gearScale[i] - rpmPerKmh) / gearScale[i]
+            if (delta < bestDelta) {
+                bestDelta = delta
+                best = i
+            }
+        }
+        return if (best >= 0) (best + 1) to bestDelta else null
+    }
+
     private fun estimateInternal(rpmPerKmh: Double): Pair<Int, Boolean>? {
         if (rpmPerKmh <= 5.0) return null
         var best = -1

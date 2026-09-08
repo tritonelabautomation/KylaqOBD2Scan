@@ -59,6 +59,12 @@ class TransmissionEngine {
         // 3. Estimated Gear (derived with high confidence threshold)
         var estimatedGear: Int? = null
         var isConfident = false
+        // Expected-vs-actual drivetrain deviation: the gear model predicts the engine rpm the
+        // gearbox SHOULD show for the nearest gear at this speed; the difference is torque-
+        // converter slip (open/slip-controlled converter, launch, shift transient) or model
+        // error (tyre change, degraded calibration). Quantified for the dashboard.
+        var slipRpm: Double? = null
+        var lockupDisplay = "Not available"
 
         if (speedKmh != null && engineRpm != null && speedKmh >= 10.0 && engineRpm >= 1000.0) {
             val currentRpmPerKmh = engineRpm / speedKmh
@@ -73,6 +79,25 @@ class TransmissionEngine {
             if (est != null) {
                 estimatedGear = est.first
                 isConfident = est.second
+            }
+
+            gearModel.nearestGear(currentRpmPerKmh)?.let { (nearGear, deviation) ->
+                gearModel.expectedRpm(nearGear, speedKmh)?.let { expected ->
+                    val slip = engineRpm - expected
+                    slipRpm = slip
+                    lockupDisplay = when {
+                        deviation <= com.example.engine.Aq250GearModel.TOLERANCE ->
+                            "Locked / coupled (expected %.0f rpm, slip %+.0f)".format(expected, slip)
+                        slip > 0.0 ->
+                            "Converter slip +%.0f rpm (G%d expects %.0f, actual %.0f)".format(
+                                slip, nearGear, expected, engineRpm
+                            )
+                        else ->
+                            "Below model -%.0f rpm (G%d expects %.0f) - engine braking/decel?".format(
+                                -slip, nearGear, expected
+                            )
+                    }
+                }
             }
         }
 
@@ -91,8 +116,8 @@ class TransmissionEngine {
             targetGearDisplay = "Not available",
             inputRpm = engineRpm,
             outputRpm = speedKmh?.let { it * 15.0 }, // approximate output shaft scale if unvalidated
-            torqueConverterSlipRpm = null,
-            torqueConverterLockup = if (isConfident) "Coupled / Locked" else "Not available",
+            torqueConverterSlipRpm = slipRpm,
+            torqueConverterLockup = lockupDisplay,
             atfTemperatureC = null,
             isEstimatedGearConfident = isConfident,
             source = if (validatedActualGear != null) ValueSource.STANDARD_OBD else ValueSource.ESTIMATED
