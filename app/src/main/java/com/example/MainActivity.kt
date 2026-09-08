@@ -392,7 +392,8 @@ fun MainApp(viewModel: MainViewModel) {
                 SettingsScreen(
                     viewModel = viewModel,
                     onBack = { navController.popBackStack() },
-                    onOpenAbout = { navController.navigate(Screen.About.route) }
+                    onOpenAbout = { navController.navigate(Screen.About.route) },
+                    onOpenPidConfig = { navController.navigate(Screen.PidConfig.route) }
                 )
             }
 

@@ -36,7 +36,8 @@ import java.util.Locale
 fun SettingsScreen(
     viewModel: MainViewModel,
     onBack: () -> Unit,
-    onOpenAbout: () -> Unit = {}
+    onOpenAbout: () -> Unit = {},
+    onOpenPidConfig: () -> Unit = {}
 ) {
     val context = LocalContext.current
     // FIX (bug: Google sign-in button did nothing): Credential Manager requires an
@@ -107,6 +108,42 @@ fun SettingsScreen(
                 .verticalScroll(scrollState),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            // PID management was an orphaned route (registered in MainActivity but never
+            // navigated to) - the navigation audit wired it here so every screen is reachable.
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onOpenPidConfig() }
+                    .testTag("card_pid_config"),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.Settings,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Manage PIDs",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            "Enable, edit or reset the tracked OBD-II parameters",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
