@@ -232,6 +232,8 @@ private fun TorquePowerCard(snapshot: DriveAnalytics.DriveSnapshot) {
 @Composable
 private fun TrendCard(snapshot: DriveAnalytics.DriveSnapshot) {
     val recent = snapshot.trend.takeLast(900) // ~15 minutes at 1 Hz
+    // Relative seconds keep the x axis inside float precision on long uptimes.
+    val t0 = recent.firstOrNull()?.timestampMonotonicMs ?: 0L
     SectionCard(
         title = "Fuel & speed trend (last ~15 min)",
         subtitle = "1 Hz log of what the car actually did: speed, fuel flow and boost. Flat fuel " +
@@ -239,9 +241,9 @@ private fun TrendCard(snapshot: DriveAnalytics.DriveSnapshot) {
     ) {
         XyPlot(
             series = listOf(
-                XySeries("speed km/h", CyberCyan, recent.map { it.timestampMonotonicMs.toFloat() to it.speedKmh.toFloat() }),
-                XySeries("fuel L/h ×5", NeonEmerald, recent.map { it.timestampMonotonicMs.toFloat() to ((it.fuelLh ?: 0.0) * 5).toFloat() }),
-                XySeries("boost kPa", ElectricAmber, recent.map { it.timestampMonotonicMs.toFloat() to (it.boostKpa ?: 0.0).toFloat() })
+                XySeries("speed km/h", CyberCyan, recent.map { (it.timestampMonotonicMs - t0) / 1000f to it.speedKmh.toFloat() }),
+                XySeries("fuel L/h ×5", NeonEmerald, recent.map { (it.timestampMonotonicMs - t0) / 1000f to ((it.fuelLh ?: 0.0) * 5).toFloat() }),
+                XySeries("boost kPa", ElectricAmber, recent.map { (it.timestampMonotonicMs - t0) / 1000f to (it.boostKpa ?: 0.0).toFloat() })
             ),
             xLabel = "time →",
             yLabel = "mixed units",

@@ -331,7 +331,7 @@ class DriveAnalytics(
             harshAccelCount = harshAccelCount,
             harshBrakeCount = harshBrakeCount,
             idleSeconds = idleSeconds,
-            trend = trend.toList()
+            trend = trend.takeLast(SNAPSHOT_TREND_POINTS)
         )
     }
 
@@ -361,7 +361,9 @@ class DriveAnalytics(
     // endregion
 
     companion object {
-        private const val MAX_TREND_POINTS = 4 * 60 * 60 // 1 Hz for four hours
+        private const val MAX_TREND_POINTS = 60 * 60 // 1 Hz for one hour
+        /** Snapshot copies stay small; charts only show ~15 minutes anyway. */
+        private const val SNAPSHOT_TREND_POINTS = 1800
         private val FACTORY_CURVE_RPM_BINS = listOf(1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000, 5500, 6000)
     }
 }
