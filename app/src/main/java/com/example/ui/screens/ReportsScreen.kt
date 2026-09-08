@@ -39,6 +39,7 @@ fun ReportsScreen(
     onBack: () -> Unit
 ) {
     val settings = viewModel.settingsRepository
+    val cur by settings.currencySymbol.collectAsState()
     var refresh by remember { mutableStateOf(0) }
 
     val fuel = remember(refresh) { viewModel.fuelLogRepository.entries() }
@@ -108,8 +109,8 @@ fun ReportsScreen(
         ) {
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Metric("YTD SPEND", String.format("₹%.0f", ytdSpend), ElectricAmber, Modifier.weight(1f))
-                Metric("COST/KM", fuelStats.costPerKm?.let { String.format("₹%.2f", it) } ?: "--", CyberCyan, Modifier.weight(1f))
+                Metric("YTD SPEND", String.format("%s%.0f", cur, ytdSpend), ElectricAmber, Modifier.weight(1f))
+                Metric("COST/KM", fuelStats.costPerKm?.let { String.format("%s%.2f", cur, it) } ?: "--", CyberCyan, Modifier.weight(1f))
                 Metric("AVG", fuelStats.avgKmPerL?.let { String.format("%.1f km/L", it) } ?: "--", NeonEmerald, Modifier.weight(1f))
             }
             Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
@@ -117,8 +118,8 @@ fun ReportsScreen(
                     Text("Monthly spend trend", color = TextSecondaryDark, fontSize = 12.sp)
                     if (monthlySpend.size >= 2) {
                         XyPlot(
-                            series = listOf(XySeries("₹", ElectricAmber, monthlySpend.mapIndexed { i, p -> i.toFloat() to p.second.toFloat() })),
-                            xLabel = "month →", yLabel = "₹", height = 150.dp
+                            series = listOf(XySeries(cur, ElectricAmber, monthlySpend.mapIndexed { i, p -> i.toFloat() to p.second.toFloat() })),
+                            xLabel = "month →", yLabel = cur, height = 150.dp
                         )
                     } else Text("Not enough data yet.", color = TextSecondaryDark, fontSize = 11.sp)
                 }
@@ -149,7 +150,7 @@ fun ReportsScreen(
                             color = if (fraction > 1) ResearchPurple else NeonEmerald,
                         )
                         Text(
-                            String.format("spent ₹%.0f of ₹%.0f (%.0f%%)", thisMonthSpend, b, fraction * 100),
+                            String.format("spent %s%.0f of %s%.0f (%.0f%%)", cur, thisMonthSpend, cur, b, fraction * 100),
                             color = if (fraction > 1) ResearchPurple else TextSecondaryDark, fontSize = 11.sp
                         )
                     }
@@ -171,8 +172,8 @@ fun ReportsScreen(
                     estimate?.let { e ->
                         Text(
                             String.format(
-                                "fuel ₹%.0f + tolls ₹%.0f = ₹%.0f · %.1f h drive · rideshare would cost ₹%.0f (you save ₹%.0f)",
-                                e.fuelCost, e.tollCost, e.totalCost, e.driveHours, e.rideshareCost, e.savingVsRideshare
+                                "fuel %s%.0f + tolls %s%.0f = %s%.0f · %.1f h drive · rideshare would cost %s%.0f (you save %s%.0f)",
+                                cur, e.fuelCost, cur, e.tollCost, cur, e.totalCost, e.driveHours, cur, e.rideshareCost, cur, e.savingVsRideshare
                             ),
                             color = NeonEmerald, fontSize = 11.sp
                         )
@@ -193,7 +194,7 @@ fun ReportsScreen(
                         transfers = TripSplitter.settle(members, payments)
                     }) { Text("Settle up") }
                     transfers.forEach { t ->
-                        Text("${t.from} → ${t.to} : ₹%.0f".format(t.amount), color = CyberCyan, fontSize = 12.sp)
+                        Text("${t.from} → ${t.to} : ${cur}%.0f".format(t.amount), color = CyberCyan, fontSize = 12.sp)
                     }
                 }
             }

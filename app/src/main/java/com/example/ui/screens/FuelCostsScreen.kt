@@ -48,6 +48,7 @@ fun FuelCostsScreen(
     val entries = remember(refresh) { repo.entries() }
     val stats = remember(refresh) { repo.stats() }
     var showAdd by remember { mutableStateOf(false) }
+    val cur by viewModel.settingsRepository.currencySymbol.collectAsState()
 
     LaunchedEffect(Unit) { if (viewModel.takeQuickAdd("fuel")) showAdd = true }
 
@@ -79,9 +80,9 @@ fun FuelCostsScreen(
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FuelStatChip("AVG", stats.avgKmPerL?.let { String.format("%.1f km/L", it) } ?: "--", NeonEmerald, Modifier.weight(1f))
-                    FuelStatChip("₹/KM", stats.costPerKm?.let { String.format("%.2f", it) } ?: "--", CyberCyan, Modifier.weight(1f))
-                    FuelStatChip("30-DAY ₹", stats.cost30d?.let { String.format("%.0f", it) } ?: "--", ElectricAmber, Modifier.weight(1f))
-                    FuelStatChip("₹/L", stats.lastPricePerL?.let { String.format("%.1f", it) } ?: "--", TextSecondaryDark, Modifier.weight(1f))
+                    FuelStatChip("$cur/KM", stats.costPerKm?.let { String.format("%.2f", it) } ?: "--", CyberCyan, Modifier.weight(1f))
+                    FuelStatChip("30-DAY $cur", stats.cost30d?.let { String.format("%.0f", it) } ?: "--", ElectricAmber, Modifier.weight(1f))
+                    FuelStatChip("$cur/L", stats.lastPricePerL?.let { String.format("%.1f", it) } ?: "--", TextSecondaryDark, Modifier.weight(1f))
                 }
             }
             item {

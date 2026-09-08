@@ -339,6 +339,14 @@ class SettingsRepository(private val context: Context) {
         _remindersEnabled.value = enabled
     }
 
+    private val _appearanceMode = MutableStateFlow(prefs.getString("appearance_mode", "DARK") ?: "DARK")
+    val appearanceMode: StateFlow<String> = _appearanceMode.asStateFlow()
+
+    fun setAppearanceMode(mode: String) {
+        prefs.edit().putString("appearance_mode", mode).apply()
+        _appearanceMode.value = mode
+    }
+
     private val _unitsMetric = MutableStateFlow(prefs.getBoolean("units_metric", true))
     val unitsMetric: StateFlow<Boolean> = _unitsMetric.asStateFlow()
 

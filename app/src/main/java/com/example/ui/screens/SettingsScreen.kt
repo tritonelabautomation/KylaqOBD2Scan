@@ -141,6 +141,7 @@ fun SettingsScreen(
             )
             val unitsMetric by viewModel.settingsRepository.unitsMetric.collectAsState()
             val currencySymbol by viewModel.settingsRepository.currencySymbol.collectAsState()
+            val appearanceMode by viewModel.settingsRepository.appearanceMode.collectAsState()
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -152,11 +153,20 @@ fun SettingsScreen(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Straighten, contentDescription = null, tint = Color(0xFF00E5FF))
                         Spacer(Modifier.width(8.dp))
-                        Text("Units & Currency", fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = Color(0xFFE6EDF3))
+                        Text("Appearance, Units & Currency", fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = Color(0xFFE6EDF3))
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("Metric (km, km/L)", fontSize = 13.sp, color = Color(0xFF9AA7B4), modifier = Modifier.weight(1f))
                         Switch(checked = unitsMetric, onCheckedChange = { viewModel.settingsRepository.setUnitsMetric(it) })
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf("DARK", "LIGHT", "SYSTEM").forEach { m ->
+                            FilterChip(
+                                selected = appearanceMode == m,
+                                onClick = { viewModel.settingsRepository.setAppearanceMode(m) },
+                                label = { Text(m.lowercase(), fontSize = 12.sp) }
+                            )
+                        }
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         listOf("\u20B9", "$", "\u20AC", "\u00A3").forEach { sym ->
@@ -168,7 +178,7 @@ fun SettingsScreen(
                         }
                     }
                     Text(
-                        "Applies to Expenses, Reports and fuel cost figures.",
+                        "Currency restates money figures across Fuel, Expenses & Reports; appearance restyles dialogs, cards and inputs.",
                         fontSize = 10.sp, color = Color(0xFF9AA7B4)
                     )
                 }

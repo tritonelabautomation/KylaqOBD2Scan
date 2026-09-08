@@ -96,7 +96,14 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         setContent {
-            MyApplicationTheme {
+            val appearance by viewModel.settingsRepository.appearanceMode.collectAsState()
+            MyApplicationTheme(
+                darkTheme = when (appearance) {
+                    "LIGHT" -> false
+                    "SYSTEM" -> androidx.compose.foundation.isSystemInDarkTheme()
+                    else -> true
+                }
+            ) {
                 MainApp(viewModel = viewModel)
             }
         }

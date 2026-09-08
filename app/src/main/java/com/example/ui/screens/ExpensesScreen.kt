@@ -53,6 +53,7 @@ fun ExpensesScreen(
     var filter by remember { mutableStateOf("All") }
     var showAdd by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf<String?>(null) }
+    val cur by viewModel.settingsRepository.currencySymbol.collectAsState()
 
     LaunchedEffect(Unit) { if (viewModel.takeQuickAdd("expense")) showAdd = true }
 
@@ -140,12 +141,12 @@ fun ExpensesScreen(
                             XyPlot(
                                 series = listOf(
                                     XySeries(
-                                        "₹/month", ElectricAmber,
+                                        "$cur/month", ElectricAmber,
                                         monthly.mapIndexed { i, p -> i.toFloat() to p.second.toFloat() }
                                     )
                                 ),
                                 xLabel = "month →",
-                                yLabel = "₹",
+                                yLabel = cur,
                                 height = 150.dp
                             )
                         } else {
@@ -179,7 +180,7 @@ fun ExpensesScreen(
                             Text(r.dateUtc.take(10), color = TextSecondaryDark, fontSize = 10.sp)
                         }
                         Text(
-                            if (r.amount > 0) String.format("₹%.0f", r.amount) else "--",
+                            if (r.amount > 0) String.format("%s%.0f", cur, r.amount) else "--",
                             color = ElectricAmber, fontSize = 13.sp, fontWeight = FontWeight.Bold
                         )
                         if (r.kind == "Other") {
