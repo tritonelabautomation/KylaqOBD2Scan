@@ -46,8 +46,12 @@ class RideBehaviorRecorder {
     private var elevationGainM = 0.0
     private var elevationLossM = 0.0
     private var lastAltitudeM: Double? = null
-    private var firstTsMs = 0L
-    private var lastTsMs = 0L
+    // Nullable timestamps: tsMs == 0 is a LEGITIMATE first sample (relative clocks),
+    // so 0L cannot double as "no sample yet" without swallowing the first interval.
+    private var firstTsMs: Long? = null
+    private var lastTsMs: Long? = null
+    private var lastStateName: String? = null
+    private var lastSpeedKmh: Double? = null
     private var distanceKm = 0.0
     private var lastGear: Int? = null
     private var lastGearTsMs = 0L
@@ -64,8 +68,10 @@ class RideBehaviorRecorder {
         elevationGainM = 0.0
         elevationLossM = 0.0
         lastAltitudeM = null
-        firstTsMs = 0L
-        lastTsMs = 0L
+        firstTsMs = null
+        lastTsMs = null
+        lastStateName = null
+        lastSpeedKmh = null
         distanceKm = 0.0
         lastGear = null
         lastGearTsMs = 0L
@@ -84,34 +90,39 @@ class RideBehaviorRecorder {
         gear: Int?,
         altitudeM: Double?
     ) {
-        val dt = if (lastTsMs > 0L) ((tsMs - lastTsMs) / 1000.0).coerceIn(0.0, 5.0) else 0.0
-        if (firstTsMs == 0L) firstTsMs = tsMs
-        lastTsMs = tsMs
+        val prevTs = lastTsMs
+        val dt = if (prevTs != null) ((tsMs - prevTs) / 1000.0).coerceIn(0.0, 5.0) else 0.0
+        if (firstTsMs == null) firstTsMs = tsMs
 
         if (dt > 0.0) {
-            stateSeconds[stateName] = (stateSeconds[stateName] ?: 0.0) + dt
-            speedKmh?.let { distanceKm += it * dt / 3600.0 }
+            // Credit the elapsed interval to the PREVIOUS sample's state/gear/speed: the
+            // seconds between t-1 and t were spent in whatever was observed at t-1.
+            lastStateName?.let { stateSeconds[it] = (stateSeconds[it] ?: 0.0) + dt }
+            lastSpeedKmh?.let { distanceKm += it * dt / 3600.0 }
+            lastGear?.takeIf { it in 1..6 }?.let { gearSeconds[it] += dt }
+        }
+        lastTsMs = tsMs
+        lastStateName = stateName
+        lastSpeedKmh = speedKmh
 
-            val g = gear?.takeIf { it in 1..6 }
-            if (g != null) {
-                gearSeconds[g] += dt
-                if (lastGear != null && g != lastGear) {
-                    // rpm BEFORE the drop is the shift point the TCU chose (D vs S vs M evidence).
-                    shifts.add(ShiftEvent(lastGear, g, lastRpm ?: rpm ?: 0.0, tsMs - lastGearTsMs))
-                    pendingShiftRpm = null
-                }
-                if (g != lastGear) lastGearTsMs = tsMs
-                lastGear = g
-            } else if (rpm != null && lastRpm != null && tsMs - lastRpmTsMs < 2000L) {
-                // Fallback: torque-converter upshows as a 350-1500 rpm drop at (nearly) steady speed.
-                val drop = lastRpm!! - rpm
-                if (pendingShiftRpm == null && drop in 350.0..1500.0) {
-                    pendingShiftRpm = lastRpm
-                    pendingShiftTsMs = lastRpmTsMs
-                } else if (pendingShiftRpm != null && drop < 100.0 && rpm > 800.0) {
-                    shifts.add(ShiftEvent(null, null, pendingShiftRpm!!, tsMs - pendingShiftTsMs))
-                    pendingShiftRpm = null
-                }
+        val g = gear?.takeIf { it in 1..6 }
+        if (g != null) {
+            if (lastGear != null && g != lastGear) {
+                // rpm BEFORE the drop is the shift point the TCU chose (D vs S vs M evidence).
+                shifts.add(ShiftEvent(lastGear, g, lastRpm ?: rpm ?: 0.0, tsMs - lastGearTsMs))
+                pendingShiftRpm = null
+            }
+            if (g != lastGear) lastGearTsMs = tsMs
+            lastGear = g
+        } else if (rpm != null && lastRpm != null && tsMs - lastRpmTsMs < 2000L) {
+            // Fallback: torque-converter upshows as a 350-1500 rpm drop at (nearly) steady speed.
+            val drop = lastRpm!! - rpm
+            if (pendingShiftRpm == null && drop in 350.0..1500.0) {
+                pendingShiftRpm = lastRpm
+                pendingShiftTsMs = lastRpmTsMs
+            } else if (pendingShiftRpm != null && drop < 100.0 && rpm > 800.0) {
+                shifts.add(ShiftEvent(null, null, pendingShiftRpm!!, tsMs - pendingShiftTsMs))
+                pendingShiftRpm = null
             }
         }
 
@@ -132,7 +143,7 @@ class RideBehaviorRecorder {
         val upshiftRpms = shifts.map { it.rpmAtShift }.filter { it > 500.0 }
         return RideSummary(
             dateUtc = dateUtc,
-            durationSec = if (lastTsMs > firstTsMs) (lastTsMs - firstTsMs) / 1000.0 else 0.0,
+            durationSec = firstTsMs?.let { f -> lastTsMs?.let { l -> if (l > f) (l - f) / 1000.0 else 0.0 } } ?: 0.0,
             distanceKm = distanceKm,
             stateSeconds = stateSeconds.toMap(),
             gearSeconds = gearSeconds.toList(),
