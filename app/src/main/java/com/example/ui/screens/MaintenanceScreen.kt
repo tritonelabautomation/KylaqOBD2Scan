@@ -7,6 +7,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -31,6 +32,7 @@ import java.util.TimeZone
  * due states computed from logged services, the current odometer and today's date. Fully offline —
  * no account, no subscription, no "unlock full report" paywall.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MaintenanceScreen(
     viewModel: MainViewModel,
@@ -69,10 +71,10 @@ fun MaintenanceScreen(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    CountChip("${counts[MaintenanceCatalog.DueStatus.OVERDUE] ?: 0} overdue", WarningRed)
-                    CountChip("${counts[MaintenanceCatalog.DueStatus.DUE_SOON] ?: 0} due soon", ElectricAmber)
-                    CountChip("${counts[MaintenanceCatalog.DueStatus.GOOD] ?: 0} good", NeonEmerald)
-                    CountChip("${counts[MaintenanceCatalog.DueStatus.UNKNOWN] ?: 0} unknown", TextSecondaryDark)
+                    CountChip("${counts[MaintenanceCatalog.DueStatus.OVERDUE] ?: 0} overdue", WarningRed, Modifier.weight(1f))
+                    CountChip("${counts[MaintenanceCatalog.DueStatus.DUE_SOON] ?: 0} due soon", ElectricAmber, Modifier.weight(1f))
+                    CountChip("${counts[MaintenanceCatalog.DueStatus.GOOD] ?: 0} good", NeonEmerald, Modifier.weight(1f))
+                    CountChip("${counts[MaintenanceCatalog.DueStatus.UNKNOWN] ?: 0} unknown", TextSecondaryDark, Modifier.weight(1f))
                 }
             }
             item {
@@ -189,11 +191,11 @@ fun MaintenanceScreen(
 }
 
 @Composable
-private fun CountChip(label: String, color: Color) {
+private fun CountChip(label: String, color: Color, modifier: Modifier = Modifier) {
     Surface(
         color = color.copy(alpha = 0.15f),
         shape = RoundedCornerShape(10.dp),
-        modifier = Modifier.weight(1f)
+        modifier = modifier
     ) {
         Text(
             label,

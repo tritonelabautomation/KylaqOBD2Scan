@@ -10,6 +10,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -30,6 +31,7 @@ import kotlinx.coroutines.launch
  * user's Drive (with the normal Google account chooser when signed out), we keep a persistable
  * permission, and backups flow as ZIP files both ways.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DriveBackupScreen(
     viewModel: MainViewModel,

@@ -8,6 +8,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -35,6 +36,7 @@ import java.util.TimeZone
  * per-tank efficiency chart. Logging a grade (X95 / regular) also stamps the live OBD tank
  * segment so the X95 comparison gets ground truth instead of heuristics.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FuelCostsScreen(
     viewModel: MainViewModel,
@@ -73,10 +75,10 @@ fun FuelCostsScreen(
         ) {
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    StatChip("AVG", stats.avgKmPerL?.let { String.format("%.1f km/L", it) } ?: "--", NeonEmerald)
-                    StatChip("₹/KM", stats.costPerKm?.let { String.format("%.2f", it) } ?: "--", CyberCyan)
-                    StatChip("30-DAY ₹", stats.cost30d?.let { String.format("%.0f", it) } ?: "--", ElectricAmber)
-                    StatChip("₹/L", stats.lastPricePerL?.let { String.format("%.1f", it) } ?: "--", TextSecondaryDark)
+                    StatChip("AVG", stats.avgKmPerL?.let { String.format("%.1f km/L", it) } ?: "--", NeonEmerald, Modifier.weight(1f))
+                    StatChip("₹/KM", stats.costPerKm?.let { String.format("%.2f", it) } ?: "--", CyberCyan, Modifier.weight(1f))
+                    StatChip("30-DAY ₹", stats.cost30d?.let { String.format("%.0f", it) } ?: "--", ElectricAmber, Modifier.weight(1f))
+                    StatChip("₹/L", stats.lastPricePerL?.let { String.format("%.1f", it) } ?: "--", TextSecondaryDark, Modifier.weight(1f))
                 }
             }
             item {
@@ -193,10 +195,9 @@ fun FuelCostsScreen(
 }
 
 @Composable
-private fun StatChip(label: String, value: String, color: Color) {
+private fun StatChip(label: String, value: String, color: Color, modifier: Modifier = Modifier) {
     Column(
-        modifier = Modifier
-            .weight(1f)
+        modifier = modifier
             .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(12.dp))
             .padding(vertical = 10.dp),
         horizontalAlignment = Alignment.CenterHorizontally

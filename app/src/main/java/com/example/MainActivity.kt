@@ -25,7 +25,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import androidx.compose.foundation.layout.HorizontalDivider
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
@@ -146,7 +145,7 @@ fun MainApp(viewModel: MainViewModel) {
         Screen.Console
     )
 
-    val drawerState = rememberDrawerState(DrawerValue.Closed())
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
     val drawerScope = rememberCoroutineScope()
     val drawerItems = bottomNavItems + listOf(
         Screen.FuelCosts, Screen.Maintenance, Screen.DriveBackup, Screen.Settings, Screen.About
