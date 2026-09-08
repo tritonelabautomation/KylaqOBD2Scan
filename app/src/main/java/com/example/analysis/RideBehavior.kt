@@ -30,8 +30,18 @@ class RideBehaviorRecorder {
         val avgUpshiftRpm: Double?,
         val maxUpshiftRpm: Double?,
         val avgShiftDurationMs: Long?,
-        val modeTag: String
+        val modeTag: String,
+        val converterSlipSec: Double = 0.0,
+        val converterLockedSec: Double = 0.0,
+        val maxSlipRpm: Double? = null
     ) {
+        /** Fraction of measured drivetrain time spent with the converter NOT locked. */
+        val converterSlipShare: Double
+            get() {
+                val total = converterSlipSec + converterLockedSec
+                return if (total > 0.0) converterSlipSec / total else 0.0
+            }
+
         /** The Aisin D-map shifts ~2.0-2.5k rpm; S/M hold past ~3k. Detects "prolonged" sport shifts. */
         val sportLikeShiftMap: Boolean get() = (avgUpshiftRpm ?: 0.0) > 3000.0
 
@@ -60,6 +70,12 @@ class RideBehaviorRecorder {
     private var lastRpmTsMs = 0L
     private var pendingShiftRpm: Double? = null
     private var pendingShiftTsMs = 0L
+    // Torque-converter health: expected-vs-actual deviation seconds (from TransmissionEngine).
+    private var converterSlipSec = 0.0
+    private var converterLockedSec = 0.0
+    private var maxSlipRpm: Double? = null
+    private var lastSlipRpm: Double? = null
+    private var lastLocked: Boolean? = null
 
     fun reset(tag: ModeTag = modeTag) {
         modeTag = tag
@@ -80,6 +96,11 @@ class RideBehaviorRecorder {
         lastRpmTsMs = 0L
         pendingShiftRpm = null
         pendingShiftTsMs = 0L
+        converterSlipSec = 0.0
+        converterLockedSec = 0.0
+        maxSlipRpm = null
+        lastSlipRpm = null
+        lastLocked = null
     }
 
     fun onSample(
@@ -88,7 +109,9 @@ class RideBehaviorRecorder {
         rpm: Double?,
         speedKmh: Double?,
         gear: Int?,
-        altitudeM: Double?
+        altitudeM: Double?,
+        slipRpm: Double? = null,
+        converterLocked: Boolean? = null
     ) {
         val prevTs = lastTsMs
         val dt = if (prevTs != null) ((tsMs - prevTs) / 1000.0).coerceIn(0.0, 5.0) else 0.0
@@ -100,6 +123,17 @@ class RideBehaviorRecorder {
             lastStateName?.let { stateSeconds[it] = (stateSeconds[it] ?: 0.0) + dt }
             lastSpeedKmh?.let { distanceKm += it * dt / 3600.0 }
             lastGear?.takeIf { it in 1..6 }?.let { gearSeconds[it] += dt }
+            // Converter health: seconds the drivetrain ran locked vs slipping (previous sample).
+            lastLocked?.let { locked ->
+                if (locked) {
+                    converterLockedSec += dt
+                } else {
+                    converterSlipSec += dt
+                    lastSlipRpm?.takeIf { it > 0.0 }?.let { s ->
+                        maxSlipRpm = maxOf(maxSlipRpm ?: s, s)
+                    }
+                }
+            }
         }
         lastTsMs = tsMs
         lastStateName = stateName
@@ -137,6 +171,8 @@ class RideBehaviorRecorder {
 
         lastRpm = rpm
         lastRpmTsMs = tsMs
+        lastSlipRpm = slipRpm
+        lastLocked = converterLocked
     }
 
     fun summary(dateUtc: String): RideSummary {
@@ -154,7 +190,10 @@ class RideBehaviorRecorder {
             maxUpshiftRpm = upshiftRpms.maxOrNull(),
             avgShiftDurationMs = shifts.map { it.durationMs }.takeIf { it.isNotEmpty() }
                 ?.average()?.toLong(),
-            modeTag = modeTag.name
+            modeTag = modeTag.name,
+            converterSlipSec = converterSlipSec,
+            converterLockedSec = converterLockedSec,
+            maxSlipRpm = maxSlipRpm
         )
     }
 }
@@ -166,7 +205,7 @@ object RideCodec {
         val states = s.stateSeconds.entries.joinToString(",") { "${it.key}=%.0f".format(it.value) }
         val gears = s.gearSeconds.drop(1).joinToString(",") { "%.0f".format(it) }
         return listOf(
-            "r1",
+            "r2",
             com.example.data.ExpenseCodec.esc(s.dateUtc),
             "%.0f".format(s.durationSec),
             "%.2f".format(s.distanceKm),
@@ -178,13 +217,19 @@ object RideCodec {
             s.avgUpshiftRpm?.let { "%.0f".format(it) } ?: "-",
             s.maxUpshiftRpm?.let { "%.0f".format(it) } ?: "-",
             s.avgShiftDurationMs?.toString() ?: "-",
-            s.modeTag
+            s.modeTag,
+            "%.0f".format(s.converterSlipSec),
+            "%.0f".format(s.converterLockedSec),
+            s.maxSlipRpm?.let { "%.0f".format(it) } ?: "-"
         ).joinToString("|")
     }
 
     fun decode(line: String): RideBehaviorRecorder.RideSummary? {
         val p = line.split('|')
-        if (p.size != 13 || p[0] != "r1") return null
+        // "r2" (16 fields) carries converter health; legacy "r1" (13 fields) still decodes.
+        val isR2 = p.size == 16 && p[0] == "r2"
+        val isR1 = p.size == 13 && p[0] == "r1"
+        if (!isR2 && !isR1) return null
         return try {
             val states = com.example.data.ExpenseCodec.unesc(p[4])
                 .split(',')
@@ -206,7 +251,10 @@ object RideCodec {
                 avgUpshiftRpm = p[9].toDoubleOrNull(),
                 maxUpshiftRpm = p[10].toDoubleOrNull(),
                 avgShiftDurationMs = p[11].toLongOrNull(),
-                modeTag = p[12]
+                modeTag = p[12],
+                converterSlipSec = if (isR2) p[13].toDoubleOrNull() ?: 0.0 else 0.0,
+                converterLockedSec = if (isR2) p[14].toDoubleOrNull() ?: 0.0 else 0.0,
+                maxSlipRpm = if (isR2) p[15].toDoubleOrNull() else null
             )
         } catch (e: Exception) {
             null

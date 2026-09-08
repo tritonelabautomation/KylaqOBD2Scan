@@ -522,7 +522,49 @@ private fun RideXrayCard(rides: List<com.example.analysis.RideBehaviorRecorder.R
                             fontSize = 10.sp
                         )
                     }
+                    val convTotal = r.converterSlipSec + r.converterLockedSec
+                    if (convTotal > 0.0) {
+                        val highSlip = r.converterSlipShare > 0.25 && r.converterSlipSec > 60.0
+                        Text(
+                            "converter: locked ${String.format("%.0f", r.converterLockedSec)}s · slip " +
+                                "${String.format("%.0f", r.converterSlipSec)}s " +
+                                "(${String.format("%.0f", r.converterSlipShare * 100.0)}%)" +
+                                (r.maxSlipRpm?.let { " · max +${String.format("%.0f", it)} rpm" } ?: ""),
+                            color = if (highSlip) ElectricAmber else TextSecondaryDark,
+                            fontSize = 10.sp
+                        )
+                        if (highSlip) {
+                            Text(
+                                "high converter slip vs the AQ250 math model - ATF condition / TCC worth checking",
+                                color = WarningRed, fontSize = 10.sp
+                            )
+                        }
+                    }
                 }
+            }
+            // Vehicle trend across the last rides (list is newest-first).
+            val trend = rides.take(5).reversed()
+            val upTrend = trend.mapNotNull { it.avgUpshiftRpm }
+            if (upTrend.size >= 2) {
+                val drift = (upTrend.last() - upTrend.first()) / upTrend.first() * 100.0
+                Text(
+                    "shift-point trend (${upTrend.size} rides): ${String.format("%.0f", upTrend.first())} → " +
+                        "${String.format("%.0f", upTrend.last())} rpm (${if (drift >= 0) "+" else ""}${String.format("%.0f", drift)}%)" +
+                        if (kotlin.math.abs(drift) > 8.0) " - notable drift, check driving style/mode mix" else "",
+                    color = if (kotlin.math.abs(drift) > 8.0) ElectricAmber else TextSecondaryDark,
+                    fontSize = 10.sp
+                )
+            }
+            val slipTrend = trend.filter { it.converterSlipSec + it.converterLockedSec > 0.0 }
+            if (slipTrend.size >= 2) {
+                val first = slipTrend.first().converterSlipShare * 100.0
+                val last = slipTrend.last().converterSlipShare * 100.0
+                Text(
+                    "converter-slip trend: ${String.format("%.0f", first)}% → ${String.format("%.0f", last)}% of measured drivetrain time" +
+                        if (last > first + 5.0) " - rising slip: ATF/TCC watch item" else "",
+                    color = if (last > first + 5.0) ElectricAmber else TextSecondaryDark,
+                    fontSize = 10.sp
+                )
             }
             val dUp = rides.filter { it.modeTag == "D" }.mapNotNull { it.avgUpshiftRpm }
             val sUp = rides.filter { it.modeTag != "D" }.mapNotNull { it.avgUpshiftRpm }

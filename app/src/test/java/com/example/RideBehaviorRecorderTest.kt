@@ -64,4 +64,38 @@ class RideBehaviorRecorderTest {
         assertNull(RideCodec.decode("garbage"))
         assertNull(RideCodec.decode("r1|a|b"))
     }
+
+    @Test
+    fun `converter locked and slip seconds follow the deviation model`() {
+        val rec = RideBehaviorRecorder()
+        rec.onSample(0L, "CRUISING", 2200.0, 100.0, 5, null, slipRpm = -33.0, converterLocked = true)
+        rec.onSample(1000L, "CRUISING", 2200.0, 100.0, 5, null, slipRpm = -33.0, converterLocked = true)
+        rec.onSample(2000L, "ACCELERATING", 2900.0, 100.0, null, null, slipRpm = 667.0, converterLocked = false)
+        rec.onSample(3000L, "ACCELERATING", 3200.0, 110.0, null, null, slipRpm = 800.0, converterLocked = false)
+        val s = rec.summary("x")
+        // Intervals [0-1s] and [1-2s] ran locked; interval [2-3s] ran slipping (prev-sample credit).
+        assertEquals(2.0, s.converterLockedSec, 0.01)
+        assertEquals(1.0, s.converterSlipSec, 0.01)
+        assertEquals(667.0, s.maxSlipRpm!!, 0.01)
+        assertEquals(1.0 / 3.0, s.converterSlipShare, 0.01)
+    }
+
+    @Test
+    fun `codec r2 round trips converter health and legacy r1 still decodes`() {
+        val rec = RideBehaviorRecorder()
+        rec.onSample(0L, "CRUISING", 2200.0, 100.0, 5, null, slipRpm = 900.0, converterLocked = false)
+        rec.onSample(1000L, "CRUISING", 2200.0, 100.0, 5, null, slipRpm = -30.0, converterLocked = true)
+        val encoded = RideCodec.encode(rec.summary("2026-09-08T10:00:00Z"))
+        assertTrue(encoded.startsWith("r2|"))
+        val decoded = RideCodec.decode(encoded)!!
+        assertEquals(1.0, decoded.converterSlipSec, 0.01)
+        assertEquals(0.0, decoded.converterLockedSec, 0.01)
+        assertEquals(900.0, decoded.maxSlipRpm!!, 0.01)
+        // Legacy 13-field r1 lines (already stored in ride_log) decode with converter defaults.
+        val legacy = "r1|2026-01-01T00:00:00Z|600|12.50|CRUISING=600|0,600,0,0,0,0|0|0|0|-|-|-|D"
+        val l = RideCodec.decode(legacy)!!
+        assertEquals(600.0, l.durationSec, 0.01)
+        assertEquals(0.0, l.converterSlipSec, 0.01)
+        assertNull(l.maxSlipRpm)
+    }
 }

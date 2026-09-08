@@ -659,7 +659,14 @@ class ObdScheduler(
             rpm = engineRpm,
             speedKmh = speedKmh,
             gear = transState.estimatedGear?.takeIf { transState.isEstimatedGearConfident },
-            altitudeM = altitudeSource?.invoke()
+            altitudeM = altitudeSource?.invoke(),
+            // Expected-vs-actual drivetrain deviation (converter health per ride).
+            slipRpm = transState.torqueConverterSlipRpm,
+            converterLocked = if (transState.torqueConverterSlipRpm != null) {
+                transState.isEstimatedGearConfident
+            } else {
+                null
+            }
         )
 
         // 5. Derived drive intelligence: power/torque curves, efficiency sweet spot,
