@@ -83,6 +83,7 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector)
     object Reminders : Screen("reminders", "Reminders", Icons.Default.Notifications)
     object Reports : Screen("reports", "Reports", Icons.Default.QueryStats)
     object CoachChat : Screen("coach_chat", "Coach Chat", Icons.Default.Chat)
+    object Trips : Screen("trips", "Trip Planner", Icons.Default.Map)
     object Settings : Screen("settings", "Settings", Icons.Default.Settings)
     object About : Screen("about", "About & Fuel Guide", Icons.Default.Info)
 }
@@ -168,7 +169,7 @@ fun MainApp(viewModel: MainViewModel) {
     val drawerScope = rememberCoroutineScope()
     val drawerItems = bottomNavItems + listOf(
         Screen.FuelCosts, Screen.Maintenance, Screen.Expenses, Screen.Reports,
-        Screen.CoachChat, Screen.Reminders, Screen.Documents, Screen.DriveBackup, Screen.Settings, Screen.About
+        Screen.CoachChat, Screen.Trips, Screen.Reminders, Screen.Documents, Screen.DriveBackup, Screen.Settings, Screen.About
     )
     val mainTabRoutes = bottomNavItems.map { it.route }.toSet()
     var showQuickAdd by remember { mutableStateOf(false) }
@@ -571,6 +572,9 @@ fun MainApp(viewModel: MainViewModel) {
             }
             composable(Screen.CoachChat.route) {
                 CoachChatScreen(viewModel = viewModel)
+            }
+            composable(Screen.Trips.route) {
+                TripsScreen(viewModel = viewModel, onBack = { navController.popBackStack() })
             }
             composable(Screen.Settings.route) {
                 SettingsScreen(

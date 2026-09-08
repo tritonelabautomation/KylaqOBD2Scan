@@ -6,6 +6,7 @@ import com.example.data.DocumentRepository
 import com.example.data.ExpenseRepository
 import com.example.data.FuelLogRepository
 import com.example.data.ReminderRepository
+import com.example.data.TripPlanRepository
 import com.example.data.MaintenanceRepository
 import com.example.data.GpsManager
 import com.example.data.RawLogManager
@@ -42,6 +43,7 @@ object AppContainer {
     lateinit var expenseRepository: ExpenseRepository
     lateinit var documentRepository: DocumentRepository
     lateinit var reminderRepository: ReminderRepository
+    lateinit var tripPlanRepository: TripPlanRepository
     
     fun init(context: Context) {
         if (isInitialized) return
@@ -70,6 +72,7 @@ object AppContainer {
             expenseRepository = ExpenseRepository(appContext)
             documentRepository = DocumentRepository(appContext)
             reminderRepository = ReminderRepository(appContext)
+            tripPlanRepository = TripPlanRepository(appContext)
             isInitialized = true
         }
     }

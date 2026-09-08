@@ -943,6 +943,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val expenseRepository = AppContainer.expenseRepository
     val documentRepository = AppContainer.documentRepository
     val reminderRepository = AppContainer.reminderRepository
+    val tripPlanRepository = AppContainer.tripPlanRepository
 
     private val _quickAdd = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
 
