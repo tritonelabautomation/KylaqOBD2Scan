@@ -86,19 +86,36 @@ fun XyPlot(
             }
         }
         Canvas(modifier = Modifier.fillMaxWidth().height(height)) {
-            // grid
-            val gridPaint = Stroke(width = 1f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 8f), 0f))
+            // grid: drawLine takes strokeWidth/pathEffect arguments, not a Paint-like style
+            val dash = PathEffect.dashPathEffect(floatArrayOf(6f, 8f), 0f)
             for (i in 0..4) {
                 val y = size.height * i / 4f
-                drawLine(TextSecondaryDark.copy(alpha = 0.25f), Offset(0f, y), Offset(size.width, y), style = gridPaint)
+                drawLine(
+                    color = TextSecondaryDark.copy(alpha = 0.25f),
+                    start = Offset(0f, y),
+                    end = Offset(size.width, y),
+                    strokeWidth = 1f,
+                    pathEffect = dash
+                )
                 val x = size.width * i / 4f
-                drawLine(TextSecondaryDark.copy(alpha = 0.15f), Offset(x, 0f), Offset(x, size.height), style = gridPaint)
+                drawLine(
+                    color = TextSecondaryDark.copy(alpha = 0.15f),
+                    start = Offset(x, 0f),
+                    end = Offset(x, size.height),
+                    strokeWidth = 1f,
+                    pathEffect = dash
+                )
             }
             // marker
             markerX?.let { mx ->
                 if (mx in minX..maxX) {
                     val x = (mx - minX) / spanX * size.width
-                    drawLine(Color(0xFFFFB300), Offset(x, 0f), Offset(x, size.height), style = Stroke(width = 3f))
+                    drawLine(
+                        color = Color(0xFFFFB300),
+                        start = Offset(x, 0f),
+                        end = Offset(x, size.height),
+                        strokeWidth = 3f
+                    )
                 }
             }
             // series

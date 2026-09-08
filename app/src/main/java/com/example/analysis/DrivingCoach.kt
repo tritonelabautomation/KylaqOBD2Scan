@@ -83,7 +83,7 @@ object DrivingCoach {
             out.add(
                 Tip(
                     "Coasting: ${String.format("%.1f", coast.totalKm)} km, " +
-                        "${String.format("%.2f", coast.totalSavedVsCruise)} L saved",
+                        "${String.format("%.2f", coast.totalSavedVsCruiseL)} L saved",
                     if (coast.neutralEvents > coast.fuelCutEvents) {
                         "Most of your coasting happened at idle rpm (drivetrain disengaged). It is " +
                             "smooth but burns idle fuel and loses engine braking; staying in gear " +
