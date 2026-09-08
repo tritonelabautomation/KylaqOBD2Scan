@@ -41,12 +41,13 @@ class FleetExporterTest {
     fun `rows merge all ledgers newest first`() {
         val rows = FleetExporter.collectRows(fuel, services, expenses, documents)
         assertEquals(4, rows.size)
-        assertEquals("Toll", rows[0].type) // 2026-09-03 first
-        assertEquals("Fuel", rows[1].type)
-        assertEquals("Service", rows[2].type)
-        assertEquals("Document", rows[3].type)
-        assertEquals(3240.0, rows[1].amount!!, 0.001) // 30 L * 108
-        assertEquals("4/5", rows[2].detail.substring(0, 3))
+        // Documents sort by expiry (2027), then the 2026 ledger rows newest-first.
+        assertEquals("Document", rows[0].type)
+        assertEquals("Toll", rows[1].type) // 2026-09-03
+        assertEquals("Fuel", rows[2].type) // 2026-09-01
+        assertEquals("Service", rows[3].type) // 2026-08-15
+        assertEquals(3240.0, rows[2].amount!!, 0.001) // 30 L * 108
+        assertEquals("4/5", rows[3].detail.substring(0, 3))
     }
 
     @Test
@@ -67,8 +68,10 @@ class FleetExporterTest {
         assertEquals("KylaqOBD2Scan", json.getString("app"))
         assertEquals("Kylaq 1.0 TSI", json.getString("vehicle"))
         assertEquals(4, json.getJSONArray("entries").length())
-        val first = json.getJSONArray("entries").getJSONObject(0)
-        assertEquals("Toll", first.getString("type"))
-        assertEquals(260.0, first.getDouble("amount"), 0.001)
+        val entries = json.getJSONArray("entries")
+        assertEquals("Document", entries.getJSONObject(0).getString("type"))
+        val toll = entries.getJSONObject(1)
+        assertEquals("Toll", toll.getString("type"))
+        assertEquals(260.0, toll.getDouble("amount"), 0.001)
     }
 }
