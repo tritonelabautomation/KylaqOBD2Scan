@@ -3,7 +3,9 @@ package com.example
 import android.Manifest
 import android.content.pm.PackageManager
 import android.app.ForegroundServiceStartNotAllowedException
-import androidx.lifecycle.LifecycleResumeEffect
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import android.content.Intent
 import androidx.compose.ui.platform.LocalContext
 import com.example.service.ObdKeepAliveService
@@ -186,11 +188,18 @@ fun MainApp(viewModel: MainViewModel) {
     }
     // QA H1: Android 12+ forbids starting a foreground service while the app is in the
     // background; auto-connect can reach CONNECTED with the activity stopped. Retry on resume.
-    LifecycleResumeEffect(keepAliveConnection, keepAliveRetryPending) {
-        if (keepAliveRetryPending && keepAliveConnection == ConnectionState.CONNECTED) {
-            if (startKeepAlive(keepAliveRecording)) keepAliveRetryPending = false
+    val keepAliveLifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(keepAliveLifecycleOwner, keepAliveConnection, keepAliveRetryPending) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME &&
+                keepAliveRetryPending &&
+                keepAliveConnection == ConnectionState.CONNECTED
+            ) {
+                if (startKeepAlive(keepAliveRecording)) keepAliveRetryPending = false
+            }
         }
-        onPauseOrDispose { }
+        keepAliveLifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { keepAliveLifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     val bottomNavItems = listOf(
