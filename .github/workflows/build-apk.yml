@@ -44,7 +44,13 @@ jobs:
         id: unit-tests
         continue-on-error: true
         shell: bash
-        run: gradle testDebugUnitTest -PciExcludeRobolectric=1 --stacktrace --continue 2>&1 | tee /tmp/unit-tests.log
+        run: |
+          gradle testDebugUnitTest -PciExcludeRobolectric=1 --stacktrace --continue 2>&1 | tee /tmp/unit-tests.log
+          if grep -q 'ApplicationManager.getApplication()" is null' /tmp/unit-tests.log; then
+            echo "KSP2 worker-init NPE (known flake) - stopping daemons and retrying once"
+            gradle --stop || true
+            gradle testDebugUnitTest -PciExcludeRobolectric=1 --stacktrace --continue 2>&1 | tee /tmp/unit-tests.log
+          fi
 
       # Actions logs and artifacts are served from domains that are not reachable from
       # every environment that has to triage a red run, so the digest is parsed here and
@@ -119,7 +125,15 @@ jobs:
           gradle-version: '9.3.1'
 
       - name: Build debug APK
-        run: gradle assembleDebug --stacktrace
+        run: |
+          gradle assembleDebug --stacktrace 2>&1 | tee /tmp/build.log
+          if grep -q 'ApplicationManager.getApplication()" is null' /tmp/build.log; then
+            echo "KSP2 worker-init NPE (known flake) - stopping daemons and retrying once"
+            gradle --stop || true
+            gradle assembleDebug --stacktrace
+          elif grep -qE 'FAILURE: Build failed|error:' /tmp/build.log; then
+            exit 1
+          fi
 
       # Extract actual evaluated version metadata from the built APK using aapt.
       # This is the only reliable way to get the evaluated versionName and versionCode
