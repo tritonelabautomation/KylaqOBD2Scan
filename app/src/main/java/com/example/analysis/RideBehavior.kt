@@ -179,8 +179,10 @@ object RideCodec {
                 .split(',')
                 .filter { it.contains('=') }
                 .associate { it.substringBefore('=') to (it.substringAfter('=').toDoubleOrNull() ?: 0.0) }
+            // encode() drops index 0, so restore the dummy 0th entry at the FRONT.
             val gears = p[5].split(',').mapNotNull { it.toDoubleOrNull() }.toMutableList()
-            while (gears.size < 7) gears.add(0.0)
+            while (gears.size < 6) gears.add(0.0)
+            gears.add(0, 0.0)
             RideBehaviorRecorder.RideSummary(
                 dateUtc = com.example.data.ExpenseCodec.unesc(p[1]),
                 durationSec = p[2].toDoubleOrNull() ?: 0.0,
