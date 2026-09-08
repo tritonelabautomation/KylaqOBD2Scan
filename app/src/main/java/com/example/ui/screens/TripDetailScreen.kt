@@ -27,6 +27,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
+import com.example.ui.components.XyPlot
+import com.example.ui.components.XySeries
 import com.example.data.db.entities.AiAnalysisEntity
 import com.example.data.db.entities.RawLogEntity
 import com.example.data.db.entities.TelemetrySampleEntity
@@ -171,7 +173,17 @@ fun TripDetailScreen(
                 TripDetailTab.OVERVIEW -> {
                     Column {
                         TripFuelLogCard(fuelSummary)
-                        TripOverviewView(trip = trip, sampleCount = samples.size, rawCount = rawLogs.size, analysis = aiAnalysis)
+                        TripOverviewView(
+                            trip = trip,
+                            sampleCount = samples.size,
+                            rawCount = rawLogs.size,
+                            analysis = aiAnalysis,
+                            sampleSpanSec = if (samples.size > 1) {
+                                (samples.maxOf { it.timestamp } - samples.minOf { it.timestamp }) / 1000
+                            } else {
+                                0L
+                            }
+                        )
                     }
                 }
                 TripDetailTab.TRENDS -> {
@@ -225,7 +237,8 @@ private fun TripOverviewView(
     trip: TripEntity?,
     sampleCount: Int,
     rawCount: Int,
-    analysis: AiAnalysisEntity?
+    analysis: AiAnalysisEntity?,
+    sampleSpanSec: Long = 0L
 ) {
     if (trip == null) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -313,7 +326,12 @@ private fun TripOverviewView(
                     DetailRow("Adapter Used", trip.adapterName)
                     DetailRow("Protocol", trip.protocolName)
                     DetailRow("Detected ECUs", trip.detectedEcus)
-                    DetailRow("Duration", "${trip.durationSeconds / 60}m ${trip.durationSeconds % 60}s")
+                    val durSec = maxOf(trip.durationSeconds, sampleSpanSec)
+                    DetailRow(
+                        "Duration",
+                        "${durSec / 60}m ${durSec % 60}s" +
+                            if (sampleSpanSec > trip.durationSeconds) " (from samples)" else ""
+                    )
                     DetailRow("Samples Recorded", "$sampleCount samples")
                     DetailRow("Raw CAN Frames", "$rawCount frames")
                     DetailRow("Start Time (UTC)", trip.startTimeUtc)
@@ -402,47 +420,61 @@ private fun TripTrendsView(
             }
         }
 
-        // Trend Canvas Chart
+        // Power · Torque · Speed on ONE chart (owner-requested, dyno-comparison style),
+        // with numeric X (seconds into trip) and Y tick scales from XyPlot.
+        val combined = remember(samples) { combinedPowerTorqueSpeed(samples) }
+        if (combined.any { it.points.size >= 2 }) {
+            Text(
+                "POWER · TORQUE · SPEED - one chart, whole trip",
+                color = CyberCyan, fontWeight = FontWeight.Bold, fontSize = 12.sp
+            )
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                color = DarkSurface,
+                border = androidx.compose.foundation.BorderStroke(1.dp, CyberCyan.copy(alpha = 0.2f))
+            ) {
+                XyPlot(
+                    series = combined,
+                    modifier = Modifier.padding(10.dp),
+                    xLabel = "s into trip",
+                    yLabel = "km/h · Nm · kW"
+                )
+            }
+        }
+
+        // Per-PID trend with a real time axis (was index-only, no scales).
+        Text(
+            "${pids.firstOrNull { it.first == selectedPid }?.second ?: selectedPid} vs time",
+            color = CyberCyan, fontWeight = FontWeight.Bold, fontSize = 12.sp
+        )
         Surface(
-            modifier = Modifier.fillMaxWidth().height(220.dp),
+            modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(14.dp),
             color = DarkSurface,
             border = androidx.compose.foundation.BorderStroke(1.dp, CyberCyan.copy(alpha = 0.2f))
         ) {
-            if (numericValues.size < 2) {
+            val t0 = targetSamples.minOfOrNull { it.timestamp } ?: 0L
+            val timePoints = targetSamples.mapNotNull { smp ->
+                smp.numericValue?.let { ((smp.timestamp - t0) / 1000.0).toFloat() to it.toFloat() }
+            }.sortedBy { it.first }
+            if (timePoints.size < 2) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text("Insufficient sample points to render trend", color = TextSecondaryDark, fontSize = 12.sp)
                 }
             } else {
-                val minVal = numericValues.minOrNull() ?: 0.0
-                val maxVal = numericValues.maxOrNull() ?: 1.0
-                val range = if (maxVal - minVal > 0.001) maxVal - minVal else 1.0
-
-                Canvas(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-                    val w = size.width
-                    val h = size.height
-
-                    // Grid lines
-                    drawLine(Color(0xFF2A2D3A), Offset(0f, 0f), Offset(w, 0f), strokeWidth = 1f)
-                    drawLine(Color(0xFF2A2D3A), Offset(0f, h / 2f), Offset(w, h / 2f), strokeWidth = 1f)
-                    drawLine(Color(0xFF2A2D3A), Offset(0f, h), Offset(w, h), strokeWidth = 1f)
-
-                    val path = Path()
-                    val stepX = w / (numericValues.size - 1)
-
-                    numericValues.forEachIndexed { i, v ->
-                        val normY = ((v - minVal) / range).toFloat()
-                        val y = h - (normY * h)
-                        val x = i * stepX
-                        if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
-                    }
-
-                    drawPath(
-                        path = path,
-                        color = CyberCyan,
-                        style = Stroke(width = 3.dp.toPx())
-                    )
-                }
+                XyPlot(
+                    series = listOf(
+                        XySeries(
+                            pids.firstOrNull { it.first == selectedPid }?.second ?: selectedPid,
+                            CyberCyan,
+                            timePoints
+                        )
+                    ),
+                    modifier = Modifier.padding(10.dp),
+                    xLabel = "s into trip",
+                    yLabel = pidUnit(selectedPid)
+                )
             }
         }
 
@@ -820,7 +852,9 @@ private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summar
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
             Text(
-                "Log fuel (integrated from PID 015E/019D)",
+                "Log fuel (" +
+                    (if (summary.fuelEstimated) "model-estimated from rpm+load - ECU answers no 015E/019D" else "integrated from PID 015E/019D") +
+                    ")",
                 color = CyberCyan,
                 fontWeight = FontWeight.Bold,
                 fontSize = 14.sp
@@ -874,4 +908,61 @@ private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summar
             )
         }
     }
+}
+
+/** Unit label for the per-PID trend Y axis. */
+private fun pidUnit(pid: String): String = when (pid) {
+    "010C" -> "rpm"
+    "010D" -> "km/h"
+    "0105" -> "°C"
+    "010B" -> "kPa"
+    "0142" -> "V"
+    "0111" -> "%"
+    "0104" -> "%"
+    else -> ""
+}
+
+/**
+ * Speed (010D), torque (0162 % x 178 Nm, or load x model full-load torque when the ECU
+ * skips 0162) and shaft power (T·ω) as three time-aligned series for one combined chart.
+ */
+private fun combinedPowerTorqueSpeed(samples: List<TelemetrySampleEntity>): List<XySeries> {
+    fun norm(pid: String): String = pid.uppercase().let { if (it.length == 2) "01$it" else it }
+    val byPid = samples.groupBy { norm(it.pid) }
+    val t0 = samples.minOfOrNull { it.timestamp } ?: return emptyList()
+    fun secs(ts: Long) = ((ts - t0) / 1000.0).toFloat()
+    val speed = (byPid["010D"] ?: emptyList()).mapNotNull { s ->
+        s.numericValue?.let { secs(s.timestamp) to it.toFloat() }
+    }.sortedBy { it.first }
+    val rpm = (byPid["010C"] ?: emptyList()).mapNotNull { s ->
+        s.numericValue?.let { s.timestamp to it }
+    }.sortedBy { it.first }
+    val triples = mutableListOf<Triple<Float, Float, Float>>() // (sec, torque Nm, rpm)
+    val pct = (byPid["0162"] ?: emptyList()).mapNotNull { s -> s.numericValue?.let { s.timestamp to it } }
+    val loadSource = if (pct.isNotEmpty()) pct.map { it.first to it.second } else null
+    val load4 = (byPid["0104"] ?: emptyList()).mapNotNull { s -> s.numericValue?.let { s.timestamp to it } }
+    val source = loadSource ?: load4
+    if (rpm.isNotEmpty() && source.isNotEmpty()) {
+        val sortedSource = source.sortedBy { it.first }
+        var ri = 0
+        for ((ts, v) in sortedSource) {
+            while (ri + 1 < rpm.size &&
+                kotlin.math.abs(rpm[ri + 1].first - ts) < kotlin.math.abs(rpm[ri].first - ts)
+            ) {
+                ri++
+            }
+            if (kotlin.math.abs(rpm[ri].first - ts) > 5000L) continue
+            val rpmAt = rpm[ri].second
+            val torque = if (loadSource != null) v * 1.78 else v / 100.0 *
+                com.example.engine.PowertrainModel.fullLoadTorqueNm(rpmAt)
+            triples += Triple(secs(ts), torque.toFloat(), rpmAt.toFloat())
+        }
+    }
+    val torqueSeries = triples.map { it.first to it.second }
+    val powerSeries = triples.map { it.first to (it.third * it.second / 9549.3f) }
+    return listOf(
+        XySeries("speed km/h", com.example.ui.theme.NeonEmerald, speed),
+        XySeries("torque Nm", com.example.ui.theme.CyberCyan, torqueSeries),
+        XySeries("power kW", com.example.ui.theme.ElectricAmber, powerSeries)
+    )
 }

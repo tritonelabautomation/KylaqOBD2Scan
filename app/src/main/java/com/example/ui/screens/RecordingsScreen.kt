@@ -536,5 +536,10 @@ private fun TrendRow(label: String, values: List<Double>, fmt: String, color: Co
             Modifier.fillMaxWidth().height(48.dp),
             color
         )
+        Text(
+            "y-scale: ${String.format(fmt, values.minOrNull() ?: 0.0)} – ${String.format(fmt, values.maxOrNull() ?: 0.0)} · " +
+                "x: oldest → newest trip (${values.size} pts)",
+            color = TextSecondaryDark, fontSize = 9.sp
+        )
     }
 }

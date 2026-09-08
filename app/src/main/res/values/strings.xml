@@ -15,4 +15,5 @@
     Until configured, Google Sign-In and Drive backup are DISABLED.
     -->
     <string name="google_web_client_id">YOUR_GOOGLE_WEB_CLIENT_ID.apps.googleusercontent.com</string>
+    <string name="car_dash_label">Car Dash</string>
 </resources>
