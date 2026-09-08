@@ -2,6 +2,9 @@ package com.example
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.content.Intent
+import androidx.compose.ui.platform.LocalContext
+import com.example.service.ObdKeepAliveService
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -144,7 +147,8 @@ fun MainApp(viewModel: MainViewModel) {
         val requiredPermissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             basePermissions + arrayOf(
                 Manifest.permission.BLUETOOTH_CONNECT,
-                Manifest.permission.BLUETOOTH_SCAN
+                Manifest.permission.BLUETOOTH_SCAN,
+                Manifest.permission.POST_NOTIFICATIONS
             )
         } else {
             basePermissions + arrayOf(
@@ -153,6 +157,21 @@ fun MainApp(viewModel: MainViewModel) {
             )
         }
         permissionLauncher.launch(requiredPermissions)
+    }
+
+    // Background keep-alive (2026-09-09): while the adapter is CONNECTED the process
+    // runs as a foreground service so Android cannot silently kill the OBD session.
+    val keepAliveConnection by viewModel.connectionState.collectAsState()
+    val keepAliveRecording by viewModel.isRecording.collectAsState()
+    val keepAliveContext = LocalContext.current
+    LaunchedEffect(keepAliveConnection, keepAliveRecording) {
+        if (keepAliveConnection == ConnectionState.CONNECTED) {
+            val intent = Intent(keepAliveContext, ObdKeepAliveService::class.java)
+                .putExtra(ObdKeepAliveService.EXTRA_RECORDING, keepAliveRecording)
+            ContextCompat.startForegroundService(keepAliveContext, intent)
+        } else {
+            keepAliveContext.stopService(Intent(keepAliveContext, ObdKeepAliveService::class.java))
+        }
     }
 
     val bottomNavItems = listOf(
