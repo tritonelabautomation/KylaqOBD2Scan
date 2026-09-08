@@ -22,7 +22,8 @@ import xml.etree.ElementTree as ET
 
 GRADLE_ERROR = re.compile(
     r"^\s*(e: file://.*|.*error: .*|FAILURE: Build failed with an exception\.|"
-    r"> Task .* FAILED|Caused by: .*|What went wrong:.*)$"
+    r"> Task .* FAILED|Caused by: .*|What went wrong:.*|"
+    r"com\.example\.[A-Za-z0-9_]+ > [A-Za-z0-9_]+ (STARTED|PASSED|FAILED|SKIPPED).*)$"
 )
 NOISE = re.compile(
     r"^\s*(Download|Downloading|Resolve|Transforming|Deprecated Gradle)"

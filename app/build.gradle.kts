@@ -34,6 +34,16 @@ plugins {
   alias(libs.plugins.google.services)
 }
 
+// Unit-test hygiene: a hung test must fail the job in minutes, not zombie-run for hours,
+// and every test start/result is logged so the CI digest can name the offender.
+tasks.withType<Test>().configureEach {
+    timeout.set(java.time.Duration.ofMinutes(12))
+    testLogging {
+        events("started", "passed", "failed", "skipped")
+        showStandardStreams = false
+    }
+}
+
 android {
   namespace = "com.example"
   compileSdk { version = release(36) { minorApiLevel = 1 } }
