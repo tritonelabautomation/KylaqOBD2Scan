@@ -2,6 +2,8 @@ package com.example
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.app.ForegroundServiceStartNotAllowedException
+import androidx.lifecycle.LifecycleResumeEffect
 import android.content.Intent
 import androidx.compose.ui.platform.LocalContext
 import com.example.service.ObdKeepAliveService
@@ -164,14 +166,31 @@ fun MainApp(viewModel: MainViewModel) {
     val keepAliveConnection by viewModel.connectionState.collectAsState()
     val keepAliveRecording by viewModel.isRecording.collectAsState()
     val keepAliveContext = LocalContext.current
+    var keepAliveRetryPending by remember { mutableStateOf(false) }
+    val startKeepAlive: (Boolean) -> Boolean = { recording ->
+        val intent = Intent(keepAliveContext, ObdKeepAliveService::class.java)
+            .putExtra(ObdKeepAliveService.EXTRA_RECORDING, recording)
+        val result = runCatching { ContextCompat.startForegroundService(keepAliveContext, intent) }
+        if (result.exceptionOrNull() is ForegroundServiceStartNotAllowedException) {
+            keepAliveRetryPending = true
+        }
+        result.isSuccess
+    }
     LaunchedEffect(keepAliveConnection, keepAliveRecording) {
         if (keepAliveConnection == ConnectionState.CONNECTED) {
-            val intent = Intent(keepAliveContext, ObdKeepAliveService::class.java)
-                .putExtra(ObdKeepAliveService.EXTRA_RECORDING, keepAliveRecording)
-            ContextCompat.startForegroundService(keepAliveContext, intent)
+            startKeepAlive(keepAliveRecording)
         } else {
-            keepAliveContext.stopService(Intent(keepAliveContext, ObdKeepAliveService::class.java))
+            keepAliveRetryPending = false
+            runCatching { keepAliveContext.stopService(Intent(keepAliveContext, ObdKeepAliveService::class.java)) }
         }
+    }
+    // QA H1: Android 12+ forbids starting a foreground service while the app is in the
+    // background; auto-connect can reach CONNECTED with the activity stopped. Retry on resume.
+    LifecycleResumeEffect(keepAliveConnection, keepAliveRetryPending) {
+        if (keepAliveRetryPending && keepAliveConnection == ConnectionState.CONNECTED) {
+            if (startKeepAlive(keepAliveRecording)) keepAliveRetryPending = false
+        }
+        onPauseOrDispose { }
     }
 
     val bottomNavItems = listOf(

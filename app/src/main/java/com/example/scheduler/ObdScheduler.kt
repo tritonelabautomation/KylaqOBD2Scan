@@ -706,9 +706,12 @@ class ObdScheduler(
 
     private fun appendRawHistory(pidId: String, record: TransactionRecord) {
         val currHistory = _pidRawHistory.value.toMutableMap()
-        val list = (currHistory[pidId] ?: emptyList()).toMutableList()
-        if (list.size >= 500) {
-            list.removeAt(0)
+        // QA M7: avoid per-sample ArrayList element shifts at the 500-entry cap.
+        val existing = currHistory[pidId] ?: emptyList()
+        val list = if (existing.size >= 500) {
+            existing.subList(existing.size - 499, existing.size).toMutableList()
+        } else {
+            existing.toMutableList()
         }
         list.add(record)
         currHistory[pidId] = list

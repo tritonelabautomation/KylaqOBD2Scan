@@ -5,8 +5,8 @@
 [![Build Android APK](https://github.com/tritonelabautomation/KylaqOBD2Scan/actions/workflows/build-apk.yml/badge.svg)](https://github.com/tritonelabautomation/KylaqOBD2Scan/actions/workflows/build-apk.yml)
 ![minSdk](https://img.shields.io/badge/minSdk-24-3DDC84)
 ![targetSdk](https://img.shields.io/badge/targetSdk-36-3DDC84)
-![tests](https://img.shields.io/badge/unit%20tests-281%20passing-brightgreen)
-![suites](https://img.shields.io/badge/test%20suites-27-blue)
+![tests](https://img.shields.io/badge/unit%20tests-290%20passing-brightgreen)
+![suites](https://img.shields.io/badge/test%20suites-29-blue)
 ![license](https://img.shields.io/badge/license-all%20rights%20reserved-lightgrey)
 
 Built in Kotlin + Jetpack Compose (Material 3, dark "cyber" theme), Room, and coroutines. Every physical claim in the app (torque curves, gear ratios, converter slip, fuel energy) is traced back to an official source or to a captured live trace from the owner's own car — see [References](#references--sources).
@@ -90,7 +90,7 @@ Implementation lives in `engine/PowertrainModel.kt`, `engine/GearModel.kt`, `eng
 
 ## 🧪 Verification policy
 
-- **27 test suites / 281 unit tests** run in CI on every push (`.github/workflows/build-apk.yml`), plus an APK build job.
+- **29 test suites / 290 unit tests** run in CI on every push (`.github/workflows/build-apk.yml`), plus an APK build job.
 - **Reference trace replay:** a real captured ELM327 session from the owner's Kylaq is checked into `tools/trace_sim/reference_trace.txt`; `KylaqTraceReplayTest` and `KylaqRealWorldTraceIntegrationTest` assert the decoder, scheduler and store semantics against it.
 - **Adversarial decoder tests** (`PidDecoderAdversarialTest`, `DtcDecoderAdversarialTest`) fuzz malformed frames.
 - CI posts a parsed test digest back to the open pull request so red runs are triageable without Actions access.

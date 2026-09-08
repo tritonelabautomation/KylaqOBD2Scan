@@ -10,6 +10,12 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import androidx.core.app.NotificationCompat
 import com.example.MainActivity
 import com.example.R
@@ -48,6 +54,8 @@ class ObdKeepAliveService : Service() {
     }
 
     private var wakeLock: PowerManager.WakeLock? = null
+    private val refreshScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private var refreshJob: Job? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -55,6 +63,15 @@ class ObdKeepAliveService : Service() {
         val recording = intent?.getBooleanExtra(EXTRA_RECORDING, false) == true
         startForegroundCompat(recording)
         refreshWakeLock()
+        // QA M1: re-acquire before the 60 min timeout so multi-hour drives never lose CPU.
+        if (refreshJob == null) {
+            refreshJob = refreshScope.launch {
+                while (isActive) {
+                    kotlinx.coroutines.delay(45 * 60 * 1000L)
+                    refreshWakeLock()
+                }
+            }
+        }
         return START_STICKY
     }
 
@@ -95,6 +112,8 @@ class ObdKeepAliveService : Service() {
     }
 
     override fun onDestroy() {
+        refreshJob?.cancel()
+        refreshScope.cancel()
         wakeLock?.let { if (it.isHeld) it.release() }
         wakeLock = null
         super.onDestroy()

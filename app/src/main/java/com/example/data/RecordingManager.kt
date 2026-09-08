@@ -112,18 +112,21 @@ class RecordingManager(
 
         // Asynchronously insert initial Trip record in Room
         CoroutineScope(Dispatchers.IO).launch {
-            tripRepository.insertTrip(
-                TripEntity(
-                    id = sessionId,
-                    title = defaultName,
-                    vehicleName = vehicleName,
-                    adapterName = adapterName,
-                    protocolName = protocolName,
-                    startTimeUtc = nowUtc,
-                    startTimestamp = sessionStartTimestamp,
-                    status = "RECORDING"
+            // QA H2: uncaught Room exception here would crash the process mid-recording.
+            runCatching {
+                tripRepository.insertTrip(
+                    TripEntity(
+                        id = sessionId,
+                        title = defaultName,
+                        vehicleName = vehicleName,
+                        adapterName = adapterName,
+                        protocolName = protocolName,
+                        startTimeUtc = nowUtc,
+                        startTimestamp = sessionStartTimestamp,
+                        status = "RECORDING"
+                    )
                 )
-            )
+            }.onFailure { android.util.Log.e("RecordingManager", "initial trip insert failed", it) }
         }
 
         return metadata
@@ -349,7 +352,8 @@ class RecordingManager(
             loadSavedRecordings()
         }
         CoroutineScope(Dispatchers.IO).launch {
-            tripRepository.deleteTrip(sessionId)
+            runCatching { tripRepository.deleteTrip(sessionId) }
+                .onFailure { android.util.Log.e("RecordingManager", "trip delete failed", it) }
         }
     }
 
@@ -359,7 +363,8 @@ class RecordingManager(
         }
         loadSavedRecordings()
         CoroutineScope(Dispatchers.IO).launch {
-            tripRepository.deleteAllTrips()
+            runCatching { tripRepository.deleteAllTrips() }
+                .onFailure { android.util.Log.e("RecordingManager", "delete-all failed", it) }
         }
     }
 
