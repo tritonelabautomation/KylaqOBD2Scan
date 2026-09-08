@@ -75,10 +75,10 @@ fun FuelCostsScreen(
         ) {
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    StatChip("AVG", stats.avgKmPerL?.let { String.format("%.1f km/L", it) } ?: "--", NeonEmerald, Modifier.weight(1f))
-                    StatChip("₹/KM", stats.costPerKm?.let { String.format("%.2f", it) } ?: "--", CyberCyan, Modifier.weight(1f))
-                    StatChip("30-DAY ₹", stats.cost30d?.let { String.format("%.0f", it) } ?: "--", ElectricAmber, Modifier.weight(1f))
-                    StatChip("₹/L", stats.lastPricePerL?.let { String.format("%.1f", it) } ?: "--", TextSecondaryDark, Modifier.weight(1f))
+                    FuelStatChip("AVG", stats.avgKmPerL?.let { String.format("%.1f km/L", it) } ?: "--", NeonEmerald, Modifier.weight(1f))
+                    FuelStatChip("₹/KM", stats.costPerKm?.let { String.format("%.2f", it) } ?: "--", CyberCyan, Modifier.weight(1f))
+                    FuelStatChip("30-DAY ₹", stats.cost30d?.let { String.format("%.0f", it) } ?: "--", ElectricAmber, Modifier.weight(1f))
+                    FuelStatChip("₹/L", stats.lastPricePerL?.let { String.format("%.1f", it) } ?: "--", TextSecondaryDark, Modifier.weight(1f))
                 }
             }
             item {
@@ -195,7 +195,7 @@ fun FuelCostsScreen(
 }
 
 @Composable
-private fun StatChip(label: String, value: String, color: Color, modifier: Modifier = Modifier) {
+private fun FuelStatChip(label: String, value: String, color: Color, modifier: Modifier = Modifier) {
     Column(
         modifier = modifier
             .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(12.dp))
