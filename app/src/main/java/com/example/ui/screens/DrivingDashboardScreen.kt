@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.bluetooth.ConnectionState
+import com.example.ui.components.ConnectionBanner
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.MainViewModel
 
@@ -29,7 +30,9 @@ import com.example.ui.viewmodel.MainViewModel
 @Composable
 fun DrivingDashboardScreen(
     viewModel: MainViewModel,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onOpenDrawer: (() -> Unit)? = null,
+    onOpenConsole: () -> Unit = {}
 ) {
     val isRecording by viewModel.isRecording.collectAsStateWithLifecycle()
     val isPolling by viewModel.isPolling.collectAsStateWithLifecycle()
@@ -42,6 +45,7 @@ fun DrivingDashboardScreen(
     val transmissionState by viewModel.transmissionState.collectAsStateWithLifecycle()
 
     val isConnected = connectionState == ConnectionState.CONNECTED
+    val connectionStatusMessage by viewModel.connectionStatusMessage.collectAsStateWithLifecycle()
 
     val rpm = liveDecodedMap["010C"] ?: "--"
     val speed = liveDecodedMap["010D"] ?: "--"
@@ -74,8 +78,12 @@ fun DrivingDashboardScreen(
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
+                    IconButton(onClick = onOpenDrawer ?: onBack) {
+                        Icon(
+                            if (onOpenDrawer != null) Icons.Default.Menu else Icons.Default.ArrowBack,
+                            contentDescription = if (onOpenDrawer != null) "Menu" else "Back",
+                            tint = Color.White
+                        )
                     }
                 },
                 actions = {
@@ -103,6 +111,13 @@ fun DrivingDashboardScreen(
                 .padding(horizontal = 14.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
+            ConnectionBanner(
+                connectionState = connectionState,
+                statusMessage = connectionStatusMessage,
+                onConnectAction = onOpenConsole,
+                actionLabel = "CONSOLE"
+            )
+
             // Powertrain Intelligence Banner (Driving State, 6-AT Gear, Fuel Economy)
             Surface(
                 modifier = Modifier.fillMaxWidth(),

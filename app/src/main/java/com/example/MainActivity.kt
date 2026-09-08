@@ -300,8 +300,9 @@ fun MainApp(viewModel: MainViewModel) {
             composable(Screen.DrivingDashboard.route) {
                 DrivingDashboardScreen(
                     viewModel = viewModel,
-                    onBack = { navController.popBackStack() }
-                    
+                    onBack = { navController.popBackStack() },
+                    onOpenDrawer = { drawerScope.launch { drawerState.open() } },
+                    onOpenConsole = { navController.navigate(Screen.Console.route) }
                 )
             }
 

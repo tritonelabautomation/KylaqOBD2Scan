@@ -75,7 +75,7 @@ fun MetricRow(
 
 /** Global UI preference: hide rows the ECU never answers (declutter, owner request). */
 object TelemetryPrefs {
-    var showUnsupported by mutableStateOf(false)
+    var showUnsupported by mutableStateOf(true)
 }
 
 @Composable
