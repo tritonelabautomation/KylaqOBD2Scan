@@ -35,18 +35,22 @@ class VinAuthorityTestA {
         assertTrue(r is VinSelectionResult.Unavailable)
     }
 
-    @Test fun t3_unauthFirst_returnsAuth() {
+    // Policy (see VinAuthority KDoc): ANY conflicting VIN, authoritative or not, fails closed.
+    @Test fun t3_unauthFirst_conflicting_failsClosed() {
         val c = listOf(VinCandidate("7E9", "UNAUTH", false), VinCandidate("7E8", "AUTH", true))
-        val r = VinAuthority.selectVinByAuthority(c)
-        assertTrue(r is VinSelectionResult.Success)
-        assertEquals("AUTH", (r as VinSelectionResult.Success).vin)
+        assertTrue(VinAuthority.selectVinByAuthority(c) is VinSelectionResult.Ambiguous)
     }
 
-    @Test fun t4_authFirst_returnsAuth() {
+    @Test fun t4_authFirst_conflicting_failsClosed() {
         val c = listOf(VinCandidate("7E8", "AUTH", true), VinCandidate("7E9", "UNAUTH", false))
+        assertTrue(VinAuthority.selectVinByAuthority(c) is VinSelectionResult.Ambiguous)
+    }
+
+    @Test fun t4b_unauthAgrees_authSucceeds() {
+        val c = listOf(VinCandidate("7E8", "SAMEVIN", true), VinCandidate("7E9", "SAMEVIN", false))
         val r = VinAuthority.selectVinByAuthority(c)
         assertTrue(r is VinSelectionResult.Success)
-        assertEquals("AUTH", (r as VinSelectionResult.Success).vin)
+        assertEquals("SAMEVIN", (r as VinSelectionResult.Success).vin)
     }
 
     @Test fun t5_sameVin_accepted() {
@@ -65,12 +69,12 @@ class VinAuthorityTestA {
     }
 
     @Test fun t8_validAuth_malformedUnauth() {
-        val r = VinAuthority.selectVinByAuthority(VinAuthority.collectVinCandidates(listOf(mal("7E9"), v("7E8", "VALID12345678"))))
+        val r = VinAuthority.selectVinByAuthority(VinAuthority.collectVinCandidates(listOf(mal("7E9"), v("7E8", "VALD1234567890ABC"))))
         assertTrue(r is VinSelectionResult.Success)
     }
 
     @Test fun t9_validUnauth_malformedAuth() {
-        val r = VinAuthority.selectVinByAuthority(VinAuthority.collectVinCandidates(listOf(v("7E9", "UNAUTH"), mal("7E8"))))
+        val r = VinAuthority.selectVinByAuthority(VinAuthority.collectVinCandidates(listOf(v("7E9", "UNAUTH1234567890A"), mal("7E8"))))
         assertTrue(r is VinSelectionResult.Unavailable)
     }
 

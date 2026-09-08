@@ -41,7 +41,7 @@ object TripFuelSummary {
     private const val FUEL_DENSITY_KG_L = 0.745
     private const val COAST_SPEED_KMH = 20.0
     private const val COAST_FUEL_LH = 0.15
-    private const val MAX_GAP_MS = 5000L
+    private const val MAX_GAP_MS = 15000L // slow PIDs legitimately arrive ~10 s apart
 
     fun summarize(samples: List<SamplePoint>): Summary {
         if (samples.isEmpty()) {

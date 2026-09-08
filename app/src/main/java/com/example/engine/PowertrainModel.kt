@@ -62,6 +62,9 @@ object PowertrainModel {
     private const val GRAVITY = 9.81
     private const val RPM_TO_KW = 9549.297
 
+    /** Top gear cannot hold below this crank speed without lugging. */
+    const val LUGGING_RPM = 1000.0
+
     /**
      * Full-load (WOT) torque curve, piecewise linear in rpm. Anchored at the factory plateau
      * (178 Nm, 1750-4000 rpm) and at the rated point (85 kW at 5500 rpm ⇒ 147.5 Nm); the
@@ -143,8 +146,16 @@ object PowertrainModel {
         val fullLoad = fullLoadTorqueNm(rpm).coerceAtLeast(10.0)
         val load = (torqueNm / fullLoad).coerceIn(0.02, 1.0)
         val rpmTerm = (1.0 - 0.25 * square((rpm - 2750.0) / 3250.0)).coerceIn(0.55, 1.0)
+        // Below ~1500 rpm combustion stability and friction collapse efficiency far more than
+        // the flat bell curve suggests; without this the modelled sweet spot drifts to lugging
+        // speeds no gearbox would actually hold in top gear.
+        val lowRpmPenalty = if (rpm < 1500.0) {
+            0.55 + 0.45 * ((rpm - 800.0) / 700.0).coerceIn(0.0, 1.0)
+        } else {
+            1.0
+        }
         val loadTerm = 0.30 + 0.70 * load
-        return (0.40 * rpmTerm * loadTerm).coerceIn(0.08, 0.40)
+        return (0.40 * rpmTerm * lowRpmPenalty * loadTerm).coerceIn(0.08, 0.40)
     }
 
     /** Fuel flow in L/h for a delivered shaft power at a given brake thermal efficiency. */
@@ -166,7 +177,9 @@ object PowertrainModel {
     ): Double? {
         if (speedKmh <= 1.0 || rpmPerKmh <= 0.0) return null
         val rpm = speedKmh * rpmPerKmh
-        if (rpm < 800.0 || rpm > 6500.0) return null
+        // LUGGING_RPM: below this crank speed the gearbox cannot cruise in a tall gear -
+        // it would lug or downshift, so steady-state consumption is undefined there.
+        if (rpm < LUGGING_RPM || rpm > 6500.0) return null
         val power = powerDemandKw(speedKmh, 0.0, massKg, gradePct)
         val torque = power * RPM_TO_KW / rpm
         if (torque > fullLoadTorqueNm(rpm)) return null // gear too tall for the speed

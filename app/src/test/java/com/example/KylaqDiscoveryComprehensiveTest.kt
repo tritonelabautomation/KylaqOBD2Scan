@@ -212,7 +212,7 @@ class KylaqDiscoveryComprehensiveTest {
 
     @Test
     fun testKylaqAuthoritativeProfile() {
-        assertEquals("Škoda Kylaq", KylaqProtocolProfile.VEHICLE_NAME)
+        assertEquals("Skoda Kylaq", KylaqProtocolProfile.VEHICLE_NAME) // ASCII constant: avoids mojibake on non-UTF8 consoles
         assertEquals("1.0 TSI (EA211)", KylaqProtocolProfile.ENGINE_NAME)
         assertEquals("ATSP6", KylaqProtocolProfile.ELM_PROTOCOL_COMMAND)
         assertEquals("7DF", KylaqProtocolProfile.FUNCTIONAL_REQUEST_ID)

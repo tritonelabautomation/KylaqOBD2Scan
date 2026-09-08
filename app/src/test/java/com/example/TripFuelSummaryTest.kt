@@ -17,7 +17,7 @@ class TripFuelSummaryTest {
         val samples = mutableListOf<TripFuelSummary.SamplePoint>()
         // 10 minutes at 60 km/h burning 4 L/h, sampled every 10 s
         var ts = 0L
-        repeat(60) {
+        repeat(61) {
             samples.add(point("010D", ts, 60.0))
             samples.add(point("015E", ts, 4.0))
             ts += 10_000

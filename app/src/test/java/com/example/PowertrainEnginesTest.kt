@@ -173,10 +173,12 @@ class PowertrainEnginesTest {
         val hasNext = manager.parseCapabilityBitmap(0x00, listOf(0x80, 0x10, 0x08, 0x01))
 
         assertTrue(hasNext)
-        assertEquals(CapabilityStatus.SUPPORTED, manager.getStatus("0101"))
-        assertEquals(CapabilityStatus.SUPPORTED, manager.getStatus("010C"))
-        assertEquals(CapabilityStatus.SUPPORTED, manager.getStatus("0115"))
-        assertEquals(CapabilityStatus.SUPPORTED, manager.getStatus("0120"))
+        // Bitmap evidence is never treated as direct validation (Rule 5: only DIRECT_VALIDATED
+        // or LIVE_ELIGIBLE PIDs enter the live poller).
+        assertEquals(CapabilityStatus.BITMAP_SUPPORTED, manager.getStatus("0101"))
+        assertEquals(CapabilityStatus.BITMAP_SUPPORTED, manager.getStatus("010C"))
+        assertEquals(CapabilityStatus.BITMAP_SUPPORTED, manager.getStatus("0115"))
+        assertEquals(CapabilityStatus.BITMAP_SUPPORTED, manager.getStatus("0120"))
         assertEquals(CapabilityStatus.NOT_SUPPORTED, manager.getStatus("0102"))
         assertEquals(CapabilityStatus.NOT_SUPPORTED, manager.getStatus("010D"))
     }
