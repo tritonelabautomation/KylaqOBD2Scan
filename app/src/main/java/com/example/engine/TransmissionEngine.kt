@@ -17,21 +17,14 @@ class TransmissionEngine {
 
     // Calibrated gear ratio bands for Škoda Kylaq 1.0 TSI (EA211 + 6-Speed Torque Converter AT)
     // Values represent RPM per km/h in locked-up / coupled converter state:
-    // Final Drive: ~3.87
-    // 1st (4.04): ~105 RPM / km/h
-    // 2nd (2.37): ~62 RPM / km/h
-    // 3rd (1.56): ~41 RPM / km/h
-    // 4th (1.16): ~30 RPM / km/h
-    // 5th (0.85): ~22 RPM / km/h
-    // 6th (0.67): ~17.5 RPM / km/h
-    private val gearRpmPerKmhBands = listOf(
-        Pair(1, 92.0..120.0),
-        Pair(2, 54.0..72.0),
-        Pair(3, 36.0..48.0),
-        Pair(4, 26.5..34.5),
-        Pair(5, 19.5..25.5),
-        Pair(6, 14.5..19.0)
-    )
+    /**
+     * AQ250-6F / 09G (Aisin TF-60SN) per SSP 291 - ratios 4.148/2.370/1.556/1.155/0.859/0.686,
+     * spread 6.05, slip-controlled lock-up. Relative ratios are factory truth; the absolute
+     * rpm-per-km/h scale self-calibrates from steady cruise samples (final drive x idler x
+     * tyre circumference varies by application), so D/S/M paddle gears all read correctly.
+     */
+    val gearModel = Aq250GearModel()
+    private var lastRpmPerKmh: Double? = null
 
     /**
      * Evaluates transmission state.
@@ -69,13 +62,17 @@ class TransmissionEngine {
 
         if (speedKmh != null && engineRpm != null && speedKmh >= 10.0 && engineRpm >= 1000.0) {
             val currentRpmPerKmh = engineRpm / speedKmh
+            // Only steady-ratio samples (converter locked, no shift transient) adapt the model.
+            val stable = lastRpmPerKmh?.let {
+                kotlin.math.abs(it - currentRpmPerKmh) / currentRpmPerKmh < 0.02
+            } ?: false
+            gearModel.observe(currentRpmPerKmh, stable)
+            lastRpmPerKmh = currentRpmPerKmh
 
-            for ((gear, band) in gearRpmPerKmhBands) {
-                if (currentRpmPerKmh in band) {
-                    estimatedGear = gear
-                    isConfident = true
-                    break
-                }
+            val est = gearModel.estimate(currentRpmPerKmh)
+            if (est != null) {
+                estimatedGear = est.first
+                isConfident = est.second
             }
         }
 

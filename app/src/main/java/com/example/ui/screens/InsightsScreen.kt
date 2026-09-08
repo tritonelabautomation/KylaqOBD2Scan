@@ -87,6 +87,7 @@ fun InsightsScreen(
             item { TurboCard(snapshot) }
             item { TanksCard(snapshot, viewModel.tankHistory()) }
             item { RideXrayCard(viewModel.rideHistory()) }
+            item { GearboxCard(viewModel.obdScheduler.transmissionEngine.gearModel) }
             item { CoachCard(tips) }
             item { Spacer(modifier = Modifier.height(8.dp)) }
         }
@@ -534,5 +535,38 @@ private fun RideXrayCard(rides: List<com.example.analysis.RideBehaviorRecorder.R
                 )
             }
         }
+    }
+}
+
+/**
+ * The owner's gearbox, from the AQ250/09G Self-Study Programme: factory ratios plus the LIVE
+ * self-calibrated rpm-per-km/h scale the gear estimator learned from their own cruise samples.
+ */
+@Composable
+private fun GearboxCard(model: com.example.engine.Aq250GearModel) {
+    SectionCard(
+        title = "Gearbox: AQ250-6F (09G)",
+        subtitle = "Aisin TF-60SN · SSP 291 ratios · self-calibrated gear scale from your cruise data"
+    ) {
+        Text(
+            "Ratios 4.148 / 2.370 / 1.556 / 1.155 / 0.859 / 0.686 · reverse 3.394 · spread 6.05 · " +
+                "Lepelletier set, slip-controlled lock-up clutch",
+            color = Color.White, fontSize = 10.sp
+        )
+        Text(
+            "ATF ${com.example.engine.Aq250GearModel.ATF_SPEC}, ${String.format("%.1f", com.example.engine.Aq250GearModel.ATF_FILL_L)} L lifetime fill",
+            color = ElectricAmber, fontSize = 10.sp
+        )
+        val scales = model.calibratedScales()
+        Text(
+            "Learned rpm per km/h per gear (${model.totalSamples()} cruise samples): " +
+                scales.joinToString(" ") { "G${it.first}:${String.format("%.1f", it.second)}" },
+            color = TextSecondaryDark, fontSize = 10.sp
+        )
+        Text(
+            "D holds ~2.0-2.5k upshifts; S/M hold past ~3k - tag MODE on the HUD and the Ride " +
+                "X-ray proves the difference from your own shift points.",
+            color = CyberCyan, fontSize = 10.sp
+        )
     }
 }
