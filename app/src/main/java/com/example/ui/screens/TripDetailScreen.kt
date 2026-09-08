@@ -443,6 +443,29 @@ private fun TripTrendsView(
             }
         }
 
+        // Dyno view like the owner's Team-BHP reference: the same three quantities
+        // averaged per 250 rpm bucket and plotted AGAINST engine speed.
+        val rpmBins = remember(samples) { rpmBinnedSeries(samples) }
+        if (rpmBins.any { it.points.size >= 2 }) {
+            Text(
+                "DYNO VIEW - power · torque · speed vs engine rpm (250 rpm buckets)",
+                color = CyberCyan, fontWeight = FontWeight.Bold, fontSize = 12.sp
+            )
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                color = DarkSurface,
+                border = androidx.compose.foundation.BorderStroke(1.dp, CyberCyan.copy(alpha = 0.2f))
+            ) {
+                XyPlot(
+                    series = rpmBins,
+                    modifier = Modifier.padding(10.dp),
+                    xLabel = "engine rpm",
+                    yLabel = "km/h · Nm · kW"
+                )
+            }
+        }
+
         // Per-PID trend with a real time axis (was index-only, no scales).
         Text(
             "${pids.firstOrNull { it.first == selectedPid }?.second ?: selectedPid} vs time",
@@ -964,5 +987,58 @@ private fun combinedPowerTorqueSpeed(samples: List<TelemetrySampleEntity>): List
         XySeries("speed km/h", com.example.ui.theme.NeonEmerald, speed),
         XySeries("torque Nm", com.example.ui.theme.CyberCyan, torqueSeries),
         XySeries("power kW", com.example.ui.theme.ElectricAmber, powerSeries)
+    )
+}
+
+/**
+ * Dyno-reference view: speed / torque / power averaged in 250 rpm buckets and plotted
+ * against engine speed (the Team-BHP curve style the owner asked to match).
+ */
+private fun rpmBinnedSeries(samples: List<TelemetrySampleEntity>): List<XySeries> {
+    fun norm(pid: String): String = pid.uppercase().let { if (it.length == 2) "01$it" else it }
+    val byPid = samples.groupBy { norm(it.pid) }
+    val speed = (byPid["010D"] ?: emptyList()).mapNotNull { s -> s.numericValue?.let { s.timestamp to it } }.sortedBy { it.first }
+    val rpm = (byPid["010C"] ?: emptyList()).mapNotNull { s -> s.numericValue?.let { s.timestamp to it } }.sortedBy { it.first }
+    val pct = (byPid["0162"] ?: emptyList()).mapNotNull { s -> s.numericValue?.let { s.timestamp to it } }
+    val load = (byPid["0104"] ?: emptyList()).mapNotNull { s -> s.numericValue?.let { s.timestamp to it } }
+    val isPercentTorque = pct.isNotEmpty()
+    val source = if (isPercentTorque) pct else load
+    if (rpm.isEmpty() || source.isEmpty() || speed.isEmpty()) return emptyList()
+
+    class Acc {
+        var tq = 0.0
+        var pw = 0.0
+        var sp = 0.0
+        var n = 0
+    }
+    val buckets = mutableMapOf<Int, Acc>()
+    var ri = 0
+    var si = 0
+    for ((ts, v) in source.sortedBy { it.first }) {
+        while (ri + 1 < rpm.size &&
+            kotlin.math.abs(rpm[ri + 1].first - ts) < kotlin.math.abs(rpm[ri].first - ts)
+        ) ri++
+        if (kotlin.math.abs(rpm[ri].first - ts) > 5000L) continue
+        val r = rpm[ri].second
+        while (si + 1 < speed.size &&
+            kotlin.math.abs(speed[si + 1].first - ts) < kotlin.math.abs(speed[si].first - ts)
+        ) si++
+        val sp = speed[si].second
+        val tq = if (isPercentTorque) v * 1.78 else v / 100.0 *
+            com.example.engine.PowertrainModel.fullLoadTorqueNm(r)
+        val pw = r * tq / 9549.3
+        val acc = buckets.getOrPut((r.toInt() / 250) * 250) { Acc() }
+        acc.tq += tq
+        acc.pw += pw
+        acc.sp += sp
+        acc.n++
+    }
+    val keys = buckets.keys.sorted()
+    fun avg(sel: (Acc) -> Double): List<Pair<Float, Float>> =
+        keys.map { k -> k.toFloat() to (sel(buckets.getValue(k)) / buckets.getValue(k).n).toFloat() }
+    return listOf(
+        XySeries("speed km/h", com.example.ui.theme.NeonEmerald, avg { it.sp }),
+        XySeries("torque Nm", com.example.ui.theme.CyberCyan, avg { it.tq }),
+        XySeries("power kW", com.example.ui.theme.ElectricAmber, avg { it.pw })
     )
 }
