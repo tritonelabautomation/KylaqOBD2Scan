@@ -16,7 +16,8 @@ fun VehicleGarageScreen(
     vehicles: List<VehicleEntity>,
     onAddVehicle: () -> Unit,
     onAutoScan: () -> Unit,
-    onSelectVehicle: (VehicleEntity) -> Unit
+    onSelectVehicle: (VehicleEntity) -> Unit,
+    onOpenProfiles: () -> Unit = {}
 ) {
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Text("My Garage", style = MaterialTheme.typography.headlineMedium, color = CyberCyan)
@@ -60,6 +61,13 @@ fun VehicleGarageScreen(
             OutlinedButton(onClick = onAutoScan, modifier = Modifier.weight(1f)) {
                 Text("Auto Scan (OBD)")
             }
+        }
+        Spacer(modifier = Modifier.height(12.dp))
+        OutlinedButton(
+            onClick = onOpenProfiles,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("1.0 TSI Protocol Profiles")
         }
     }
 }

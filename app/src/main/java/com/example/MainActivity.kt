@@ -42,6 +42,7 @@ import kotlinx.coroutines.launch
 
 sealed class Screen(val route: String, val title: String, val icon: ImageVector) {
     object Dashboard : Screen("dashboard", "Dashboard", Icons.Default.Speed)
+    object Insights : Screen("insights", "Insights", Icons.Default.Insights)
     object CarDoctor : Screen("car_doctor", "AI Doctor", Icons.Default.HealthAndSafety)
     object DrivingDashboard : Screen("driving_hud", "Auto HUD", Icons.Default.DirectionsCar)
     object Recordings : Screen("recordings", "Trips", Icons.Default.Folder)
@@ -121,6 +122,7 @@ fun MainApp(viewModel: MainViewModel) {
 
     val bottomNavItems = listOf(
         Screen.Dashboard,
+        Screen.Insights,
         Screen.Garage,
         Screen.CarDoctor,
         Screen.Recordings,
@@ -203,6 +205,13 @@ fun MainApp(viewModel: MainViewModel) {
                 )
             }
 
+            composable(Screen.Insights.route) {
+                InsightsScreen(
+                    viewModel = viewModel,
+                    onBack = { navController.popBackStack() }
+                )
+            }
+
             composable(Screen.CarDoctor.route) {
                 AiDoctorScreen(
                     viewModel = viewModel,
@@ -258,6 +267,7 @@ fun MainApp(viewModel: MainViewModel) {
                     vehicles = allVehicles,
                     onAddVehicle = { navController.navigate(Screen.AddVehicle.route) },
                     onAutoScan = { navController.navigate("auto_scan_obd") },
+                    onOpenProfiles = { navController.navigate(Screen.Profiles.route) },
                     onSelectVehicle = { vehicle ->
                         val name = if (vehicle.nickname.isNullOrBlank()) "${vehicle.make} ${vehicle.model}" else vehicle.nickname
                         viewModel.setVehicleName(name)

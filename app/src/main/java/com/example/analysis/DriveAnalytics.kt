@@ -59,6 +59,9 @@ class DriveAnalytics(
         val tanks: List<FuelQualityAnalyzer.TankSegment> = emptyList(),
         val activeTank: FuelQualityAnalyzer.TankSegment? = null,
         val fuelComparisonNote: String? = null,
+        val harshAccelCount: Int = 0,
+        val harshBrakeCount: Int = 0,
+        val idleSeconds: Double = 0.0,
         val trend: List<TrendPoint> = emptyList()
     )
 
@@ -75,6 +78,12 @@ class DriveAnalytics(
     private var lastSpeedMs = 0L
     private var measuredRpmPerKmh: Double? = null
     private var lastSnapshotMs = 0L
+    private var harshAccelCount = 0
+    private var harshBrakeCount = 0
+    private var idleSeconds = 0.0
+    private var lastHarshAccelMs = 0L
+    private var lastHarshBrakeMs = 0L
+    private var lastSignalMs = 0L
 
     private val torqueBins = LinkedHashMap<Int, BinStats>()
     private val powerBins = LinkedHashMap<Int, BinStats>()
@@ -107,6 +116,8 @@ class DriveAnalytics(
     ) {
         val speed = speedKmh ?: 0.0
         val accel = acceleration(timestampMonotonicMs, speed)
+        countHarshEvents(timestampMonotonicMs, accel)
+        countIdle(timestampMonotonicMs, speed, rpm)
 
         updateGearRatio(speed, rpm)
 
@@ -229,6 +240,25 @@ class DriveAnalytics(
         return (speed - previousSpeed) / 3.6 / dt
     }
 
+    /** >2.5 m/s² (~0-100 km/h in under 11 s) counts as a harsh acceleration, debounced 3 s. */
+    private fun countHarshEvents(ts: Long, accel: Double?) {
+        val a = accel ?: return
+        if (a > 2.5 && ts - lastHarshAccelMs > 3000L) {
+            harshAccelCount++
+            lastHarshAccelMs = ts
+        } else if (a < -3.0 && ts - lastHarshBrakeMs > 3000L) {
+            harshBrakeCount++
+            lastHarshBrakeMs = ts
+        }
+    }
+
+    /** Engine running while stationary burns fuel for nothing; accumulate it honestly. */
+    private fun countIdle(ts: Long, speed: Double, rpm: Double?) {
+        val dt = if (lastSignalMs > 0L) (ts - lastSignalMs).coerceIn(0L, 5000L) / 1000.0 else 0.0
+        lastSignalMs = ts
+        if (speed < 1.0 && rpm != null && rpm > 300.0) idleSeconds += dt
+    }
+
     /**
      * Highest-gear ratio seen so far (rpm per km/h). The minimum ratio at road speed is the top
      * gear, which is exactly the gear the efficiency sweep should use for the sweet spot.
@@ -298,6 +328,9 @@ class DriveAnalytics(
             tanks = fuelQuality.tanks(),
             activeTank = fuelQuality.activeTank(),
             fuelComparisonNote = fuelQuality.comparisonNote(),
+            harshAccelCount = harshAccelCount,
+            harshBrakeCount = harshBrakeCount,
+            idleSeconds = idleSeconds,
             trend = trend.toList()
         )
     }
