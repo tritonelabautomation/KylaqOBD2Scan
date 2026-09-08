@@ -18,6 +18,7 @@ object NoticeManager {
     private const val SUMMARY_ID = 9001
     private const val TEST_ID = 9002
     private const val CHECKIN_ID = 9003
+    private const val ARRIVAL_ID = 9004
 
     fun ensureChannel(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -84,6 +85,23 @@ object NoticeManager {
             NotificationManagerCompat.from(context).notify(CHECKIN_ID, notification)
         } catch (e: SecurityException) {
             // Permission denied: the in-app hub still lists everything.
+        }
+    }
+
+    /** GPS co-pilot arrival detection (VehIQ trip co-pilot). */
+    fun postArrival(context: Context, tripName: String) {
+        ensureChannel(context)
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_dialog_map)
+            .setContentTitle("Arrived: $tripName")
+            .setContentText("Co-pilot tracked the full planned distance. Log your trip fuel and expenses!")
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setAutoCancel(true)
+            .build()
+        try {
+            NotificationManagerCompat.from(context).notify(ARRIVAL_ID, notification)
+        } catch (e: SecurityException) {
+            // Permission denied: the Trip Planner screen shows the arrival state anyway.
         }
     }
 

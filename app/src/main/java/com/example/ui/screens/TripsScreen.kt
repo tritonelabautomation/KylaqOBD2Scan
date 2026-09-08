@@ -14,6 +14,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import com.example.ai.GeminiTextClient
 import com.example.data.ExpenseCodec
 import com.example.data.TripPlanCodec
@@ -55,6 +63,44 @@ fun TripsScreen(
     var aiText by remember { mutableStateOf<String?>(null) }
     var aiBusy by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf<String?>(null) }
+
+    // GPS co-pilot: live progress against the planned distance, arrival notification, SOS,
+    // and Maps intents for fuel/food - all free, no POI API key needed.
+    val context = LocalContext.current
+    val gps by viewModel.gpsData.collectAsState()
+    var coPilotPlan by remember { mutableStateOf<TripPlanCodec.TripPlan?>(null) }
+    var baselineM by remember { mutableStateOf(0f) }
+    var arrived by remember { mutableStateOf(false) }
+    val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) {
+            val ok = viewModel.gpsManager.startTracking()
+            status = if (ok) "Co-pilot live - GPS tracking" else "Enable GPS in system settings, then start again"
+        } else {
+            status = "Location permission denied - co-pilot needs GPS"
+        }
+    }
+    fun startCoPilot(plan: TripPlanCodec.TripPlan) {
+        coPilotPlan = plan
+        baselineM = gps.distanceTraveledMeters
+        arrived = false
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+            val ok = viewModel.gpsManager.startTracking()
+            status = if (ok) "Co-pilot live: ${plan.name}" else "Enable GPS in system settings, then start again"
+        } else {
+            permLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+    }
+    LaunchedEffect(gps.distanceTraveledMeters, coPilotPlan) {
+        val plan = coPilotPlan
+        if (plan != null && !arrived) {
+            val travelledKm = (gps.distanceTraveledMeters - baselineM) / 1000.0
+            if (travelledKm >= plan.distanceKm && plan.distanceKm > 0) {
+                arrived = true
+                com.example.data.NoticeManager.postArrival(context, plan.name)
+                status = "Arrived: ${plan.name} - log your trip fuel!"
+            }
+        }
+    }
 
     val upcoming = plans.filter { !it.completed }
     val done = plans.filter { it.completed }
@@ -100,6 +146,73 @@ fun TripsScreen(
             status?.let { msg ->
                 item { Text(msg, color = NeonEmerald, fontSize = 11.sp) }
             }
+            coPilotPlan?.let { plan ->
+                item {
+                    val travelledKm = ((gps.distanceTraveledMeters - baselineM) / 1000.0).coerceAtLeast(0.0)
+                    val remainingKm = (plan.distanceKm - travelledKm).coerceAtLeast(0.0)
+                    val speed = if (gps.speedKmh > 8f) gps.speedKmh.toDouble() else 45.0
+                    Card(
+                        shape = RoundedCornerShape(14.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, if (arrived) NeonEmerald else CyberCyan)
+                    ) {
+                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    if (arrived) Icons.Default.Flag else Icons.Default.Navigation,
+                                    contentDescription = null,
+                                    tint = if (arrived) NeonEmerald else CyberCyan
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    if (arrived) "ARRIVED - ${plan.name}" else "Co-pilot: ${plan.name}",
+                                    color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                TextButton(onClick = {
+                                    viewModel.gpsManager.stopTracking()
+                                    coPilotPlan = null
+                                    status = "Co-pilot stopped"
+                                }) { Text("Stop", fontSize = 11.sp, color = WarningRed) }
+                            }
+                            LinearProgressIndicator(
+                                progress = { (travelledKm / plan.distanceKm).toFloat().coerceIn(0f, 1f) },
+                                modifier = Modifier.fillMaxWidth().height(6.dp),
+                                color = if (arrived) NeonEmerald else CyberCyan,
+                                trackColor = TextSecondaryDark.copy(alpha = 0.2f)
+                            )
+                            Text(
+                                "%.1f / %.0f km · remaining %.1f km · ETA %.0f min · speed %.0f km/h".format(
+                                    travelledKm, plan.distanceKm, remainingKm, remainingKm / speed * 60.0, gps.speedKmh
+                                ),
+                                color = TextSecondaryDark, fontSize = 11.sp
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                TextButton(onClick = {
+                                    val sos = Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:")).apply {
+                                        putExtra(
+                                            "sms_body",
+                                            "SOS from Kylaq co-pilot (${plan.name}): I am at " +
+                                                "https://maps.google.com/?q=${gps.latitude},${gps.longitude}"
+                                        )
+                                    }
+                                    runCatching { context.startActivity(sos) }
+                                }) { Text("SOS", fontSize = 11.sp, color = WarningRed) }
+                                TextButton(onClick = {
+                                    runCatching {
+                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=petrol+pump+near+me")))
+                                    }
+                                }) { Text("Find fuel", fontSize = 11.sp) }
+                                TextButton(onClick = {
+                                    runCatching {
+                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=restaurant+near+me")))
+                                    }
+                                }) { Text("Find food", fontSize = 11.sp) }
+                            }
+                        }
+                    }
+                }
+            }
             item {
                 Text("UPCOMING (${upcoming.size})", color = CyberCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
             }
@@ -111,6 +224,7 @@ fun TripsScreen(
                     plan = plan, cur = cur, stats = stats,
                     onEdit = { editTarget = plan },
                     onDelete = { deleteTarget = plan },
+                    onCoPilot = { startCoPilot(plan) },
                     onAi = {
                         aiTarget = plan
                         aiText = null
@@ -165,6 +279,7 @@ fun TripsScreen(
                         plan = plan, cur = cur, stats = stats,
                         onEdit = { editTarget = plan },
                         onDelete = { deleteTarget = plan },
+                        onCoPilot = {},
                         onAi = {},
                         onDone = {
                             repo.update(plan.copy(completed = false))
@@ -243,6 +358,7 @@ private fun TripCard(
     stats: com.example.data.FuelStats,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
+    onCoPilot: () -> Unit,
     onAi: () -> Unit,
     onDone: () -> Unit,
     onExpense: () -> Unit
@@ -296,6 +412,7 @@ private fun TripCard(
             }
             Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                 if (!plan.completed) {
+                    TextButton(onClick = onCoPilot) { Text("Co-pilot", fontSize = 11.sp) }
                     TextButton(onClick = onAi) { Text("AI plan", fontSize = 11.sp) }
                     TextButton(onClick = onExpense) { Text("+ Expense", fontSize = 11.sp) }
                     TextButton(onClick = onDone) { Text("Done", fontSize = 11.sp) }
