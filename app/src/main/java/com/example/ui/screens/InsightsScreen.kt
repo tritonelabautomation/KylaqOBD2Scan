@@ -32,6 +32,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.analysis.DriveAnalytics
+import com.example.analysis.DriveInsightsStore
 import com.example.analysis.DrivingCoach
 import com.example.engine.CoastNeutralDetector
 import com.example.engine.PowertrainModel
@@ -82,9 +83,9 @@ fun InsightsScreen(
             item { FuelVsSpeedCard(snapshot) }
             item { TorquePowerCard(snapshot) }
             item { TrendCard(snapshot) }
-            item { CoastCard(snapshot) }
+            item { CoastCard(snapshot, viewModel.coastHistory()) }
             item { TurboCard(snapshot) }
-            item { TanksCard(snapshot) }
+            item { TanksCard(snapshot, viewModel.tankHistory()) }
             item { CoachCard(tips) }
             item { Spacer(modifier = Modifier.height(8.dp)) }
         }
@@ -253,7 +254,10 @@ private fun TrendCard(snapshot: DriveAnalytics.DriveSnapshot) {
 }
 
 @Composable
-private fun CoastCard(snapshot: DriveAnalytics.DriveSnapshot) {
+private fun CoastCard(
+    snapshot: DriveAnalytics.DriveSnapshot,
+    history: List<DriveInsightsStore.CoastLogEntry> = emptyList()
+) {
     val coast = snapshot.coast
     SectionCard(
         title = "Driving in neutral / coasting",
@@ -282,6 +286,16 @@ private fun CoastCard(snapshot: DriveAnalytics.DriveSnapshot) {
             color = if (mode == CoastNeutralDetector.CoastMode.NEUTRAL_IDLE_COAST) ElectricAmber else NeonEmerald,
             fontSize = 11.sp
         )
+        if (history.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                "SAVED SESSIONS (behaviour + mileage persist across restarts)",
+                color = TextSecondaryDark, fontSize = 10.sp
+            )
+            history.forEach { entry ->
+                Text(entry.display, color = CyberCyan, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
+            }
+        }
     }
 }
 
@@ -341,7 +355,10 @@ private fun TurboCard(snapshot: DriveAnalytics.DriveSnapshot) {
 }
 
 @Composable
-private fun TanksCard(snapshot: DriveAnalytics.DriveSnapshot) {
+private fun TanksCard(
+    snapshot: DriveAnalytics.DriveSnapshot,
+    history: List<DriveInsightsStore.TankLogEntry> = emptyList()
+) {
     SectionCard(
         title = "Fuel tanks: X95 vs regular evidence",
         subtitle = "Refuels are detected from the fuel-level PID. Cruise-only ignition advance, " +
@@ -389,6 +406,16 @@ private fun TanksCard(snapshot: DriveAnalytics.DriveSnapshot) {
                 ) {
                     Text(it, color = TextSecondaryDark, fontSize = 11.sp, modifier = Modifier.padding(10.dp))
                 }
+            }
+        }
+        if (history.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                "SAVED TANKS (survive restarts - X95 vs regular evidence builds up here)",
+                color = TextSecondaryDark, fontSize = 10.sp
+            )
+            history.forEach { entry ->
+                Text(entry.display, color = CyberCyan, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
             }
         }
     }

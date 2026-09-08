@@ -10,6 +10,7 @@ import com.example.bluetooth.ElmResponse
 import com.example.bluetooth.ElmTransport
 import com.example.bluetooth.SimulationTransport
 import kotlinx.coroutines.flow.firstOrNull
+import com.example.analysis.DriveInsightsStore
 import com.example.data.PollingSpeedMode
 import com.example.data.RawLogEntry
 import com.example.data.RawLogManager
@@ -889,11 +890,48 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             recordingTimerJob?.cancel()
             gpsManager.stopTracking()
+            persistDriveInsights()
             recordingManager.stopRecording()
             // Auto-backup to cloud if enabled
             cloudBackupManager.performAutoBackupIfNeeded()
         }
     }
+
+    /**
+     * Manual requirement: coasting behaviour + mileage are SAVED and X95-vs-regular evidence
+     * spans refuels/restarts. DriveAnalytics is memory-only, so at the end of every recording
+     * the completed coast session and any closed tank segments are appended to the durable
+     * insight logs. Never allowed to break the stop path.
+     */
+    private fun persistDriveInsights() {
+        try {
+            val snap = obdScheduler.driveAnalytics.snapshot.value
+            val nowUtc = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US)
+                .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
+                .format(java.util.Date())
+            if (snap.coast.totalSeconds >= 30.0 || snap.coast.totalDistanceM >= 200.0) {
+                settingsRepository.appendCoastLog(DriveInsightsStore.encodeCoast(nowUtc, snap.coast))
+            }
+            val persistedStarts = settingsRepository.readTankLog()
+                .mapNotNull { DriveInsightsStore.decodeTank(it)?.dedupKey }
+                .toSet()
+            snap.tanks.filter { it.endMonotonicMs != null }.forEach { tank ->
+                if (tank.startMonotonicMs.toString() !in persistedStarts) {
+                    settingsRepository.appendTankLog(DriveInsightsStore.encodeTank(nowUtc, tank))
+                }
+            }
+        } catch (e: Exception) {
+            // Insight persistence is best-effort; stopping the recording always wins.
+        }
+    }
+
+    /** Saved coasting sessions, newest first (Insights screen history rows). */
+    fun coastHistory(): List<DriveInsightsStore.CoastLogEntry> =
+        settingsRepository.readCoastLog().mapNotNull { DriveInsightsStore.decodeCoast(it) }.take(8)
+
+    /** Saved closed tank segments, newest first (X95-vs-regular history). */
+    fun tankHistory(): List<DriveInsightsStore.TankLogEntry> =
+        settingsRepository.readTankLog().mapNotNull { DriveInsightsStore.decodeTank(it) }.take(10)
 
     fun renameRecording(sessionId: String, newName: String) {
         recordingManager.renameRecording(sessionId, newName)

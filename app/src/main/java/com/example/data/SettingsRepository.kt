@@ -305,4 +305,29 @@ class SettingsRepository(private val context: Context) {
         val defaults = DefaultPidDefinitions.getDefaults()
         savePidDefinitions(defaults)
     }
+
+    // ---------------------------------------------------------------------
+    // Durable drive-insight logs. Coasting behaviour + mileage and closed
+    // fuel-tank segments are appended when a recording ends (see
+    // analysis/DriveInsightsStore.kt) so they survive app restarts.
+    // ---------------------------------------------------------------------
+
+    fun appendCoastLog(encoded: String) = appendInsightLog("drive_coast_log", encoded, 100)
+
+    fun readCoastLog(): List<String> = readInsightLog("drive_coast_log")
+
+    fun appendTankLog(encoded: String) = appendInsightLog("drive_tank_log", encoded, 60)
+
+    fun readTankLog(): List<String> = readInsightLog("drive_tank_log")
+
+    private fun appendInsightLog(key: String, encoded: String, maxEntries: Int) {
+        val existing = prefs.getString(key, null)
+        val lines = if (existing.isNullOrBlank()) mutableListOf() else existing.split('\n').toMutableList()
+        lines.add(0, encoded)
+        while (lines.size > maxEntries) lines.removeAt(lines.size - 1)
+        prefs.edit().putString(key, lines.joinToString("\n")).apply()
+    }
+
+    private fun readInsightLog(key: String): List<String> =
+        prefs.getString(key, null)?.split('\n')?.filter { it.isNotBlank() } ?: emptyList()
 }
