@@ -26,6 +26,7 @@ import com.example.ui.theme.TextSecondaryDark
 import com.example.ui.theme.WarningRed
 import com.example.ui.viewmodel.MainViewModel
 import java.text.SimpleDateFormat
+import kotlinx.coroutines.launch
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
@@ -221,6 +222,32 @@ private fun RefuelDialog(
     var grade by remember { mutableStateOf(FuelLogCodec.GRADE_UNKNOWN) }
     val grades = listOf(FuelLogCodec.GRADE_UNKNOWN, FuelLogCodec.GRADE_X95, FuelLogCodec.GRADE_REGULAR)
 
+    // VehIQ's receipt scanner, free: pick a receipt photo, Gemini extracts litres/price/station
+    // and prefills the form. Disabled (with a hint) when no API key is configured.
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    var scanning by remember { mutableStateOf(false) }
+    val pickReceipt = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri == null) {
+            scanning = false
+            return@rememberLauncherForActivityResult
+        }
+        scope.launch {
+            val bytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
+            }
+            val scan = bytes?.let { com.example.ai.GeminiTextClient.scanReceipt(it) }
+            if (scan != null) {
+                scan.liters?.let { liters = String.format(java.util.Locale.US, "%.2f", it) }
+                scan.pricePerL?.let { price = String.format(java.util.Locale.US, "%.2f", it) }
+                scan.vendor?.let { station = it }
+            }
+            scanning = false
+        }
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Log a refuel") },
@@ -238,6 +265,20 @@ private fun RefuelDialog(
                             label = { Text(g, fontSize = 11.sp) }
                         )
                     }
+                }
+                OutlinedButton(
+                    onClick = { scanning = true; pickReceipt.launch("image/*") },
+                    enabled = !scanning && com.example.ai.GeminiTextClient.isConfigured()
+                ) {
+                    Icon(Icons.Default.DocumentScanner, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (scanning) "Scanning receipt..." else "Scan receipt (AI)", fontSize = 12.sp)
+                }
+                if (!com.example.ai.GeminiTextClient.isConfigured()) {
+                    Text(
+                        "Receipt scan needs a Gemini key: set GEMINI_API_KEY in .env and rebuild.",
+                        fontSize = 10.sp, color = TextSecondaryDark
+                    )
                 }
                 Text(
                     "Grade stamps the live OBD tank segment for the X95-vs-regular comparison.",

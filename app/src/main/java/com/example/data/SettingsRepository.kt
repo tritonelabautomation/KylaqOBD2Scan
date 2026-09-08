@@ -339,6 +339,22 @@ class SettingsRepository(private val context: Context) {
         _remindersEnabled.value = enabled
     }
 
+    private val _unitsMetric = MutableStateFlow(prefs.getBoolean("units_metric", true))
+    val unitsMetric: StateFlow<Boolean> = _unitsMetric.asStateFlow()
+
+    fun setUnitsMetric(metric: Boolean) {
+        prefs.edit().putBoolean("units_metric", metric).apply()
+        _unitsMetric.value = metric
+    }
+
+    private val _currencySymbol = MutableStateFlow(prefs.getString("currency_symbol", "\u20B9") ?: "\u20B9")
+    val currencySymbol: StateFlow<String> = _currencySymbol.asStateFlow()
+
+    fun setCurrencySymbol(symbol: String) {
+        prefs.edit().putString("currency_symbol", symbol).apply()
+        _currencySymbol.value = symbol
+    }
+
     fun monthlyBudget(): Double? = prefs.getString("monthly_budget", null)?.toDoubleOrNull()
 
     fun setMonthlyBudget(amount: Double) =

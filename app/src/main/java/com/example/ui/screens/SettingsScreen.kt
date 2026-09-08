@@ -139,6 +139,40 @@ fun SettingsScreen(
                 subtitle = "YTD spend, trends, budget, trip estimator & splitter",
                 onClick = onOpenReports
             )
+            val unitsMetric by viewModel.settingsRepository.unitsMetric.collectAsState()
+            val currencySymbol by viewModel.settingsRepository.currencySymbol.collectAsState()
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 6.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF12181F))
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Straighten, contentDescription = null, tint = Color(0xFF00E5FF))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Units & Currency", fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = Color(0xFFE6EDF3))
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Metric (km, km/L)", fontSize = 13.sp, color = Color(0xFF9AA7B4), modifier = Modifier.weight(1f))
+                        Switch(checked = unitsMetric, onCheckedChange = { viewModel.settingsRepository.setUnitsMetric(it) })
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf("\u20B9", "$", "\u20AC", "\u00A3").forEach { sym ->
+                            FilterChip(
+                                selected = currencySymbol == sym,
+                                onClick = { viewModel.settingsRepository.setCurrencySymbol(sym) },
+                                label = { Text(sym, fontSize = 12.sp) }
+                            )
+                        }
+                    }
+                    Text(
+                        "Applies to Expenses, Reports and fuel cost figures.",
+                        fontSize = 10.sp, color = Color(0xFF9AA7B4)
+                    )
+                }
+            }
             SimpleNavCard(
                 icon = Icons.Default.Notifications,
                 title = "Reminders Hub",
