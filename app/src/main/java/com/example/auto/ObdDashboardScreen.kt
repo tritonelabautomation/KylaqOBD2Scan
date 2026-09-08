@@ -273,22 +273,22 @@ class ObdDashboardScreen(carContext: CarContext) : Screen(carContext) {
             .addAction(
                 Action.Builder()
                     .setTitle("Details")
-                    .setOnClickListener { callback ->
+                    // car-app 1.7's Action.OnClickListener takes no arguments; the host
+                    // tracks completion itself, so there is no OnDoneCallback to invoke.
+                    .setOnClickListener {
                         try {
                             screenManager.push(ObdDetailsScreen(carContext))
                         } catch (t: Throwable) {
                             Log.e(TAG, "push details screen failed: ${t.message}", t)
                         }
-                        callback.onSuccess(null)
                     }
                     .build()
             )
             .addAction(
                 Action.Builder()
                     .setTitle("Reconnect")
-                    .setOnClickListener { callback ->
+                    .setOnClickListener {
                         requestReconnect(lifecycleScope)
-                        callback.onSuccess(null)
                     }
                     .build()
             )

@@ -199,16 +199,11 @@ class CloudBackupManager(
                     "After changing the console entry, force-stop Android Auto/Play services or " +
                     "reboot once — the mapping is cached."
             else ->
-                "Sign-in failed (${e.errorCode}): ${e.message ?: "unknown error"}. " +
+                "Sign-in failed (${e.type}): ${e.errorMessage ?: e.message ?: "unknown error"}. " +
                     "Package ${context.packageName}, SHA-1 ${fingerprints.joinToString(" / ")}."
         }
     }
 
-    /**
-     * Initiates modern Google Sign-In using AndroidX Credential Manager.
-     * After successful Google identity retrieval, exchanges the ID token with Firebase
-     * so the user is actually authenticated against Firebase services (Firestore, etc.).
-     */
     /**
      * Initiates Google Sign-In using AndroidX Credential Manager, then (when this build is
      * Firebase-configured) exchanges the ID token for a Firebase session.
