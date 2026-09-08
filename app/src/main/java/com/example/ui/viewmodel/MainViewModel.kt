@@ -1034,6 +1034,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /** Saved ride X-rays, newest first (behaviour + gears + elevation per ride). */
+    // ---- AC & climate behaviour (additive 2026-09-09) ----
+    val acSetTempC: StateFlow<Double> = settingsRepository.acSetTempC
+    val acAutoMode: StateFlow<Boolean> = settingsRepository.acAutoMode
+
+    fun setAcSetTempC(value: Double) = settingsRepository.setAcSetTempC(value)
+    fun setAcAutoMode(enabled: Boolean) = settingsRepository.setAcAutoMode(enabled)
+
+    /** Cross-ride learned AC-on vs AC-off economy from tagged ride summaries. */
+    data class AcLearning(val onKmL: Double, val offKmL: Double, val rides: Int)
+
+    fun acLearning(): AcLearning? {
+        var onKm = 0.0; var onL = 0.0; var offKm = 0.0; var offL = 0.0; var n = 0
+        for (r in rideHistory()) {
+            if (r.acOnKm > 0.05 && r.acOnFuelL > 0.005 && r.acOffKm > 0.05 && r.acOffFuelL > 0.005) {
+                onKm += r.acOnKm; onL += r.acOnFuelL; offKm += r.acOffKm; offL += r.acOffFuelL; n++
+            }
+        }
+        if (n == 0) return null
+        return AcLearning(onKm / onL, offKm / offL, n)
+    }
+
     fun rideHistory(): List<com.example.analysis.RideBehaviorRecorder.RideSummary> =
         settingsRepository.readRideLog().mapNotNull { com.example.analysis.RideCodec.decode(it) }.take(8)
 

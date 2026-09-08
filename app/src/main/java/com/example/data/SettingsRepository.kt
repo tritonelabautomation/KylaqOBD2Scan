@@ -130,6 +130,23 @@ class SettingsRepository(private val context: Context) {
         _midDisplayKmL.value = value
     }
 
+    // ---- AC & climate behaviour prefs (additive 2026-09-09) ----
+    private val _acSetTempC = MutableStateFlow(prefs.getFloat("ac_set_temp_c", 24f).toDouble())
+    val acSetTempC: StateFlow<Double> = _acSetTempC.asStateFlow()
+
+    fun setAcSetTempC(value: Double) {
+        prefs.edit().putFloat("ac_set_temp_c", value.toFloat()).apply()
+        _acSetTempC.value = value
+    }
+
+    private val _acAutoMode = MutableStateFlow(prefs.getBoolean("ac_auto_mode", false))
+    val acAutoMode: StateFlow<Boolean> = _acAutoMode.asStateFlow()
+
+    fun setAcAutoMode(enabled: Boolean) {
+        prefs.edit().putBoolean("ac_auto_mode", enabled).apply()
+        _acAutoMode.value = enabled
+    }
+
     fun setGoogleAccountName(name: String?) {
         if (!name.isNullOrBlank()) {
             prefs.edit().putString("google_account_name", name.trim()).apply()

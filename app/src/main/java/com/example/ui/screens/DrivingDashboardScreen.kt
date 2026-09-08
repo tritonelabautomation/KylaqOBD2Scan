@@ -42,6 +42,7 @@ fun DrivingDashboardScreen(
     val transmissionState by viewModel.transmissionState.collectAsStateWithLifecycle()
 
     val isConnected = connectionState == ConnectionState.CONNECTED
+    val acAuto by viewModel.acAutoMode.collectAsStateWithLifecycle()
 
     val rpm = liveDecodedMap["010C"] ?: "--"
     val speed = liveDecodedMap["010D"] ?: "--"
@@ -222,7 +223,7 @@ fun DrivingDashboardScreen(
                     ) {
                         Text(
                             when (viewModel.rideAc) {
-                                "AC" -> "AC ON"
+                                "AC" -> if (acAuto) "AC AUTO" else "AC ON"
                                 "BLOWER" -> "BLOWER"
                                 else -> "AC OFF"
                             },

@@ -15,6 +15,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import com.example.ui.components.AcClimateCard
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -70,6 +71,16 @@ fun DashboardScreen(
     val gpsData by viewModel.gpsData.collectAsState()
 
     val realtimeEconomy by viewModel.realtimeEconomy.collectAsState()
+    val acSetTempC by viewModel.acSetTempC.collectAsState()
+    val acAutoMode by viewModel.acAutoMode.collectAsState()
+    var acTagUi by remember { mutableStateOf(viewModel.rideAc) }
+    val acLearning = remember(viewModel, connectionState, acTagUi) { viewModel.acLearning() }
+    val acSpeed = liveDecodedMap["010D"]?.toDoubleOrNull() ?: 0.0
+    val acBaselineLh = remember(realtimeEconomy, acSpeed) {
+        val kmL = realtimeEconomy?.smoothedKmL
+        if (acSpeed > 5.0 && kmL != null && kmL > 0.5) acSpeed / kmL
+        else realtimeEconomy?.idleConsumptionLh
+    }
     val tripEconomy by viewModel.tripEconomy.collectAsState()
     val drivingState by viewModel.drivingState.collectAsState()
     val transmissionState by viewModel.transmissionState.collectAsState()
@@ -112,6 +123,26 @@ fun DashboardScreen(
             }
         }
         
+        // AC & CLIMATE BEHAVIOUR (additive 2026-09-09): tag, AUTO flag, setpoint vs
+        // PID 0146 ambient delta, modelled compressor fuel price, learned ON-vs-OFF economy.
+        AcClimateCard(
+            acTag = acTagUi,
+            onCycleAc = {
+                val next = when (acTagUi) { "OFF" -> "AC"; "AC" -> "BLOWER"; else -> "OFF" }
+                viewModel.setRideAc(next)
+                acTagUi = next
+            },
+            autoMode = acAutoMode,
+            onToggleAuto = { viewModel.setAcAutoMode(!acAutoMode) },
+            setTempC = acSetTempC,
+            onSetTemp = { viewModel.setAcSetTempC(it) },
+            ambientC = liveDecodedMap["0146"]?.toDoubleOrNull(),
+            baselineLh = acBaselineLh,
+            onKmL = acLearning?.onKmL,
+            offKmL = acLearning?.offKmL,
+            learnedRides = acLearning?.rides ?: 0
+        )
+
         // Vehicle & Connection Status Banner
         VehicleStatusHeader(
             vehicleName = vehicleName,
