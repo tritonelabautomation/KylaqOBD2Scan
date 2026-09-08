@@ -569,8 +569,8 @@ fun MainApp(viewModel: MainViewModel) {
             composable(Screen.Settings.route) {
                 SettingsScreen(
                     viewModel = viewModel,
-                    onBack = { navController.popBackStack() },,
-                    onOpenDrawer = { drawerScope.launch { drawerState.open() } }
+                    onBack = { navController.popBackStack() },
+                    onOpenDrawer = { drawerScope.launch { drawerState.open() } },
                     onOpenAbout = { navController.navigate(Screen.About.route) },
                     onOpenPidConfig = { navController.navigate(Screen.PidConfig.route) },
                     onOpenFuelCosts = { navController.navigate(Screen.FuelCosts.route) },
