@@ -38,7 +38,9 @@ import java.io.File
 fun RecordingsScreen(
     viewModel: MainViewModel,
     onNavigateToTripDetail: (String) -> Unit,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onOpenDrawer: (() -> Unit)? = null
+
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -94,8 +96,8 @@ fun RecordingsScreen(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onBack, modifier = Modifier.testTag("btn_recordings_back")) {
-                    Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                IconButton(onClick = onOpenDrawer ?: onBack, modifier = Modifier.testTag("btn_recordings_back")) {
+                    Icon(if (onOpenDrawer != null) Icons.Default.Menu else Icons.Default.ArrowBack, contentDescription = "Back")
                 }
                 Spacer(modifier = Modifier.width(6.dp))
                 Column {

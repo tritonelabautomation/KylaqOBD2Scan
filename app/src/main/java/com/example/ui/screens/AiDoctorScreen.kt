@@ -52,7 +52,9 @@ enum class DoctorTab {
 fun AiDoctorScreen(
     viewModel: MainViewModel,
     onNavigateToTripDetail: (String) -> Unit,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onOpenDrawer: (() -> Unit)? = null
+
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -131,8 +133,8 @@ fun AiDoctorScreen(
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
+                    IconButton(onClick = onOpenDrawer ?: onBack) {
+                        Icon(if (onOpenDrawer != null) Icons.Default.Menu else Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
                     }
                 },
                 actions = {

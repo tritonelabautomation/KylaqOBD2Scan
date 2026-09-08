@@ -37,6 +37,7 @@ import java.util.Locale
 fun SettingsScreen(
     viewModel: MainViewModel,
     onBack: () -> Unit,
+    onOpenDrawer: (() -> Unit)? = null,
     onOpenAbout: () -> Unit = {},
     onOpenPidConfig: () -> Unit = {},
     onOpenFuelCosts: () -> Unit = {},
@@ -96,8 +97,8 @@ fun SettingsScreen(
             TopAppBar(
                 title = { Text("App & Cloud Settings", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
-                    IconButton(onClick = onBack, modifier = Modifier.testTag("btn_settings_back")) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                    IconButton(onClick = onOpenDrawer ?: onBack, modifier = Modifier.testTag("btn_settings_back")) {
+                        Icon(if (onOpenDrawer != null) Icons.Default.Menu else Icons.Default.ArrowBack, contentDescription = "Back")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(

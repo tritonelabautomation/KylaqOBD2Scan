@@ -56,7 +56,9 @@ import com.example.ui.viewmodel.MainViewModel
 @Composable
 fun InsightsScreen(
     viewModel: MainViewModel,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onOpenDrawer: (() -> Unit)? = null
+
 ) {
     val snapshot by viewModel.obdScheduler.driveAnalytics.snapshot.collectAsState()
     val trip by viewModel.tripEconomy.collectAsState()
@@ -66,8 +68,8 @@ fun InsightsScreen(
         TopAppBar(
             title = { Text("Drive Insights & Learning Guide") },
             navigationIcon = {
-                IconButton(onClick = onBack, modifier = Modifier.testTag("btn_insights_back")) {
-                    Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                IconButton(onClick = onOpenDrawer ?: onBack, modifier = Modifier.testTag("btn_insights_back")) {
+                    Icon(if (onOpenDrawer != null) Icons.Default.Menu else Icons.Default.ArrowBack, contentDescription = "Back")
                 }
             },
             colors = TopAppBarDefaults.topAppBarColors(

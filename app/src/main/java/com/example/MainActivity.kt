@@ -195,66 +195,52 @@ fun MainApp(viewModel: MainViewModel) {
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp)
                 )
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                drawerItems.forEach { screen ->
-                    NavigationDrawerItem(
-                        icon = { Icon(screen.icon, contentDescription = null) },
-                        label = { Text(screen.title) },
-                        selected = currentRoute == screen.route,
-                        onClick = {
-                            drawerScope.launch { drawerState.close() }
-                            if (currentRoute != screen.route) {
-                                navController.navigate(screen.route) {
-                                    popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                                    launchSingleTop = true
-                                    restoreState = true
-                                }
-                            }
-                        },
-                        modifier = Modifier.padding(horizontal = 10.dp)
+                val groups = listOf(
+                    "DRIVE" to listOf(Screen.Dashboard, Screen.DrivingDashboard, Screen.Console),
+                    "ANALYZE" to listOf(Screen.Insights, Screen.CarDoctor, Screen.CoachChat, Screen.RawMonitor),
+                    "TRIPS & FLEET" to listOf(Screen.Recordings, Screen.Trips, Screen.Garage, Screen.Maintenance),
+                    "MONEY & DOCS" to listOf(Screen.FuelCosts, Screen.Expenses, Screen.Reports, Screen.Documents, Screen.Reminders),
+                    "SYSTEM" to listOf(Screen.Settings, Screen.PidConfig, Screen.PidScanner, Screen.Profiles, Screen.DriveBackup, Screen.About)
+                )
+                groups.forEach { (groupName, items) ->
+                    Text(
+                        groupName,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(start = 20.dp, top = 10.dp, bottom = 2.dp)
                     )
+                    items.forEach { screen ->
+                        NavigationDrawerItem(
+                            icon = { Icon(screen.icon, contentDescription = null) },
+                            label = { Text(screen.title) },
+                            selected = currentRoute == screen.route,
+                            onClick = {
+                                drawerScope.launch { drawerState.close() }
+                                if (currentRoute != screen.route) {
+                                    navController.navigate(screen.route) {
+                                        popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                                        launchSingleTop = true
+                                        restoreState = true
+                                    }
+                                }
+                            },
+                            modifier = Modifier.padding(horizontal = 10.dp)
+                        )
+                    }
                 }
+                Spacer(modifier = Modifier.weight(1f))
+                Text(
+                    "v${com.example.BuildConfig.VERSION_NAME} - swipe from left edge or tap the menu icon",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 10.sp,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
+                )
             }
         }
     ) {
     Scaffold(
         modifier = Modifier.fillMaxSize(),
-        bottomBar = {
-            NavigationBar(
-                containerColor = MaterialTheme.colorScheme.surface,
-                tonalElevation = 8.dp
-            ) {
-                bottomNavItems.forEach { screen ->
-                    // FIX (bug: tab highlight inconsistent on nested screens)
-                    val isCurrentScreen = currentRoute == screen.route ||
-                            (screen.route == Screen.PidDetail.route && currentRoute?.startsWith("pid_detail") == true) ||
-                            (screen.route == Screen.Recordings.route && currentRoute?.startsWith("trip_detail") == true) ||
-                            (screen.route == Screen.Garage.route && (currentRoute?.startsWith("vehicle_profile") == true || currentRoute?.startsWith("add_vehicle") == true))
-
-                    NavigationBarItem(
-                        icon = { Icon(screen.icon, contentDescription = screen.title) },
-                        label = { Text(screen.title, fontSize = 10.sp, fontWeight = if (isCurrentScreen) FontWeight.Bold else FontWeight.Normal) },
-                        selected = isCurrentScreen,
-                        onClick = {
-                            if (!isCurrentScreen) {
-                                navController.navigate(screen.route) {
-                                    popUpTo(Screen.Dashboard.route) {
-                                        saveState = true
-                                    }
-                                    launchSingleTop = true
-                                    restoreState = true
-                                }
-                            }
-                        },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = CyberCyan,
-                            selectedTextColor = CyberCyan,
-                            indicatorColor = MaterialTheme.colorScheme.surfaceVariant
-                        ),
-                        modifier = Modifier.testTag("nav_item_${screen.title.lowercase().replace(" ", "_")}")
-                    )
-                }
-            }
-        }
     ) { innerPadding ->
         Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
         NavHost(
@@ -294,7 +280,8 @@ fun MainApp(viewModel: MainViewModel) {
             composable(Screen.Insights.route) {
                 InsightsScreen(
                     viewModel = viewModel,
-                    onBack = { navController.popBackStack() }
+                    onBack = { navController.popBackStack() },
+                    onOpenDrawer = { drawerScope.launch { drawerState.open() } }
                 )
             }
 
@@ -304,7 +291,8 @@ fun MainApp(viewModel: MainViewModel) {
                     onNavigateToTripDetail = { tripId ->
                         navController.navigate(Screen.TripDetail.createRoute(tripId))
                     },
-                    onBack = { navController.popBackStack() }
+                    onBack = { navController.popBackStack() },
+                    onOpenDrawer = { drawerScope.launch { drawerState.open() } }
                     
                 )
             }
@@ -342,7 +330,8 @@ fun MainApp(viewModel: MainViewModel) {
             composable(Screen.Console.route) {
                 AdapterConsoleScreen(
                     viewModel = viewModel,
-                    onBack = { navController.popBackStack() }
+                    onBack = { navController.popBackStack() },
+                    onOpenDrawer = { drawerScope.launch { drawerState.open() } }
                     
                 )
             }
@@ -499,7 +488,8 @@ fun MainApp(viewModel: MainViewModel) {
                     onNavigateToTripDetail = { tripId ->
                         navController.navigate(Screen.TripDetail.createRoute(tripId))
                     },
-                    onBack = { navController.popBackStack() }
+                    onBack = { navController.popBackStack() },
+                    onOpenDrawer = { drawerScope.launch { drawerState.open() } }
                     
                 )
             }
@@ -579,7 +569,8 @@ fun MainApp(viewModel: MainViewModel) {
             composable(Screen.Settings.route) {
                 SettingsScreen(
                     viewModel = viewModel,
-                    onBack = { navController.popBackStack() },
+                    onBack = { navController.popBackStack() },,
+                    onOpenDrawer = { drawerScope.launch { drawerState.open() } }
                     onOpenAbout = { navController.navigate(Screen.About.route) },
                     onOpenPidConfig = { navController.navigate(Screen.PidConfig.route) },
                     onOpenFuelCosts = { navController.navigate(Screen.FuelCosts.route) },
@@ -595,7 +586,8 @@ fun MainApp(viewModel: MainViewModel) {
             composable(Screen.About.route) {
                 AboutScreen(
                     viewModel = viewModel,
-                    onBack = { navController.popBackStack() }
+                    onBack = { navController.popBackStack() },
+                    onOpenDrawer = { drawerScope.launch { drawerState.open() } }
                 )
             }
         }

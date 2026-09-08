@@ -73,6 +73,11 @@ fun MetricRow(
     MetricRowWithSource(label = label, value = value, isError = isError, source = null)
 }
 
+/** Global UI preference: hide rows the ECU never answers (declutter, owner request). */
+object TelemetryPrefs {
+    var showUnsupported by mutableStateOf(false)
+}
+
 @Composable
 fun MetricRowWithSource(
     label: String,
@@ -80,6 +85,7 @@ fun MetricRowWithSource(
     isError: Boolean = false,
     source: String? = null
 ) {
+    if (value == "Not available" && !TelemetryPrefs.showUnsupported) return
     Row(
         modifier = Modifier
             .fillMaxWidth()

@@ -39,6 +39,16 @@ fun TelemetryDashboardContent(
     Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
 
         // 1. Driving State & Transmission (Škoda Kylaq 6-Speed AT - No DSG)
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+            horizontalArrangement = Arrangement.End
+        ) {
+            FilterChip(
+                selected = TelemetryPrefs.showUnsupported,
+                onClick = { TelemetryPrefs.showUnsupported = !TelemetryPrefs.showUnsupported },
+                label = { Text("show unsupported PIDs", fontSize = 10.sp) }
+            )
+        }
         TelemetrySectionCard(
             title = "DRIVING & TRANSMISSION (6-AT)",
             icon = Icons.Default.DirectionsCar,
