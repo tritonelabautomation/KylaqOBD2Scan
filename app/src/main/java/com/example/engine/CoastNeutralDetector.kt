@@ -170,7 +170,7 @@ class CoastNeutralDetector(
         }
     }
 
-    private fun close(openEvent: Open, nowMs: Long): CoastEvent {
+    private fun close(openEvent: Open, nowMs: Long): CoastEvent? {
         val durationMs = (nowMs - openEvent.startMs).coerceAtLeast(0L)
         // Ignore taps shorter than a second: sensor noise, not a coast.
         if (durationMs < 1000L) return null

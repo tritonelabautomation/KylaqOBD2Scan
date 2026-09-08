@@ -129,7 +129,7 @@ class DriveAnalytics(
         val powerKw = if (rpm != null && measuredTorque != null) {
             PowertrainModel.powerKw(rpm, measuredTorque)
         } else {
-            PowertrainModel.powerDemandKw(speed, accel, massKg)
+            PowertrainModel.powerDemandKw(speed, accel ?: 0.0, massKg)
         }
 
         if (rpm != null && rpm > 600) {

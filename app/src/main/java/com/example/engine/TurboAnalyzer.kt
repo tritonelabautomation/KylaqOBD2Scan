@@ -104,7 +104,7 @@ class TurboAnalyzer(
             overBoostEvents = overBoostCount,
             tipInCount = tipIns.size,
             lastLagMs = tipIns.lastOrNull()?.lagMs,
-            averageLagMs = if (lags.isEmpty()) null else lags.average(),
+            averageLagMs = if (lags.isEmpty()) null else lags.average().toLong(),
             chargeTempC = chargeTemp,
             wastegatePct = wastegate,
             boostVsRpm = boostByRpmBin.entries
