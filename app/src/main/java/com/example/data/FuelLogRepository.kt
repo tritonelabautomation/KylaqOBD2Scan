@@ -91,12 +91,15 @@ object FuelLogCodec {
         var anchorOdo: Double? = null
         var litersSinceAnchor = 0.0
         for (e in list.sortedBy { it.idMs }) {
-            val odo = e.odometerKm ?: continue
             if (e.liters <= 0.5) continue
+            // Partials contribute litres even WITHOUT an odometer reading (Fuelio
+            // semantics: a missed-previous-tank top-up never anchors an interval,
+            // it only swells the next closing one).
             if (e.partial) {
                 litersSinceAnchor += e.liters
                 continue
             }
+            val odo = e.odometerKm ?: continue
             val a = anchorOdo
             if (a != null && odo > a) {
                 val fuel = litersSinceAnchor + e.liters
