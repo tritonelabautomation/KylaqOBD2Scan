@@ -48,6 +48,7 @@ fun MaintenanceScreen(
     var statusFilter by remember { mutableStateOf("All") }
     var showTrackDialog by remember { mutableStateOf(false) }
     var whyTarget by remember { mutableStateOf<MaintenanceCatalog.DueState?>(null) }
+    var intervalTarget by remember { mutableStateOf<MaintenanceCatalog.ServiceItem?>(null) }
 
     LaunchedEffect(Unit) { if (viewModel.takeQuickAdd("service")) pickItem = true }
 
@@ -200,9 +201,27 @@ fun MaintenanceScreen(
                                 },
                                 fontSize = 11.sp, fontWeight = FontWeight.Bold
                             )
+                            // Interval usage: how much of the km window is consumed (VehIQ progress bars).
+                            state.kmRemaining?.let { rem ->
+                                val progress = (1.0 - rem / state.item.intervalKm).toFloat().coerceIn(0f, 1f)
+                                Spacer(Modifier.height(4.dp))
+                                LinearProgressIndicator(
+                                    progress = { progress },
+                                    modifier = Modifier.fillMaxWidth().height(4.dp),
+                                    color = when {
+                                        progress >= 1f -> WarningRed
+                                        progress >= 0.9f -> ElectricAmber
+                                        else -> NeonEmerald
+                                    },
+                                    trackColor = TextSecondaryDark.copy(alpha = 0.2f)
+                                )
+                            }
                         }
                         Column(horizontalAlignment = Alignment.End) {
                             TextButton(onClick = { logTarget = state.item }) { Text("Log") }
+                            TextButton(onClick = { intervalTarget = state.item }) {
+                                Text("Interval", fontSize = 11.sp, color = TextSecondaryDark)
+                            }
                             if (state.status == MaintenanceCatalog.DueStatus.OVERDUE ||
                                 state.status == MaintenanceCatalog.DueStatus.DUE_SOON
                             ) {
@@ -244,6 +263,24 @@ fun MaintenanceScreen(
                                 color = TextSecondaryDark, fontSize = 10.sp
                             )
                         }
+                    }
+                }
+            }
+            item {
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("Parts guide - 1.0 TSI EA211 evo2", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Text("\u2022 Engine oil: 5W-30/5W-40 meeting VW 504 00 / 502 00, ~4.0-4.3 L with filter", color = TextSecondaryDark, fontSize = 11.sp)
+                        Text("\u2022 Oil filter: spin-on canister, change with every oil service", color = TextSecondaryDark, fontSize = 11.sp)
+                        Text("\u2022 Air filter: panel element, inspect at 15k, replace 30k (15k in dusty duty)", color = TextSecondaryDark, fontSize = 11.sp)
+                        Text("\u2022 Cabin filter: activated-carbon type, yearly before monsoon", color = TextSecondaryDark, fontSize = 11.sp)
+                        Text("\u2022 Spark plugs: iridium, gap ~0.7-0.8 mm, first at 60k then every 40-60k", color = TextSecondaryDark, fontSize = 11.sp)
+                        Text("\u2022 Coolant: G12evo (pink/violet), never mix green G11; check ratio at 30k", color = TextSecondaryDark, fontSize = 11.sp)
+                        Text("\u2022 Brake fluid: DOT 4 (Class 6 for ABS/ESP), every 2 years", color = TextSecondaryDark, fontSize = 11.sp)
+                        Text("\u2022 Front pads: wear sensor wired; budget sets ~40k km city duty", color = TextSecondaryDark, fontSize = 11.sp)
                     }
                 }
             }
@@ -339,6 +376,17 @@ fun MaintenanceScreen(
                         if (tracked.isEmpty()) "Tracking all items. Tick to narrow the board." else "${tracked.size} item(s) selected.",
                         fontSize = 11.sp, color = TextSecondaryDark
                     )
+                    val severe = remember(refresh) { repo.severeConditions() }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Severe conditions", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Dusty roads, short trips, hot climate: intervals shrink 25% (VW severe-service schedule).", fontSize = 10.sp, color = TextSecondaryDark)
+                        }
+                        Switch(
+                            checked = severe,
+                            onCheckedChange = { repo.setSevereConditions(it); refresh++ }
+                        )
+                    }
                     MaintenanceCatalog.KYLAQ_ITEMS.forEach { item ->
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Checkbox(
@@ -361,6 +409,49 @@ fun MaintenanceScreen(
                 }
             },
             dismissButton = { TextButton(onClick = { showTrackDialog = false }) { Text("Done") } }
+        )
+    }
+
+    intervalTarget?.let { item ->
+        val current = remember(item.id, refresh) { repo.customIntervals()[item.id] }
+        var kmText by remember(item.id) {
+            mutableStateOf((current?.first ?: item.intervalKm).let { String.format("%.0f", it) })
+        }
+        var daysText by remember(item.id) {
+            mutableStateOf((current?.second ?: item.intervalDays).let { if (it > 0) it.toString() else "" })
+        }
+        AlertDialog(
+            onDismissRequest = { intervalTarget = null },
+            title = { Text("Custom interval: ${item.label}") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Catalog: ${String.format("%.0f", item.intervalKm / 1000.0)}k km" +
+                            (if (item.intervalDays > 0) " / ${item.intervalDays} days" else "") +
+                            (if (current != null) " (overridden)" else ""),
+                        fontSize = 11.sp, color = TextSecondaryDark
+                    )
+                    OutlinedTextField(value = kmText, onValueChange = { kmText = it }, label = { Text("Every km") }, singleLine = true)
+                    OutlinedTextField(value = daysText, onValueChange = { daysText = it }, label = { Text("Every days (0 = none)") }, singleLine = true)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    repo.setCustomInterval(item.id, kmText.toDoubleOrNull(), daysText.toIntOrNull() ?: 0)
+                    intervalTarget = null
+                    refresh++
+                }) { Text("Save") }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = {
+                        repo.clearCustomInterval(item.id)
+                        intervalTarget = null
+                        refresh++
+                    }) { Text("Reset", color = WarningRed) }
+                    TextButton(onClick = { intervalTarget = null }) { Text("Cancel") }
+                }
+            }
         )
     }
 

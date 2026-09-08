@@ -146,11 +146,48 @@ class MaintenanceRepository(context: Context) {
     fun setTrackedItemIds(ids: Set<String>) =
         prefs.edit().putString("tracked_items", ids.joinToString("|")).apply()
 
+    /** VehIQ custom interval override per item: itemId to (km, days); null = catalog default. */
+    fun customIntervals(): Map<String, Pair<Double?, Int?>> =
+        prefs.getString("custom_intervals", null)?.split('\n')?.filter { it.isNotBlank() }?.mapNotNull { line ->
+            val p = line.split('|')
+            if (p.size != 3) null else Triple(p[0], p[1].toDoubleOrNull(), p[2].toIntOrNull())
+        }?.associate { it.first to (it.second to it.third) } ?: emptyMap()
+
+    fun setCustomInterval(itemId: String, km: Double?, days: Int?) {
+        val map = customIntervals().toMutableMap()
+        map[itemId] = km to days
+        prefs.edit().putString(
+            "custom_intervals",
+            map.entries.joinToString("\n") { "${it.key}|${it.value.first ?: "-"}|${it.value.second ?: "-"}" }
+        ).apply()
+    }
+
+    fun clearCustomInterval(itemId: String) {
+        val map = customIntervals().toMutableMap()
+        map.remove(itemId)
+        prefs.edit().putString(
+            "custom_intervals",
+            map.entries.joinToString("\n") { "${it.key}|${it.value.first ?: "-"}|${it.value.second ?: "-"}" }
+        ).apply()
+    }
+
+    /** Dusty roads, short trips, hot climate: scale every interval down by 25% (VW severe service). */
+    fun severeConditions(): Boolean = prefs.getBoolean("severe_conditions", false)
+
+    fun setSevereConditions(on: Boolean) = prefs.edit().putBoolean("severe_conditions", on).apply()
+
     fun dueStates(nowMs: Long = System.currentTimeMillis()): List<MaintenanceCatalog.DueState> {
         val lastMap = lastPerItem()
         val odo = currentOdometerKm()
+        val overrides = customIntervals()
+        val factor = if (severeConditions()) 0.75 else 1.0
         return MaintenanceCatalog.KYLAQ_ITEMS.map { item ->
-            MaintenanceCatalog.evaluate(item, lastMap[item.id], odo, nowMs)
+            val override = overrides[item.id]
+            val effective = item.copy(
+                intervalKm = (override?.first ?: item.intervalKm) * factor,
+                intervalDays = (((override?.second ?: item.intervalDays) * factor).toInt())
+            )
+            MaintenanceCatalog.evaluate(effective, lastMap[item.id], odo, nowMs)
         }
     }
 

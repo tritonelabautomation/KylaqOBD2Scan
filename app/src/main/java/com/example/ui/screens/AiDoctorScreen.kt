@@ -579,7 +579,8 @@ private fun AskAiTab(
             "Run AI Diagnostic",
             "Attach Current Vehicle Data",
             "Analyze DTCs",
-            "Analyze History"
+            "Analyze History",
+            "Counter-questions for my mechanic"
         )
         androidx.compose.foundation.lazy.LazyRow(
             modifier = Modifier.fillMaxWidth(),

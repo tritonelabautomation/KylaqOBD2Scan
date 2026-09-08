@@ -229,6 +229,16 @@ private fun RefuelDialog(
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
     var scanning by remember { mutableStateOf(false) }
+    val voiceEntry = com.example.ui.components.rememberVoiceLauncher { transcript ->
+        com.example.data.VoiceParse.liters(transcript)?.let { l ->
+            liters = String.format(java.util.Locale.US, "%.2f", l)
+            price.toDoubleOrNull()?.let { p -> if (p > 0) total = String.format(java.util.Locale.US, "%.0f", l * p) }
+        }
+        com.example.data.VoiceParse.price(transcript)?.let { p ->
+            price = String.format(java.util.Locale.US, "%.2f", p)
+            liters.toDoubleOrNull()?.let { l -> total = String.format(java.util.Locale.US, "%.0f", l * p) }
+        }
+    }
     val pickReceipt = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.GetContent()
     ) { uri ->
@@ -317,6 +327,11 @@ private fun RefuelDialog(
                         "Receipt scan needs a Gemini key: set GEMINI_API_KEY in .env and rebuild.",
                         fontSize = 10.sp, color = TextSecondaryDark
                     )
+                }
+                TextButton(onClick = { runCatching { voiceEntry.launch(com.example.ui.components.voiceIntent()) } }) {
+                    Icon(Icons.Default.Mic, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Voice: \"filled 35 litres at 108 rupees per litre\"", fontSize = 11.sp)
                 }
                 Text(
                     "Grade stamps the live OBD tank segment for the X95-vs-regular comparison.",
