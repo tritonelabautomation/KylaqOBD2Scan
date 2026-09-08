@@ -165,6 +165,9 @@ dependencies {
   testImplementation(libs.androidx.core)
   testImplementation(libs.androidx.junit)
   testImplementation(libs.junit)
+  // Real org.json for JVM tests: the android.jar copy is a throwing stub, which made
+  // GeminiTextClient.parseReceiptJson swallow "Stub!" and return null in unit tests.
+  testImplementation("org.json:json:20240303")
   testImplementation(libs.kotlinx.coroutines.test)
   testImplementation(libs.robolectric)
   testImplementation(libs.roborazzi)
