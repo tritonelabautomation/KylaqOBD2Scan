@@ -48,6 +48,8 @@ fun FuelCostsScreen(
     val stats = remember(refresh) { repo.stats() }
     var showAdd by remember { mutableStateOf(false) }
 
+    LaunchedEffect(Unit) { if (viewModel.takeQuickAdd("fuel")) showAdd = true }
+
     Scaffold(
         topBar = {
             TopAppBar(

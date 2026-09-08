@@ -940,6 +940,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     val fuelLogRepository = AppContainer.fuelLogRepository
     val maintenanceRepository = AppContainer.maintenanceRepository
+    val expenseRepository = AppContainer.expenseRepository
+    val documentRepository = AppContainer.documentRepository
+    val reminderRepository = AppContainer.reminderRepository
+
+    private val _quickAdd = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+
+    /** Quick-Add FAB target consumed once by the destination screen to auto-open its dialog. */
+    fun setQuickAdd(tag: String) { _quickAdd.value = tag }
+
+    fun takeQuickAdd(tag: String): Boolean {
+        if (_quickAdd.value == tag) { _quickAdd.value = null; return true }
+        return false
+    }
+
+    /** Due-item summary notification (services, documents, reminders) at app start. */
+    fun refreshDueNotifications() {
+        if (!settingsRepository.remindersEnabled.value) return
+        val now = System.currentTimeMillis()
+        val day = 24L * 60 * 60 * 1000L
+        val lines = mutableListOf<String>()
+        maintenanceRepository.dueStates(now)
+            .filter { it.status == com.example.data.MaintenanceCatalog.DueStatus.OVERDUE }
+            .forEach { lines.add("Overdue: ${it.item.label}") }
+        documentRepository.expiringWithin(30, now)
+            .forEach { (doc, ms) -> lines.add(if (ms < 0) "Expired: ${doc.type}" else "Expiring in ${ms / day} d: ${doc.type}") }
+        reminderRepository.due(now).forEach { lines.add("Reminder due: ${it.title}") }
+        if (lines.isNotEmpty()) com.example.data.NoticeManager.postSummary(getApplication(), lines)
+    }
 
     /** Owner logged a refuel grade: stamp the next OBD tank segment with ground truth. */
     fun tagFuelGrade(grade: String) {

@@ -331,6 +331,19 @@ class SettingsRepository(private val context: Context) {
     private fun readInsightLog(key: String): List<String> =
         prefs.getString(key, null)?.split('\n')?.filter { it.isNotBlank() } ?: emptyList()
 
+    private val _remindersEnabled = MutableStateFlow(prefs.getBoolean("reminders_enabled", true))
+    val remindersEnabled: StateFlow<Boolean> = _remindersEnabled.asStateFlow()
+
+    fun setRemindersEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean("reminders_enabled", enabled).apply()
+        _remindersEnabled.value = enabled
+    }
+
+    fun monthlyBudget(): Double? = prefs.getString("monthly_budget", null)?.toDoubleOrNull()
+
+    fun setMonthlyBudget(amount: Double) =
+        prefs.edit().putString("monthly_budget", String.format(java.util.Locale.US, "%.2f", amount)).apply()
+
     /** Persisted SAF tree URI of the chosen Google Drive backup folder (null = not linked). */
     fun driveTreeUri(): String? = prefs.getString("drive_tree_uri", null)
 

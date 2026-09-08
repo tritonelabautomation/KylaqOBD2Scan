@@ -30,7 +30,13 @@ import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.rememberDrawerState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.ui.Alignment
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -72,6 +78,10 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector)
     object FuelCosts : Screen("fuel_costs", "Fuel & Costs", Icons.Default.LocalGasStation)
     object Maintenance : Screen("maintenance", "Maintenance", Icons.Default.Build)
     object DriveBackup : Screen("drive_backup", "Drive Backup", Icons.Default.CloudUpload)
+    object Expenses : Screen("expenses", "Expenses", Icons.Default.ReceiptLong)
+    object Documents : Screen("documents", "Documents", Icons.Default.Description)
+    object Reminders : Screen("reminders", "Reminders", Icons.Default.Notifications)
+    object Reports : Screen("reports", "Reports", Icons.Default.QueryStats)
     object Settings : Screen("settings", "Settings", Icons.Default.Settings)
     object About : Screen("about", "About & Fuel Guide", Icons.Default.Info)
 }
@@ -117,6 +127,7 @@ fun MainApp(viewModel: MainViewModel) {
 
     LaunchedEffect(Unit) {
         viewModel.startSessionAutomation()
+        viewModel.refreshDueNotifications()
         val basePermissions = arrayOf(
             Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.ACCESS_COARSE_LOCATION
@@ -148,8 +159,11 @@ fun MainApp(viewModel: MainViewModel) {
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val drawerScope = rememberCoroutineScope()
     val drawerItems = bottomNavItems + listOf(
-        Screen.FuelCosts, Screen.Maintenance, Screen.DriveBackup, Screen.Settings, Screen.About
+        Screen.FuelCosts, Screen.Maintenance, Screen.Expenses, Screen.Reports,
+        Screen.Reminders, Screen.Documents, Screen.DriveBackup, Screen.Settings, Screen.About
     )
+    val mainTabRoutes = bottomNavItems.map { it.route }.toSet()
+    var showQuickAdd by remember { mutableStateOf(false) }
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -233,12 +247,11 @@ fun MainApp(viewModel: MainViewModel) {
             }
         }
     ) { innerPadding ->
+        Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
         NavHost(
             navController = navController,
             startDestination = Screen.Dashboard.route,
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
+            modifier = Modifier.fillMaxSize()
         ) {
             composable(Screen.Dashboard.route) {
                 DashboardScreen(
@@ -464,6 +477,18 @@ fun MainApp(viewModel: MainViewModel) {
                     onBack = { navController.popBackStack() }
                 )
             }
+            composable(Screen.Expenses.route) {
+                ExpensesScreen(viewModel = viewModel, onBack = { navController.popBackStack() })
+            }
+            composable(Screen.Documents.route) {
+                DocumentsScreen(viewModel = viewModel, onBack = { navController.popBackStack() })
+            }
+            composable(Screen.Reminders.route) {
+                RemindersScreen(viewModel = viewModel, onBack = { navController.popBackStack() })
+            }
+            composable(Screen.Reports.route) {
+                ReportsScreen(viewModel = viewModel, onBack = { navController.popBackStack() })
+            }
             composable(Screen.Settings.route) {
                 SettingsScreen(
                     viewModel = viewModel,
@@ -472,7 +497,11 @@ fun MainApp(viewModel: MainViewModel) {
                     onOpenPidConfig = { navController.navigate(Screen.PidConfig.route) },
                     onOpenFuelCosts = { navController.navigate(Screen.FuelCosts.route) },
                     onOpenMaintenance = { navController.navigate(Screen.Maintenance.route) },
-                    onOpenDriveBackup = { navController.navigate(Screen.DriveBackup.route) }
+                    onOpenDriveBackup = { navController.navigate(Screen.DriveBackup.route) },
+                    onOpenExpenses = { navController.navigate(Screen.Expenses.route) },
+                    onOpenDocuments = { navController.navigate(Screen.Documents.route) },
+                    onOpenReminders = { navController.navigate(Screen.Reminders.route) },
+                    onOpenReports = { navController.navigate(Screen.Reports.route) }
                 )
             }
 
@@ -483,7 +512,40 @@ fun MainApp(viewModel: MainViewModel) {
                 )
             }
         }
+        if (currentRoute in mainTabRoutes) {
+            FloatingActionButton(
+                onClick = { showQuickAdd = true },
+                modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+                containerColor = CyberCyan,
+                contentColor = MaterialTheme.colorScheme.surface
+            ) {
+                Icon(Icons.Default.Add, contentDescription = "Quick add")
+            }
+        }
+        }
     }
+    }
+
+    if (showQuickAdd) {
+        AlertDialog(
+            onDismissRequest = { showQuickAdd = false },
+            title = { Text("Quick add") },
+            text = {
+                Column {
+                    listOf(
+                        "Fuel fill-up" to { viewModel.setQuickAdd("fuel"); navController.navigate(Screen.FuelCosts.route) },
+                        "Service" to { viewModel.setQuickAdd("service"); navController.navigate(Screen.Maintenance.route) },
+                        "Expense" to { viewModel.setQuickAdd("expense"); navController.navigate(Screen.Expenses.route) },
+                        "Document" to { viewModel.setQuickAdd("document"); navController.navigate(Screen.Documents.route) }
+                    ).forEach { (label, action) ->
+                        TextButton(onClick = { showQuickAdd = false; action() }) {
+                            Text(label, fontSize = 14.sp)
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showQuickAdd = false }) { Text("Close") } }
+        )
     }
 
 

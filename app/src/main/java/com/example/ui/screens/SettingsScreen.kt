@@ -40,7 +40,11 @@ fun SettingsScreen(
     onOpenPidConfig: () -> Unit = {},
     onOpenFuelCosts: () -> Unit = {},
     onOpenMaintenance: () -> Unit = {},
-    onOpenDriveBackup: () -> Unit = {}
+    onOpenDriveBackup: () -> Unit = {},
+    onOpenExpenses: () -> Unit = {},
+    onOpenDocuments: () -> Unit = {},
+    onOpenReminders: () -> Unit = {},
+    onOpenReports: () -> Unit = {}
 ) {
     val context = LocalContext.current
     // FIX (bug: Google sign-in button did nothing): Credential Manager requires an
@@ -122,6 +126,30 @@ fun SettingsScreen(
                 title = "Maintenance & Health",
                 subtitle = "Kylaq service plan with due states and service log",
                 onClick = onOpenMaintenance
+            )
+            SimpleNavCard(
+                icon = Icons.Default.ReceiptLong,
+                title = "Expenses",
+                subtitle = "Unified fuel, service & cost timeline with CSV export",
+                onClick = onOpenExpenses
+            )
+            SimpleNavCard(
+                icon = Icons.Default.QueryStats,
+                title = "Reports & Analytics",
+                subtitle = "YTD spend, trends, budget, trip estimator & splitter",
+                onClick = onOpenReports
+            )
+            SimpleNavCard(
+                icon = Icons.Default.Notifications,
+                title = "Reminders Hub",
+                subtitle = "Due services, expiring documents & custom reminders",
+                onClick = onOpenReminders
+            )
+            SimpleNavCard(
+                icon = Icons.Default.Description,
+                title = "Documents",
+                subtitle = "Insurance, RC, licence, PUC with expiry alerts",
+                onClick = onOpenDocuments
             )
             SimpleNavCard(
                 icon = Icons.Default.CloudUpload,

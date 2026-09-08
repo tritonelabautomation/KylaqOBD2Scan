@@ -43,6 +43,9 @@ fun MaintenanceScreen(
     val states = remember(refresh) { repo.dueStates() }
     var odoText by remember { mutableStateOf(repo.currentOdometerKm()?.let { String.format("%.0f", it) } ?: "") }
     var logTarget by remember { mutableStateOf<MaintenanceCatalog.ServiceItem?>(null) }
+    var pickItem by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) { if (viewModel.takeQuickAdd("service")) pickItem = true }
 
     val counts = states.groupingBy { it.status }.eachCount()
 
@@ -164,6 +167,23 @@ fun MaintenanceScreen(
                 )
             }
         }
+    }
+
+    if (pickItem) {
+        AlertDialog(
+            onDismissRequest = { pickItem = false },
+            title = { Text("Log which service?") },
+            text = {
+                Column {
+                    MaintenanceCatalog.KYLAQ_ITEMS.forEach { item ->
+                        TextButton(onClick = { pickItem = false; logTarget = item }) {
+                            Text(item.label, fontSize = 12.sp)
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { pickItem = false }) { Text("Cancel") } }
+        )
     }
 
     logTarget?.let { item ->
