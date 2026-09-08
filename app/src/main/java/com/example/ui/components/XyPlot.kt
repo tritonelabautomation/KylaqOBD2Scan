@@ -2,8 +2,6 @@ package com.example.ui.components
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -87,22 +85,7 @@ fun XyPlot(
                 }
             }
         }
-        Row(modifier = Modifier.fillMaxWidth()) {
-            // Y-axis tick scale (top = max, bottom = min) aligned to the grid rows.
-            Column(
-                modifier = Modifier.height(height),
-                verticalArrangement = Arrangement.SpaceBetween,
-                horizontalAlignment = Alignment.End
-            ) {
-                for (i in 0..4) {
-                    Text(
-                        fmt(maxY - (maxY - minY) * i / 4f),
-                        color = TextSecondaryDark,
-                        fontSize = 9.sp
-                    )
-                }
-            }
-            Canvas(modifier = Modifier.weight(1f).height(height)) {
+        Canvas(modifier = Modifier.fillMaxWidth().height(height)) {
             // grid: drawLine takes strokeWidth/pathEffect arguments, not a Paint-like style
             val dash = PathEffect.dashPathEffect(floatArrayOf(6f, 8f), 0f)
             for (i in 0..4) {
@@ -152,23 +135,6 @@ fun XyPlot(
                         cap = StrokeCap.Round,
                         pathEffect = if (s.dashed) PathEffect.dashPathEffect(floatArrayOf(10f, 8f), 0f) else null
                     )
-                )
-            }
-        }
-        }
-        // X-axis tick scale (5 ticks, min → max) under the plot area.
-        Row(modifier = Modifier.fillMaxWidth().padding(start = 30.dp)) {
-            for (i in 0..4) {
-                Text(
-                    fmt(minX + spanX * i / 4f),
-                    color = TextSecondaryDark,
-                    fontSize = 9.sp,
-                    modifier = Modifier.weight(1f),
-                    textAlign = when (i) {
-                        0 -> TextAlign.Start
-                        4 -> TextAlign.End
-                        else -> TextAlign.Center
-                    }
                 )
             }
         }

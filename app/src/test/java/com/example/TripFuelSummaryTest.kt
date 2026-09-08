@@ -73,36 +73,4 @@ class TripFuelSummaryTest {
         assertEquals(0.0, summary.fuelLiters, 0.0001)
         assertEquals(0, summary.sampleCount)
     }
-
-    @Test
-    fun `short stored pid keys still integrate distance and fuel`() {
-        val samples = mutableListOf<TripFuelSummary.SamplePoint>()
-        var ts = 0L
-        repeat(61) {
-            samples.add(point("0D", ts, 60.0))   // short form as stored by some writers
-            samples.add(point("5E", ts, 4.0))
-            ts += 10_000
-        }
-        val summary = TripFuelSummary.summarize(samples)
-        assertTrue("distance ~10 km, was ${summary.distanceKm}", abs(summary.distanceKm - 10.0) < 0.2)
-        assertTrue("fuel ~0.667 L, was ${summary.fuelLiters}", abs(summary.fuelLiters - 4.0 * 600.0 / 3600.0) < 0.05)
-        assertEquals(false, summary.fuelEstimated)
-    }
-
-    @Test
-    fun `fuel rate is model-estimated when the ECU answers no fuel pid`() {
-        val samples = mutableListOf<TripFuelSummary.SamplePoint>()
-        var ts = 0L
-        repeat(61) {
-            samples.add(point("010D", ts, 90.0))
-            samples.add(point("010C", ts, 2200.0))
-            samples.add(point("0104", ts, 55.0)) // ~55% load at 2200 rpm
-            ts += 10_000
-        }
-        val summary = TripFuelSummary.summarize(samples)
-        assertEquals(true, summary.fuelEstimated)
-        assertTrue("estimated fuel > 0, was ${summary.fuelLiters}", summary.fuelLiters > 1.0)
-        assertTrue("distance ~15 km, was ${summary.distanceKm}", abs(summary.distanceKm - 15.0) < 0.3)
-        assertNotNull(summary.kmPerLiter)
-    }
 }

@@ -635,11 +635,8 @@ fun SettingsScreen(
                             "AABrowser project): a distraction-optimised activity with CAR_LAUNCHER + " +
                             "ACCESS_SURFACE that AA's unknown-sources toggle DOES unlock (media/messaging/" +
                             "parked classes). Sideload this APK, enable AA developer mode + unknown sources, " +
-                            "reconnect - the head-unit launcher should list it. NOTE: the parked route needs the " +
-                            "newer AA stack (AABrowser itself demands Android 15+); on Android 13-14 phones " +
-                            "only PLAY-TRUSTED installs list - use Play Console Internal App Sharing " +
-                            "(upload AAB, install via the shared link) for a guaranteed head-unit icon. " +
-                            "This build also adds a phone-side 'Car Dash' launcher icon. Details: " +
+                            "reconnect - the head-unit launcher should list it. Some hosts grant the car " +
+                            "surface only while parked (host safety policy). Details: " +
                             "docs/reference/android-auto-install-guide.md.",
                         color = TextSecondaryDark,
                         fontSize = 10.sp

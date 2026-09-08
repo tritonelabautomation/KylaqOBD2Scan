@@ -242,32 +242,10 @@ fun RecordingsScreen(
                                 fontSize = 10.sp
                             )
                         }
-                    }
-                    if (trends.isNotEmpty()) {
+                    } else {
                         Text(
-                            "PER-TRIP NUMBERS (newest first)",
-                            color = TextSecondaryDark, fontSize = 10.sp, fontWeight = FontWeight.Bold
-                        )
-                        trends.take(6).forEach { t ->
-                            val when_ = java.text.SimpleDateFormat("dd-MM HH:mm", java.util.Locale.US)
-                                .format(java.util.Date(t.startTs))
-                            Text(
-                                when_ +
-                                    (t.avgRpm?.let { " · ${String.format("%.0f", it)} rpm" } ?: "") +
-                                    (t.avgSpeedKmh?.let { " · ${String.format("%.0f", it)} km/h" } ?: "") +
-                                    (t.avgLoadPct?.let { " · ${String.format("%.0f", it)}% load" } ?: "") +
-                                    (t.avgTorqueNm?.let { " · ${String.format("%.0f", it)} Nm" } ?: "") +
-                                    (t.idleActualLh?.let {
-                                        " · idle ${String.format("%.2f", it)} vs 0.80 L/h model"
-                                    } ?: ""),
-                                color = NeonEmerald, fontSize = 10.sp, fontFamily = FontFamily.Monospace
-                            )
-                        }
-                    }
-                    if (trends.size < 2) {
-                        Text(
-                            "Sparkline trends unlock from the 2nd recorded trip; the table above and the " +
-                                "per-trip Trends tab (time axis + Power·Torque·Speed + dyno view) work today.",
+                            "Record at least 2 trips with OBD logging and the rpm / speed / load / torque " +
+                                "and idle-vs-model trend charts appear here.",
                             color = TextSecondaryDark, fontSize = 10.sp
                         )
                     }
@@ -557,11 +535,6 @@ private fun TrendRow(label: String, values: List<Double>, fmt: String, color: Co
             values.map { it.toFloat() },
             Modifier.fillMaxWidth().height(48.dp),
             color
-        )
-        Text(
-            "y-scale: ${String.format(fmt, values.minOrNull() ?: 0.0)} – ${String.format(fmt, values.maxOrNull() ?: 0.0)} · " +
-                "x: oldest → newest trip (${values.size} pts)",
-            color = TextSecondaryDark, fontSize = 9.sp
         )
     }
 }

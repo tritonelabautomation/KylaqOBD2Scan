@@ -32,8 +32,7 @@ object TripFuelSummary {
         val coastSeconds: Double,
         val idleSeconds: Double,
         val speedHistogram: List<Pair<Int, Double>>,
-        val sampleCount: Int,
-        val fuelEstimated: Boolean = false
+        val sampleCount: Int
     ) {
         val litersPer100Km: Double?
             get() = if (distanceKm > 0.05) fuelLiters / distanceKm * 100.0 else null
@@ -49,16 +48,11 @@ object TripFuelSummary {
             return Summary(0.0, 0.0, null, 0L, 0.0, 0.0, 0.0, 0.0, 0.0, emptyList(), 0)
         }
 
-        val byPid = samples.groupBy { normPid(it.pid) }
+        val byPid = samples.groupBy { it.pid.uppercase() }
         val speedSeries = (byPid["010D"] ?: emptyList())
             .mapNotNull { p -> p.value?.let { p.timestampMs to it } }
             .sortedBy { it.first }
-        val hasFuelPid = (byPid[PID_FUEL_VOL] ?: emptyList()).any { it.value != null } ||
-            (byPid[PID_FUEL_MASS] ?: emptyList()).any { it.value != null }
-        // ECUs that answer neither 015E nor 019D (some Kylaq builds) still get an honest
-        // fuel figure: rate reconstructed from rpm + load through the powertrain model.
-        val fuelSeries = (if (hasFuelPid) buildFuelSeries(byPid) else estimatedFuelSeries(byPid))
-            .sortedBy { it.first }
+        val fuelSeries = buildFuelSeries(byPid).sortedBy { it.first }
 
         var fuelLiters = 0.0
         var coastSeconds = 0.0
@@ -113,49 +107,8 @@ object TripFuelSummary {
             coastSeconds = coastSeconds,
             idleSeconds = idleSeconds,
             speedHistogram = histogram.entries.map { it.key to it.value }.sortedBy { it.first },
-            sampleCount = samples.size,
-            fuelEstimated = !hasFuelPid
+            sampleCount = samples.size
         )
-    }
-
-    /** Stored PIDs appear both as "010D" and short "0D" - normalise to the 4-char J1979 id. */
-    private fun normPid(pid: String): String {
-        val up = pid.uppercase()
-        return if (up.length == 2) "01$up" else up
-    }
-
-    private const val PID_FUEL_VOL = "015E"
-    private const val PID_FUEL_MASS = "019D"
-
-    /**
-     * Model-estimated fuel rate (L/h) when the ECU answers no fuel-flow PID:
-     * torque = load% x full-load torque at rpm, then P = T·ω and the model's brake
-     * thermal efficiency converts shaft power to fuel flow.
-     */
-    private fun estimatedFuelSeries(byPid: Map<String, List<SamplePoint>>): List<Pair<Long, Double>> {
-        val rpm = (byPid["010C"] ?: emptyList())
-            .mapNotNull { p -> p.value?.let { p.timestampMs to it } }
-            .sortedBy { it.first }
-        val load = (byPid["0104"] ?: emptyList())
-            .mapNotNull { p -> p.value?.let { p.timestampMs to it } }
-            .sortedBy { it.first }
-        if (rpm.isEmpty() || load.isEmpty()) return emptyList()
-        val out = mutableListOf<Pair<Long, Double>>()
-        var ri = 0
-        for ((ts, loadPct) in load) {
-            while (ri + 1 < rpm.size &&
-                kotlin.math.abs(rpm[ri + 1].first - ts) < kotlin.math.abs(rpm[ri].first - ts)
-            ) {
-                ri++
-            }
-            val rpmAt = rpm[ri].second
-            if (kotlin.math.abs(rpm[ri].first - ts) > 5000L) continue
-            val torque = loadPct / 100.0 * com.example.engine.PowertrainModel.fullLoadTorqueNm(rpmAt)
-            val power = com.example.engine.PowertrainModel.powerKw(rpmAt, torque)
-            val eta = com.example.engine.PowertrainModel.brakeThermalEfficiency(rpmAt, torque)
-            out += ts to com.example.engine.PowertrainModel.fuelRateLh(power, eta)
-        }
-        return out
     }
 
     /** Fuel rate in L/h from 015E directly, or 019D mass flow converted at petrol density. */

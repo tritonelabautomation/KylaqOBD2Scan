@@ -54,22 +54,6 @@ Kylaq TSI Coach now ships BOTH routes:
   discoverable from sideloaded installs with AA unknown sources enabled.
   Host safety policy may restrict the surface to parked state on some head units.
 
-## Phone-OS reality matrix (verified against AABrowser's own requirements)
-
-| Phone OS | Sideloaded TEMPLATE app | Sideloaded PARKED/surface app | Play-trusted install |
-|---|---|---|---|
-| Android 15+ | hidden | **lists** (unknown sources on) | lists |
-| Android 13-14 (e.g. moto edge 20) | hidden | hidden (stack too old) | **lists** |
-
-AABrowser states "Requires Android 15 or later" - the parked-surface discovery path does
-not exist on Android 13/14 phones. On those phones the ONLY route to a head-unit icon is a
-trusted install:
-
-1. Play Console (one-time USD 25 developer account) → **Internal app sharing**.
-2. Upload the release AAB from CI artifacts.
-3. Open the generated link ON the phone, signed in with your Google account, install.
-4. Force-stop Android Auto, reconnect - the launcher lists the app (both routes then work).
-
 ## After a trusted install, if the icon still hides
 
 - Force-stop the Android Auto app (it caches the discovered-app list), reconnect the USB/WiFi
