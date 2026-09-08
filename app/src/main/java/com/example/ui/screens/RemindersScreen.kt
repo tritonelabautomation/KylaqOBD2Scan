@@ -42,6 +42,7 @@ fun RemindersScreen(
     var showAdd by remember { mutableStateOf(false) }
     val settings = viewModel.settingsRepository
     val masterEnabled by settings.remindersEnabled.collectAsState()
+    val weeklyCheckIn by settings.weeklyCheckInEnabled.collectAsState()
 
     val now = System.currentTimeMillis()
     val day = 24L * 60 * 60 * 1000L
@@ -86,6 +87,13 @@ fun RemindersScreen(
                             Text("Master toggle for due-item alerts at app start.", color = TextSecondaryDark, fontSize = 10.sp)
                         }
                         Switch(checked = masterEnabled, onCheckedChange = { settings.setRemindersEnabled(it) })
+                    }
+                    Row(Modifier.padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Weekly check-in", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Nudge if nothing was logged for 7+ days.", color = TextSecondaryDark, fontSize = 10.sp)
+                        }
+                        Switch(checked = weeklyCheckIn, onCheckedChange = { settings.setWeeklyCheckIn(it) })
                     }
                 }
             }

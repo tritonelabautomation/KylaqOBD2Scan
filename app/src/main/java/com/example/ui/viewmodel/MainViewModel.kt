@@ -967,6 +967,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             .forEach { (doc, ms) -> lines.add(if (ms < 0) "Expired: ${doc.type}" else "Expiring in ${ms / day} d: ${doc.type}") }
         reminderRepository.due(now).forEach { lines.add("Reminder due: ${it.title}") }
         if (lines.isNotEmpty()) com.example.data.NoticeManager.postSummary(getApplication(), lines)
+
+        // Weekly check-in: if nothing was logged for 7+ days (and we have not nagged this week),
+        // post a low-priority nudge - VehIQ's inactivity reminder, opt-out in the Reminders hub.
+        if (settingsRepository.weeklyCheckInEnabled.value) {
+            val week = 7L * 24 * 60 * 60 * 1000
+            val lastActivity = maxOf(
+                fuelLogRepository.entries().maxOfOrNull { it.idMs } ?: 0L,
+                maintenanceRepository.logs().maxOfOrNull { it.dateMs } ?: 0L,
+                expenseRepository.entries().maxOfOrNull { it.idMs } ?: 0L
+            )
+            val sinceLastNag = now - settingsRepository.lastCheckInNotifiedMs()
+            if (lastActivity > 0L && now - lastActivity > week && sinceLastNag > week) {
+                val inactiveDays = ((now - lastActivity) / day).toInt()
+                com.example.data.NoticeManager.postCheckIn(getApplication(), inactiveDays)
+                settingsRepository.setLastCheckInNotifiedMs(now)
+            }
+        }
     }
 
     /** Owner logged a refuel grade: stamp the next OBD tank segment with ground truth. */

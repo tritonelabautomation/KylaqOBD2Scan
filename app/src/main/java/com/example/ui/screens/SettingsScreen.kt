@@ -25,6 +25,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.*
+import com.example.data.FleetExporter
 import com.example.ui.viewmodel.MainViewModel
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -181,6 +182,83 @@ fun SettingsScreen(
                         "Currency restates money figures across Fuel, Expenses & Reports; appearance restyles dialogs, cards and inputs.",
                         fontSize = 10.sp, color = Color(0xFF9AA7B4)
                     )
+                }
+            }
+            var exportStatus by remember { mutableStateOf<String?>(null) }
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 6.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF12181F))
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.FileDownload, contentDescription = null, tint = Color(0xFF00E5FF))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Export data", fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = Color(0xFFE6EDF3))
+                    }
+                    Text(
+                        "Unified ledger of fuel, services, expenses & documents - free, no account.",
+                        fontSize = 10.sp, color = Color(0xFF9AA7B4)
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = {
+                            val rows = FleetExporter.collectRows(
+                                viewModel.fuelLogRepository.entries(),
+                                viewModel.maintenanceRepository.logs(),
+                                viewModel.expenseRepository.entries(),
+                                viewModel.documentRepository.documents()
+                            )
+                            val file = FleetExporter.writeToDownloads(context, "kylaq-fleet.csv", FleetExporter.toCsv(rows))
+                            exportStatus = file?.let { "CSV saved: ${it.name} (${rows.size} rows)" } ?: "CSV export failed"
+                        }) { Text("CSV", fontSize = 12.sp) }
+                        OutlinedButton(onClick = {
+                            val rows = FleetExporter.collectRows(
+                                viewModel.fuelLogRepository.entries(),
+                                viewModel.maintenanceRepository.logs(),
+                                viewModel.expenseRepository.entries(),
+                                viewModel.documentRepository.documents()
+                            )
+                            val stats = viewModel.fuelLogRepository.stats()
+                            val statsLine = "lifetime %.1f km/L, cost/km %.2f".format(
+                                stats.avgKmPerL ?: Double.NaN, stats.costPerKm ?: Double.NaN
+                            )
+                            val json = FleetExporter.toJson(rows, vehicleName, statsLine)
+                            val file = FleetExporter.writeToDownloads(context, "kylaq-fleet.json", json)
+                            exportStatus = file?.let { "JSON saved: ${it.name}" } ?: "JSON export failed"
+                        }) { Text("JSON", fontSize = 12.sp) }
+                        OutlinedButton(onClick = {
+                            val rows = FleetExporter.collectRows(
+                                viewModel.fuelLogRepository.entries(),
+                                viewModel.maintenanceRepository.logs(),
+                                viewModel.expenseRepository.entries(),
+                                viewModel.documentRepository.documents()
+                            )
+                            val stats = viewModel.fuelLogRepository.stats()
+                            val downloads = java.io.File(context.getExternalFilesDir(null), "Downloads").apply { mkdirs() }
+                            val pdf = java.io.File(downloads, "kylaq-fleet-summary.pdf")
+                            val ok = FleetExporter.writePdf(
+                                pdf,
+                                "Kylaq fleet summary - $vehicleName",
+                                listOf(
+                                    "Lifetime %.1f km/L · cost/km %.2f · %d ledger rows".format(
+                                        stats.avgKmPerL ?: Double.NaN, stats.costPerKm ?: Double.NaN, rows.size
+                                    ),
+                                    "Generated ${java.text.SimpleDateFormat("dd MMM yyyy HH:mm", java.util.Locale.getDefault()).format(java.util.Date())}"
+                                ),
+                                rows
+                            )
+                            exportStatus = if (ok) "PDF saved: ${pdf.name}" else "PDF export failed"
+                        }) { Text("PDF", fontSize = 12.sp) }
+                    }
+                    Text(
+                        "Files land in Android/data/<package>/files/Downloads.",
+                        fontSize = 10.sp, color = Color(0xFF9AA7B4)
+                    )
+                    exportStatus?.let {
+                        Text(it, fontSize = 11.sp, color = Color(0xFF00E676))
+                    }
                 }
             }
             SimpleNavCard(

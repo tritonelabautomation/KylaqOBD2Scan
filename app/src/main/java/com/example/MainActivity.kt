@@ -348,6 +348,7 @@ fun MainApp(viewModel: MainViewModel) {
 
                         composable(Screen.Garage.route) {
                 val allVehicles by viewModel.recordingManager.tripRepository.allVehiclesFlow.collectAsState(initial = emptyList())
+                val garageScope = rememberCoroutineScope()
                 VehicleGarageScreen(
                     vehicles = allVehicles,
                     onAddVehicle = { navController.navigate(Screen.AddVehicle.route) },
@@ -357,6 +358,27 @@ fun MainApp(viewModel: MainViewModel) {
                         val name = if (vehicle.nickname.isNullOrBlank()) "${vehicle.make} ${vehicle.model}" else vehicle.nickname
                         viewModel.setVehicleName(name)
                         navController.navigate(Screen.VehicleProfile.createRoute(vehicle.id))
+                    },
+                    onUpdateVehicle = { v ->
+                        garageScope.launch { viewModel.recordingManager.tripRepository.insertVehicle(v) }
+                    },
+                    onDeleteVehicle = { v ->
+                        garageScope.launch { viewModel.recordingManager.tripRepository.deleteVehicle(v.id) }
+                    },
+                    onMoveVehicle = { vehicle, delta ->
+                        garageScope.launch {
+                            val list = allVehicles.toMutableList()
+                            val from = list.indexOfFirst { it.id == vehicle.id }
+                            val to = from + delta
+                            if (from >= 0 && to in list.indices) {
+                                val moved = list.removeAt(from)
+                                list.add(to, moved)
+                                // Re-index the whole garage so the manual order becomes explicit.
+                                list.forEachIndexed { i, v ->
+                                    viewModel.recordingManager.tripRepository.insertVehicle(v.copy(sortOrder = i))
+                                }
+                            }
+                        }
                     }
                 )
             }

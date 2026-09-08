@@ -29,7 +29,9 @@ data class VehicleEntity(
     val licensePlate: String? = null,
     val odometerKm: Int? = null,
     val isLegacy: Boolean = false,
-    val notes: String? = null
+    val notes: String? = null,
+    /** Manual garage ordering (VehIQ-style reorder); 0 = insertion order fallback. */
+    val sortOrder: Int = 0
 )
 
 @Entity(tableName = "protocol_test_results")

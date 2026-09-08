@@ -38,6 +38,10 @@ class TripRepository(context: Context) {
         newEntitiesDao.insertVehicle(vehicle)
     }
 
+    suspend fun deleteVehicle(vehicleId: String) = withContext(Dispatchers.IO) {
+        newEntitiesDao.deleteVehicleById(vehicleId)
+    }
+
     suspend fun insertProtocolTestResult(result: ProtocolTestResultEntity) = withContext(Dispatchers.IO) {
         newEntitiesDao.insertProtocolTestResult(result)
     }

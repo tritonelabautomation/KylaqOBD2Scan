@@ -339,6 +339,18 @@ class SettingsRepository(private val context: Context) {
         _remindersEnabled.value = enabled
     }
 
+    private val _weeklyCheckIn = MutableStateFlow(prefs.getBoolean("weekly_check_in", true))
+    val weeklyCheckInEnabled: StateFlow<Boolean> = _weeklyCheckIn.asStateFlow()
+
+    fun setWeeklyCheckIn(enabled: Boolean) {
+        prefs.edit().putBoolean("weekly_check_in", enabled).apply()
+        _weeklyCheckIn.value = enabled
+    }
+
+    fun lastCheckInNotifiedMs(): Long = prefs.getLong("last_checkin_notified", 0L)
+
+    fun setLastCheckInNotifiedMs(ms: Long) = prefs.edit().putLong("last_checkin_notified", ms).apply()
+
     private val _appearanceMode = MutableStateFlow(prefs.getString("appearance_mode", "DARK") ?: "DARK")
     val appearanceMode: StateFlow<String> = _appearanceMode.asStateFlow()
 
