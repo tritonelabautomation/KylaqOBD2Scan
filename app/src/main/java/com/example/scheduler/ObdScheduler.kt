@@ -7,6 +7,7 @@ import com.example.data.RecordingManager
 import com.example.data.SettingsRepository
 import com.example.discovery.EcuDiscoveryManager
 import com.example.discovery.PidCapabilityManager
+import com.example.analysis.DriveAnalytics
 import com.example.engine.DrivingStateEngine
 import com.example.engine.EconomyEngine
 import com.example.engine.TransmissionEngine
@@ -55,6 +56,7 @@ class ObdScheduler(
     val capabilityManager: PidCapabilityManager = PidCapabilityManager(),
     val economyEngine: EconomyEngine = EconomyEngine(),
     val drivingStateEngine: DrivingStateEngine = DrivingStateEngine(),
+    val driveAnalytics: DriveAnalytics = DriveAnalytics(),
     val transmissionEngine: TransmissionEngine = TransmissionEngine()
 ) {
 
@@ -645,6 +647,30 @@ class ObdScheduler(
             rawGearRatio = primaryNumeric("01A4")
         )
         _transmissionState.value = transState
+
+        // 5. Derived drive intelligence: power/torque curves, efficiency sweet spot,
+        //    coasting-in-neutral events, turbo behaviour and per-tank fuel comparison.
+        driveAnalytics.onSignals(
+            timestampMonotonicMs = timestampMonotonic,
+            speedKmh = speedKmh,
+            rpm = engineRpm,
+            throttlePct = throttlePct,
+            pedalPct = pedalPct,
+            fuelRateLh = effectiveFuelRateLh,
+            mapKpa = primaryNumeric("010B"),
+            baroKpa = primaryNumeric("0133"),
+            timingDeg = primaryNumeric("010E"),
+            stftPct = primaryNumeric("0106"),
+            ltftPct = primaryNumeric("0107"),
+            loadPct = primaryNumeric("0104"),
+            fuelLevelPct = primaryNumeric("012F"),
+            chargeTempC = primaryNumeric("0166"),
+            wastegatePct = primaryNumeric("016E"),
+            brakeActive = drivingResult.isBrakeActive,
+            actualTorquePct = primaryNumeric("0162"),
+            demandTorquePct = primaryNumeric("0161"),
+            referenceTorqueNm = primaryNumeric("0163") ?: primaryNumeric("0164")
+        )
     }
 
     /**
