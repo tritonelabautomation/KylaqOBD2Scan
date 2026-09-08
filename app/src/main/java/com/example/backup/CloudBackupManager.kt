@@ -451,12 +451,49 @@ class CloudBackupManager(
      * Triggers automatic background backup if enabled and user is logged in.
      */
     suspend fun performAutoBackupIfNeeded() {
-        if (settingsRepository.autoCloudBackup.value && settingsRepository.googleAccountEmail.value != null) {
-            performBackupNow()
+        if (!settingsRepository.autoCloudBackup.value || settingsRepository.googleAccountEmail.value == null) return
+        // Fuelio parity: Wi-Fi-only and once-daily gates for automatic syncs.
+        if (settingsRepository.backupWifiOnly.value && !isOnWifi()) return
+        if (settingsRepository.backupDaily.value) {
+            val age = System.currentTimeMillis() - settingsRepository.lastBackupTimestamp.value
+            if (age < 20L * 60 * 60 * 1000) return
+        }
+        val result = performBackupNow()
+        if (result.success) {
+            settingsRepository.setLastBackupTimestamp(System.currentTimeMillis())
+        }
+        if (settingsRepository.backupShowNotification.value) {
+            notifySync(result.message, result.success)
         }
     }
 
+    private fun isOnWifi(): Boolean {
+        val cm = context.getSystemService(android.net.ConnectivityManager::class.java) ?: return false
+        val net = cm.activeNetwork ?: return false
+        return cm.getNetworkCapabilities(net)?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) == true
+    }
+
+    /** Silent low-importance notification so owners see sync outcomes like Fuelio does. */
+    private fun notifySync(message: String, success: Boolean) {
+        val nm = context.getSystemService(android.app.NotificationManager::class.java) ?: return
+        if (nm.getNotificationChannel(CHANNEL_BACKUP) == null) {
+            nm.createNotificationChannel(
+                android.app.NotificationChannel(CHANNEL_BACKUP, "Drive backup sync", android.app.NotificationManager.IMPORTANCE_LOW)
+            )
+        }
+        val notification = androidx.core.app.NotificationCompat.Builder(context, CHANNEL_BACKUP)
+            .setSmallIcon(android.R.drawable.stat_sys_upload_done)
+            .setContentTitle(if (success) "Drive backup complete" else "Drive backup problem")
+            .setContentText(message)
+            .setSilent(true)
+            .build()
+        nm.notify(NOTIFICATION_BACKUP_ID, notification)
+    }
+
     companion object {
+        private const val CHANNEL_BACKUP = "backup_sync"
+        private const val NOTIFICATION_BACKUP_ID = 9002
+
         /**
          * Values that ship in the repository as instructions-to-self. Sending any of these to
          * Google Play services produces ApiException 10 (DEVELOPER_ERROR), which reads like a

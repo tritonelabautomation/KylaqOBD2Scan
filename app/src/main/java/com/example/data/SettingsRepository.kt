@@ -142,6 +142,31 @@ class SettingsRepository(private val context: Context) {
     private val _acAutoMode = MutableStateFlow(prefs.getBoolean("ac_auto_mode", false))
     val acAutoMode: StateFlow<Boolean> = _acAutoMode.asStateFlow()
 
+    // ---- Fuelio-parity backup prefs (additive 2026-09-09) ----
+    private val _backupShowNotification = MutableStateFlow(prefs.getBoolean("backup_show_notification", true))
+    val backupShowNotification: StateFlow<Boolean> = _backupShowNotification.asStateFlow()
+
+    fun setBackupShowNotification(enabled: Boolean) {
+        prefs.edit().putBoolean("backup_show_notification", enabled).apply()
+        _backupShowNotification.value = enabled
+    }
+
+    private val _backupWifiOnly = MutableStateFlow(prefs.getBoolean("backup_wifi_only", false))
+    val backupWifiOnly: StateFlow<Boolean> = _backupWifiOnly.asStateFlow()
+
+    fun setBackupWifiOnly(enabled: Boolean) {
+        prefs.edit().putBoolean("backup_wifi_only", enabled).apply()
+        _backupWifiOnly.value = enabled
+    }
+
+    private val _backupDaily = MutableStateFlow(prefs.getBoolean("backup_daily", false))
+    val backupDaily: StateFlow<Boolean> = _backupDaily.asStateFlow()
+
+    fun setBackupDaily(enabled: Boolean) {
+        prefs.edit().putBoolean("backup_daily", enabled).apply()
+        _backupDaily.value = enabled
+    }
+
     fun setAcAutoMode(enabled: Boolean) {
         prefs.edit().putBoolean("ac_auto_mode", enabled).apply()
         _acAutoMode.value = enabled

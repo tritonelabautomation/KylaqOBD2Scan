@@ -80,9 +80,35 @@ fun FuelCostsScreen(
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FuelStatChip("AVG", stats.avgKmPerL?.let { String.format("%.1f km/L", it) } ?: "--", NeonEmerald, Modifier.weight(1f))
+                    FuelStatChip("LAST", stats.lastKmPerL?.let { String.format("%.1f km/L", it) } ?: "--", NeonEmerald, Modifier.weight(1f))
+                    FuelStatChip("$cur/L", stats.lastPricePerL?.let { String.format("%.1f", it) } ?: "--", TextSecondaryDark, Modifier.weight(1f))
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FuelStatChip("$cur/KM", stats.costPerKm?.let { String.format("%.2f", it) } ?: "--", CyberCyan, Modifier.weight(1f))
                     FuelStatChip("30-DAY $cur", stats.cost30d?.let { String.format("%.0f", it) } ?: "--", ElectricAmber, Modifier.weight(1f))
-                    FuelStatChip("$cur/L", stats.lastPricePerL?.let { String.format("%.1f", it) } ?: "--", TextSecondaryDark, Modifier.weight(1f))
+                    FuelStatChip("MONTH $cur", stats.costThisMonth?.let { String.format("%.0f", it) } ?: "--", ElectricAmber, Modifier.weight(1f))
+                }
+                val stationStats = repo.stationStats()
+                if (stationStats.isNotEmpty()) {
+                    Card(
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                "STATION INTELLIGENCE (from your own log)",
+                                color = TextSecondaryDark, fontSize = 11.sp, fontWeight = FontWeight.Bold
+                            )
+                            stationStats.take(4).forEach { st ->
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text(st.name, color = Color.White, fontSize = 11.sp, modifier = Modifier.weight(1f))
+                                    Text("${st.visits}x", color = TextSecondaryDark, fontSize = 10.sp)
+                                    Text(String.format("avg %.1f", st.avgPrice), color = CyberCyan, fontSize = 10.sp)
+                                    Text(String.format("best %.1f", st.bestPrice), color = NeonEmerald, fontSize = 10.sp)
+                                }
+                            }
+                        }
+                    }
                 }
             }
             item {
@@ -137,37 +163,86 @@ fun FuelCostsScreen(
                     )
                 }
             }
-            items(entries, key = { it.idMs }) { entry ->
-                Card(
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            Icons.Default.LocalGasStation,
-                            contentDescription = null,
-                            tint = when (entry.grade) {
-                                FuelLogCodec.GRADE_X95 -> NeonEmerald
-                                FuelLogCodec.GRADE_REGULAR -> ElectricAmber
-                                else -> TextSecondaryDark
-                            },
-                            modifier = Modifier.size(20.dp)
+            val chronologicalForPrev = entries.sortedBy { it.idMs }
+            val prevOdoById = mutableMapOf<Long, Double?>()
+            chronologicalForPrev.forEachIndexed { idx, e -> prevOdoById[e.idMs] = if (idx > 0) chronologicalForPrev[idx - 1].odometerKm else null }
+            val intervalById = stats.intervals.toMap()
+            val descending = entries.sortedByDescending { it.idMs }
+            var currentMonth = ""
+            descending.forEach { entry ->
+                val monthCal = java.util.Calendar.getInstance().apply { timeInMillis = entry.idMs }
+                val monthKey = String.format(java.util.Locale.US, "%04d-%02d", monthCal.get(java.util.Calendar.YEAR), monthCal.get(java.util.Calendar.MONTH) + 1)
+                if (monthKey != currentMonth) {
+                    currentMonth = monthKey
+                    item(key = "month-$monthKey") {
+                        Text(
+                            monthLabel(entry.idMs),
+                            color = TextSecondaryDark, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(top = 8.dp)
                         )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(entry.display, color = Color.White, fontSize = 12.sp)
-                            entry.odometerKm?.let {
+                    }
+                }
+                item(key = entry.idMs) {
+                    Card(
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.LocalGasStation,
+                                contentDescription = null,
+                                tint = when (entry.grade) {
+                                    FuelLogCodec.GRADE_X95 -> NeonEmerald
+                                    FuelLogCodec.GRADE_REGULAR -> ElectricAmber
+                                    else -> TextSecondaryDark
+                                },
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Row {
+                                    Text(entry.dateUtc.take(10), color = Color.White, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                                    val prev = prevOdoById[entry.idMs]
+                                    if (entry.odometerKm != null && prev != null && entry.odometerKm > prev) {
+                                        Text(String.format("+%.0f km", entry.odometerKm - prev), color = TextSecondaryDark, fontSize = 10.sp)
+                                    }
+                                }
                                 Text(
-                                    String.format("odometer %.0f km", it),
+                                    String.format(java.util.Locale.US, "%.2f L  ·  ₹%.2f/L  ·  ₹%.0f", entry.liters, entry.pricePerL, entry.totalCost),
                                     color = TextSecondaryDark, fontSize = 10.sp
                                 )
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    val kmL = intervalById[entry.idMs]
+                                    Text(
+                                        if (kmL != null) String.format("km/L: %.2f", kmL) else "km/L: --",
+                                        color = if (kmL != null) NeonEmerald else TextSecondaryDark,
+                                        fontSize = 11.sp, fontWeight = FontWeight.Bold
+                                    )
+                                    if (kmL != null && kmL > 0.1) {
+                                        Text(String.format("₹%.2f/km", entry.pricePerL / kmL), color = CyberCyan, fontSize = 10.sp)
+                                    }
+                                    if (entry.partial) {
+                                        Text("PARTIAL", color = ElectricAmber, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                                if (entry.station.isNotBlank() || entry.note.isNotBlank()) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        if (entry.station.isNotBlank()) {
+                                            Icon(Icons.Default.Place, contentDescription = null, tint = TextSecondaryDark, modifier = Modifier.size(12.dp))
+                                            Text(entry.station, color = TextSecondaryDark, fontSize = 10.sp)
+                                        }
+                                        if (entry.note.isNotBlank()) {
+                                            Icon(Icons.Default.Note, contentDescription = "Note", tint = TextSecondaryDark, modifier = Modifier.size(12.dp))
+                                        }
+                                    }
+                                }
                             }
-                        }
-                        IconButton(onClick = { repo.delete(entry.idMs); refresh++ }) {
-                            Icon(Icons.Default.Delete, contentDescription = "Delete", tint = WarningRed, modifier = Modifier.size(18.dp))
+                            IconButton(onClick = { repo.delete(entry.idMs); refresh++ }) {
+                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = WarningRed, modifier = Modifier.size(18.dp))
+                            }
                         }
                     }
                 }
@@ -178,17 +253,28 @@ fun FuelCostsScreen(
     if (showAdd) {
         RefuelDialog(
             onDismiss = { showAdd = false },
-            onSave = { liters, price, odo, station, grade, note ->
-                val now = System.currentTimeMillis()
+            recentStations = entries.map { it.station }.filter { it.isNotBlank() }.distinct().take(4),
+            onSave = { liters, price, odo, station, grade, note, partial, dateStr, timeStr ->
+                val cal = java.util.Calendar.getInstance()
+                val dp = dateStr.split('-')
+                val tp = timeStr.split(':')
+                if (dp.size == 3 && tp.size == 2) {
+                    cal.set(dp[0].toIntOrNull() ?: cal.get(java.util.Calendar.YEAR),
+                        (dp[1].toIntOrNull() ?: 1) - 1, dp[2].toIntOrNull() ?: 1,
+                        tp[0].toIntOrNull() ?: 12, tp[1].toIntOrNull() ?: 0, 0)
+                }
+                val ms = cal.timeInMillis
                 val utc = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
                     .apply { timeZone = TimeZone.getTimeZone("UTC") }
-                    .format(Date(now))
+                    .format(Date(ms))
                 repo.add(
                     FuelLogCodec.FuelEntry(
-                        idMs = now, dateUtc = utc, liters = liters, pricePerL = price,
-                        odometerKm = odo, station = station, grade = grade, note = note
+                        idMs = ms, dateUtc = utc, liters = liters, pricePerL = price,
+                        odometerKm = odo, station = station, grade = grade, note = note,
+                        partial = partial
                     )
                 )
+                viewModel.triggerCloudBackupIfEnabled()
                 if (grade != FuelLogCodec.GRADE_UNKNOWN) viewModel.tagFuelGrade(grade)
                 odo?.let { viewModel.maintenanceRepository.setCurrentOdometerKm(it) }
                 refresh++
@@ -196,6 +282,13 @@ fun FuelCostsScreen(
             }
         )
     }
+}
+
+private fun monthLabel(idMs: Long): String {
+    val cal = java.util.Calendar.getInstance().apply { timeInMillis = idMs }
+    return String.format("%s %d",
+        cal.getDisplayName(java.util.Calendar.MONTH, java.util.Calendar.LONG, java.util.Locale.US),
+        cal.get(java.util.Calendar.YEAR))
 }
 
 @Composable
@@ -214,7 +307,8 @@ private fun FuelStatChip(label: String, value: String, color: Color, modifier: M
 @Composable
 private fun RefuelDialog(
     onDismiss: () -> Unit,
-    onSave: (Double, Double, Double?, String, String, String) -> Unit
+    recentStations: List<String>,
+    onSave: (Double, Double, Double?, String, String, String, Boolean, String, String) -> Unit
 ) {
     var liters by remember { mutableStateOf("") }
     var price by remember { mutableStateOf("") }
@@ -222,6 +316,17 @@ private fun RefuelDialog(
     var odo by remember { mutableStateOf("") }
     var station by remember { mutableStateOf("") }
     var grade by remember { mutableStateOf(FuelLogCodec.GRADE_UNKNOWN) }
+    var note by remember { mutableStateOf("") }
+    var partial by remember { mutableStateOf(false) }
+    val nowCal = java.util.Calendar.getInstance()
+    var dateStr by remember {
+        mutableStateOf(String.format(java.util.Locale.US, "%04d-%02d-%02d",
+            nowCal.get(java.util.Calendar.YEAR), nowCal.get(java.util.Calendar.MONTH) + 1, nowCal.get(java.util.Calendar.DAY_OF_MONTH)))
+    }
+    var timeStr by remember {
+        mutableStateOf(String.format(java.util.Locale.US, "%02d:%02d",
+            nowCal.get(java.util.Calendar.HOUR_OF_DAY), nowCal.get(java.util.Calendar.MINUTE)))
+    }
     val grades = listOf(FuelLogCodec.GRADE_UNKNOWN, FuelLogCodec.GRADE_X95, FuelLogCodec.GRADE_REGULAR)
 
     // VehIQ's receipt scanner, free: pick a receipt photo, Gemini extracts litres/price/station
@@ -306,6 +411,22 @@ private fun RefuelDialog(
                 TextField(value = odo, onValueChange = { odo = it }, label = { Text("Odometer km (optional)") }, singleLine = true)
                 TextField(value = station, onValueChange = { station = it }, label = { Text("Station (optional)") }, singleLine = true)
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    TextField(value = dateStr, onValueChange = { dateStr = it }, label = { Text("Date") }, singleLine = true, modifier = Modifier.weight(1f))
+                    TextField(value = timeStr, onValueChange = { timeStr = it }, label = { Text("Time") }, singleLine = true, modifier = Modifier.weight(1f))
+                }
+                if (recentStations.isNotEmpty()) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        recentStations.take(3).forEach { st ->
+                            FilterChip(selected = station == st, onClick = { station = st }, label = { Text(st.take(14), fontSize = 10.sp) })
+                        }
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Missed previous fill-up (partial tank)", color = TextSecondaryDark, fontSize = 11.sp, modifier = Modifier.weight(1f))
+                    Switch(checked = partial, onCheckedChange = { partial = it })
+                }
+                TextField(value = note, onValueChange = { note = it }, label = { Text("Note (optional)") }, singleLine = true)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     grades.forEach { g ->
                         FilterChip(
                             selected = grade == g,
@@ -345,7 +466,7 @@ private fun RefuelDialog(
                     val l = liters.toDoubleOrNull()
                     val p = price.toDoubleOrNull()
                     if (l != null && p != null && l > 0) {
-                        onSave(l, p, odo.toDoubleOrNull(), station.trim(), grade, "")
+                        onSave(l, p, odo.toDoubleOrNull(), station.trim(), grade, note.trim(), partial, dateStr, timeStr)
                     }
                 }
             ) { Text("Save") }

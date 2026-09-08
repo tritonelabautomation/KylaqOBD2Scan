@@ -46,6 +46,45 @@ fun DriveBackupScreen(
     var backups by remember { mutableStateOf<List<DriveBackupClient.BackupFile>>(emptyList()) }
     val autoBackup by settings.autoCloudBackup.collectAsState()
     val lastBackup by settings.lastBackupTimestamp.collectAsState()
+    val showNotif by settings.backupShowNotification.collectAsState()
+    val wifiOnly by settings.backupWifiOnly.collectAsState()
+    val daily by settings.backupDaily.collectAsState()
+    var pendingRestore by remember { mutableStateOf<DriveBackupClient.BackupFile?>(null) }
+    val fuelRepo = viewModel.fuelLogRepository
+    val csvExport = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/csv")
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            status = try {
+                val csv = com.example.data.FuelLogCodec.toCsv(fuelRepo.entries())
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    context.contentResolver.openOutputStream(uri)?.use { it.write(csv.toByteArray()) }
+                }
+                "Fuel log CSV exported (${fuelRepo.entries().size} entries)."
+            } catch (e: Exception) {
+                "CSV export failed: ${e.message}"
+            }
+        }
+    }
+    val csvImport = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            status = try {
+                val text = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    context.contentResolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) } ?: ""
+                }
+                val incoming = com.example.data.FuelLogCodec.fromCsv(text)
+                val merged = com.example.data.FuelLogCodec.merge(fuelRepo.entries(), incoming)
+                fuelRepo.replaceAll(merged)
+                "Merged ${incoming.size} CSV rows (${merged.size} total, duplicates skipped)."
+            } catch (e: Exception) {
+                "CSV import failed: ${e.message}"
+            }
+        }
+    }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) {
@@ -149,7 +188,45 @@ fun DriveBackupScreen(
                                 "Last backup: " + (if (lastBackup > 0) java.util.Date(lastBackup).toString() else "never"),
                                 color = TextSecondaryDark, fontSize = 10.sp
                             )
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Show notification", color = TextSecondaryDark, fontSize = 12.sp)
+                                Switch(checked = showNotif, onCheckedChange = { settings.setBackupShowNotification(it) })
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Daily backup service", color = TextSecondaryDark, fontSize = 12.sp)
+                                Switch(checked = daily, onCheckedChange = { settings.setBackupDaily(it) })
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Auto sync only on Wi-Fi", color = TextSecondaryDark, fontSize = 12.sp)
+                                Switch(checked = wifiOnly, onCheckedChange = { settings.setBackupWifiOnly(it) })
+                            }
                         }
+                    }
+                }
+            }
+            item {
+                Text("IMPORT/EXPORT SELECTIVELY", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    "Export writes fuel_log.csv to your Drive folder; import MERGES a CSV " +
+                        "(duplicate fill-ups are skipped, existing entries win).",
+                    color = TextSecondaryDark, fontSize = 11.sp
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { csvExport.launch("fuel_log.csv") }, modifier = Modifier.weight(1f)) {
+                        Text("Export CSV")
+                    }
+                    Button(onClick = { csvImport.launch(arrayOf("text/csv", "text/comma-separated-values")) }, modifier = Modifier.weight(1f)) {
+                        Text("Import CSV (merge)")
                     }
                 }
             }
@@ -188,20 +265,7 @@ fun DriveBackupScreen(
                             )
                         }
                         TextButton(
-                            onClick = {
-                                busy = true
-                                status = "Restoring ${file.name}…"
-                                scope.launch {
-                                    status = try {
-                                        "Restore finished: " + DriveBackupClient.restoreBackup(
-                                            context, file.uri, viewModel.recordingManager
-                                        )
-                                    } catch (e: Exception) {
-                                        "Restore failed: ${e.message}"
-                                    }
-                                    busy = false
-                                }
-                            },
+                            onClick = { pendingRestore = file },
                             enabled = !busy
                         ) { Text("Restore") }
                     }
@@ -209,4 +273,39 @@ fun DriveBackupScreen(
             }
         }
     }
+
+    pendingRestore?.let { file ->
+        AlertDialog(
+            onDismissRequest = { pendingRestore = null },
+            title = { Text("Files on Google Drive") },
+            text = {
+                Text(
+                    "Choose how to apply cloud data. RESTORE FULL BACKUP overwrites all current " +
+                        "data with " + file.name + ". For a fuel-log-only merge use Import CSV instead."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val target = file
+                        pendingRestore = null
+                        busy = true
+                        status = "Restoring " + target.name
+                        scope.launch {
+                            status = try {
+                                "Restore finished: " + DriveBackupClient.restoreBackup(
+                                    context, target.uri, viewModel.recordingManager
+                                )
+                            } catch (e: Exception) {
+                                "Restore failed: " + (e.message ?: "error")
+                            }
+                            busy = false
+                        }
+                    }
+                ) { Text("RESTORE (OVERWRITE)") }
+            },
+            dismissButton = { TextButton(onClick = { pendingRestore = null }) { Text("CANCEL") } }
+        )
+    }
+
 }

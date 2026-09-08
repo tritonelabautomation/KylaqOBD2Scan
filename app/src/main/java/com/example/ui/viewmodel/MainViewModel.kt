@@ -1044,6 +1044,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** Cross-ride learned AC-on vs AC-off economy from tagged ride summaries. */
     data class AcLearning(val onKmL: Double, val offKmL: Double, val rides: Int)
 
+    /** Fuelio parity: auto-backup hook fired after every refuel save. */
+    fun triggerCloudBackupIfEnabled() {
+        viewModelScope.launch { cloudBackupManager.performAutoBackupIfNeeded() }
+    }
+
     fun acLearning(): AcLearning? {
         var onKm = 0.0; var onL = 0.0; var offKm = 0.0; var offL = 0.0; var n = 0
         for (r in rideHistory()) {
