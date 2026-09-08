@@ -31,11 +31,12 @@ class MaintenanceCatalogTest {
 
     @Test
     fun `distance-only item goes due soon then overdue`() {
-        val soon = MaintenanceCatalog.ServiceLog("front_pads", "2026-01-01T00:00:00Z", now - 100 * day, 39_000.0, null)
+        // Serviced at 1 000 km, interval 40 000 km, now at 40 000 km => exactly 1 000 km left.
+        val soon = MaintenanceCatalog.ServiceLog("front_pads", "2026-01-01T00:00:00Z", now - 100 * day, 1_000.0, null)
         assertEquals(
             MaintenanceCatalog.DueStatus.DUE_SOON,
             MaintenanceCatalog.evaluate(pads, soon, 40_000.0, now).status
-        ) // 1000 km left
+        )
         val over = MaintenanceCatalog.ServiceLog("front_pads", "2025-01-01T00:00:00Z", now - 600 * day, 39_000.0, null)
         assertEquals(
             MaintenanceCatalog.DueStatus.OVERDUE,
