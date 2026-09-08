@@ -281,7 +281,7 @@ fun MaintenanceScreen(
                         Text("\u2022 Coolant: G12evo (pink/violet), never mix green G11; check ratio at 30k", color = TextSecondaryDark, fontSize = 11.sp)
                         Text("\u2022 Brake fluid: DOT 4 (Class 6 for ABS/ESP), every 2 years", color = TextSecondaryDark, fontSize = 11.sp)
                         Text("\u2022 Front pads: wear sensor wired; budget sets ~40k km city duty", color = TextSecondaryDark, fontSize = 11.sp)
-                        Text("\u2022 Gearbox AQ250-6F (09G, Aisin TF-60SN): ATF G 052 025 A2 (JWS 3309) only, 7.0 L lifetime fill - never mix other ATF", color = TextSecondaryDark, fontSize = 11.sp)
+                        Text("\u2022 Gearbox AQ250-6F (09G, Aisin TF-60SN): ATF G 052 025 A2 (JWS 3309) only, 7.0 L fill / ~3 L top-up after repair - filled for life, never mix other ATF", color = TextSecondaryDark, fontSize = 11.sp)
                         Text("\u2022 09G ratios 4.148/2.370/1.556/1.155/0.859/0.686 (spread 6.05): long 6th is your highway economy gear", color = TextSecondaryDark, fontSize = 11.sp)
                     }
                 }

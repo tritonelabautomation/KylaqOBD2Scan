@@ -11,6 +11,13 @@ import kotlin.math.abs
  *    with slip-controlled lock-up clutch
  *  - ATF G 052 025 A2 (Esso JWS 3309), 7.0 L initial fill, lifetime filling
  *
+ * Cross-verified against the Skoda 09G Workshop Manual Edition 07.2014 (see
+ * docs/reference/09g-workshop-manual.md): identical ratio set across most applications;
+ * variant sets exist (KGV 4.044-0.672, PLS/PAL 4.670-0.690, QEM 4.460-0.670) with two
+ * idler (1.061 / 0.906) and two final-drive (4.067 / 3.867) combinations, and the ATF
+ * top-up after repair is approx. 3 L. With the converter lock-up closed, gears 2-6 are
+ * mechanically driven (no slip) - exactly the state this model calibrates from.
+ *
  * The RELATIVE ratios are factory truth; the ABSOLUTE rpm-per-km/h scale (final drive x
  * idler gear x tyre circumference) differs per engine/tyre application, so the model
  * self-calibrates: confident cruise samples (converter locked, steady rpm & speed) adapt
@@ -24,6 +31,7 @@ class Aq250GearModel {
         const val SPREAD: Double = 6.05
         const val ATF_SPEC: String = "G 052 025 A2 (Esso JWS 3309)"
         const val ATF_FILL_L: Double = 7.0
+        const val ATF_TOPUP_L: Double = 3.0
         const val IDLER: Double = 1.061
 
         /** Prior rpm-per-km/h per unit ratio, from Kylaq/Kushaq-family cruise observations. */

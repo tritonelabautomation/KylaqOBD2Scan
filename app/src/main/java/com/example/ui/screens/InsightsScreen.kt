@@ -554,7 +554,7 @@ private fun GearboxCard(model: com.example.engine.Aq250GearModel) {
             color = Color.White, fontSize = 10.sp
         )
         Text(
-            "ATF ${com.example.engine.Aq250GearModel.ATF_SPEC}, ${String.format("%.1f", com.example.engine.Aq250GearModel.ATF_FILL_L)} L lifetime fill",
+            "ATF ${com.example.engine.Aq250GearModel.ATF_SPEC}, ${String.format("%.1f", com.example.engine.Aq250GearModel.ATF_FILL_L)} L fill / ~${String.format("%.0f", com.example.engine.Aq250GearModel.ATF_TOPUP_L)} L top-up, filled for life (change only after repair)",
             color = ElectricAmber, fontSize = 10.sp
         )
         val scales = model.calibratedScales()
