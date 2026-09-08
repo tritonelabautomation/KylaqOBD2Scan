@@ -629,12 +629,15 @@ fun SettingsScreen(
                         fontSize = 11.sp
                     )
                     Text(
-                        text = "Google: car-app-library apps appear on REAL head units only when installed " +
-                            "from a trusted source (Play Store / Internal App Sharing / closed testing track). " +
-                            "Android Auto's 'unknown sources' toggle applies to media & messaging apps only - " +
-                            "it does NOT unlock template car apps. Sideloaded APKs run in the Desktop Head Unit " +
-                            "emulator on a PC. Full steps: docs/reference/android-auto-install-guide.md " +
-                            "(in-app: About & Fuel Guide links the same guide).",
+                        text = "Two routes exist. (1) TEMPLATE route (CarAppService): Google requires a " +
+                            "Play-trusted install on real head units - sideloaded template apps stay hidden. " +
+                            "(2) PARKED/SURFACE route (this build ships it too - same recipe as the sideloaded " +
+                            "AABrowser project): a distraction-optimised activity with CAR_LAUNCHER + " +
+                            "ACCESS_SURFACE that AA's unknown-sources toggle DOES unlock (media/messaging/" +
+                            "parked classes). Sideload this APK, enable AA developer mode + unknown sources, " +
+                            "reconnect - the head-unit launcher should list it. Some hosts grant the car " +
+                            "surface only while parked (host safety policy). Details: " +
+                            "docs/reference/android-auto-install-guide.md.",
                         color = TextSecondaryDark,
                         fontSize = 10.sp
                     )

@@ -36,6 +36,24 @@ https://developer.android.com/training/cars/testing#real-vehicles
    against the DHU window to verify the live OBD dashboard (rpm, speed, gear, converter slip,
    economy) without the car.
 
+## Route B (sideload-friendly, shipped in-app since c65f089+1): the parked-surface activity
+
+Evidence (fetched 2026-09-08 from github.com/kododake/AABrowser, 477 stars, active):
+its manifest contains **no CarAppService at all**. It declares a plain activity with
+`android.intent.category.CAR_LAUNCHER` + `androidx.car.app.category.NAVIGATION` +
+`android.intent.category.APP_MAPS`, `distractionOptimized=true` metadata and the
+`androidx.car.app.ACCESS_SURFACE` permission, and its README tells users to enable AA
+developer mode + **unknown sources** - i.e. it enters through the *parked/surface* app
+class, which IS covered by the unknown-sources exemption (media, messaging, parked).
+That is why a GitHub-sideloaded AABrowser reaches real head units while a sideloaded
+*template* app cannot.
+
+Kylaq TSI Coach now ships BOTH routes:
+- `auto/ObdCarAppService.kt` (template, IOT) - full dash on trusted installs & AAOS.
+- `auto/AutoDashActivity.kt` (parked-surface recipe above, hosts the same live HUD) -
+  discoverable from sideloaded installs with AA unknown sources enabled.
+  Host safety policy may restrict the surface to parked state on some head units.
+
 ## After a trusted install, if the icon still hides
 
 - Force-stop the Android Auto app (it caches the discovered-app list), reconnect the USB/WiFi
