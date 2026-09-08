@@ -92,6 +92,31 @@ class SettingsRepository(private val context: Context) {
         _googleWebClientId.value = clean
     }
 
+    private val _defaultBtAddress = MutableStateFlow(prefs.getString("default_bt_address", null))
+    val defaultBtAddress: StateFlow<String?> = _defaultBtAddress.asStateFlow()
+
+    private val _autoConnect = MutableStateFlow(prefs.getBoolean("auto_connect_adapter", true))
+    val autoConnect: StateFlow<Boolean> = _autoConnect.asStateFlow()
+
+    private val _autoRecord = MutableStateFlow(prefs.getBoolean("auto_record_on_start", true))
+    val autoRecord: StateFlow<Boolean> = _autoRecord.asStateFlow()
+
+    /** The adapter auto-connect and both supervisors should use; null = pick by name. */
+    fun setDefaultBtAddress(address: String?) {
+        prefs.edit().putString("default_bt_address", address).apply()
+        _defaultBtAddress.value = address
+    }
+
+    fun setAutoConnect(enabled: Boolean) {
+        prefs.edit().putBoolean("auto_connect_adapter", enabled).apply()
+        _autoConnect.value = enabled
+    }
+
+    fun setAutoRecord(enabled: Boolean) {
+        prefs.edit().putBoolean("auto_record_on_start", enabled).apply()
+        _autoRecord.value = enabled
+    }
+
     fun setGoogleAccountName(name: String?) {
         if (!name.isNullOrBlank()) {
             prefs.edit().putString("google_account_name", name.trim()).apply()

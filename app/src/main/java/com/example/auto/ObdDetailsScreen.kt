@@ -54,6 +54,7 @@ class ObdDetailsScreen(carContext: CarContext) : Screen(carContext) {
     private var health: ProtocolHealth = ProtocolHealth.UNKNOWN
     private var isPolling: Boolean = false
     private var connectedDevice: String? = null
+    private var enabledPids: List<com.example.model.PidDefinition> = emptyList()
 
     init {
         lifecycle.addObserver(object : DefaultLifecycleObserver {
@@ -87,6 +88,11 @@ class ObdDetailsScreen(carContext: CarContext) : Screen(carContext) {
             health = AppContainer.protocolHealth.value
             isPolling = scheduler.isPolling.value
             connectedDevice = AppContainer.bluetoothManager.connectedDeviceName.value
+            enabledPids = try {
+                AppContainer.settingsRepository.pidDefinitions.value.filter { it.enabled }
+            } catch (t: Throwable) {
+                emptyList()
+            }
         } catch (t: Throwable) {
             Log.e(TAG, "details snapshot failed: ${t.message}", t)
         }
@@ -144,6 +150,7 @@ class ObdDetailsScreen(carContext: CarContext) : Screen(carContext) {
             )
             .addRow(tripRow())
             .addRow(economyRow())
+            .let { builder -> extraPidRows().fold(builder) { b, row -> b.addRow(row) } }
             .addRow(
                 Row.Builder()
                     .setTitle("State $drivingStateName")
@@ -156,6 +163,27 @@ class ObdDetailsScreen(carContext: CarContext) : Screen(carContext) {
             .setTitle("OBD DETAILS - LIVE ENGINE DATA")
             .setHeaderAction(Action.BACK)
             .build()
+    }
+
+    /**
+     * Every enabled PID the phone app polls, in pairs, so PIDs added in PID Config appear on the
+     * car screen too instead of a frozen hardcoded list.
+     */
+    private fun extraPidRows(): List<Row> {
+        val alreadyShown = setOf(
+            "010C", "010D", "0104", "0105", "010B", "010F", "0111", "0142",
+            "010E", "0103", "0106", "0107", "0110", "015C", "015E", "0146", "011F", "0121"
+        )
+        val extras = enabledPids.filter { it.id !in alreadyShown }.take(24)
+        return extras.chunked(2).map { pair ->
+            val first = pair[0]
+            val builder = Row.Builder()
+                .setTitle("${first.shortName} ${value(first.id)}")
+            if (pair.size > 1) {
+                builder.addText("${pair[1].shortName} ${value(pair[1].id)}")
+            }
+            builder.build()
+        }
     }
 
     private fun connectionRow(): Row = Row.Builder()

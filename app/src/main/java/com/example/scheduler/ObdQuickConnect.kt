@@ -65,6 +65,7 @@ object ObdQuickConnect {
     suspend fun connectPairedAdapterAndPoll(
         scope: CoroutineScope,
         pids: List<String> = DASHBOARD_PIDS,
+        respectAutoConnectSetting: Boolean = true,
         onStatus: (String) -> Unit = {}
     ): Boolean = withContext(Dispatchers.IO) {
         val scheduler = try {
@@ -81,6 +82,11 @@ object ObdQuickConnect {
 
         val bluetooth = AppContainer.bluetoothManager
         val settings = AppContainer.settingsRepository
+
+        if (respectAutoConnectSetting && !settings.autoConnect.value) {
+            onStatus("Auto-connect is switched off in the connect dialog")
+            return@withContext false
+        }
 
         // Case 1: the phone app (or an earlier car session) already holds the RFCOMM socket.
         val existing = bluetooth.currentTransport()
@@ -101,8 +107,8 @@ object ObdQuickConnect {
         }
 
         // Case 2: nothing connected yet - find a paired OBD adapter and open it.
-        val device = try {
-            bluetooth.getPairedDevices().firstOrNull { looksLikeObdAdapter(it.name) }
+        val pairedDevices = try {
+            bluetooth.getPairedDevices()
         } catch (t: SecurityException) {
             onStatus("Bluetooth permission is missing on the phone")
             return@withContext false
@@ -110,6 +116,12 @@ object ObdQuickConnect {
             onStatus("Could not read paired devices: ${t.message}")
             return@withContext false
         }
+
+        // The adapter starred in the connect dialog wins; otherwise recognise by name so a
+        // phone with several paired devices never grabs a headset.
+        val defaultAddress = settings.defaultBtAddress.value
+        val device = pairedDevices.firstOrNull { it.address == defaultAddress }
+            ?: pairedDevices.firstOrNull { looksLikeObdAdapter(it.name) }
 
         if (device == null) {
             onStatus("No paired OBD adapter found (pair an ELM327 in Android Bluetooth settings)")

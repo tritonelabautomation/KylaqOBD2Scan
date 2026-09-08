@@ -193,7 +193,10 @@ class ObdDashboardScreen(carContext: CarContext) : Screen(carContext) {
                 Log.w(TAG, "stopPolling before reconnect failed: ${t.message}")
             }
             try {
-                val ok = ObdQuickConnect.connectPairedAdapterAndPoll(this) { note ->
+                val ok = ObdQuickConnect.connectPairedAdapterAndPoll(
+                    scope = this,
+                    respectAutoConnectSetting = false
+                ) { note ->
                     statusNote = note
                     invalidate()
                 }

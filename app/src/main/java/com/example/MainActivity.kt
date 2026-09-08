@@ -101,7 +101,12 @@ fun MainApp(viewModel: MainViewModel) {
         hasBluetoothPermission = allGranted
     }
 
+    val defaultBtAddress by viewModel.settingsRepository.defaultBtAddress.collectAsState()
+    val autoConnect by viewModel.settingsRepository.autoConnect.collectAsState()
+    val autoRecord by viewModel.settingsRepository.autoRecord.collectAsState()
+
     LaunchedEffect(Unit) {
+        viewModel.startSessionAutomation()
         val basePermissions = arrayOf(
             Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.ACCESS_COARSE_LOCATION
@@ -404,7 +409,13 @@ fun MainApp(viewModel: MainViewModel) {
             onStartSimulation = {
                 viewModel.startSimulationMode()
             },
-            onDismiss = { showConnectionDialog = false }
+            onDismiss = { showConnectionDialog = false },
+            defaultAddress = defaultBtAddress,
+            onSetDefault = { address -> viewModel.settingsRepository.setDefaultBtAddress(address) },
+            autoConnect = autoConnect,
+            onAutoConnectChanged = { enabled -> viewModel.settingsRepository.setAutoConnect(enabled) },
+            autoRecord = autoRecord,
+            onAutoRecordChanged = { enabled -> viewModel.settingsRepository.setAutoRecord(enabled) }
         )
     }
 }

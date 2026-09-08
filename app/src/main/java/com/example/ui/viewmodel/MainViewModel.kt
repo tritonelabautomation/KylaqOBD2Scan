@@ -23,9 +23,11 @@ import com.example.model.TransactionRecord
 import com.example.protocol.PidDecoder
 import com.example.protocol.SafetyValidator
 import com.example.protocol.ValidationResult
+import com.example.scheduler.ObdQuickConnect
 import com.example.scheduler.ObdScheduler
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.firstOrNull
@@ -60,6 +62,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val connectionState: StateFlow<ConnectionState> = bluetoothManager.connectionState
     val connectedDeviceName: StateFlow<String?> = bluetoothManager.connectedDeviceName
     val connectionStatusMessage: StateFlow<String> = bluetoothManager.statusMessage
+
+    /** Human-readable notes from the auto-connect/auto-record supervisors. */
+    private val _automationMessage = MutableStateFlow<String?>(null)
+    val automationMessage: StateFlow<String?> = _automationMessage.asStateFlow()
 
     val isPolling: StateFlow<Boolean> = obdScheduler.isPolling
 
@@ -660,6 +666,61 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             obdScheduler.stopPolling()
         } else {
             obdScheduler.startPolling(viewModelScope, transport)
+        }
+    }
+
+    /**
+     * Keeps a logging session alive without the user touching the phone:
+     *
+     *  * every 10 s, if auto-connect is enabled and nothing is polling, ask [ObdQuickConnect]
+     *    to (re)open the starred / recognised adapter - this is what makes recording resume
+     *    after the adapter drops or the ignition cycle restarts;
+     *  * every 2 s, if auto-record is enabled, start a recording as soon as the engine is
+     *    running (rpm > 200) and save it once the engine has been off for a minute.
+     *
+     * Both loops live in viewModelScope, so they stop with the app UI; Android Auto runs its
+     * own supervisor while the car screen is visible.
+     */
+    fun startSessionAutomation() {
+        viewModelScope.launch {
+            while (isActive) {
+                if (settingsRepository.autoConnect.value && !obdScheduler.isPolling.value) {
+                    try {
+                        ObdQuickConnect.connectPairedAdapterAndPoll(viewModelScope) { message ->
+                            _automationMessage.value = message
+                        }
+                    } catch (t: Exception) {
+                        _automationMessage.value = t.message ?: "Auto-connect failed"
+                    }
+                }
+                delay(10_000)
+            }
+        }
+        viewModelScope.launch {
+            var engineOffSinceMs = 0L
+            while (isActive) {
+                val rpm = obdScheduler.liveNumericMap.value["010C"]
+                val recording = recordingManager.isRecording.value
+                if (settingsRepository.autoRecord.value) {
+                    if (rpm != null && rpm > 200.0) {
+                        engineOffSinceMs = 0L
+                        if (!recording && obdScheduler.isPolling.value) {
+                            startRecording()
+                        }
+                    } else if (recording) {
+                        val now = android.os.SystemClock.elapsedRealtime()
+                        if (engineOffSinceMs == 0L) {
+                            engineOffSinceMs = now
+                        } else if (now - engineOffSinceMs > 60_000L) {
+                            stopRecording()
+                            engineOffSinceMs = 0L
+                        }
+                    }
+                } else if (recording) {
+                    engineOffSinceMs = 0L
+                }
+                delay(2_000)
+            }
         }
     }
 
