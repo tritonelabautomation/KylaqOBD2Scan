@@ -2,12 +2,7 @@ package com.example.ui.screens
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.Text
-import androidx.compose.ui.unit.sp
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.runtime.*
@@ -44,16 +39,6 @@ fun TelemetryDashboardContent(
     Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
 
         // 1. Driving State & Transmission (Škoda Kylaq 6-Speed AT - No DSG)
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-            horizontalArrangement = Arrangement.End
-        ) {
-            FilterChip(
-                selected = TelemetryPrefs.showUnsupported,
-                onClick = { TelemetryPrefs.showUnsupported = !TelemetryPrefs.showUnsupported },
-                label = { Text("show unsupported PIDs", fontSize = 10.sp) }
-            )
-        }
         TelemetrySectionCard(
             title = "DRIVING & TRANSMISSION (6-AT)",
             icon = Icons.Default.DirectionsCar,

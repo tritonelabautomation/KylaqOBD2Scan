@@ -121,61 +121,31 @@ class BluetoothManager(private val context: Context) {
             val deviceName = try { device.name ?: deviceAddress } catch (_: SecurityException) { deviceAddress }
             _connectedDeviceName.value = deviceName
 
-            // BLE-only dongles can pair but expose no Classic RFCOMM channel - detect early
-            // and tell the owner instead of failing with a generic socket error.
-            val deviceType = try { device.type } catch (_: SecurityException) { BluetoothDevice.DEVICE_TYPE_UNKNOWN }
-            if (deviceType == BluetoothDevice.DEVICE_TYPE_LE) {
-                _connectionState.value = ConnectionState.ERROR
-                _statusMessage.value = "$deviceName is a Bluetooth-LE-only adapter: this app needs a Classic/SPP ELM327. Pair a Classic dongle and retry."
-                return@withContext Pair(false, null)
+            // Create RFCOMM socket
+            val socket = try {
+                device.createRfcommSocketToServiceRecord(sppUuid)
+            } catch (e: Exception) {
+                // Fallback using hidden createRfcommSocket method if standard fails on some clones
+                val method = device.javaClass.getMethod("createRfcommSocket", Int::class.javaPrimitiveType)
+                method.invoke(device, 1) as android.bluetooth.BluetoothSocket
             }
 
-            // Socket fallback chain: secure SPP -> insecure SPP -> reflected channel 1.
-            // Cheap ELM327 clones frequently accept only one of the three.
-            val socketCandidates = listOfNotNull(
-                runCatching { device.createRfcommSocketToServiceRecord(sppUuid) }.getOrNull(),
-                runCatching { device.createInsecureRfcommSocketToServiceRecord(sppUuid) }.getOrNull(),
-                runCatching {
-                    val method = device.javaClass.getMethod("createRfcommSocket", Int::class.javaPrimitiveType)
-                    method.invoke(device, 1) as android.bluetooth.BluetoothSocket
-                }.getOrNull()
-            )
-            if (socketCandidates.isEmpty()) {
-                _connectionState.value = ConnectionState.ERROR
-                _statusMessage.value = "Could not create any RFCOMM socket for $deviceName (Bluetooth permission denied?)"
-                return@withContext Pair(false, null)
-            }
+            val transport = BluetoothElmTransport(socket)
+            transport.setRawLogListener(rawLogListener)
 
-            var transport: BluetoothElmTransport? = null
-            val socketFailures = mutableListOf<String>()
-            for ((idx, socket) in socketCandidates.withIndex()) {
-                val candidate = BluetoothElmTransport(socket)
-                candidate.setRawLogListener(rawLogListener)
-                _statusMessage.value = "Connecting to $deviceName (socket attempt ${idx + 1}/${socketCandidates.size})..."
-                if (candidate.connect()) {
-                    transport = candidate
-                    break
-                }
-                socketFailures.add("attempt ${idx + 1} failed")
-            }
-            if (transport == null) {
+            _statusMessage.value = "Connecting to $deviceName..."
+            val connected = transport.connect()
+
+            if (!connected) {
                 _connectionState.value = ConnectionState.ERROR
-                _statusMessage.value = "Could not establish connection to $deviceName (${socketFailures.joinToString(", ")}). Is the dongle plugged in and ignition ON? Unpair and re-pair if it repeats."
+                _statusMessage.value = "Could not establish connection to $deviceName"
                 return@withContext Pair(false, null)
             }
 
             _connectionState.value = ConnectionState.INITIALIZING
             _statusMessage.value = "Initializing ELM327 adapter (AT commands)..."
 
-            var initResults = transport.initializeAdapter(initSequence)
-            var initCheck = evaluateInit(initResults)
-            if (!initCheck.first) {
-                // Clones can need a beat after ATZ; retry the whole sequence once.
-                _statusMessage.value = "Adapter answered but init incomplete (${initCheck.second}) - retrying once..."
-                kotlinx.coroutines.delay(600)
-                initResults = transport.initializeAdapter(initSequence)
-                initCheck = evaluateInit(initResults)
-            }
+            val initResults = transport.initializeAdapter(initSequence)
             val lastInitStatus = initResults.lastOrNull()?.second?.status
 
             // FIX: Properly validate adapter initialization. Previous check accepted
@@ -192,7 +162,20 @@ class BluetoothManager(private val context: Context) {
             // ("Adapter failed initialization: ATSP6 failed") even when the adapter answered
             // OK to everything it was actually sent. Any ATSP* command is now accepted, and
             // a sequence without one is not treated as a protocol failure.
-            val initSuccessful = initCheck.first
+            val resetOk = initResults.firstOrNull { it.first.equals("ATZ", ignoreCase = true) }
+                ?.second?.status == com.example.model.ResponseStatus.OK
+            val echoOffOk = initResults.firstOrNull { it.first.equals("ATE0", ignoreCase = true) }
+                ?.second?.status == com.example.model.ResponseStatus.OK
+            val protocolResult = initResults.firstOrNull {
+                it.first.trim().uppercase().startsWith("ATSP")
+            }
+            val protocolCommand = protocolResult?.first?.trim()?.uppercase()
+            val protocolOk = protocolCommand == null ||
+                protocolResult?.second?.status == com.example.model.ResponseStatus.OK
+
+            val initSuccessful = (lastInitStatus == com.example.model.ResponseStatus.OK ||
+                    initResults.any { it.second.status == com.example.model.ResponseStatus.OK }) &&
+                    resetOk && echoOffOk && protocolOk
 
             if (initSuccessful) {
                 activeTransport = transport
@@ -201,9 +184,14 @@ class BluetoothManager(private val context: Context) {
                 _statusMessage.value = "Connected to $deviceName"
                 return@withContext Pair(true, transport)
             } else {
+                val failureReasons = buildList {
+                    if (!resetOk) add("ATZ failed")
+                    if (!echoOffOk) add("ATE0 failed")
+                    if (!protocolOk) add((protocolCommand ?: "ATSP") + " failed")
+                }.joinToString(", ")
                 transport.disconnect()
                 _connectionState.value = ConnectionState.ERROR
-                _statusMessage.value = "Adapter failed initialization: ${initCheck.second}. Socket was OK, so this is an adapter-firmware/protocol issue - try another ATSP profile in Settings."
+                _statusMessage.value = "Adapter failed initialization: $failureReasons. Check ELM327 clone compatibility."
                 return@withContext Pair(false, null)
             }
         } catch (e: Exception) {
@@ -211,29 +199,6 @@ class BluetoothManager(private val context: Context) {
             _statusMessage.value = "Connection error: ${e.localizedMessage}"
             return@withContext Pair(false, null)
         }
-    }
-
-    /** Shared init validation so the retry path and the pass path agree on one rule. */
-    private fun evaluateInit(initResults: List<Pair<String, ElmResponse>>): Pair<Boolean, String> {
-        val resetOk = initResults.firstOrNull { it.first.equals("ATZ", ignoreCase = true) }
-            ?.second?.status == com.example.model.ResponseStatus.OK
-        val echoOffOk = initResults.firstOrNull { it.first.equals("ATE0", ignoreCase = true) }
-            ?.second?.status == com.example.model.ResponseStatus.OK
-        val protocolResult = initResults.firstOrNull {
-            it.first.trim().uppercase().startsWith("ATSP")
-        }
-        val protocolCommand = protocolResult?.first?.trim()?.uppercase()
-        val protocolOk = protocolCommand == null ||
-                protocolResult?.second?.status == com.example.model.ResponseStatus.OK
-        val anyOk = initResults.any { it.second.status == com.example.model.ResponseStatus.OK }
-        val ok = anyOk && resetOk && echoOffOk && protocolOk
-        val reasons = buildList {
-            if (!resetOk) add("ATZ failed")
-            if (!echoOffOk) add("ATE0 failed")
-            if (!protocolOk) add((protocolCommand ?: "ATSP") + " failed")
-            if (!anyOk) add("no AT command answered")
-        }.joinToString(", ")
-        return Pair(ok, reasons.ifBlank { "unknown" })
     }
 
     /**

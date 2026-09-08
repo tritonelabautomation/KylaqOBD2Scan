@@ -28,7 +28,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.bluetooth.ConnectionState
 import com.example.data.PollingSpeedMode
-import com.example.ui.components.ConnectionBanner
 import com.example.model.TransactionRecord
 import com.example.data.GpsData
 import com.example.model.CanProtocol
@@ -51,7 +50,6 @@ fun DashboardScreen(
     onOpenConnectDialog: () -> Unit
 ) {
     val connectionState by viewModel.connectionState.collectAsState()
-    val connectionStatusMessage by viewModel.connectionStatusMessage.collectAsState()
     val connectedDeviceName by viewModel.connectedDeviceName.collectAsState()
     val isPolling by viewModel.isPolling.collectAsState()
     val transactionCount by viewModel.transactionCount.collectAsState()
@@ -114,12 +112,6 @@ fun DashboardScreen(
             }
         }
         
-        ConnectionBanner(
-            connectionState = connectionState,
-            statusMessage = connectionStatusMessage,
-            onConnectAction = onOpenConnectDialog
-        )
-
         // Vehicle & Connection Status Banner
         VehicleStatusHeader(
             vehicleName = vehicleName,

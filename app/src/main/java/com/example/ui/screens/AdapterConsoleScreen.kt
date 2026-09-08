@@ -39,9 +39,7 @@ import java.util.Locale
 @Composable
 fun AdapterConsoleScreen(
     viewModel: MainViewModel,
-    onBack: () -> Unit,
-    onOpenDrawer: (() -> Unit)? = null
-
+    onBack: () -> Unit
 ) {
     val context = LocalContext.current
     val rawLogs by viewModel.rawLogs.collectAsState()
@@ -71,8 +69,8 @@ fun AdapterConsoleScreen(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onOpenDrawer ?: onBack, modifier = Modifier.testTag("btn_console_back")) {
-                    Icon(if (onOpenDrawer != null) Icons.Default.Menu else Icons.Default.ArrowBack, contentDescription = "Back")
+                IconButton(onClick = onBack, modifier = Modifier.testTag("btn_console_back")) {
+                    Icon(Icons.Default.ArrowBack, contentDescription = "Back")
                 }
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(

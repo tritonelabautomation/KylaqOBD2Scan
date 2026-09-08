@@ -12,7 +12,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -57,9 +56,7 @@ import com.example.ui.viewmodel.MainViewModel
 @Composable
 fun InsightsScreen(
     viewModel: MainViewModel,
-    onBack: () -> Unit,
-    onOpenDrawer: (() -> Unit)? = null
-
+    onBack: () -> Unit
 ) {
     val snapshot by viewModel.obdScheduler.driveAnalytics.snapshot.collectAsState()
     val trip by viewModel.tripEconomy.collectAsState()
@@ -69,8 +66,8 @@ fun InsightsScreen(
         TopAppBar(
             title = { Text("Drive Insights & Learning Guide") },
             navigationIcon = {
-                IconButton(onClick = onOpenDrawer ?: onBack, modifier = Modifier.testTag("btn_insights_back")) {
-                    Icon(if (onOpenDrawer != null) Icons.Default.Menu else Icons.Default.ArrowBack, contentDescription = "Back")
+                IconButton(onClick = onBack, modifier = Modifier.testTag("btn_insights_back")) {
+                    Icon(Icons.Default.ArrowBack, contentDescription = "Back")
                 }
             },
             colors = TopAppBarDefaults.topAppBarColors(

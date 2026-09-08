@@ -15,7 +15,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -57,9 +56,7 @@ import kotlin.math.abs
 @Composable
 fun AboutScreen(
     viewModel: MainViewModel,
-    onBack: () -> Unit,
-    onOpenDrawer: (() -> Unit)? = null
-
+    onBack: () -> Unit
 ) {
     val trip by viewModel.tripEconomy.collectAsState()
     var midInput by remember {
@@ -70,8 +67,8 @@ fun AboutScreen(
         TopAppBar(
             title = { Text("About & Fuel Guide") },
             navigationIcon = {
-                IconButton(onClick = onOpenDrawer ?: onBack, modifier = Modifier.testTag("btn_about_back")) {
-                    Icon(if (onOpenDrawer != null) Icons.Default.Menu else Icons.Default.ArrowBack, contentDescription = "Back")
+                IconButton(onClick = onBack, modifier = Modifier.testTag("btn_about_back")) {
+                    Icon(Icons.Default.ArrowBack, contentDescription = "Back")
                 }
             },
             colors = TopAppBarDefaults.topAppBarColors(
