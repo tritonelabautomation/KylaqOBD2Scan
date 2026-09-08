@@ -162,6 +162,14 @@ class SettingsRepository(private val context: Context) {
     private val _backupDaily = MutableStateFlow(prefs.getBoolean("backup_daily", false))
     val backupDaily: StateFlow<Boolean> = _backupDaily.asStateFlow()
 
+    private val _accent = MutableStateFlow(prefs.getString("accent_theme", "CYBER") ?: "CYBER")
+    val accent: StateFlow<String> = _accent.asStateFlow()
+
+    fun setAccent(name: String) {
+        prefs.edit().putString("accent_theme", name).apply()
+        _accent.value = name
+    }
+
     fun setBackupDaily(enabled: Boolean) {
         prefs.edit().putBoolean("backup_daily", enabled).apply()
         _backupDaily.value = enabled

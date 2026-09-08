@@ -81,6 +81,7 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector)
     }
     object PidConfig : Screen("pid_config", "Config", Icons.Default.Tune)
     object PidScanner : Screen("pid_scanner", "PID Scanner", Icons.Default.Search)
+    object CodingLab : Screen("coding_lab", "Coding Lab", Icons.Default.Build)
     object Profiles : Screen("profiles", "Profiles", Icons.Default.VerifiedUser)
     object FuelCosts : Screen("fuel_costs", "Fuel & Costs", Icons.Default.LocalGasStation)
     object Maintenance : Screen("maintenance", "Maintenance", Icons.Default.Build)
@@ -214,9 +215,20 @@ fun MainApp(viewModel: MainViewModel) {
 
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val drawerScope = rememberCoroutineScope()
+    val accentTheme by viewModel.settingsRepository.accent.collectAsState()
+    androidx.compose.runtime.LaunchedEffect(accentTheme) {
+        com.example.ui.theme.setAccentColor(
+            when (accentTheme) {
+                "RED" -> androidx.compose.ui.graphics.Color(0xFFFF2D3F)
+                "AMBER" -> androidx.compose.ui.graphics.Color(0xFFFFB300)
+                else -> androidx.compose.ui.graphics.Color(0xFF00E5FF)
+            }
+        )
+    }
     val drawerItems = bottomNavItems + listOf(
         Screen.FuelCosts, Screen.Maintenance, Screen.Expenses, Screen.Reports,
-        Screen.CoachChat, Screen.Trips, Screen.Reminders, Screen.Documents, Screen.DriveBackup, Screen.Settings, Screen.About
+        Screen.CoachChat, Screen.Trips, Screen.Reminders, Screen.Documents, Screen.DriveBackup,
+        Screen.PidScanner, Screen.CodingLab, Screen.Settings, Screen.About
     )
     val mainTabRoutes = bottomNavItems.map { it.route }.toSet()
     var showQuickAdd by remember { mutableStateOf(false) }
@@ -573,6 +585,12 @@ fun MainApp(viewModel: MainViewModel) {
             }
             composable(Screen.PidScanner.route) {
                 com.example.ui.screens.PidScannerScreen(
+                    viewModel = viewModel,
+                    onBack = { navController.popBackStack() }
+                )
+            }
+            composable(Screen.CodingLab.route) {
+                com.example.ui.screens.CodingLabScreen(
                     viewModel = viewModel,
                     onBack = { navController.popBackStack() }
                 )

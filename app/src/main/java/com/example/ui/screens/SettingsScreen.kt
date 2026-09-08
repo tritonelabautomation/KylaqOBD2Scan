@@ -143,6 +143,7 @@ fun SettingsScreen(
             val unitsMetric by viewModel.settingsRepository.unitsMetric.collectAsState()
             val currencySymbol by viewModel.settingsRepository.currencySymbol.collectAsState()
             val appearanceMode by viewModel.settingsRepository.appearanceMode.collectAsState()
+            val accentTheme by viewModel.settingsRepository.accent.collectAsState()
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -166,6 +167,15 @@ fun SettingsScreen(
                                 selected = appearanceMode == m,
                                 onClick = { viewModel.settingsRepository.setAppearanceMode(m) },
                                 label = { Text(m.lowercase(), fontSize = 12.sp) }
+                            )
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf("CYBER" to "cyber", "RED" to "red sport", "AMBER" to "amber").forEach { (a, label) ->
+                            FilterChip(
+                                selected = accentTheme == a,
+                                onClick = { viewModel.settingsRepository.setAccent(a) },
+                                label = { Text(label, fontSize = 12.sp) }
                             )
                         }
                     }

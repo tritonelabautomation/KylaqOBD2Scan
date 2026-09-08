@@ -3,7 +3,16 @@ package com.example.ui.theme
 import androidx.compose.ui.graphics.Color
 
 // Automotive Telemetry Color Palette
-val CyberCyan = Color(0xFF00E5FF)
+/**
+ * App-wide accent. mutableStateOf so the Settings "ACCENT" chips (CYBER / RED SPORT /
+ * AMBER) restyle every screen live - owner request 2026-09-09 ("MID red theme" wish,
+ * implemented in-app; car-side coding is research-only, see docs/reference/vag-coding-research.md).
+ */
+var CyberCyan by androidx.compose.runtime.mutableStateOf(Color(0xFF00E5FF))
+
+fun setAccentColor(c: Color) {
+    CyberCyan = c
+}
 val CyberCyanDark = Color(0xFF00B0FF)
 val NeonEmerald = Color(0xFF00E676)
 val ElectricAmber = Color(0xFFFFB300)

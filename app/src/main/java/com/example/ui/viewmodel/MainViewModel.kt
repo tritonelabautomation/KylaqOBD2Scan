@@ -1044,6 +1044,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** Cross-ride learned AC-on vs AC-off economy from tagged ride summaries. */
     data class AcLearning(val onKmL: Double, val offKmL: Double, val rides: Int)
 
+    data class CodingLabResult(val raw: String, val payloadHex: String?, val ascii: String?, val nrc: String?)
+
+    /** Read-only UDS 0x22 explorer (SafetyValidator blocks every write service). */
+    suspend fun codingLabRead(header: String, did: String): CodingLabResult {
+        val transport = bluetoothManager.currentTransport()
+            ?: return CodingLabResult("NOT CONNECTED - connect the adapter first.", null, null, null)
+        val request = com.example.protocol.CodingLabCodec.readRequest(did)
+        val validation = com.example.protocol.SafetyValidator.validateCommand(request)
+        if (validation is com.example.protocol.ValidationResult.Rejected) {
+            return CodingLabResult("SAFETY: ${validation.reason}", null, null, null)
+        }
+        transport.sendCommand("ATSH $header", 1200L)
+        val resp = transport.sendCommand(request, 2500L)
+        transport.sendCommand("ATSH 7E0", 1200L)
+        val raw = resp.rawText.ifBlank { resp.lines.joinToString(" | ") }
+        val nrc = com.example.protocol.CodingLabCodec.negativeNrc(raw)
+        val payload = if (nrc == null) {
+            com.example.protocol.CodingLabCodec.decodePositive(resp.lines, did)
+                .ifBlank { com.example.protocol.CodingLabCodec.decodePositive(listOf(raw), did).ifBlank { null } }
+        } else null
+        return CodingLabResult(
+            raw = raw.ifBlank { "[no response]" },
+            payloadHex = payload,
+            ascii = payload?.let { com.example.protocol.CodingLabCodec.hexToAscii(it) },
+            nrc = nrc?.let { com.example.protocol.CodingLabCodec.nrcName(it) }
+        )
+    }
+
     /** Fuelio parity: auto-backup hook fired after every refuel save. */
     fun triggerCloudBackupIfEnabled() {
         viewModelScope.launch { cloudBackupManager.performAutoBackupIfNeeded() }
