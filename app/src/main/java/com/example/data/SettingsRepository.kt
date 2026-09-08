@@ -339,6 +339,15 @@ class SettingsRepository(private val context: Context) {
         _remindersEnabled.value = enabled
     }
 
+    private val _businessUsePct = MutableStateFlow(prefs.getInt("business_use_pct", 0))
+    val businessUsePct: StateFlow<Int> = _businessUsePct.asStateFlow()
+
+    /** Tax method "Actual Costs x business-use %": share of running costs claimed for work. */
+    fun setBusinessUsePct(pct: Int) {
+        prefs.edit().putInt("business_use_pct", pct.coerceIn(0, 100)).apply()
+        _businessUsePct.value = pct.coerceIn(0, 100)
+    }
+
     private val _weeklyCheckIn = MutableStateFlow(prefs.getBoolean("weekly_check_in", true))
     val weeklyCheckInEnabled: StateFlow<Boolean> = _weeklyCheckIn.asStateFlow()
 

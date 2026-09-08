@@ -113,6 +113,13 @@ fun ReportsScreen(
                 Metric("COST/KM", fuelStats.costPerKm?.let { String.format("%s%.2f", cur, it) } ?: "--", CyberCyan, Modifier.weight(1f))
                 Metric("AVG", fuelStats.avgKmPerL?.let { String.format("%.1f km/L", it) } ?: "--", NeonEmerald, Modifier.weight(1f))
             }
+            val businessPct by settings.businessUsePct.collectAsState()
+            if (businessPct > 0) {
+                Text(
+                    "Business use $businessPct%% of YTD (actual-costs method): %s%.0f claimable".format(cur, ytdSpend * businessPct / 100.0),
+                    color = TextSecondaryDark, fontSize = 11.sp
+                )
+            }
             Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                 Column(Modifier.padding(12.dp)) {
                     Text("Monthly spend trend", color = TextSecondaryDark, fontSize = 12.sp)

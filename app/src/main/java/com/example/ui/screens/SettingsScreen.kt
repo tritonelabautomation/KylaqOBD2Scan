@@ -178,6 +178,21 @@ fun SettingsScreen(
                             )
                         }
                     }
+                    val businessPct by viewModel.settingsRepository.businessUsePct.collectAsState()
+                    var businessInput by remember { mutableStateOf(if (businessPct > 0) businessPct.toString() else "") }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Business use % (tax)", fontSize = 13.sp, color = Color(0xFF9AA7B4), modifier = Modifier.weight(1f))
+                        OutlinedTextField(
+                            value = businessInput,
+                            onValueChange = { businessInput = it.filter(Char::isDigit).take(3) },
+                            modifier = Modifier.width(84.dp),
+                            singleLine = true,
+                            label = { Text("%", fontSize = 11.sp) }
+                        )
+                        TextButton(onClick = { viewModel.settingsRepository.setBusinessUsePct(businessInput.toIntOrNull() ?: 0) }) {
+                            Text("Set")
+                        }
+                    }
                     Text(
                         "Currency restates money figures across Fuel, Expenses & Reports; appearance restyles dialogs, cards and inputs.",
                         fontSize = 10.sp, color = Color(0xFF9AA7B4)

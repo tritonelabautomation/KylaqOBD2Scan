@@ -387,12 +387,62 @@ fun MainApp(viewModel: MainViewModel) {
                 val vehicleId = backStackEntry.arguments?.getString("vehicleId")
                 val allVehicles by viewModel.recordingManager.tripRepository.allVehiclesFlow.collectAsState(initial = emptyList())
                 val vehicle = allVehicles.find { it.id == vehicleId }
+                val profileNow = remember(vehicleId) { System.currentTimeMillis() }
+                val fuelStats = remember(vehicleId) { viewModel.fuelLogRepository.stats() }
+                val ownershipRows = remember(vehicleId) {
+                    val nextDue = viewModel.maintenanceRepository.dueStates(profileNow)
+                        .filter {
+                            it.status == com.example.data.MaintenanceCatalog.DueStatus.DUE_SOON ||
+                                it.status == com.example.data.MaintenanceCatalog.DueStatus.OVERDUE
+                        }
+                        .minByOrNull { it.kmRemaining ?: Double.MAX_VALUE }
+                    listOf(
+                        "Avg Fuel Economy" to (fuelStats.avgKmPerL?.let { String.format("%.1f km/L (%d logs)", it, fuelStats.entryCount) } ?: "Not enough data"),
+                        "Running Cost" to (fuelStats.costPerKm?.let { String.format("%.2f/km", it) } ?: "--"),
+                        "Odometer" to (viewModel.maintenanceRepository.currentOdometerKm()?.let { String.format("%.0f km", it) } ?: "Not set"),
+                        "Next Maintenance" to (nextDue?.let { "${it.item.label} (${it.headline})" } ?: "Nothing due")
+                    )
+                }
+                val upcomingRows = remember(vehicleId) {
+                    val rows = mutableListOf<String>()
+                    viewModel.maintenanceRepository.dueStates(profileNow)
+                        .filter {
+                            it.status == com.example.data.MaintenanceCatalog.DueStatus.OVERDUE ||
+                                it.status == com.example.data.MaintenanceCatalog.DueStatus.DUE_SOON
+                        }
+                        .take(4)
+                        .forEach { rows.add("${it.item.label} - ${it.headline}") }
+                    viewModel.documentRepository.expiringWithin(30, profileNow)
+                        .forEach { pair ->
+                            val doc = pair.first
+                            val ms = pair.second
+                            rows.add(if (ms < 0) "${doc.type}: ${doc.title} EXPIRED" else "${doc.type}: ${doc.title} expires in ${ms / 86400000L} d")
+                        }
+                    rows
+                }
+                val recentRows = remember(vehicleId) {
+                    val cur = viewModel.settingsRepository.currencySymbol.value
+                    val items = mutableListOf<Pair<Long, String>>()
+                    viewModel.fuelLogRepository.entries().take(3).forEach {
+                        items.add(it.idMs to "${it.dateUtc.take(10)} · Fuel ${String.format("%.1f", it.liters)} L · $cur${String.format("%.0f", it.totalCost)}")
+                    }
+                    viewModel.maintenanceRepository.logs().take(3).forEach {
+                        items.add(it.dateMs to ("${it.dateUtc.take(10)} · Service ${it.itemId}" + (it.cost?.let { c -> " · $cur${String.format("%.0f", c)}" } ?: "")))
+                    }
+                    viewModel.expenseRepository.entries().take(3).forEach {
+                        items.add(it.idMs to "${it.dateUtc.take(10)} · ${it.category} · $cur${String.format("%.0f", it.amount)}")
+                    }
+                    items.sortedByDescending { it.first }.take(6).map { it.second }
+                }
                 com.example.ui.screens.VehicleProfileScreen(
                     vehicle = vehicle,
                     catalogRepository = viewModel.catalogRepository,
                     onBack = { navController.popBackStack() },
                     onNavigateToDtc = { navController.navigate(Screen.DtcScanner.route) },
-                    onNavigateToPidScanner = { navController.navigate(Screen.PidScanner.route) }
+                    onNavigateToPidScanner = { navController.navigate(Screen.PidScanner.route) },
+                    ownership = ownershipRows,
+                    upcoming = upcomingRows,
+                    recent = recentRows
                 )
             }
             

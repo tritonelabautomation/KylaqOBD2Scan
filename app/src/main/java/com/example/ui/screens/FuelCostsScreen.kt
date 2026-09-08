@@ -218,6 +218,7 @@ private fun RefuelDialog(
 ) {
     var liters by remember { mutableStateOf("") }
     var price by remember { mutableStateOf("") }
+    var total by remember { mutableStateOf("") }
     var odo by remember { mutableStateOf("") }
     var station by remember { mutableStateOf("") }
     var grade by remember { mutableStateOf(FuelLogCodec.GRADE_UNKNOWN) }
@@ -254,8 +255,44 @@ private fun RefuelDialog(
         title = { Text("Log a refuel") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextField(value = liters, onValueChange = { liters = it }, label = { Text("Litres") }, singleLine = true)
-                TextField(value = price, onValueChange = { price = it }, label = { Text("Price ₹/L") }, singleLine = true)
+                // VehIQ "Adding Fuel": fill any two of litres / price / total - the third computes.
+                TextField(
+                    value = liters,
+                    onValueChange = {
+                        liters = it
+                        val l = it.toDoubleOrNull()
+                        val p = price.toDoubleOrNull()
+                        if (l != null && p != null && p > 0) total = String.format(java.util.Locale.US, "%.0f", l * p)
+                    },
+                    label = { Text("Litres") }, singleLine = true
+                )
+                TextField(
+                    value = price,
+                    onValueChange = {
+                        price = it
+                        val p = it.toDoubleOrNull()
+                        val l = liters.toDoubleOrNull()
+                        val t = total.toDoubleOrNull()
+                        if (p != null && p > 0) {
+                            if (l != null) total = String.format(java.util.Locale.US, "%.0f", l * p)
+                            else if (t != null) liters = String.format(java.util.Locale.US, "%.2f", t / p)
+                        }
+                    },
+                    label = { Text("Price ₹/L") }, singleLine = true
+                )
+                TextField(
+                    value = total,
+                    onValueChange = {
+                        total = it
+                        val t = it.toDoubleOrNull()
+                        val p = price.toDoubleOrNull()
+                        val l = liters.toDoubleOrNull()
+                        if (t != null && p != null && p > 0 && l == null) {
+                            liters = String.format(java.util.Locale.US, "%.2f", t / p)
+                        }
+                    },
+                    label = { Text("Total ₹ (auto)") }, singleLine = true
+                )
                 TextField(value = odo, onValueChange = { odo = it }, label = { Text("Odometer km (optional)") }, singleLine = true)
                 TextField(value = station, onValueChange = { station = it }, label = { Text("Station (optional)") }, singleLine = true)
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
