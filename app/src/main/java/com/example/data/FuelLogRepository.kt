@@ -181,8 +181,7 @@ object FuelLogCodec {
     }
 
     private fun csv(v: String): String =
-        if (v.contains(',') || v.contains('"') || v.contains('
-')) """ + v.replace(""", """") + """ else v
+        if (v.contains(',') || v.contains('"') || v.contains('\n')) "\"" + v.replace("\"", "\"\"") + "\"" else v
 
     private fun splitCsvLine(line: String): List<String> {
         val out = mutableListOf<String>()
