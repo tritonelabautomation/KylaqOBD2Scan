@@ -57,14 +57,14 @@ object TripSplitter {
     fun settle(members: List<String>, payments: List<Pair<String, Double>>): List<Transfer> {
         val known = members.distinct()
         if (known.size < 2) return emptyList()
-        val total = payments.sumOf { it.second }
+        // Payments by people outside the member list cannot be settled - ignore them.
+        val valid = payments.filter { it.first in known }
+        val total = valid.sumOf { it.second }
         if (total <= 0.0) return emptyList()
         val share = total / known.size
-        val balance = known.associateWith { 0.0 }.toMutableMap()
-        payments.forEach { (who, amount) ->
-            if (who in balance) balance[who] = (balance[who] ?: 0.0) + amount - share
-        }
-        // Members who never paid still owe their share.
+        // Everyone owes an equal share; payers additionally hold what they put in.
+        val balance = known.associateWith { -share }.toMutableMap()
+        valid.forEach { (who, amount) -> balance[who] = (balance[who] ?: 0.0) + amount }
         val creditors = balance.map { it.key to it.value }
             .filter { it.second > 0.01 }
             .sortedByDescending { it.second }
