@@ -42,7 +42,7 @@ class RecordingManager(
     val tripRepository: TripRepository = TripRepository(context)
 ) {
 
-    private val recordingsDir: File = File(context.filesDir, "recordings").apply {
+    val recordingsDir: File = File(context.filesDir, "recordings").apply {
         if (!exists()) mkdirs()
     }
 

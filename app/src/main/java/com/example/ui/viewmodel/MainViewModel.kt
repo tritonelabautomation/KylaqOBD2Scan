@@ -892,6 +892,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             gpsManager.stopTracking()
             persistDriveInsights()
             recordingManager.stopRecording()
+            // OAuth-free Drive backup: if a folder is linked, mirror the recordings there.
+            if (settingsRepository.autoCloudBackup.value) {
+                settingsRepository.driveTreeUri()?.let { tree ->
+                    try {
+                        com.example.backup.DriveBackupClient.sendBackup(
+                            getApplication(), android.net.Uri.parse(tree), recordingManager
+                        )
+                        settingsRepository.setLastBackupTimestamp(System.currentTimeMillis())
+                    } catch (e: Exception) {
+                        // Backup is best-effort; never block the stop path.
+                    }
+                }
+            }
             // Auto-backup to cloud if enabled
             cloudBackupManager.performAutoBackupIfNeeded()
         }
@@ -923,6 +936,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         } catch (e: Exception) {
             // Insight persistence is best-effort; stopping the recording always wins.
         }
+    }
+
+    val fuelLogRepository = AppContainer.fuelLogRepository
+    val maintenanceRepository = AppContainer.maintenanceRepository
+
+    /** Owner logged a refuel grade: stamp the next OBD tank segment with ground truth. */
+    fun tagFuelGrade(grade: String) {
+        obdScheduler.driveAnalytics.fuelQuality.pendingGrade = grade
     }
 
     /** Saved coasting sessions, newest first (Insights screen history rows). */

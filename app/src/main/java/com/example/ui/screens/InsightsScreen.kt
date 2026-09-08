@@ -396,6 +396,14 @@ private fun TanksCard(
                         color = if (tank.score >= 70) NeonEmerald else TextSecondaryDark,
                         fontSize = 12.sp
                     )
+                    tank.gradeTag?.let {
+                        Text(
+                            " $it",
+                            color = if (it == "X95") NeonEmerald else ElectricAmber,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             }
             snapshot.fuelComparisonNote?.let {

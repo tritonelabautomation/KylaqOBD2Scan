@@ -25,6 +25,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.compose.foundation.layout.HorizontalDivider
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.NavigationDrawerItem
+import androidx.compose.material3.rememberDrawerState
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -63,6 +70,9 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector)
     object PidConfig : Screen("pid_config", "Config", Icons.Default.Tune)
     object PidScanner : Screen("pid_scanner", "PID Scanner", Icons.Default.Search)
     object Profiles : Screen("profiles", "Profiles", Icons.Default.VerifiedUser)
+    object FuelCosts : Screen("fuel_costs", "Fuel & Costs", Icons.Default.LocalGasStation)
+    object Maintenance : Screen("maintenance", "Maintenance", Icons.Default.Build)
+    object DriveBackup : Screen("drive_backup", "Drive Backup", Icons.Default.CloudUpload)
     object Settings : Screen("settings", "Settings", Icons.Default.Settings)
     object About : Screen("about", "About & Fuel Guide", Icons.Default.Info)
 }
@@ -136,6 +146,54 @@ fun MainApp(viewModel: MainViewModel) {
         Screen.Console
     )
 
+    val drawerState = rememberDrawerState(DrawerValue.Closed())
+    val drawerScope = rememberCoroutineScope()
+    val drawerItems = bottomNavItems + listOf(
+        Screen.FuelCosts, Screen.Maintenance, Screen.DriveBackup, Screen.Settings, Screen.About
+    )
+
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ModalDrawerSheet(
+                drawerContainerColor = MaterialTheme.colorScheme.surface
+            ) {
+                Spacer(modifier = Modifier.height(20.dp))
+                Text(
+                    "Kylaq TSI Coach",
+                    color = CyberCyan,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)
+                )
+                Text(
+                    "Skoda Kylaq 1.0 TSI - drive intelligence",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp)
+                )
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                drawerItems.forEach { screen ->
+                    NavigationDrawerItem(
+                        icon = { Icon(screen.icon, contentDescription = null) },
+                        label = { Text(screen.title) },
+                        selected = currentRoute == screen.route,
+                        onClick = {
+                            drawerScope.launch { drawerState.close() }
+                            if (currentRoute != screen.route) {
+                                navController.navigate(screen.route) {
+                                    popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                                    launchSingleTop = true
+                                    restoreState = true
+                                }
+                            }
+                        },
+                        modifier = Modifier.padding(horizontal = 10.dp)
+                    )
+                }
+            }
+        }
+    ) {
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         bottomBar = {
@@ -186,6 +244,7 @@ fun MainApp(viewModel: MainViewModel) {
             composable(Screen.Dashboard.route) {
                 DashboardScreen(
                     viewModel = viewModel,
+                    onOpenDrawer = { drawerScope.launch { drawerState.open() } },
                     onNavigateToRawMonitor = {
                         navController.navigate(Screen.RawMonitor.route)
                     },
@@ -388,12 +447,33 @@ fun MainApp(viewModel: MainViewModel) {
                 )
             }
 
+            composable(Screen.FuelCosts.route) {
+                FuelCostsScreen(
+                    viewModel = viewModel,
+                    onBack = { navController.popBackStack() }
+                )
+            }
+            composable(Screen.Maintenance.route) {
+                MaintenanceScreen(
+                    viewModel = viewModel,
+                    onBack = { navController.popBackStack() }
+                )
+            }
+            composable(Screen.DriveBackup.route) {
+                DriveBackupScreen(
+                    viewModel = viewModel,
+                    onBack = { navController.popBackStack() }
+                )
+            }
             composable(Screen.Settings.route) {
                 SettingsScreen(
                     viewModel = viewModel,
                     onBack = { navController.popBackStack() },
                     onOpenAbout = { navController.navigate(Screen.About.route) },
-                    onOpenPidConfig = { navController.navigate(Screen.PidConfig.route) }
+                    onOpenPidConfig = { navController.navigate(Screen.PidConfig.route) },
+                    onOpenFuelCosts = { navController.navigate(Screen.FuelCosts.route) },
+                    onOpenMaintenance = { navController.navigate(Screen.Maintenance.route) },
+                    onOpenDriveBackup = { navController.navigate(Screen.DriveBackup.route) }
                 )
             }
 
@@ -404,6 +484,7 @@ fun MainApp(viewModel: MainViewModel) {
                 )
             }
         }
+    }
     }
 
 

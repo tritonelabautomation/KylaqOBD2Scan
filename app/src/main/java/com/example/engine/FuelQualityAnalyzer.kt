@@ -47,7 +47,8 @@ class FuelQualityAnalyzer(
         var avgStftPct: Double? = null,
         var avgLtftPct: Double? = null,
         var knockRetardEvents: Int = 0,
-        var score: Int = 0
+        var score: Int = 0,
+        var gradeTag: String? = null
     ) {
         val kmPerLiter: Double?
             get() = if (fuelUsedL > 0.05 && distanceM > 200) distanceM / 1000.0 / fuelUsedL else null
@@ -74,6 +75,12 @@ class FuelQualityAnalyzer(
     private var recentMaxTimingTs: Long = 0L
 
     private var lastTs: Long = 0L
+
+    /**
+     * Ground-truth fuel grade for the NEXT tank segment, set when the owner logs a refuel with a
+     * grade (X95 / regular) on the Fuel & Costs screen. Consumed when the segment opens.
+     */
+    var pendingGrade: String? = null
 
     fun tanks(): List<TankSegment> = segments.toList()
 
@@ -180,6 +187,7 @@ class FuelQualityAnalyzer(
         if (current == null) {
             val nextIndex = segments.size + 1
             val tank = TankSegment(index = nextIndex, startMonotonicMs = ts)
+            pendingGrade?.let { tank.gradeTag = it; pendingGrade = null }
             segments.add(tank)
             while (segments.size > maxSegments) segments.removeAt(0)
             current = tank

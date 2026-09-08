@@ -330,4 +330,13 @@ class SettingsRepository(private val context: Context) {
 
     private fun readInsightLog(key: String): List<String> =
         prefs.getString(key, null)?.split('\n')?.filter { it.isNotBlank() } ?: emptyList()
+
+    /** Persisted SAF tree URI of the chosen Google Drive backup folder (null = not linked). */
+    fun driveTreeUri(): String? = prefs.getString("drive_tree_uri", null)
+
+    fun setDriveTreeUri(uri: String?) {
+        prefs.edit().apply {
+            if (uri == null) remove("drive_tree_uri") else putString("drive_tree_uri", uri)
+        }.apply()
+    }
 }

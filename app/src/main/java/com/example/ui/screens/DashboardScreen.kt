@@ -45,6 +45,7 @@ fun DashboardScreen(
     onNavigateToTrips: () -> Unit,
     onNavigateToHud: () -> Unit,
     onNavigateToSettings: () -> Unit = {},
+    onOpenDrawer: () -> Unit = {},
     onNavigateToPidScanner: () -> Unit = {},
     onOpenConnectDialog: () -> Unit
 ) {
@@ -96,6 +97,12 @@ fun DashboardScreen(
                 Text("v${com.example.BuildConfig.VERSION_NAME} • EA211 India Platform", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(
+                    onClick = onOpenDrawer,
+                    modifier = Modifier.testTag("btn_dashboard_menu")
+                ) {
+                    Icon(Icons.Default.Menu, contentDescription = "Menu", tint = CyberCyan)
+                }
                 IconButton(
                     onClick = onNavigateToSettings,
                     modifier = Modifier.testTag("btn_dashboard_settings")

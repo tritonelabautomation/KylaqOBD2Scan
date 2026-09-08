@@ -2,6 +2,8 @@ package com.example.di
 
 import android.content.Context
 import com.example.bluetooth.BluetoothManager
+import com.example.data.FuelLogRepository
+import com.example.data.MaintenanceRepository
 import com.example.data.GpsManager
 import com.example.data.RawLogManager
 import com.example.data.RecordingManager
@@ -32,6 +34,8 @@ object AppContainer {
     lateinit var pidDiscoveryService: com.example.discovery.PidDiscoveryService
     lateinit var cloudBackupManager: com.example.backup.CloudBackupManager
     lateinit var catalogRepository: CatalogRepository
+    lateinit var fuelLogRepository: FuelLogRepository
+    lateinit var maintenanceRepository: MaintenanceRepository
     
     fun init(context: Context) {
         if (isInitialized) return
@@ -55,6 +59,8 @@ object AppContainer {
             obdScheduler = ObdScheduler(recordingManager, settingsRepository)
             pidDiscoveryService = com.example.discovery.PidDiscoveryService(obdScheduler.capabilityManager)
             cloudBackupManager = com.example.backup.CloudBackupManager(appContext, settingsRepository, recordingManager)
+            fuelLogRepository = FuelLogRepository(appContext)
+            maintenanceRepository = MaintenanceRepository(appContext)
             isInitialized = true
         }
     }

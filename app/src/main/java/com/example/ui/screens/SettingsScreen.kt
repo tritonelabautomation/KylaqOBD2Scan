@@ -37,7 +37,10 @@ fun SettingsScreen(
     viewModel: MainViewModel,
     onBack: () -> Unit,
     onOpenAbout: () -> Unit = {},
-    onOpenPidConfig: () -> Unit = {}
+    onOpenPidConfig: () -> Unit = {},
+    onOpenFuelCosts: () -> Unit = {},
+    onOpenMaintenance: () -> Unit = {},
+    onOpenDriveBackup: () -> Unit = {}
 ) {
     val context = LocalContext.current
     // FIX (bug: Google sign-in button did nothing): Credential Manager requires an
@@ -108,6 +111,25 @@ fun SettingsScreen(
                 .verticalScroll(scrollState),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            SimpleNavCard(
+                icon = Icons.Default.LocalGasStation,
+                title = "Fuel & Costs",
+                subtitle = "Fill-up journal, km/L, cost per km and 30-day spend",
+                onClick = onOpenFuelCosts
+            )
+            SimpleNavCard(
+                icon = Icons.Default.Build,
+                title = "Maintenance & Health",
+                subtitle = "Kylaq service plan with due states and service log",
+                onClick = onOpenMaintenance
+            )
+            SimpleNavCard(
+                icon = Icons.Default.CloudUpload,
+                title = "Google Drive Backup",
+                subtitle = "OAuth-free sync of trip backups via the system Drive picker",
+                onClick = onOpenDriveBackup
+            )
+
             // PID management was an orphaned route (registered in MainActivity but never
             // navigated to) - the navigation audit wired it here so every screen is reachable.
             Card(
@@ -630,6 +652,43 @@ private fun CopyableRow(label: String, value: String, onCopy: () -> Unit) {
         }
         TextButton(onClick = onCopy, modifier = Modifier.testTag("btn_copy_${label.replace(" ", "_")}")) {
             Text("Copy", fontSize = 12.sp)
+        }
+    }
+}
+
+@Composable
+private fun SimpleNavCard(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    title,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    subtitle,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }

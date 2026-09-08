@@ -50,7 +50,8 @@ object DriveInsightsStore {
         val avgStftPct: Double?,
         val avgLtftPct: Double?,
         val knockRetardEvents: Int,
-        val score: Int
+        val score: Int,
+        val gradeTag: String? = null
     ) {
         val kmPerLiter: Double?
             get() = if (fuelUsedL > 0.05 && distanceKm > 0.2) distanceKm / fuelUsedL else null
@@ -62,6 +63,7 @@ object DriveInsightsStore {
                 kmPerLiter?.let { append(String.format(" · %.1f km/L", it)) }
                 avgCruiseTimingDeg?.let { append(String.format(" · cruise timing %.1f°", it)) }
                 append(" · knock ").append(knockRetardEvents)
+                gradeTag?.let { append(" · ").append(it) }
             }
 
         /** Dedup key: monotonic segment start identifies one physical tank unambiguously. */
@@ -103,12 +105,12 @@ object DriveInsightsStore {
             tank.minCruiseTimingDeg?.let { trim(it) } ?: "-",
             tank.avgStftPct?.let { trim(it) } ?: "-",
             tank.avgLtftPct?.let { trim(it) } ?: "-",
-            tank.knockRetardEvents, tank.score
+            tank.knockRetardEvents, tank.score, tank.gradeTag ?: "-"
         ).joinToString("|")
 
     fun decodeTank(line: String): TankLogEntry? {
         val parts = line.split('|')
-        if (parts.size != 11 || parts[0] != "t$FORMAT_VERSION") return null
+        if ((parts.size != 11 && parts.size != 12) || parts[0] != "t$FORMAT_VERSION") return null
         return try {
             TankLogEntry(
                 savedAtUtc = parts[1],
@@ -120,7 +122,8 @@ object DriveInsightsStore {
                 avgStftPct = parts[7].toDoubleOrNull(),
                 avgLtftPct = parts[8].toDoubleOrNull(),
                 knockRetardEvents = parts[9].toInt(),
-                score = parts[10].toInt()
+                score = parts[10].toInt(),
+                gradeTag = parts.getOrNull(11)?.takeIf { it != "-" }
             )
         } catch (e: NumberFormatException) {
             null
