@@ -666,7 +666,10 @@ class ObdScheduler(
                 transState.isEstimatedGearConfident
             } else {
                 null
-            }
+            },
+            // AC-state economy split + battery voltage envelope (PID 0142, polled at 2 s).
+            fuelRateLh = effectiveFuelRateLh,
+            voltageV = primaryNumeric("0142")
         )
 
         // 5. Derived drive intelligence: power/torque curves, efficiency sweet spot,

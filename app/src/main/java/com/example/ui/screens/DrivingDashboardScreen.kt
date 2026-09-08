@@ -196,6 +196,46 @@ fun DrivingDashboardScreen(
                         )
                     }
 
+                    // Tap to cycle the climate tag: OFF -> AC -> BLOWER. No J1979 PID exposes
+                    // the AC clutch on this ECU, so the owner tags it and the ride recorder
+                    // splits seconds/km/fuel per state -> per-ride AC-vs-no-AC economy.
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(
+                                when (viewModel.rideAc) {
+                                    "AC" -> NeonEmerald.copy(alpha = 0.15f)
+                                    "BLOWER" -> ElectricAmber.copy(alpha = 0.15f)
+                                    else -> TextSecondaryDark.copy(alpha = 0.15f)
+                                }
+                            )
+                            .clickable {
+                                viewModel.setRideAc(
+                                    when (viewModel.rideAc) {
+                                        "OFF" -> "AC"
+                                        "AC" -> "BLOWER"
+                                        else -> "OFF"
+                                    }
+                                )
+                            }
+                            .padding(horizontal = 6.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            when (viewModel.rideAc) {
+                                "AC" -> "AC ON"
+                                "BLOWER" -> "BLOWER"
+                                else -> "AC OFF"
+                            },
+                            color = when (viewModel.rideAc) {
+                                "AC" -> NeonEmerald
+                                "BLOWER" -> ElectricAmber
+                                else -> TextSecondaryDark
+                            },
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+
                     // Real-time Economy
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("ECON: ", color = TextSecondaryDark, fontSize = 10.sp, fontWeight = FontWeight.Bold)

@@ -11,6 +11,9 @@ class RideBehaviorRecorder {
 
     enum class ModeTag { D, S, M }
 
+    /** Owner-tagged climate state (J1979 exposes no AC-clutch PID on this ECU). */
+    enum class AcTag { OFF, AC, BLOWER }
+
     data class ShiftEvent(
         val gearFrom: Int?,
         val gearTo: Int?,
@@ -33,7 +36,24 @@ class RideBehaviorRecorder {
         val modeTag: String,
         val converterSlipSec: Double = 0.0,
         val converterLockedSec: Double = 0.0,
-        val maxSlipRpm: Double? = null
+        val maxSlipRpm: Double? = null,
+        // Paddle-shift evidence (M-tagged gear changes), battery-voltage stats and
+        // AC-state economy buckets (seconds/km/fuel-litres per tagged climate state).
+        val paddleUp: Int = 0,
+        val paddleDown: Int = 0,
+        val avgPaddleRpm: Double? = null,
+        val voltMinV: Double? = null,
+        val voltAvgV: Double? = null,
+        val voltMaxV: Double? = null,
+        val acOnSec: Double = 0.0,
+        val acOnKm: Double = 0.0,
+        val acOnFuelL: Double = 0.0,
+        val acOffSec: Double = 0.0,
+        val acOffKm: Double = 0.0,
+        val acOffFuelL: Double = 0.0,
+        val blowerSec: Double = 0.0,
+        val blowerKm: Double = 0.0,
+        val blowerFuelL: Double = 0.0
     ) {
         /** Fraction of measured drivetrain time spent with the converter NOT locked. */
         val converterSlipShare: Double
@@ -47,6 +67,21 @@ class RideBehaviorRecorder {
 
         fun stateShare(name: String): Double =
             if (durationSec > 0) (stateSeconds[name] ?: 0.0) / durationSec else 0.0
+
+        /** Driver-commanded gear changes while tagged M (paddle pulls). */
+        val paddleShifts: Int get() = paddleUp + paddleDown
+
+        /** km/L observed per AC state (null until enough distance AND fuel accumulated). */
+        val acOnKmL: Double? get() = if (acOnKm > 0.05 && acOnFuelL > 0.005) acOnKm / acOnFuelL else null
+        val acOffKmL: Double? get() = if (acOffKm > 0.05 && acOffFuelL > 0.005) acOffKm / acOffFuelL else null
+        val blowerKmL: Double? get() = if (blowerKm > 0.05 && blowerFuelL > 0.005) blowerKm / blowerFuelL else null
+
+        /** Extra fuel the AC compressor costs on THIS ride vs the AC-off segments, %. */
+        val acFuelPenaltyPct: Double? get() {
+            val on = acOnKmL
+            val off = acOffKmL
+            return if (on != null && off != null && on > 0.0) (off / on - 1.0) * 100.0 else null
+        }
     }
 
     var modeTag: ModeTag = ModeTag.D
@@ -77,7 +112,30 @@ class RideBehaviorRecorder {
     private var lastSlipRpm: Double? = null
     private var lastLocked: Boolean? = null
 
-    fun reset(tag: ModeTag = modeTag) {
+    var acTag: AcTag = AcTag.OFF
+    // Paddle evidence: M-tagged gear changes counted up/down with their rpm.
+    private var paddleUp = 0
+    private var paddleDown = 0
+    private var paddleRpmSum = 0.0
+    // Battery/alternator voltage stats (PID 0142, J1979 - no current PID exists).
+    private var voltMin: Double? = null
+    private var voltMax: Double? = null
+    private var voltSum = 0.0
+    private var voltCount = 0
+    // AC-state economy buckets (interval-attributed from the PREVIOUS sample).
+    private var acOnSec = 0.0
+    private var acOnKm = 0.0
+    private var acOnFuelL = 0.0
+    private var acOffSec = 0.0
+    private var acOffKm = 0.0
+    private var acOffFuelL = 0.0
+    private var blowerSec = 0.0
+    private var blowerKm = 0.0
+    private var blowerFuelL = 0.0
+    private var lastAcTag: AcTag = AcTag.OFF
+    private var lastFuelLh: Double? = null
+
+    fun reset(tag: ModeTag = modeTag, ac: AcTag = acTag) {
         modeTag = tag
         stateSeconds.clear()
         gearSeconds.fill(0.0)
@@ -101,6 +159,25 @@ class RideBehaviorRecorder {
         maxSlipRpm = null
         lastSlipRpm = null
         lastLocked = null
+        acTag = ac
+        paddleUp = 0
+        paddleDown = 0
+        paddleRpmSum = 0.0
+        voltMin = null
+        voltMax = null
+        voltSum = 0.0
+        voltCount = 0
+        acOnSec = 0.0
+        acOnKm = 0.0
+        acOnFuelL = 0.0
+        acOffSec = 0.0
+        acOffKm = 0.0
+        acOffFuelL = 0.0
+        blowerSec = 0.0
+        blowerKm = 0.0
+        blowerFuelL = 0.0
+        lastAcTag = acTag
+        lastFuelLh = null
     }
 
     fun onSample(
@@ -111,7 +188,9 @@ class RideBehaviorRecorder {
         gear: Int?,
         altitudeM: Double?,
         slipRpm: Double? = null,
-        converterLocked: Boolean? = null
+        converterLocked: Boolean? = null,
+        fuelRateLh: Double? = null,
+        voltageV: Double? = null
     ) {
         val prevTs = lastTsMs
         val dt = if (prevTs != null) ((tsMs - prevTs) / 1000.0).coerceIn(0.0, 5.0) else 0.0
@@ -134,6 +213,32 @@ class RideBehaviorRecorder {
                     }
                 }
             }
+            // AC-state economy: credit the interval to the PREVIOUS sample's tag/speed/fuel.
+            when (lastAcTag) {
+                AcTag.AC -> {
+                    acOnSec += dt
+                    lastSpeedKmh?.let { acOnKm += it * dt / 3600.0 }
+                    lastFuelLh?.let { acOnFuelL += it * dt / 3600.0 }
+                }
+                AcTag.BLOWER -> {
+                    blowerSec += dt
+                    lastSpeedKmh?.let { blowerKm += it * dt / 3600.0 }
+                    lastFuelLh?.let { blowerFuelL += it * dt / 3600.0 }
+                }
+                AcTag.OFF -> {
+                    acOffSec += dt
+                    lastSpeedKmh?.let { acOffKm += it * dt / 3600.0 }
+                    lastFuelLh?.let { acOffFuelL += it * dt / 3600.0 }
+                }
+            }
+        }
+
+        // Battery voltage: every sane sample tightens min/avg/max (curve envelope per ride).
+        voltageV?.takeIf { it in 8.0..18.0 }?.let { v ->
+            voltMin = minOf(voltMin ?: v, v)
+            voltMax = maxOf(voltMax ?: v, v)
+            voltSum += v
+            voltCount++
         }
         lastTsMs = tsMs
         lastStateName = stateName
@@ -145,6 +250,11 @@ class RideBehaviorRecorder {
                 // rpm BEFORE the drop is the shift point the TCU chose (D vs S vs M evidence).
                 shifts.add(ShiftEvent(lastGear, g, lastRpm ?: rpm ?: 0.0, tsMs - lastGearTsMs))
                 pendingShiftRpm = null
+                // In M every gear change is a driver paddle pull - count it as evidence.
+                if (modeTag == ModeTag.M && lastGear != null) {
+                    if (g > lastGear!!) paddleUp++ else paddleDown++
+                    paddleRpmSum += (lastRpm ?: rpm ?: 0.0)
+                }
             }
             if (g != lastGear) lastGearTsMs = tsMs
             lastGear = g
@@ -173,6 +283,8 @@ class RideBehaviorRecorder {
         lastRpmTsMs = tsMs
         lastSlipRpm = slipRpm
         lastLocked = converterLocked
+        lastFuelLh = fuelRateLh
+        lastAcTag = acTag
     }
 
     fun summary(dateUtc: String): RideSummary {
@@ -193,7 +305,22 @@ class RideBehaviorRecorder {
             modeTag = modeTag.name,
             converterSlipSec = converterSlipSec,
             converterLockedSec = converterLockedSec,
-            maxSlipRpm = maxSlipRpm
+            maxSlipRpm = maxSlipRpm,
+            paddleUp = paddleUp,
+            paddleDown = paddleDown,
+            avgPaddleRpm = (paddleUp + paddleDown).takeIf { it > 0 }?.let { paddleRpmSum / it },
+            voltMinV = voltMin,
+            voltAvgV = voltCount.takeIf { it > 0 }?.let { voltSum / it },
+            voltMaxV = voltMax,
+            acOnSec = acOnSec,
+            acOnKm = acOnKm,
+            acOnFuelL = acOnFuelL,
+            acOffSec = acOffSec,
+            acOffKm = acOffKm,
+            acOffFuelL = acOffFuelL,
+            blowerSec = blowerSec,
+            blowerKm = blowerKm,
+            blowerFuelL = blowerFuelL
         )
     }
 }
@@ -201,11 +328,21 @@ class RideBehaviorRecorder {
 /** Durable one-line encoding of a ride X-ray (settings "ride_log"). */
 object RideCodec {
 
+    /** "sec,km,fuelL" sub-field parser for the AC-state buckets. */
+    private fun parts(s: String?): List<Double> {
+        val v = s?.split(',')?.mapNotNull { it.toDoubleOrNull() } ?: emptyList()
+        return listOf(v.getOrElse(0) { 0.0 }, v.getOrElse(1) { 0.0 }, v.getOrElse(2) { 0.0 })
+    }
+
+    private fun bucketSec(s: String?): Double = parts(s)[0]
+    private fun bucketKm(s: String?): Double = parts(s)[1]
+    private fun bucketFuel(s: String?): Double = parts(s)[2]
+
     fun encode(s: RideBehaviorRecorder.RideSummary): String {
         val states = s.stateSeconds.entries.joinToString(",") { "${it.key}=%.0f".format(it.value) }
         val gears = s.gearSeconds.drop(1).joinToString(",") { "%.0f".format(it) }
         return listOf(
-            "r2",
+            "r3",
             com.example.data.ExpenseCodec.esc(s.dateUtc),
             "%.0f".format(s.durationSec),
             "%.2f".format(s.distanceKm),
@@ -220,16 +357,27 @@ object RideCodec {
             s.modeTag,
             "%.0f".format(s.converterSlipSec),
             "%.0f".format(s.converterLockedSec),
-            s.maxSlipRpm?.let { "%.0f".format(it) } ?: "-"
+            s.maxSlipRpm?.let { "%.0f".format(it) } ?: "-",
+            s.paddleUp.toString(),
+            s.paddleDown.toString(),
+            s.avgPaddleRpm?.let { "%.0f".format(it) } ?: "-",
+            s.voltMinV?.let { "%.1f".format(it) } ?: "-",
+            s.voltAvgV?.let { "%.2f".format(it) } ?: "-",
+            s.voltMaxV?.let { "%.1f".format(it) } ?: "-",
+            "%.0f,%.2f,%.3f".format(s.acOnSec, s.acOnKm, s.acOnFuelL),
+            "%.0f,%.2f,%.3f".format(s.acOffSec, s.acOffKm, s.acOffFuelL),
+            "%.0f,%.2f,%.3f".format(s.blowerSec, s.blowerKm, s.blowerFuelL)
         ).joinToString("|")
     }
 
     fun decode(line: String): RideBehaviorRecorder.RideSummary? {
         val p = line.split('|')
-        // "r2" (16 fields) carries converter health; legacy "r1" (13 fields) still decodes.
+        // "r3" (25 fields) adds paddle/voltage/AC buckets; "r2" (16) converter health;
+        // legacy "r1" (13) still decodes so every stored ride_log survives upgrades.
+        val isR3 = p.size == 25 && p[0] == "r3"
         val isR2 = p.size == 16 && p[0] == "r2"
         val isR1 = p.size == 13 && p[0] == "r1"
-        if (!isR2 && !isR1) return null
+        if (!isR3 && !isR2 && !isR1) return null
         return try {
             val states = com.example.data.ExpenseCodec.unesc(p[4])
                 .split(',')
@@ -252,9 +400,24 @@ object RideCodec {
                 maxUpshiftRpm = p[10].toDoubleOrNull(),
                 avgShiftDurationMs = p[11].toLongOrNull(),
                 modeTag = p[12],
-                converterSlipSec = if (isR2) p[13].toDoubleOrNull() ?: 0.0 else 0.0,
-                converterLockedSec = if (isR2) p[14].toDoubleOrNull() ?: 0.0 else 0.0,
-                maxSlipRpm = if (isR2) p[15].toDoubleOrNull() else null
+                converterSlipSec = if (!isR1) p[13].toDoubleOrNull() ?: 0.0 else 0.0,
+                converterLockedSec = if (!isR1) p[14].toDoubleOrNull() ?: 0.0 else 0.0,
+                maxSlipRpm = if (!isR1) p[15].toDoubleOrNull() else null,
+                paddleUp = if (isR3) p[16].toIntOrNull() ?: 0 else 0,
+                paddleDown = if (isR3) p[17].toIntOrNull() ?: 0 else 0,
+                avgPaddleRpm = if (isR3) p[18].toDoubleOrNull() else null,
+                voltMinV = if (isR3) p[19].toDoubleOrNull() else null,
+                voltAvgV = if (isR3) p[20].toDoubleOrNull() else null,
+                voltMaxV = if (isR3) p[21].toDoubleOrNull() else null,
+                acOnSec = bucketSec(if (isR3) p[22] else null),
+                acOnKm = bucketKm(if (isR3) p[22] else null),
+                acOnFuelL = bucketFuel(if (isR3) p[22] else null),
+                acOffSec = bucketSec(if (isR3) p[23] else null),
+                acOffKm = bucketKm(if (isR3) p[23] else null),
+                acOffFuelL = bucketFuel(if (isR3) p[23] else null),
+                blowerSec = bucketSec(if (isR3) p[24] else null),
+                blowerKm = bucketKm(if (isR3) p[24] else null),
+                blowerFuelL = bucketFuel(if (isR3) p[24] else null)
             )
         } catch (e: Exception) {
             null

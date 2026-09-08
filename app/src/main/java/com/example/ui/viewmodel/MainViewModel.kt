@@ -1024,6 +1024,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     val rideMode: String get() = obdScheduler.rideRecorder.modeTag.name
 
+    /**
+     * Owner tags the climate state (J1979 exposes no AC-clutch/compressor PID on this ECU).
+     * Per-ride economy is then split into AC-on / blower-only / AC-off buckets.
+     */
+    fun setRideAc(tag: String) {
+        obdScheduler.rideRecorder.acTag =
+            com.example.analysis.RideBehaviorRecorder.AcTag.values()
+                .firstOrNull { it.name == tag } ?: com.example.analysis.RideBehaviorRecorder.AcTag.OFF
+    }
+
+    val rideAc: String get() = obdScheduler.rideRecorder.acTag.name
+
     /** Saved closed tank segments, newest first (X95-vs-regular history). */
     fun tankHistory(): List<DriveInsightsStore.TankLogEntry> =
         settingsRepository.readTankLog().mapNotNull { DriveInsightsStore.decodeTank(it) }.take(10)

@@ -540,6 +540,40 @@ private fun RideXrayCard(rides: List<com.example.analysis.RideBehaviorRecorder.R
                             )
                         }
                     }
+                    if (r.paddleShifts > 0) {
+                        Text(
+                            "paddle shifts (M): ${r.paddleUp} up / ${r.paddleDown} down" +
+                                (r.avgPaddleRpm?.let { " @ ${String.format("%.0f", it)} rpm" } ?: ""),
+                            color = ElectricAmber, fontSize = 10.sp
+                        )
+                    }
+                    r.voltAvgV?.let { v ->
+                        val weak = v < 13.2 || (r.voltMinV ?: v) < 11.5
+                        Text(
+                            "battery: ${String.format("%.1f", r.voltMinV ?: v)}-${String.format("%.1f", r.voltMaxV ?: v)} V " +
+                                "(avg ${String.format("%.2f", v)} V)" +
+                                if (weak) " - low: charging system / heavy electrical load (AC, blower)" else "",
+                            color = if (weak) WarningRed else TextSecondaryDark,
+                            fontSize = 10.sp
+                        )
+                    }
+                    val acParts = listOfNotNull(
+                        r.acOffKmL?.let { "AC off ${String.format("%.1f", it)} km/L (${String.format("%.1f", r.acOffKm)} km)" },
+                        r.acOnKmL?.let { "AC on ${String.format("%.1f", it)} km/L (${String.format("%.1f", r.acOnKm)} km)" },
+                        r.blowerKmL?.let { "blower ${String.format("%.1f", it)} km/L" }
+                    )
+                    if (acParts.size >= 2) {
+                        Text(
+                            "economy by AC state: ${acParts.joinToString(" · ")}",
+                            color = TextSecondaryDark, fontSize = 10.sp
+                        )
+                        r.acFuelPenaltyPct?.let { pen ->
+                            Text(
+                                "AC compressor cost this ride: +${String.format("%.0f", pen)}% fuel vs AC-off segments",
+                                color = ElectricAmber, fontSize = 10.sp
+                            )
+                        }
+                    }
                 }
             }
             // Vehicle trend across the last rides (list is newest-first).
@@ -565,6 +599,21 @@ private fun RideXrayCard(rides: List<com.example.analysis.RideBehaviorRecorder.R
                     color = if (last > first + 5.0) ElectricAmber else TextSecondaryDark,
                     fontSize = 10.sp
                 )
+            }
+            val acRides = rides.filter { it.acOnKm > 0.05 && it.acOffKm > 0.05 }
+            if (acRides.isNotEmpty()) {
+                val onKm = acRides.sumOf { it.acOnKm }
+                val onFuel = acRides.sumOf { it.acOnFuelL }
+                val offKm = acRides.sumOf { it.acOffKm }
+                val offFuel = acRides.sumOf { it.acOffFuelL }
+                if (onFuel > 0.005 && offFuel > 0.005) {
+                    val pen = ((onFuel / onKm) / (offFuel / offKm) - 1.0) * 100.0
+                    Text(
+                        "AC vs no-AC (${acRides.size} tagged ride(s)): ${String.format("%.1f", onKm / onFuel)} vs " +
+                            "${String.format("%.1f", offKm / offFuel)} km/L - your AC costs +${String.format("%.0f", pen)}% fuel",
+                        color = ElectricAmber, fontSize = 10.sp
+                    )
+                }
             }
             val dUp = rides.filter { it.modeTag == "D" }.mapNotNull { it.avgUpshiftRpm }
             val sUp = rides.filter { it.modeTag != "D" }.mapNotNull { it.avgUpshiftRpm }

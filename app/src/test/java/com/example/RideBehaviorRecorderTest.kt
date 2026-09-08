@@ -81,12 +81,12 @@ class RideBehaviorRecorderTest {
     }
 
     @Test
-    fun `codec r2 round trips converter health and legacy r1 still decodes`() {
+    fun `codec r3 round trips converter health and legacy r1 still decodes`() {
         val rec = RideBehaviorRecorder()
         rec.onSample(0L, "CRUISING", 2200.0, 100.0, 5, null, slipRpm = 900.0, converterLocked = false)
         rec.onSample(1000L, "CRUISING", 2200.0, 100.0, 5, null, slipRpm = -30.0, converterLocked = true)
         val encoded = RideCodec.encode(rec.summary("2026-09-08T10:00:00Z"))
-        assertTrue(encoded.startsWith("r2|"))
+        assertTrue(encoded.startsWith("r3|"))
         val decoded = RideCodec.decode(encoded)!!
         assertEquals(1.0, decoded.converterSlipSec, 0.01)
         assertEquals(0.0, decoded.converterLockedSec, 0.01)
@@ -97,5 +97,81 @@ class RideBehaviorRecorderTest {
         assertEquals(600.0, l.durationSec, 0.01)
         assertEquals(0.0, l.converterSlipSec, 0.01)
         assertNull(l.maxSlipRpm)
+    }
+
+    @Test
+    fun `paddle shifts counted in M mode with voltage envelope`() {
+        val rec = RideBehaviorRecorder()
+        rec.modeTag = RideBehaviorRecorder.ModeTag.M
+        var t = 0L
+        fun feed(rpm: Double, speed: Double, gear: Int?, volt: Double?) {
+            rec.onSample(t, "CRUISING", rpm, speed, gear, null, voltageV = volt)
+            t += 5000L
+        }
+        feed(2000.0, 60.0, 4, 14.1)
+        feed(2000.0, 60.0, 4, 13.9)
+        feed(2000.0, 60.0, 4, 25.0) // out-of-range garbage must be ignored
+        feed(2000.0, 60.0, 4, 12.2)
+        feed(3200.0, 80.0, 4, null)  // pre-pull: rpm BEFORE the upshift is the evidence
+        feed(2600.0, 85.0, 5, null)  // 4->5 in M = paddle UP @ 3200 rpm
+        feed(2500.0, 70.0, 5, null)
+        feed(2000.0, 60.0, 4, null)  // 5->4 in M = paddle DOWN @ 2500 rpm
+        val s = rec.summary("x")
+        assertEquals(1, s.paddleUp)
+        assertEquals(1, s.paddleDown)
+        assertEquals(2, s.paddleShifts)
+        assertEquals(2850.0, s.avgPaddleRpm!!, 0.01)
+        assertEquals(12.2, s.voltMinV!!, 0.01)
+        assertEquals(14.1, s.voltMaxV!!, 0.01)
+        assertEquals(13.4, s.voltAvgV!!, 0.01)
+    }
+
+    @Test
+    fun `AC-state buckets split km and fuel per tagged climate state`() {
+        val rec = RideBehaviorRecorder()
+        var t = 0L
+        fun feed(rpm: Double, speed: Double, fuel: Double) {
+            rec.onSample(t, "CRUISING", rpm, speed, 4, null, fuelRateLh = fuel)
+            t += 5000L
+        }
+        // 13 samples tagged OFF = 12 five-second intervals at 60 km/h, 4.0 L/h
+        // -> ~1.0 km, ~0.0667 L => 15.0 km/L (plus one boundary interval after the switch).
+        repeat(13) { feed(2000.0, 60.0, 4.0) }
+        rec.acTag = RideBehaviorRecorder.AcTag.AC
+        // 13 samples tagged AC at 50 km/h, 5.0 L/h => ~10-11 km/L (compressor load).
+        repeat(13) { feed(2200.0, 50.0, 5.0) }
+        val s = rec.summary("x")
+        assertTrue("off km ~1.08, was ${s.acOffKm}", s.acOffKm in 1.0..1.15)
+        assertEquals(15.0, s.acOffKmL!!, 0.3)
+        assertTrue("on km > 0.5, was ${s.acOnKm}", s.acOnKm > 0.5)
+        assertEquals(10.5, s.acOnKmL!!, 1.0)
+        // Same ride, both states observed -> penalty computed (~+40% fuel per km with AC).
+        val pen = s.acFuelPenaltyPct!!
+        assertTrue("penalty ~40%, was $pen", pen in 25.0..60.0)
+        assertEquals(0.0, s.blowerKm, 0.001)
+    }
+
+    @Test
+    fun `codec r3 round trips AC buckets and legacy r2 still decodes`() {
+        val rec = RideBehaviorRecorder()
+        rec.acTag = RideBehaviorRecorder.AcTag.AC
+        rec.onSample(0L, "CRUISING", 2000.0, 72.0, 4, null, fuelRateLh = 6.0, voltageV = 13.8)
+        rec.onSample(5000L, "CRUISING", 2000.0, 72.0, 4, null, fuelRateLh = 6.0, voltageV = 14.0)
+        val encoded = RideCodec.encode(rec.summary("2026-09-08T12:00:00Z"))
+        assertTrue(encoded.startsWith("r3|"))
+        val d = RideCodec.decode(encoded)!!
+        assertEquals(5.0, d.acOnSec, 0.01)
+        assertEquals(0.1, d.acOnKm, 0.002)   // 72 km/h * 5 s
+        assertEquals(13.9, d.voltAvgV!!, 0.01)
+        assertEquals(13.8, d.voltMinV!!, 0.01)
+        assertEquals(14.0, d.voltMaxV!!, 0.01)
+        // Legacy 16-field r2 lines (already stored) decode with batch-11c defaults.
+        val legacyR2 = "r2|2026-02-02T00:00:00Z|300|8.00|CRUISING=300|0,300,0,0,0,0|0|0|2|2400|2600|120|D|30|270|800"
+        val r2 = RideCodec.decode(legacyR2)!!
+        assertEquals(30.0, r2.converterSlipSec, 0.01)
+        assertEquals(800.0, r2.maxSlipRpm!!, 0.01)
+        assertEquals(0, r2.paddleShifts)
+        assertNull(r2.voltAvgV)
+        assertEquals(0.0, r2.acOnKm, 0.001)
     }
 }
