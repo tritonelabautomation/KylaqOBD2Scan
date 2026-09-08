@@ -288,13 +288,6 @@ fun SettingsScreen(
                 subtitle = "Insurance, RC, licence, PUC with expiry alerts",
                 onClick = onOpenDocuments
             )
-            SimpleNavCard(
-                icon = Icons.Default.CloudUpload,
-                title = "Google Drive Backup",
-                subtitle = "OAuth-free sync of trip backups via the system Drive picker",
-                onClick = onOpenDriveBackup
-            )
-
             // PID management was an orphaned route (registered in MainActivity but never
             // navigated to) - the navigation audit wired it here so every screen is reachable.
             Card(
@@ -384,12 +377,12 @@ fun SettingsScreen(
                         Spacer(modifier = Modifier.width(10.dp))
                         Column {
                             Text(
-                                text = "Google Drive / Cloud Backup",
+                                text = "Google Drive Backup & Sign-In",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = "Sync and preserve OBD trips across reinstalls & devices",
+                                text = "One tap: pick your Google account, trips back up to ITS Drive",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 11.sp
@@ -587,7 +580,68 @@ fun SettingsScreen(
                 }
             }
 
-            // Section 2: Vehicle & Hardware Profile
+                        // Android Auto discovery status + the one real restriction (Google policy).
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Default.DirectionsCar,
+                            contentDescription = null,
+                            tint = CyberCyan,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "Android Auto dashboard",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Live OBD dash on your head unit - discovery status below",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+                    val context = LocalContext.current
+                    val discovered = remember {
+                        runCatching {
+                            val intent = android.content.Intent("androidx.car.app.CarAppService")
+                                .setPackage(context.packageName)
+                            @Suppress("DEPRECATION")
+                            context.packageManager.queryIntentServices(intent, 0).isNotEmpty()
+                        }.getOrDefault(false)
+                    }
+                    Text(
+                        text = if (discovered) {
+                            "CarAppService declared & discoverable on this device. If your head unit still " +
+                                "does not list the app, the cause is Google's distribution rule, not this app:"
+                        } else {
+                            "CarAppService NOT discoverable - reinstall the latest APK."
+                        },
+                        color = if (discovered) NeonEmerald else WarningRed,
+                        fontSize = 11.sp
+                    )
+                    Text(
+                        text = "Google: car-app-library apps appear on REAL head units only when installed " +
+                            "from a trusted source (Play Store / Internal App Sharing / closed testing track). " +
+                            "Android Auto's 'unknown sources' toggle applies to media & messaging apps only - " +
+                            "it does NOT unlock template car apps. Sideloaded APKs run in the Desktop Head Unit " +
+                            "emulator on a PC. Full steps: docs/reference/android-auto-install-guide.md " +
+                            "(in-app: About & Fuel Guide links the same guide).",
+                        color = TextSecondaryDark,
+                        fontSize = 10.sp
+                    )
+                }
+            }
+
+// Section 2: Vehicle & Hardware Profile
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),

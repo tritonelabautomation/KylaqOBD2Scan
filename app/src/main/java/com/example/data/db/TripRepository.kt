@@ -74,6 +74,21 @@ class TripRepository(context: Context) {
         tripDao.getTripById(tripId)
     }
 
+    suspend fun recentTrips(limit: Int): List<TripEntity> = withContext(Dispatchers.IO) {
+        tripDao.getAllTrips().take(limit)
+    }
+
+    suspend fun trendSamples(tripIds: List<String>): List<TelemetrySampleEntity> = withContext(Dispatchers.IO) {
+        if (tripIds.isEmpty()) {
+            emptyList()
+        } else {
+            sampleDao.getSamplesForTrips(
+                tripIds,
+                listOf("010C", "010D", "0104", "0162", "015E", "019D", "0C", "0D")
+            )
+        }
+    }
+
     suspend fun getSamplesForTrip(tripId: String): List<TelemetrySampleEntity> = withContext(Dispatchers.IO) {
         sampleDao.getSamplesForTrip(tripId)
     }

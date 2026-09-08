@@ -1011,6 +1011,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun coastHistory(): List<DriveInsightsStore.CoastLogEntry> =
         settingsRepository.readCoastLog().mapNotNull { DriveInsightsStore.decodeCoast(it) }.take(8)
 
+    /**
+     * Cross-trip trend points (avg rpm/speed/load/torque + idle model-vs-actual) for the
+     * Trips tab charts. Computed from stored Room telemetry samples of the newest trips.
+     */
+    suspend fun computeTripTrends(limit: Int = 8): List<com.example.analysis.TripTrendPoint> {
+        val repo = recordingManager.tripRepository
+        val trips = repo.recentTrips(limit)
+        if (trips.isEmpty()) return emptyList()
+        val rows = repo.trendSamples(trips.map { it.id })
+        return com.example.analysis.TripTrendAnalyzer.analyze(
+            rows.map {
+                val pid = it.pid.uppercase()
+                com.example.analysis.TripTrendAnalyzer.Sample(
+                    tripId = it.tripId,
+                    pid = if (pid.length == 2) "01$pid" else pid,
+                    ts = it.timestamp,
+                    value = it.numericValue
+                )
+            }
+        ).sortedByDescending { it.startTs }
+    }
+
     /** Saved ride X-rays, newest first (behaviour + gears + elevation per ride). */
     fun rideHistory(): List<com.example.analysis.RideBehaviorRecorder.RideSummary> =
         settingsRepository.readRideLog().mapNotNull { com.example.analysis.RideCodec.decode(it) }.take(8)

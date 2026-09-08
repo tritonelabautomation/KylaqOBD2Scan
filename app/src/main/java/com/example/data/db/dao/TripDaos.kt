@@ -45,6 +45,13 @@ interface TelemetrySampleDao {
     @Query("SELECT * FROM telemetry_samples WHERE tripId = :tripId AND pid = :pid ORDER BY sequence ASC")
     suspend fun getSamplesForPid(tripId: String, pid: String): List<TelemetrySampleEntity>
 
+    /** Trend projection: only the PIDs the cross-trip trend charts need, for several trips. */
+    @Query(
+        "SELECT * FROM telemetry_samples WHERE tripId IN (:tripIds) AND pid IN (:pids) " +
+            "ORDER BY tripId ASC, sequence ASC"
+    )
+    suspend fun getSamplesForTrips(tripIds: List<String>, pids: List<String>): List<TelemetrySampleEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertSamples(samples: List<TelemetrySampleEntity>)
 
