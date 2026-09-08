@@ -48,6 +48,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     
     val rawLogManager = AppContainer.rawLogManager
     val gpsManager = AppContainer.gpsManager
+
+    init {
+        // Elevation logging for the ride X-ray: GPS altitude when available, silent otherwise.
+        obdScheduler.altitudeSource = {
+            val g = gpsManager.gpsData.value
+            if (g.isAvailable) g.altitudeMeters else null
+        }
+    }
     val gpsData = gpsManager.gpsData
     val settingsRepository = AppContainer.settingsRepository
     val recordingManager = AppContainer.recordingManager
@@ -726,6 +734,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun startRecording() {
+        // Fresh ride X-ray for this recording; the owner's mode tag (D/S/M) carries over.
+        obdScheduler.rideRecorder.reset()
         val meta = recordingManager.startRecording(
             vehicleName = vehicleName.value,
             vehicleId = _activeVehicleId.value,  // FIX: Pass vehicleId for proper association
@@ -925,6 +935,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (snap.coast.totalSeconds >= 30.0 || snap.coast.totalDistanceM >= 200.0) {
                 settingsRepository.appendCoastLog(DriveInsightsStore.encodeCoast(nowUtc, snap.coast))
             }
+            val ride = obdScheduler.rideRecorder.summary(nowUtc)
+            if (ride.durationSec >= 60.0 && ride.distanceKm >= 0.5) {
+                settingsRepository.appendRideLog(com.example.analysis.RideCodec.encode(ride))
+            }
             val persistedStarts = settingsRepository.readTankLog()
                 .mapNotNull { DriveInsightsStore.decodeTank(it)?.dedupKey }
                 .toSet()
@@ -995,6 +1009,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** Saved coasting sessions, newest first (Insights screen history rows). */
     fun coastHistory(): List<DriveInsightsStore.CoastLogEntry> =
         settingsRepository.readCoastLog().mapNotNull { DriveInsightsStore.decodeCoast(it) }.take(8)
+
+    /** Saved ride X-rays, newest first (behaviour + gears + elevation per ride). */
+    fun rideHistory(): List<com.example.analysis.RideBehaviorRecorder.RideSummary> =
+        settingsRepository.readRideLog().mapNotNull { com.example.analysis.RideCodec.decode(it) }.take(8)
+
+    /** Owner tags the selector position so gear logs carry D/S/M evidence (J1979 has no range PID). */
+    fun setRideMode(tag: String) {
+        obdScheduler.rideRecorder.modeTag =
+            com.example.analysis.RideBehaviorRecorder.ModeTag.values()
+                .firstOrNull { it.name == tag } ?: com.example.analysis.RideBehaviorRecorder.ModeTag.D
+    }
+
+    val rideMode: String get() = obdScheduler.rideRecorder.modeTag.name
 
     /** Saved closed tank segments, newest first (X95-vs-regular history). */
     fun tankHistory(): List<DriveInsightsStore.TankLogEntry> =

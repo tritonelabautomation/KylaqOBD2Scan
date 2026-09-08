@@ -318,6 +318,10 @@ class SettingsRepository(private val context: Context) {
 
     fun appendTankLog(encoded: String) = appendInsightLog("drive_tank_log", encoded, 60)
 
+    fun appendRideLog(encoded: String) = appendInsightLog("ride_log", encoded, 80)
+
+    fun readRideLog(): List<String> = readInsightLog("ride_log")
+
     fun readTankLog(): List<String> = readInsightLog("drive_tank_log")
 
     private fun appendInsightLog(key: String, encoded: String, maxEntries: Int) {

@@ -504,11 +504,25 @@ fun SettingsScreen(
                     } else {
                         // Sign-in CTA
                         Text(
-                            text = "Sign in to securely backup your diagnostic trip logs to Google Drive. Your records will be preserved even if the app is reinstalled or transferred to a new phone.",
+                            text = "Back up your trip logs to Google Drive. Two paths: the one-tap folder backup " +
+                                "below works TODAY with your Google account (system picker = account chooser, zero " +
+                                "Console setup). Credential Manager sign-in is optional legacy auto-sync and needs a " +
+                                "Cloud Console OAuth key - Google's requirement, not the app's.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             lineHeight = 16.sp
                         )
+
+                        Button(
+                            onClick = onOpenDriveBackup,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = NeonEmerald)
+                        ) {
+                            Icon(Icons.Default.CloudUpload, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Back up on Google Drive now (no setup)", fontWeight = FontWeight.Bold, color = Color.Black)
+                        }
 
                         GoogleSignInSetup(
                             cloudManager = cloudManager,
@@ -551,17 +565,18 @@ fun SettingsScreen(
                             Icon(Icons.Default.AccountCircle, contentDescription = null)
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                if (signInConfigured) "Sign in with Google"
-                                else "Sign in with Google (setup required)",
+                                if (signInConfigured) "Sign in with Google (legacy auto-sync)"
+                                else "Legacy sign-in (needs Console key) - use the green button above",
                                 fontWeight = FontWeight.Bold
                             )
                         }
 
                         if (!signInConfigured) {
                             Text(
-                                text = "Sign-in is disabled until an OAuth Web Client ID is configured above. " +
-                                    "This is a one-time setup in Google Cloud Console — the app cannot sign you in " +
-                                    "with the placeholder value that ships in the source.",
+                                text = "Optional: legacy Credential Manager sign-in stays disabled until an OAuth Web " +
+                                    "Client ID from Google Cloud Console is pasted above (Google requires a registered " +
+                                    "client for that API). Your Drive backup does NOT need it - the green button opens " +
+                                    "the system picker where you choose your Google account and folder.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = ElectricAmber,
                                 fontSize = 11.sp,

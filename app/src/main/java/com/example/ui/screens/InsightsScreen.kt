@@ -86,6 +86,7 @@ fun InsightsScreen(
             item { CoastCard(snapshot, viewModel.coastHistory()) }
             item { TurboCard(snapshot) }
             item { TanksCard(snapshot, viewModel.tankHistory()) }
+            item { RideXrayCard(viewModel.rideHistory()) }
             item { CoachCard(tips) }
             item { Spacer(modifier = Modifier.height(8.dp)) }
         }
@@ -469,3 +470,69 @@ internal fun modelSummary(): String =
     "Kylaq 1.0 TSI (EA211 evo2): ${PowertrainModel.PEAK_POWER_KW.toInt()} kW @5000-5500 rpm, " +
         "${PowertrainModel.PEAK_TORQUE_NM.toInt()} Nm @1750-4000 rpm, kerb " +
         "${PowertrainModel.KERB_KG.toInt()} kg, tank ${PowertrainModel.TANK_CAPACITY_L.toInt()} L."
+
+/**
+ * Ride X-ray: per-recording behaviour breakdown the owner asked for - accelerator/brake/nothing/
+ * neutral-coast seconds as shares, gear usage (D/S/M tagged), shift points (sport-map detection)
+ * and elevation climbed/descended from GPS altitude. D-vs-S comparison across tagged rides.
+ */
+@Composable
+private fun RideXrayCard(rides: List<com.example.analysis.RideBehaviorRecorder.RideSummary>) {
+    SectionCard(
+        title = "Ride X-ray (per-ride behaviour)",
+        subtitle = "Pedal / brake / coast / neutral seconds, gear seconds, shift map, elevation - saved per recording"
+    ) {
+        if (rides.isEmpty()) {
+            Text(
+                "Record a drive of 1+ minute and your first X-ray appears here.",
+                color = TextSecondaryDark, fontSize = 11.sp
+            )
+        } else {
+            rides.take(4).forEach { r ->
+                Column(
+                    modifier = androidx.compose.ui.Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp)
+                ) {
+                    Text(
+                        "${r.dateUtc.take(10)} · ${String.format("%.0f", r.durationSec / 60.0)} min · " +
+                            "${String.format("%.1f", r.distanceKm)} km · selector ${r.modeTag}",
+                        color = NeonEmerald, fontSize = 11.sp, fontWeight = FontWeight.Bold
+                    )
+                    val top = r.stateSeconds.entries.sortedByDescending { it.value }.take(4)
+                    Text(
+                        top.joinToString("  ") {
+                            "${it.key.replace('_', ' ').lowercase()} ${String.format("%.0f", if (r.durationSec > 0) it.value / r.durationSec * 100 else 0.0)}%"
+                        },
+                        color = Color.White, fontSize = 10.sp
+                    )
+                    val gears = r.gearSeconds.withIndex().drop(1).filter { it.value >= 5.0 }
+                        .joinToString(" ") { "G${it.index}:${String.format("%.0f", it.value)}s" }
+                    Text(
+                        "gears ${gears.ifBlank { "n/a" }} · climbed ${String.format("%.0f", r.elevationGainM)} m · " +
+                            "descended ${String.format("%.0f", r.elevationLossM)} m",
+                        color = TextSecondaryDark, fontSize = 10.sp
+                    )
+                    r.avgUpshiftRpm?.let { up ->
+                        Text(
+                            "${r.shiftCount} shift(s), avg upshift ${String.format("%.1f", up / 1000.0)}k rpm - " +
+                                if (r.sportLikeShiftMap) "prolonged sport-map shifts" else "economy D-map shifts",
+                            color = if (r.sportLikeShiftMap) ElectricAmber else TextSecondaryDark,
+                            fontSize = 10.sp
+                        )
+                    }
+                }
+            }
+            val dUp = rides.filter { it.modeTag == "D" }.mapNotNull { it.avgUpshiftRpm }
+            val sUp = rides.filter { it.modeTag != "D" }.mapNotNull { it.avgUpshiftRpm }
+            if (dUp.isNotEmpty() && sUp.isNotEmpty()) {
+                Text(
+                    "D vs S behaviour: D rides upshift at ${String.format("%.1f", dUp.average() / 1000.0)}k rpm, " +
+                        "S/M at ${String.format("%.1f", sUp.average() / 1000.0)}k rpm - sport holds gears " +
+                        "${String.format("%.0f", sUp.average() - dUp.average())} rpm longer.",
+                    color = CyberCyan, fontSize = 10.sp
+                )
+            }
+        }
+    }
+}

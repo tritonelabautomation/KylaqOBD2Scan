@@ -57,8 +57,12 @@ class ObdScheduler(
     val economyEngine: EconomyEngine = EconomyEngine(),
     val drivingStateEngine: DrivingStateEngine = DrivingStateEngine(),
     val driveAnalytics: DriveAnalytics = DriveAnalytics(),
-    val transmissionEngine: TransmissionEngine = TransmissionEngine()
+    val transmissionEngine: TransmissionEngine = TransmissionEngine(),
+    /** Per-ride behaviour X-ray accumulator (states, gears, shifts, elevation). */
+    val rideRecorder: com.example.analysis.RideBehaviorRecorder = com.example.analysis.RideBehaviorRecorder()
 ) {
+    /** GPS altitude feed for elevation logging; set by the ViewModel (null-safe when GPS is off). */
+    var altitudeSource: (() -> Double?)? = null
 
     val ecuDiscoveryManager = EcuDiscoveryManager(capabilityManager)
 
@@ -647,6 +651,16 @@ class ObdScheduler(
             rawGearRatio = primaryNumeric("01A4")
         )
         _transmissionState.value = transState
+
+        // Ride X-ray: behaviour state + gear + shift + elevation accumulation (per ride).
+        rideRecorder.onSample(
+            tsMs = timestampMonotonic,
+            stateName = drivingResult.state.name,
+            rpm = engineRpm,
+            speedKmh = speedKmh,
+            gear = transState.estimatedGear?.takeIf { transState.isEstimatedGearConfident },
+            altitudeM = altitudeSource?.invoke()
+        )
 
         // 5. Derived drive intelligence: power/torque curves, efficiency sweet spot,
         //    coasting-in-neutral events, turbo behaviour and per-tank fuel comparison.
