@@ -32,6 +32,21 @@ class Aq250GearModel {
         const val ATF_SPEC: String = "G 052 025 A2 (Esso JWS 3309)"
         const val ATF_FILL_L: Double = 7.0
         const val ATF_TOPUP_L: Double = 3.0
+
+        // Deep-service data from the 09G Workshop Manual (Ed. 07.2014, p.147-154) and the
+        // Skoda SLAVIA 2022 Maintenance Manual (Ed. 11.2021, s.4.1 - same India-spec AQ250):
+        /** India maintenance drain-and-fill quantity (converter/cooler stay filled). */
+        const val ATF_CHANGE_L: Double = 3.0
+        /** Quantity added when correcting a low level at the inspection plug. */
+        const val ATF_LEVEL_TOPUP_L: Double = 1.0
+        /** ATF inspection (overflow) plug tightening torque. */
+        const val ATF_PLUG_TORQUE_NM: Int = 27
+        /** Level check window: start <=35 C, correct if ~1 drop/s before 40 C, close by 45 C... */
+        const val ATF_CHECK_START_C: Int = 35
+        const val ATF_CHECK_DROP_C: Int = 40
+        const val ATF_CHECK_MAX_C: Int = 45
+        /** ...except hot countries (India): close the plug by 50 C. */
+        const val ATF_CHECK_MAX_HOT_C: Int = 50
         const val IDLER: Double = 1.061
 
         /** Prior rpm-per-km/h per unit ratio, from Kylaq/Kushaq-family cruise observations. */

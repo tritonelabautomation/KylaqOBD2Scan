@@ -554,8 +554,22 @@ private fun GearboxCard(model: com.example.engine.Aq250GearModel) {
             color = Color.White, fontSize = 10.sp
         )
         Text(
-            "ATF ${com.example.engine.Aq250GearModel.ATF_SPEC}, ${String.format("%.1f", com.example.engine.Aq250GearModel.ATF_FILL_L)} L fill / ~${String.format("%.0f", com.example.engine.Aq250GearModel.ATF_TOPUP_L)} L top-up, filled for life (change only after repair)",
+            "ATF ${com.example.engine.Aq250GearModel.ATF_SPEC}: ${String.format("%.1f", com.example.engine.Aq250GearModel.ATF_FILL_L)} L total · " +
+                "India service drain-and-fill ${String.format("%.0f", com.example.engine.Aq250GearModel.ATF_CHANGE_L)} L · level top-up ~${String.format("%.0f", com.example.engine.Aq250GearModel.ATF_LEVEL_TOPUP_L)} L",
             color = ElectricAmber, fontSize = 10.sp
+        )
+        Text(
+            "Level check (workshop manual p.147): vehicle level, P + idle, A/C off, VAS '02-gearbox electronics'; " +
+                "open inspection plug at ${com.example.engine.Aq250GearModel.ATF_CHECK_START_C}°C ATF - ~1 drop/s before " +
+                "${com.example.engine.Aq250GearModel.ATF_CHECK_DROP_C}°C = correct; close by " +
+                "${com.example.engine.Aq250GearModel.ATF_CHECK_MAX_HOT_C}°C (hot countries; else ${com.example.engine.Aq250GearModel.ATF_CHECK_MAX_C}°C); plug torque " +
+                "${com.example.engine.Aq250GearModel.ATF_PLUG_TORQUE_NM} Nm, new gasket ring",
+            color = TextSecondaryDark, fontSize = 10.sp
+        )
+        Text(
+            "Stuck in P (dead battery/fuse)? Emergency release: remove the shift-mechanism cover, press the " +
+                "yellow plastic wedge, then press the lever button and pull out of P - it re-locks if returned to P.",
+            color = WarningRed, fontSize = 10.sp
         )
         val scales = model.calibratedScales()
         Text(
