@@ -53,6 +53,23 @@ class CodingLabCodecTest {
     }
 
     @Test
+    fun `classifyResponse separates positive NRC and silent`() {
+        assertEquals("POSITIVE", CodingLabCodec.classifyResponse("62 F190 54 4D 42", "F190"))
+        assertEquals("NRC:33", CodingLabCodec.classifyResponse("7F 22 33", "F190"))
+        assertEquals("NRC:31", CodingLabCodec.classifyResponse("7F2231", "F190"))
+        assertEquals("SILENT", CodingLabCodec.classifyResponse("", "F190"))
+        assertEquals("SILENT", CodingLabCodec.classifyResponse("NO DATA", "F190"))
+        assertEquals("SILENT", CodingLabCodec.classifyResponse("BUS INIT ERROR", "F190"))
+    }
+
+    @Test
+    fun `sweep headers follow VAG convention`() {
+        assertEquals(8, CodingLabCodec.SWEEP_HEADERS.size)
+        assertEquals("7E0", CodingLabCodec.SWEEP_HEADERS.first())
+        assertEquals("7E7", CodingLabCodec.SWEEP_HEADERS.last())
+    }
+
+    @Test
     fun `hexToAscii decodes VIN and masks non-printables`() {
         val vin = "4D4F44454C56494E313233" // "MODELVIN123"
         assertEquals("MODELVIN123", CodingLabCodec.hexToAscii(vin))

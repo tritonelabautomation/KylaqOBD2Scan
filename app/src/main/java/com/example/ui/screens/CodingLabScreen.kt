@@ -18,6 +18,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
@@ -25,6 +26,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -44,13 +46,13 @@ import com.example.ui.viewmodel.MainViewModel
 import kotlinx.coroutines.launch
 
 /**
- * Read-only UDS Coding Lab (added 2026-09-09, owner request: VAG hidden-feature research).
+ * Read-only UDS Coding Lab (Batch 23 v2, 2026-09-09).
  *
- * Scouts adaptation/DID contents on any discovered ECU header with service 0x22.
- * Writes (0x2E), security access (0x27), session control (0x10) and flash services
- * are blocked by SafetyValidator - this screen can inspect, never modify, vehicle
- * coding. Rationale and the honest feasibility matrix live in
- * docs/reference/vag-coding-research.md.
+ * Scouts ECUs and reads identifiers (service 0x22) - the same passive workflow pro
+ * coders start with. Writes (0x2E), security access (0x27), session control (0x10)
+ * and flash services are blocked by SafetyValidator, so vehicle coding can never be
+ * modified from here. Full research + honest feasibility verdict:
+ * docs/reference/vag-coding-research.md
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -63,6 +65,8 @@ fun CodingLabScreen(
     var did by remember { mutableStateOf("F190") }
     var busy by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<MainViewModel.CodingLabResult?>(null) }
+    val history = remember { mutableStateListOf<Pair<String, String>>() }
+    var sweep by remember { mutableStateOf<List<MainViewModel.SweepHit>?>(null) }
 
     Scaffold(
         topBar = {
@@ -85,18 +89,63 @@ fun CodingLabScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
+            // ---- Research verdict (Batch 23, owner request: MID red theme / sport menu) ----
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("RESEARCH VERDICT - RED THEME & SPORT MENU", color = CyberCyan, fontSize = 12.sp, fontWeight = FontWeight.Black)
                     Text(
-                        "SAFETY: this lab READS identifiers (UDS 0x22). Write (0x2E), security " +
-                            "access (0x27), session control (0x10) and flashing are blocked by the " +
-                            "app's SafetyValidator. Theme / sport-menu CODING on the car requires " +
-                            "ODIS/OBDeleven-class tools with licensed seed-key access - see the " +
-                            "research doc in docs/reference/.",
+                        "MID (digital cluster) theme: NOT unlockable on Kylaq - even pro coders list " +
+                            "\"features related to Digital Cluster\" as unavailable for this car (codemyvag.in, " +
+                            "Signature+ variant page, verified 2026-09-09).",
+                        color = WarningRed, fontSize = 10.sp
+                    )
+                    Text(
+                        "Infotainment colour theme (Red/Amber/Blue) & Sport menu: unlockable via module 5F " +
+                            "adaptation coding - but it needs extended session (0x10) + licensed security access " +
+                            "(0x27) + SFD2 online token from VW servers on 2024+ cars. OBDeleven PRO/VCDS/ODIS " +
+                            "only. This app READS (0x22) and can never WRITE - by design and by law.",
                         color = ElectricAmber, fontSize = 10.sp
+                    )
+                    Text(
+                        "Your in-app wish is covered: Settings -> red sport accent re-themes this app. Full " +
+                            "evidence: docs/reference/vag-coding-research.md",
+                        color = NeonEmerald, fontSize = 10.sp
                     )
                 }
             }
+
+            // ---- ECU sweep ----
+            OutlinedButton(
+                onClick = {
+                    busy = true
+                    sweep = null
+                    scope.launch {
+                        sweep = viewModel.codingLabSweep()
+                        busy = false
+                    }
+                },
+                enabled = !busy,
+                modifier = Modifier.fillMaxWidth()
+            ) { Text(if (busy) "SCANNING 7E0-7E7..." else "SCAN ECUs (0x22 F190 VIN sweep)") }
+            sweep?.let { hits ->
+                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("MODULES THAT ANSWERED", color = TextSecondaryDark, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        hits.forEach { h ->
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(h.header, color = CyberCyan, fontSize = 12.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                                Text(
+                                    h.kind + if (h.detail.isNotBlank()) " - ${h.detail}" else "",
+                                    color = if (h.kind == "POSITIVE") NeonEmerald else ElectricAmber,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ---- Manual read ----
             Text("ECU HEADER", color = TextSecondaryDark, fontSize = 10.sp, fontWeight = FontWeight.Bold)
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 listOf("7E0" to "ENGINE", "7E1" to "GEARBOX", "7E8" to "ECU RX", "7E9" to "TCM RX").forEach { (h, label) ->
@@ -106,7 +155,7 @@ fun CodingLabScreen(
             TextField(value = header, onValueChange = { header = it }, label = { Text("Custom header (e.g. 7E0)") }, singleLine = true)
             Text("DATA IDENTIFIER (DID)", color = TextSecondaryDark, fontSize = 10.sp, fontWeight = FontWeight.Bold)
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf("F190" to "VIN", "F180" to "ECU ID", "F191" to "VW ID", "0100" to "OBD SUP").forEach { (d, label) ->
+                listOf("F190" to "VIN", "F180" to "ECU ID", "F191" to "HW/VW ID", "0100" to "OBD SUP").forEach { (d, label) ->
                     FilterChip(selected = did == d, onClick = { did = d }, label = { Text(label, fontSize = 10.sp) })
                 }
             }
@@ -121,7 +170,10 @@ fun CodingLabScreen(
                     }
                     busy = true
                     scope.launch {
-                        result = viewModel.codingLabRead(h, d)
+                        val r = viewModel.codingLabRead(h, d)
+                        result = r
+                        history.add(0, "$h 22$d" to (r.nrc ?: r.payloadHex ?: r.raw.take(40)))
+                        if (history.size > 12) history.removeAt(history.size - 1)
                         busy = false
                     }
                 },
@@ -145,6 +197,31 @@ fun CodingLabScreen(
                             if (it.isNotBlank()) Text("ASCII: $it", color = NeonEmerald, fontSize = 12.sp)
                         }
                     }
+                }
+            }
+
+            if (history.isNotEmpty()) {
+                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text("READ HISTORY", color = TextSecondaryDark, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        history.forEach { (req, res) ->
+                            Text("$req -> $res", color = NeonEmerald, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                        }
+                    }
+                }
+            }
+
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("SAFETY", color = TextSecondaryDark, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        "Reads (0x22) are passive - zero risk to modules or warranty. Write (0x2E), security " +
+                            "access (0x27), session control (0x10/0x31) and flashing (0x34-37) are blocked by " +
+                            "SafetyValidator and cannot be enabled. 5F adaptation channels " +
+                            "(Car_Function_Adaptations_Gen2: menu_display_* entries for sport/offroad/compass/" +
+                            "themes) sit behind 0x27 seed-key + SFD2 online authorisation on your 2026 car.",
+                        color = ElectricAmber, fontSize = 10.sp
+                    )
                 }
             }
         }

@@ -55,6 +55,26 @@ object CodingLabCodec {
         return sb.toString()
     }
 
+    /**
+     * Classifies a raw 0x22 response for the ECU sweep: POSITIVE (62+DID echo),
+     * NRC:<code> (module present but refused - security/session), or SILENT
+     * (nothing came back - no module at that header).
+     */
+    fun classifyResponse(raw: String, did: String): String {
+        val clean = raw.replace(" ", "").uppercase()
+        if (clean.contains("62$did")) return "POSITIVE"
+        val idx = clean.indexOf("7F22")
+        if (idx >= 0 && clean.length >= idx + 6) return "NRC:" + clean.substring(idx + 4, idx + 6)
+        if (clean.isBlank() || clean.contains("NODATA") || clean.contains("BUSINIT") ||
+            clean.contains("BUSBUSY") || clean.contains("STOPPED") || clean.contains("CANTXERROR") ||
+            clean.contains("BUSERROR") || clean.contains("UNABLETOCONNECT")
+        ) return "SILENT"
+        return "SILENT"
+    }
+
+    /** Headers swept by the lab, in VAG-conventional order. */
+    val SWEEP_HEADERS = listOf("7E0", "7E1", "7E2", "7E3", "7E4", "7E5", "7E6", "7E7")
+
     /** Hex pairs to printable ASCII (VIN, part numbers...). Non-printables become '.'. */
     fun hexToAscii(hex: String): String {
         val clean = hex.replace(" ", "")

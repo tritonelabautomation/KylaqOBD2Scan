@@ -1072,6 +1072,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
+    data class SweepHit(val header: String, val kind: String, val detail: String)
+
+    /** Passive 0x22 F190 sweep across the conventional UDS headers - discovers which modules answer. */
+    suspend fun codingLabSweep(): List<SweepHit> {
+        val transport = bluetoothManager.currentTransport()
+            ?: return listOf(SweepHit("--", "NO_ADAPTER", "Connect the ELM327 adapter first."))
+        val out = mutableListOf<SweepHit>()
+        for (h in com.example.protocol.CodingLabCodec.SWEEP_HEADERS) {
+            transport.sendCommand("ATSH $h", 900L)
+            val r = transport.sendCommand("22F190", 2000L)
+            val raw = r.rawText.ifBlank { r.lines.joinToString(" ") }
+            when (val kind = com.example.protocol.CodingLabCodec.classifyResponse(raw, "F190")) {
+                "POSITIVE" -> {
+                    val payload = com.example.protocol.CodingLabCodec.decodePositive(r.lines, "F190")
+                        .ifBlank { com.example.protocol.CodingLabCodec.decodePositive(listOf(raw), "F190") }
+                    out.add(SweepHit(h, kind, com.example.protocol.CodingLabCodec.hexToAscii(payload)))
+                }
+                else -> if (kind.startsWith("NRC")) {
+                    out.add(SweepHit(h, kind, com.example.protocol.CodingLabCodec.nrcName(kind.removePrefix("NRC:"))))
+                }
+            }
+        }
+        transport.sendCommand("ATSH 7E0", 900L)
+        if (out.isEmpty()) out.add(SweepHit("--", "SILENT", "No module answered on any header (adapter asleep or car off)."))
+        return out
+    }
+
     /** Fuelio parity: auto-backup hook fired after every refuel save. */
     fun triggerCloudBackupIfEnabled() {
         viewModelScope.launch { cloudBackupManager.performAutoBackupIfNeeded() }
