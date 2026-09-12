@@ -67,3 +67,44 @@ Supersedes/complements: `docs/qa-qc-full-audit-2026-09.md` (Batch 21).
 ## 6. Goal-driven verification (skill #4)
 
 Success criterion: after the 4 fixes, CI compiles and **all suites pass including the new 11 parser tests** (307 → 318). Result recorded in the PR digest comment for the audit commit — see `gh api repos/tritonelabautomation/KylaqOBD2Scan/issues/1/comments` (latest entry).
+
+---
+
+## Addendum 2026-09-12 — Post-mortem: why the audits missed the fuel/dashboard lineage bugs
+
+Owner question after the zeroed fuel card and empty dashboard grid: *"Why didn't previous
+QA & QC catch this?"* Honest answer, no excuses:
+
+1. **Both audits were static.** Grep/structure/manifest/concurrency checks and pure-unit
+   suites verify how code *looks* and how isolated maths behaves. The fuel bug was a
+   *cross-layer data-lineage* defect: storage writes 2-hex PID suffixes
+   (`TransactionRecord.pid`), the analyser reads 4-hex keys (`010D`). Every existing test
+   fed `summarize()` the 4-hex spelling because the test author assumed the writer's
+   format — the exact assumption that was wrong. No test ever crossed the
+   writer→storage→reader boundary.
+2. **Configuration-absence bugs are invisible statically.** 015E/019D were catalogued,
+   enabled, decoded and unit-decoded correctly; they were simply absent from three
+   validation lists, so the eligibility gate never polled them. Nothing in a static read
+   contradicts itself — only a runtime assertion "every displayed metric has a validated
+   source" catches it.
+3. **The dashboard advertised ~30 tiles while polling validated ~11 PIDs.** Same class,
+   bigger blast radius: the capability gate (added earlier to kill phantom values)
+   silently starved every unvalidated tile into "Not available".
+4. **There was no device-or-truth oracle for displayed values.** Trace-replay tests stop
+   at the decoder; nothing replays a trace through storage → analysis → UI contract.
+
+### Guards added with the fixes (make the class unrepeatable)
+- `TripFuelSummaryTest`: regression feeding **stored-format (2-hex)** samples.
+- `normalizePidKey()` canonicalises every spelling at the analysis boundary.
+- **Progressive auto-probe** in `ObdScheduler` polling loop: ONE unresolved enabled PID
+  probed per cycle → every displayed tile (present and future) self-validates at
+  runtime; refusals become explicit `NOT_SUPPORTED`.
+- **Honest tiles**: `TelemetryDashboardContent` renders "NOT SUPPORTED BY ECU" /
+  "no answer (timeout)" / "probing..." instead of silent "Not available";
+  `DashboardHonestLabelsTest` locks the contract.
+- Loud fuel-card states for missing samples / unanswered fuel-rate PIDs.
+
+### Standing rule for future audits (lineage checklist per displayed metric)
+For every value a screen shows: (a) name its source PID/flow, (b) prove the PID is in the
+poll/validation path, (c) prove the stored key format matches the reader's lookup,
+(d) prove the empty state is loud. A metric failing any step is a finding, not a todo.

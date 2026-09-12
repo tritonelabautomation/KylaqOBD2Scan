@@ -190,6 +190,7 @@ class ObdScheduler(
 
         pollingJob = scope.launch(Dispatchers.IO) {
             val lastPollTimeMap = mutableMapOf<String, Long>()
+            val lastProbeTimeMap = mutableMapOf<String, Long>()
 
             while (isActive && transport.isConnected) {
                 val activePids = settingsRepository.pidDefinitions.value.filter { it.enabled }
@@ -233,6 +234,36 @@ class ObdScheduler(
                         }
                         delay(interCommandDelay)
                     }
+                }
+
+                // LINEAGE FIX (2026-09-12, owner report: "most dashboard variables empty"):
+                // the telemetry grid renders ~30 PID tiles but bootstrap validation only
+                // covered ~11, so the live-eligibility gate silently starved every other
+                // tile forever ("Not available"). Progressive auto-probe: resolve ONE
+                // unresolved enabled PID per poll cycle - a real value where the ECU
+                // answers, explicit NOT_SUPPORTED where it refuses, TIMEOUT retried on a
+                // 15 s cooldown. Any tile added in the future self-validates the same way,
+                // which removes this whole bug class by construction.
+                val capSnapshot = capabilityManager.capabilitiesFlow.value
+                val nowProbe = SystemClock.elapsedRealtime()
+                val unresolvedDef = prioritizedPids.firstOrNull { def ->
+                    val st = capSnapshot[def.id.uppercase()]
+                        ?: capSnapshot[def.id.uppercase().removePrefix("01")]
+                    st == null || st == CapabilityStatus.NOT_TESTED ||
+                        (st == CapabilityStatus.TIMEOUT &&
+                            nowProbe - (lastProbeTimeMap[def.id] ?: 0L) > 15_000L)
+                }
+                if (unresolvedDef != null) {
+                    lastProbeTimeMap[unresolvedDef.id] = nowProbe
+                    val resp = runCatching { transport.sendCommand(unresolvedDef.id, 900L) }.getOrNull()
+                    when (resp?.status) {
+                        com.example.model.ResponseStatus.OK -> executePidQuery(transport, unresolvedDef)
+                        com.example.model.ResponseStatus.NO_DATA ->
+                            capabilityManager.markPidStatus(unresolvedDef.id, CapabilityStatus.NOT_SUPPORTED)
+                        else ->
+                            capabilityManager.markPidStatus(unresolvedDef.id, CapabilityStatus.TIMEOUT)
+                    }
+                    delay(60)
                 }
 
                 delay(10)

@@ -57,6 +57,7 @@ fun DashboardScreen(
     val canResponseCount by viewModel.canResponseCount.collectAsState()
     val errorCount by viewModel.errorCount.collectAsState()
     val liveDecodedMap by viewModel.liveDecodedMap.collectAsState()
+    val pidCapabilities by viewModel.pidCapabilities.collectAsState()
     val pidRawHistory by viewModel.pidRawHistory.collectAsState()
     val isRecording by viewModel.isRecording.collectAsState()
     val recordingDurationSeconds by viewModel.recordingDurationSeconds.collectAsState()
@@ -369,6 +370,7 @@ fun DashboardScreen(
         }
 
         TelemetryDashboardContent(
+            capabilityStatuses = pidCapabilities,
             gpsData = gpsData,
             liveMap = liveDecodedMap,
             realtimeEconomy = realtimeEconomy,

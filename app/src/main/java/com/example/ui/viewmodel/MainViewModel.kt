@@ -169,6 +169,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // Powertrain Intelligence & Trust Model Streams
     val liveTelemetryMap = obdScheduler.liveTelemetryMap
+    /** Per-PID capability verdicts so dashboard tiles can say WHY a value is missing. */
+    val pidCapabilities = obdScheduler.capabilityManager.capabilitiesFlow
     val realtimeEconomy = obdScheduler.realtimeEconomy
     val tripEconomy = obdScheduler.tripEconomy
     val drivingState = obdScheduler.drivingState
