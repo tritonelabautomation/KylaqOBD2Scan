@@ -18,7 +18,8 @@ class TripFuelSummaryTest {
         // TransactionRecord suffix; before the normalizePidKey fix every stat read zero.
         val samples = mutableListOf<TripFuelSummary.SamplePoint>()
         var ts = 1_000_000L
-        repeat(10) {
+        // 60 s window at 4 L/h = ~0.066 L: above the 0.05 L integration threshold.
+        repeat(60) {
             samples.add(point("0D", ts, 60.0))   // speed, 2-hex form
             samples.add(point("5E", ts, 4.0))    // fuel rate L/h, 2-hex form
             ts += 1000
@@ -27,7 +28,7 @@ class TripFuelSummaryTest {
         assertTrue("distance must integrate from 2-hex 0D rows", s2.distanceKm > 0.05)
         assertTrue("fuel must integrate from 2-hex 5E rows", s2.fuelLiters > 0.05)
         assertEquals(60.0, s2.maxSpeedKmh, 1e-9)
-        assertEquals(s2.sampleCount, 20)
+        assertEquals(120, s2.sampleCount)
     }
 
     @Test
