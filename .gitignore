@@ -20,3 +20,8 @@ debug.keystore
 # Python tooling (trace replay + structure checker under tools/)
 __pycache__/
 *.pyc
+
+# QA fix: release signing material must never be committable (build.gradle.kts fallback path)
+my-upload-key.jks
+*.jks
+*.keystore
