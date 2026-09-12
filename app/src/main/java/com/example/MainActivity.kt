@@ -82,6 +82,7 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector)
     object PidConfig : Screen("pid_config", "Config", Icons.Default.Tune)
     object PidScanner : Screen("pid_scanner", "PID Scanner", Icons.Default.Search)
     object CodingLab : Screen("coding_lab", "Coding Lab", Icons.Default.Build)
+    object RevTheater : Screen("rev_theater", "Rev Theater", Icons.Default.MusicNote)
     object Profiles : Screen("profiles", "Profiles", Icons.Default.VerifiedUser)
     object FuelCosts : Screen("fuel_costs", "Fuel & Costs", Icons.Default.LocalGasStation)
     object Maintenance : Screen("maintenance", "Maintenance", Icons.Default.Build)
@@ -228,7 +229,7 @@ fun MainApp(viewModel: MainViewModel) {
     val drawerItems = bottomNavItems + listOf(
         Screen.FuelCosts, Screen.Maintenance, Screen.Expenses, Screen.Reports,
         Screen.CoachChat, Screen.Trips, Screen.Reminders, Screen.Documents, Screen.DriveBackup,
-        Screen.PidScanner, Screen.CodingLab, Screen.Settings, Screen.About
+        Screen.PidScanner, Screen.CodingLab, Screen.RevTheater, Screen.Settings, Screen.About
     )
     val mainTabRoutes = bottomNavItems.map { it.route }.toSet()
     var showQuickAdd by remember { mutableStateOf(false) }
@@ -585,6 +586,12 @@ fun MainApp(viewModel: MainViewModel) {
             }
             composable(Screen.PidScanner.route) {
                 com.example.ui.screens.PidScannerScreen(
+                    viewModel = viewModel,
+                    onBack = { navController.popBackStack() }
+                )
+            }
+            composable(Screen.RevTheater.route) {
+                com.example.ui.screens.RevTheaterScreen(
                     viewModel = viewModel,
                     onBack = { navController.popBackStack() }
                 )
