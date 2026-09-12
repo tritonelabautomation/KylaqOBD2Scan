@@ -16,7 +16,7 @@ class TripFuelSummaryTest {
     fun `stored 2-hex sample pids (0D 5E 9D) summarise identically to 4-hex`() {
         // Regression for the owner screenshot 2026-09-12: DB rows carry the 2-hex
         // TransactionRecord suffix; before the normalizePidKey fix every stat read zero.
-        val samples = mutableListOf<SamplePoint>()
+        val samples = mutableListOf<TripFuelSummary.SamplePoint>()
         var ts = 1_000_000L
         repeat(10) {
             samples.add(point("0D", ts, 60.0))   // speed, 2-hex form
