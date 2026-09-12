@@ -19,7 +19,8 @@ class EngineAudioPlayer {
         private set
     @Volatile var rpm: Double = 0.0
     @Volatile var throttle: Double = 0.0
-    @Volatile var volume: Float = 0.8f
+    // private: the generated setVolume(F)V would clash with fun setVolume below.
+    @Volatile private var volumeValue: Float = 0.8f
     @Volatile var running: Boolean = false
         private set
 
@@ -62,7 +63,7 @@ class EngineAudioPlayer {
             )
             track = at
             try {
-                at.setVolume(volume)
+                at.setVolume(volumeValue)
                 at.play()
                 while (running) {
                     val current = profile
@@ -89,8 +90,8 @@ class EngineAudioPlayer {
     }
 
     fun setVolume(v: Float) {
-        volume = v.coerceIn(0f, 1f)
-        track?.setVolume(volume)
+        volumeValue = v.coerceIn(0f, 1f)
+        track?.setVolume(volumeValue)
     }
 
     fun stop() {
