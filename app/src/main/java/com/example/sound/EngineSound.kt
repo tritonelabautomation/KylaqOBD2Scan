@@ -159,7 +159,7 @@ class EngineSoundSynth(private val sampleRate: Int = 44100) {
             }
 
             val shaped = (sample * gain * Short.MAX_VALUE * 0.55)
-            out[i] = shaped.coerceIn(-32767.0, 32767.0).toShort()
+            out[i] = shaped.coerceIn(-32767.0, 32767.0).toInt().toShort()
         }
     }
 
