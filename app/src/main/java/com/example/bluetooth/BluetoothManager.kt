@@ -130,15 +130,33 @@ class BluetoothManager(private val context: Context) {
                 method.invoke(device, 1) as android.bluetooth.BluetoothSocket
             }
 
-            val transport = BluetoothElmTransport(socket)
+            var transport = BluetoothElmTransport(socket)
             transport.setRawLogListener(rawLogListener)
 
             _statusMessage.value = "Connecting to $deviceName..."
-            val connected = transport.connect()
+            var connected = transport.connect()
+
+            // QA 2026-09-09 (owner question: adapter held by another app): the ELM327
+            // exposes ONE RFCOMM channel. When the standard-UUID socket fails (channel
+            // occupied, half-open peer, quirky clone), retry once on a fresh socket via
+            // the hidden raw-channel API before declaring failure.
+            if (!connected) {
+                // Close the dead socket first so the retry starts with a fresh RFCOMM fd.
+                runCatching { socket.close() }
+                try {
+                    val method = device.javaClass.getMethod("createRfcommSocket", Int::class.javaPrimitiveType)
+                    val fallbackSocket = method.invoke(device, 1) as android.bluetooth.BluetoothSocket
+                    transport = BluetoothElmTransport(fallbackSocket)
+                    transport.setRawLogListener(rawLogListener)
+                    _statusMessage.value = "Retrying $deviceName on raw RFCOMM channel 1..."
+                    connected = transport.connect()
+                } catch (_: Exception) { }
+            }
 
             if (!connected) {
+                val kind = ConnectionFailureClassifier.classify(transport.lastConnectError)
                 _connectionState.value = ConnectionState.ERROR
-                _statusMessage.value = "Could not establish connection to $deviceName"
+                _statusMessage.value = ConnectionFailureClassifier.guidance(kind, deviceName, transport.lastConnectError)
                 return@withContext Pair(false, null)
             }
 
