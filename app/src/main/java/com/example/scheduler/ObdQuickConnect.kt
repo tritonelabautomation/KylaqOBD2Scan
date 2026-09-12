@@ -29,7 +29,9 @@ import kotlinx.coroutines.withContext
 object ObdQuickConnect {
 
     /** PIDs shown on the dashboards; each is probed once before live polling is allowed. */
-    val DASHBOARD_PIDS = listOf("010C", "010D", "0104", "0105", "010B", "0111", "010F", "0142")
+    // 015E/019D added 2026-09-12 so car-only (Android Auto) sessions also validate the
+    // fuel-rate PIDs - without validation the capability gate never polls them.
+    val DASHBOARD_PIDS = listOf("010C", "010D", "0104", "0105", "010B", "0111", "010F", "0142", "015E", "019D")
 
     /**
      * Name fragments that identify an ELM327-style adapter. Auto-connect must never grab a

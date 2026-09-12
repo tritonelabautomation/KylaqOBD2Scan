@@ -854,6 +854,27 @@ private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summar
                 color = TextSecondaryDark,
                 fontSize = 11.sp
             )
+            if (summary.sampleCount == 0) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    "No stored telemetry samples for this trip - nothing to integrate.",
+                    color = WarningRed, fontSize = 11.sp
+                )
+            } else if (!summary.hasFuelSeries) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    "FUEL RATE UNAVAILABLE: PIDs 015E/019D never answered on this ECU " +
+                        "(common on some petrol ECUs). Fuel figures stay honest at zero - " +
+                        "use refuel-log km/L in Fuel Costs instead.",
+                    color = ElectricAmber, fontSize = 10.sp
+                )
+            } else if (!summary.hasSpeedSeries) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    "SPEED UNAVAILABLE: PID 010D never answered - distance cannot be integrated.",
+                    color = ElectricAmber, fontSize = 10.sp
+                )
+            }
             if (summary.speedHistogram.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(

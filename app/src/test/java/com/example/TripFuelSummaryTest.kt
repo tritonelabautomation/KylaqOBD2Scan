@@ -13,6 +13,24 @@ class TripFuelSummaryTest {
         TripFuelSummary.SamplePoint(pid, ts, value)
 
     @Test
+    fun `stored 2-hex sample pids (0D 5E 9D) summarise identically to 4-hex`() {
+        // Regression for the owner screenshot 2026-09-12: DB rows carry the 2-hex
+        // TransactionRecord suffix; before the normalizePidKey fix every stat read zero.
+        val samples = mutableListOf<SamplePoint>()
+        var ts = 1_000_000L
+        repeat(10) {
+            samples.add(point("0D", ts, 60.0))   // speed, 2-hex form
+            samples.add(point("5E", ts, 4.0))    // fuel rate L/h, 2-hex form
+            ts += 1000
+        }
+        val s2 = TripFuelSummary.summarize(samples)
+        assertTrue("distance must integrate from 2-hex 0D rows", s2.distanceKm > 0.05)
+        assertTrue("fuel must integrate from 2-hex 5E rows", s2.fuelLiters > 0.05)
+        assertEquals(60.0, s2.maxSpeedKmh, 1e-9)
+        assertEquals(s2.sampleCount, 20)
+    }
+
+    @Test
     fun `integrates fuel rate and speed into distance and consumption`() {
         val samples = mutableListOf<TripFuelSummary.SamplePoint>()
         // 10 minutes at 60 km/h burning 4 L/h, sampled every 10 s

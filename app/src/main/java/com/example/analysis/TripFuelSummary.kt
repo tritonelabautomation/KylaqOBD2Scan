@@ -32,7 +32,11 @@ object TripFuelSummary {
         val coastSeconds: Double,
         val idleSeconds: Double,
         val speedHistogram: List<Pair<Int, Double>>,
-        val sampleCount: Int
+        val sampleCount: Int,
+        /** Loud-failure flags (2026-09-12): the card must SAY "ECU never answered",
+         *  not silently show 0.00 L / 0.0 km. */
+        val hasSpeedSeries: Boolean = false,
+        val hasFuelSeries: Boolean = false
     ) {
         val litersPer100Km: Double?
             get() = if (distanceKm > 0.05) fuelLiters / distanceKm * 100.0 else null
@@ -45,10 +49,15 @@ object TripFuelSummary {
 
     fun summarize(samples: List<SamplePoint>): Summary {
         if (samples.isEmpty()) {
-            return Summary(0.0, 0.0, null, 0L, 0.0, 0.0, 0.0, 0.0, 0.0, emptyList(), 0)
+            return Summary(0.0, 0.0, null, 0L, 0.0, 0.0, 0.0, 0.0, 0.0, emptyList(), 0, false, false)
         }
 
-        val byPid = samples.groupBy { it.pid.uppercase() }
+        // STORED-FORMAT FIX (2026-09-12, owner screenshot): TelemetrySampleEntity.pid is
+        // written from TransactionRecord.pid, which carries the 2-hex PID suffix ("0D",
+        // "5E", "9D"). The 4-hex lookups below ("010D", "015E", "019D") therefore matched
+        // NOTHING and every sample-derived stat silently read zero while the trip-level
+        // aggregates (2-hex matching) looked fine. Normalise both spellings to 4-hex.
+        val byPid = samples.groupBy { normalizePidKey(it.pid) }
         val speedSeries = (byPid["010D"] ?: emptyList())
             .mapNotNull { p -> p.value?.let { p.timestampMs to it } }
             .sortedBy { it.first }
@@ -107,8 +116,20 @@ object TripFuelSummary {
             coastSeconds = coastSeconds,
             idleSeconds = idleSeconds,
             speedHistogram = histogram.entries.map { it.key to it.value }.sortedBy { it.first },
-            sampleCount = samples.size
+            sampleCount = samples.size,
+            hasSpeedSeries = speedSeries.isNotEmpty(),
+            hasFuelSeries = fuelSeries.isNotEmpty()
         )
+    }
+
+    /** Accepts "0D"/"010D"/"10D" and friends; canonicalises to the 4-hex service-01 form. */
+    fun normalizePidKey(pid: String): String {
+        val clean = pid.trim().uppercase().filter { it in '0'..'9' || it in 'A'..'F' }
+        return when (clean.length) {
+            2 -> "01$clean"
+            3 -> "0$clean"
+            else -> clean
+        }
     }
 
     /** Fuel rate in L/h from 015E directly, or 019D mass flow converted at petrol density. */

@@ -352,7 +352,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         transport.sendCommand(proto.atCommand, 1500L)
         kotlinx.coroutines.delay(200)
 
-        val pidsToTest = listOf("0100", "010C", "010D", "0105", "010B", "0111", "010F", "0142")
+        // 015E/019D added 2026-09-12: fuel-rate PIDs were never validated, so the
+        // capability gate skipped them forever and every trip logged 0.00 L.
+        val pidsToTest = listOf("0100", "010C", "010D", "0105", "010B", "0111", "010F", "0142", "015E", "019D")
         var success = 0
         var timeout = 0
         var invalid = 0
@@ -600,7 +602,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun performDashboardBootstrap(transport: ElmTransport) {
-        val pidsToTest = listOf("010C", "010D", "0105", "010B", "0111", "010F", "0142")
+        val pidsToTest = listOf("010C", "010D", "0105", "010B", "0111", "010F", "0142", "015E", "019D")
         for (pid in pidsToTest) {
             val resp = transport.sendCommand(pid, 1000L)
             val expectedService = "41"
