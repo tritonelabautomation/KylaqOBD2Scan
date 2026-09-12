@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.example.bluetooth.BluetoothDeviceInfo
 import com.example.ui.theme.CyberCyan
+import com.example.ui.theme.ElectricAmber
 import com.example.ui.theme.NeonEmerald
 
 @Composable
@@ -29,7 +30,13 @@ fun ConnectionDialog(
     isBluetoothEnabled: Boolean,
     onDeviceSelected: (String) -> Unit,
     onStartSimulation: () -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    defaultAddress: String? = null,
+    onSetDefault: (String?) -> Unit = {},
+    autoConnect: Boolean = true,
+    onAutoConnectChanged: (Boolean) -> Unit = {},
+    autoRecord: Boolean = true,
+    onAutoRecordChanged: (Boolean) -> Unit = {}
 ) {
     Dialog(onDismissRequest = onDismiss) {
         Card(
@@ -125,8 +132,20 @@ fun ConnectionDialog(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
+                SwitchRow(
+                    label = "Auto-connect when the app or Android Auto starts",
+                    checked = autoConnect,
+                    onCheckedChange = onAutoConnectChanged
+                )
+                SwitchRow(
+                    label = "Auto-record every drive (engine on records, engine off saves)",
+                    checked = autoRecord,
+                    onCheckedChange = onAutoRecordChanged
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "Paired Bluetooth Adapters (${pairedDevices.size})",
+                    text = "Paired Bluetooth Adapters (${pairedDevices.size}) - star one to make it the default",
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary
@@ -184,7 +203,7 @@ fun ConnectionDialog(
                                     Spacer(modifier = Modifier.width(12.dp))
                                     Column {
                                         Text(
-                                            text = dev.name,
+                                            text = dev.name + if (defaultAddress == dev.address) "  (default)" else "",
                                             style = MaterialTheme.typography.bodyMedium,
                                             fontWeight = FontWeight.Medium
                                         )
@@ -196,6 +215,27 @@ fun ConnectionDialog(
                                             fontSize = 11.sp
                                         )
                                     }
+                                    Spacer(modifier = Modifier.weight(1f))
+                                    IconButton(
+                                        onClick = {
+                                            onSetDefault(if (defaultAddress == dev.address) null else dev.address)
+                                        },
+                                        modifier = Modifier.testTag("btn_default_${dev.address}")
+                                    ) {
+                                        Icon(
+                                            imageVector = if (defaultAddress == dev.address) {
+                                                Icons.Default.Star
+                                            } else {
+                                                Icons.Default.StarBorder
+                                            },
+                                            contentDescription = "Set default adapter",
+                                            tint = if (defaultAddress == dev.address) {
+                                                ElectricAmber
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                            }
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -203,5 +243,22 @@ fun ConnectionDialog(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SwitchRow(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f)
+        )
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }

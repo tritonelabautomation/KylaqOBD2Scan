@@ -38,6 +38,10 @@ class TripRepository(context: Context) {
         newEntitiesDao.insertVehicle(vehicle)
     }
 
+    suspend fun deleteVehicle(vehicleId: String) = withContext(Dispatchers.IO) {
+        newEntitiesDao.deleteVehicleById(vehicleId)
+    }
+
     suspend fun insertProtocolTestResult(result: ProtocolTestResultEntity) = withContext(Dispatchers.IO) {
         newEntitiesDao.insertProtocolTestResult(result)
     }
@@ -68,6 +72,21 @@ class TripRepository(context: Context) {
 
     suspend fun getTripById(tripId: String): TripEntity? = withContext(Dispatchers.IO) {
         tripDao.getTripById(tripId)
+    }
+
+    suspend fun recentTrips(limit: Int): List<TripEntity> = withContext(Dispatchers.IO) {
+        tripDao.getAllTrips().take(limit)
+    }
+
+    suspend fun trendSamples(tripIds: List<String>): List<TelemetrySampleEntity> = withContext(Dispatchers.IO) {
+        if (tripIds.isEmpty()) {
+            emptyList()
+        } else {
+            sampleDao.getSamplesForTrips(
+                tripIds,
+                listOf("010C", "010D", "0104", "0162", "015E", "019D", "0C", "0D")
+            )
+        }
     }
 
     suspend fun getSamplesForTrip(tripId: String): List<TelemetrySampleEntity> = withContext(Dispatchers.IO) {

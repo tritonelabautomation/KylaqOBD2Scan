@@ -42,6 +42,7 @@ fun DrivingDashboardScreen(
     val transmissionState by viewModel.transmissionState.collectAsStateWithLifecycle()
 
     val isConnected = connectionState == ConnectionState.CONNECTED
+    val acAuto by viewModel.acAutoMode.collectAsStateWithLifecycle()
 
     val rpm = liveDecodedMap["010C"] ?: "--"
     val speed = liveDecodedMap["010D"] ?: "--"
@@ -154,9 +155,13 @@ fun DrivingDashboardScreen(
                     // Transmission Gear
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("GEAR: ", color = TextSecondaryDark, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        // Selector mode tag prefixes the gear: D3 / S3 / M3 like the cluster.
+                        // J1979 exposes no range PID, so the owner tags D/S/M with one tap and
+                        // every gear-second + shift point is logged under that tag (D-vs-S evidence).
+                        val mode = viewModel.rideMode
                         val gearText = when {
-                            transmissionState.actualGear != null -> "G${transmissionState.actualGear}"
-                            transmissionState.estimatedGear != null -> "G${transmissionState.estimatedGear} (Est)"
+                            transmissionState.actualGear != null -> "$mode${transmissionState.actualGear}"
+                            transmissionState.estimatedGear != null -> "$mode${transmissionState.estimatedGear} (Est)"
                             else -> transmissionState.selectedRange.ifBlank { "—" }
                         }
                         Text(
@@ -165,6 +170,70 @@ fun DrivingDashboardScreen(
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace
+                        )
+                    }
+
+                    // Tap to cycle the selector tag: D -> S -> M (paddle).
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(ElectricAmber.copy(alpha = 0.15f))
+                            .clickable {
+                                viewModel.setRideMode(
+                                    when (viewModel.rideMode) {
+                                        "D" -> "S"
+                                        "S" -> "M"
+                                        else -> "D"
+                                    }
+                                )
+                            }
+                            .padding(horizontal = 6.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            "MODE ${viewModel.rideMode}",
+                            color = ElectricAmber,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+
+                    // Tap to cycle the climate tag: OFF -> AC -> BLOWER. No J1979 PID exposes
+                    // the AC clutch on this ECU, so the owner tags it and the ride recorder
+                    // splits seconds/km/fuel per state -> per-ride AC-vs-no-AC economy.
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(
+                                when (viewModel.rideAc) {
+                                    "AC" -> NeonEmerald.copy(alpha = 0.15f)
+                                    "BLOWER" -> ElectricAmber.copy(alpha = 0.15f)
+                                    else -> TextSecondaryDark.copy(alpha = 0.15f)
+                                }
+                            )
+                            .clickable {
+                                viewModel.setRideAc(
+                                    when (viewModel.rideAc) {
+                                        "OFF" -> "AC"
+                                        "AC" -> "BLOWER"
+                                        else -> "OFF"
+                                    }
+                                )
+                            }
+                            .padding(horizontal = 6.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            when (viewModel.rideAc) {
+                                "AC" -> if (acAuto) "AC AUTO" else "AC ON"
+                                "BLOWER" -> "BLOWER"
+                                else -> "AC OFF"
+                            },
+                            color = when (viewModel.rideAc) {
+                                "AC" -> NeonEmerald
+                                "BLOWER" -> ElectricAmber
+                                else -> TextSecondaryDark
+                            },
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Black
                         )
                     }
 

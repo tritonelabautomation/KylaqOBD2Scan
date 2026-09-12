@@ -38,6 +38,18 @@ data class CloudBackupInfo(
 )
 
 /**
+ * The user dismissed the Google account chooser. Reported as a failure so callers get a
+ * single `Result` type back, but callers should not show it as an error.
+ */
+class SignInCancelledException : Exception("Sign-in cancelled")
+
+/**
+ * Google Sign-In cannot run because no usable OAuth *Web application* client ID is
+ * configured. The message tells the user exactly where to put one.
+ */
+class SignInNotConfiguredException(message: String) : Exception(message)
+
+/**
  * Handles Google Drive cloud backup, Google identity sign-in via Credential Manager,
  * and background synchronization for OBD trip records and ZIP bundles.
  */
@@ -68,118 +80,229 @@ class CloudBackupManager(
     }
 
     /**
-     * Reads the Google Web Client ID from strings.xml resource or BuildConfig.
-     * Returns null if not configured, which disables Google Sign-In gracefully
-     * rather than silently trusting whatever account the SDK has access to.
+     * Resolves the OAuth *Web application* client ID for Google Sign-In.
+     *
+     * Precedence: value entered on-device (Settings → Cloud Backup) → `strings.xml` →
+     * `BuildConfig.GOOGLE_WEB_CLIENT_ID`.
+     *
+     * FIX (sign-in never worked): the repository ships
+     * `google_web_client_id = "YOUR_GOOGLE_WEB_CLIENT_ID.apps.googleusercontent.com"`. The old
+     * code only checked `isNullOrBlank()`, so that placeholder was handed to Credential
+     * Manager and Google Play services rejected the request (ApiException 10 /
+     * DEVELOPER_ERROR) — the account chooser appeared and then nothing happened. Placeholders
+     * are now detected and treated as "not configured", and a real client ID can be entered
+     * in the app without rebuilding it.
      */
-    private fun readGoogleWebClientId(): String? {
-        // Try strings.xml resource first
+    fun readGoogleWebClientId(): String? {
+        settingsRepository.googleWebClientId.value
+            ?.takeIf { isUsableClientId(it) }
+            ?.let { return it.trim() }
+
         val resId = context.resources.getIdentifier("google_web_client_id", "string", context.packageName)
         if (resId != 0) {
-            val fromRes = context.getString(resId)
-                        if (!fromRes.isNullOrBlank()) {
-                return fromRes
-            }
+            context.getString(resId)?.takeIf { isUsableClientId(it) }?.let { return it.trim() }
         }
-        // Fallback: BuildConfig (set via gradle.properties / local.properties)
+
         return try {
             val field = com.example.BuildConfig::class.java.getField("GOOGLE_WEB_CLIENT_ID")
-            val value = field.get(null) as? String
-            if (!value.isNullOrBlank()) value else null
+            (field.get(null) as? String)?.takeIf { isUsableClientId(it) }?.trim()
         } catch (_: Exception) {
             null
         }
     }
 
+    /** True when Google Sign-In has everything it needs to run. */
+    val isGoogleSignInConfigured: Boolean get() = readGoogleWebClientId() != null
+
     /**
-     * Initiates modern Google Sign-In using AndroidX Credential Manager.
-     * After successful Google identity retrieval, exchanges the ID token with Firebase
-     * so the user is actually authenticated against Firebase services (Firestore, etc.).
+     * Persists (or, when null/blank, clears) the on-device OAuth Web Client ID, so sign-in can
+     * be configured without rebuilding the app.
+     */
+    fun setGoogleWebClientId(clientId: String?) {
+        settingsRepository.setGoogleWebClientId(clientId?.trim()?.takeIf { it.isNotEmpty() })
+    }
+
+    /**
+     * A client ID is usable only if it looks like a real OAuth Web client:
+     * `<project>-<hash>.apps.googleusercontent.com`, and not one of the placeholders that
+     * ship in the repo.
+     */
+    fun isUsableClientId(value: String?): Boolean {
+        val candidate = value?.trim().orEmpty()
+        if (candidate.isEmpty()) return false
+        if (!candidate.endsWith(".apps.googleusercontent.com", ignoreCase = true)) return false
+        if (PLACEHOLDER_CLIENT_ID.containsMatchIn(candidate)) return false
+        // "<number>-<32 hex>.apps.googleusercontent.com" has at least 3 dots.
+        return candidate.count { it == '.' } >= 3
+    }
+
+    /**
+     * SHA-1 fingerprints of this build's signing certificate(s), colon separated — the exact
+     * value that must be registered against the OAuth client in Google Cloud Console.
+     * Works for the modern [android.content.pm.SigningInfo] API and the legacy path.
+     */
+    fun signingSha1Fingerprints(): List<String> {
+        return try {
+            val pm = context.packageManager
+            val signatures = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                @Suppress("DEPRECATION")
+                val info = pm.getPackageInfo(
+                    context.packageName,
+                    android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES
+                )
+                val signing = info.signingInfo
+                when {
+                    signing == null -> emptyList()
+                    signing.hasMultipleSigners() -> signing.apkContentsSigners?.toList() ?: emptyList()
+                    else -> signing.signingCertificateHistory?.toList() ?: emptyList()
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                pm.getPackageInfo(
+                    context.packageName,
+                    android.content.pm.PackageManager.GET_SIGNATURES
+                ).signatures?.toList() ?: emptyList()
+            }
+            signatures.mapNotNull { signature ->
+                try {
+                    MessageDigest.getInstance("SHA-1").digest(signature.toByteArray())
+                        .joinToString(":") { "%02X".format(it) }
+                } catch (_: Exception) {
+                    null
+                }
+            }.distinct()
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    /**
+     * Turns a Credential Manager failure into something a person can act on. Google's own
+     * message ("ApiException: 10") says nothing about the actual cause, which is nearly
+     * always an OAuth client that does not list this package name + signing SHA-1.
+     */
+    private fun describeCredentialFailure(e: GetCredentialException): String {
+        val raw = listOfNotNull(e.message, e.cause?.message, e.localizedMessage).joinToString(" ")
+        val developerError = raw.contains("DEVELOPER_ERROR", ignoreCase = true) ||
+            raw.contains("ApiException: 10") ||
+            raw.contains("statusCode=10")
+        val fingerprints = signingSha1Fingerprints().ifEmpty { listOf("unavailable") }
+        return when {
+            e is androidx.credentials.exceptions.NoCredentialException ->
+                "No Google account could be offered to this app. Make sure you are signed in to " +
+                    "a Google account on the phone, then register this build in Google Cloud Console: " +
+                    "package ${context.packageName}, SHA-1 ${fingerprints.joinToString(" / ")}."
+            developerError ->
+                "Google rejected this app's OAuth client (DEVELOPER_ERROR). The Web Client ID must " +
+                    "be type 'Web application', and its authorized Android client must list " +
+                    "package ${context.packageName} with SHA-1 ${fingerprints.joinToString(" / ")}. " +
+                    "After changing the console entry, force-stop Android Auto/Play services or " +
+                    "reboot once — the mapping is cached."
+            else ->
+                "Sign-in failed (${e.type}): ${e.errorMessage ?: e.message ?: "unknown error"}. " +
+                    "Package ${context.packageName}, SHA-1 ${fingerprints.joinToString(" / ")}."
+        }
+    }
+
+    /**
+     * Initiates Google Sign-In using AndroidX Credential Manager, then (when this build is
+     * Firebase-configured) exchanges the ID token for a Firebase session.
+     *
+     * Failure modes are reported with actionable text — see [describeCredentialFailure].
+     * A dismissed account chooser comes back as [SignInCancelledException], which callers
+     * should not present as an error.
      */
     suspend fun signInWithGoogle(activity: android.app.Activity): Result<String> = withContext(Dispatchers.Main) {
-        try {
-            // Build GoogleIdOption
-            val rawNonce = UUID.randomUUID().toString()
-            val md = MessageDigest.getInstance("SHA-256")
-            val hashedNonce = md.digest(rawNonce.toByteArray()).joinToString("") { "%02x".format(it) }
-
-            // CRITICAL FIX: Server Client ID must be a real Web Client ID from Google Cloud Console.
-            // Previously this was a placeholder ("dummy-client-id.apps.googleusercontent.com") which
-            // caused Credential Manager to return whatever default account the SDK had access to
-            // (e.g. "connected.driver@gmail.com") and trust it blindly. The email was persisted
-            // without any verified session.
-            //
-            // To configure real Google Sign-In:
-            //   1. Create a project in Google Cloud Console: https://console.cloud.google.com
-            //   2. Enable "Google Identity" / "Google Sign-In" API
-            //   3. Create OAuth 2.0 Client ID of type "Web application"
-            //   4. Add the package name + SHA-1 signing certificate fingerprint:
-            //        ./gradlew signingReport   (debug SHA-1)
-            //   5. Replace the placeholder below with the real Web Client ID.
-            //   6. Also set in res/values/strings.xml: <string name="google_web_client_id">...</string>
-            //
-            // Until configured, Google sign-in remains DISABLED — signInWithGoogle() returns
-            // an error rather than silently trusting an arbitrary account.
-            val serverClientId = readGoogleWebClientId()
-            if (serverClientId == null) {
-                return@withContext Result.failure(Exception(
-                    "Google Sign-In is not configured. Set GOOGLE_WEB_CLIENT_ID in local.properties " +
-                    "or res/values/strings.xml as 'google_web_client_id'. See CloudBackupManager.kt for setup."
-                ))
-            }
-            val googleIdOption = GetGoogleIdOption.Builder()
-                .setFilterByAuthorizedAccounts(false)
-                .setServerClientId(serverClientId)
-                .setAutoSelectEnabled(false)
-                .setNonce(hashedNonce)
-                .build()
-
-            val request = GetCredentialRequest.Builder()
-                .addCredentialOption(googleIdOption)
-                .build()
-
-            val response: GetCredentialResponse = credentialManager.getCredential(
-                context = activity,
-                request = request
+        val serverClientId = readGoogleWebClientId()
+        if (serverClientId == null) {
+            return@withContext Result.failure(
+                SignInNotConfiguredException(
+                    "Google Sign-In needs an OAuth Web Client ID. Open Settings → Cloud Backup → " +
+                        "\u201CGoogle Sign-In setup\u201D, paste the client ID from " +
+                        "console.cloud.google.com (APIs & Services → Credentials → OAuth 2.0 Client " +
+                        "IDs, type \u201CWeb application\u201D) and register this build\u2019s package name " +
+                        "and SHA-1 shown there."
+                )
             )
+        }
 
-            // FIX: Extract idToken at function scope so Firebase auth can use it
-            val credential = response.credential
-            if (credential !is androidx.credentials.CustomCredential ||
-                credential.type != GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
-                return@withContext Result.failure(Exception("Unexpected credential type: ${credential::class.java.simpleName}"))
-            }
-            val googleIdTokenCredential = GoogleIdTokenCredential.createFrom(credential.data)
-            val email = googleIdTokenCredential.id
-            val idToken = googleIdTokenCredential.idToken
-            settingsRepository.setGoogleAccountEmail(email)
+        val rawNonce = UUID.randomUUID().toString()
+        val hashedNonce = try {
+            MessageDigest.getInstance("SHA-256").digest(rawNonce.toByteArray())
+                .joinToString("") { "%02x".format(it) }
+        } catch (_: Exception) {
+            rawNonce
+        }
 
-            // FIX: Exchange Google ID token for a Firebase auth credential so Firebase
-            // services (Firestore rules, AppCheck, AI backend) actually know the user.
-            // Without this step, googleAccountEmail is saved but Firebase remains unauthenticated.
+        val googleIdOption = GetGoogleIdOption.Builder()
+            .setFilterByAuthorizedAccounts(false)
+            .setServerClientId(serverClientId)
+            .setAutoSelectEnabled(false)
+            .setNonce(hashedNonce)
+            .build()
+
+        val request = GetCredentialRequest.Builder()
+            .addCredentialOption(googleIdOption)
+            .build()
+
+        val response = try {
+            credentialManager.getCredential(context = activity, request = request)
+        } catch (cancelled: GetCredentialCancellationException) {
+            return@withContext Result.failure(SignInCancelledException())
+        } catch (noCredential: androidx.credentials.exceptions.NoCredentialException) {
+            return@withContext Result.failure(Exception(describeCredentialFailure(noCredential)))
+        } catch (credentialError: GetCredentialException) {
+            // Rule 28: never fall back to a fake account on failure.
+            return@withContext Result.failure(Exception(describeCredentialFailure(credentialError)))
+        } catch (other: Exception) {
+            return@withContext Result.failure(Exception("Sign-in error: ${other.message}"))
+        }
+
+        val credential = response.credential
+        if (credential !is androidx.credentials.CustomCredential ||
+            credential.type != GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
+        ) {
+            return@withContext Result.failure(
+                Exception("Unexpected credential type: ${credential::class.java.simpleName}")
+            )
+        }
+
+        val googleId = try {
+            GoogleIdTokenCredential.createFrom(credential.data)
+        } catch (parseError: Exception) {
+            return@withContext Result.failure(
+                Exception("Could not read the Google ID token: ${parseError.message}")
+            )
+        }
+
+        val email = googleId.id
+        settingsRepository.setGoogleAccountEmail(email)
+        settingsRepository.setGoogleAccountName(googleId.displayName ?: googleId.givenName)
+
+        // Firebase is optional. A build without google-services.json has no FirebaseApp and
+        // FirebaseAuth.getInstance() throws IllegalStateException; Google sign-in itself did
+        // succeed, so say that instead of showing a confusing auth failure.
+        val firebaseConfigured = try {
+            com.google.firebase.FirebaseApp.getApps(context).isNotEmpty()
+        } catch (_: Exception) {
+            false
+        }
+
+        if (firebaseConfigured) {
             try {
-                val firebaseCredential = GoogleAuthProvider.getCredential(idToken, null)
+                val firebaseCredential = GoogleAuthProvider.getCredential(googleId.idToken, null)
                 FirebaseAuth.getInstance().signInWithCredential(firebaseCredential).await()
                 _syncStatusMessage.value = "Signed in to Google & Firebase as $email"
             } catch (fbErr: Exception) {
-                // Don't fail the whole sign-in — local email is still saved.
-                // Surface the Firebase error so the user knows sync may be limited.
-                _syncStatusMessage.value =
-                    "Signed in to Google as $email, but Firebase auth failed: ${fbErr.localizedMessage ?: fbErr.message}"
+                _syncStatusMessage.value = "Signed in to Google as $email, but Firebase auth failed: " +
+                    (fbErr.localizedMessage ?: fbErr.message)
             }
-
-
-
-            Result.success(email)
-        } catch (e: GetCredentialCancellationException) {
-            Result.failure(Exception("Sign-in was cancelled by user."))
-        } catch (e: GetCredentialException) {
-            // Rule 28: DO NOT force a fallback email on failure
-            Result.failure(Exception("Sign-in failed: ${e.message}"))
-        } catch (e: Exception) {
-            // Rule 28: DO NOT force a fallback email on failure
-            Result.failure(Exception("Sign-in error: ${e.message}"))
+        } else {
+            _syncStatusMessage.value = "Signed in to Google as $email " +
+                "(cloud sync limited: this build has no google-services.json, so Firebase is not configured)"
         }
+
+        Result.success(email)
     }
 
     /**
@@ -190,6 +313,7 @@ class CloudBackupManager(
             credentialManager.clearCredentialState(ClearCredentialStateRequest())
         } catch (_: Exception) {}
         settingsRepository.setGoogleAccountEmail(null)
+        settingsRepository.setGoogleAccountName(null)
         settingsRepository.setAutoCloudBackup(false)
         _syncStatusMessage.value = "Signed out of Google Drive."
     }
@@ -327,8 +451,56 @@ class CloudBackupManager(
      * Triggers automatic background backup if enabled and user is logged in.
      */
     suspend fun performAutoBackupIfNeeded() {
-        if (settingsRepository.autoCloudBackup.value && settingsRepository.googleAccountEmail.value != null) {
-            performBackupNow()
+        if (!settingsRepository.autoCloudBackup.value || settingsRepository.googleAccountEmail.value == null) return
+        // Fuelio parity: Wi-Fi-only and once-daily gates for automatic syncs.
+        if (settingsRepository.backupWifiOnly.value && !isOnWifi()) return
+        if (settingsRepository.backupDaily.value) {
+            val age = System.currentTimeMillis() - settingsRepository.lastBackupTimestamp.value
+            if (age < 20L * 60 * 60 * 1000) return
         }
+        val result = performBackupNow()
+        if (result.success) {
+            settingsRepository.setLastBackupTimestamp(System.currentTimeMillis())
+        }
+        if (settingsRepository.backupShowNotification.value) {
+            notifySync(result.message, result.success)
+        }
+    }
+
+    private fun isOnWifi(): Boolean {
+        val cm = context.getSystemService(android.net.ConnectivityManager::class.java) ?: return false
+        val net = cm.activeNetwork ?: return false
+        return cm.getNetworkCapabilities(net)?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) == true
+    }
+
+    /** Silent low-importance notification so owners see sync outcomes like Fuelio does. */
+    private fun notifySync(message: String, success: Boolean) {
+        val nm = context.getSystemService(android.app.NotificationManager::class.java) ?: return
+        if (nm.getNotificationChannel(CHANNEL_BACKUP) == null) {
+            nm.createNotificationChannel(
+                android.app.NotificationChannel(CHANNEL_BACKUP, "Drive backup sync", android.app.NotificationManager.IMPORTANCE_LOW)
+            )
+        }
+        val notification = androidx.core.app.NotificationCompat.Builder(context, CHANNEL_BACKUP)
+            .setSmallIcon(android.R.drawable.stat_sys_upload_done)
+            .setContentTitle(if (success) "Drive backup complete" else "Drive backup problem")
+            .setContentText(message)
+            .setSilent(true)
+            .build()
+        nm.notify(NOTIFICATION_BACKUP_ID, notification)
+    }
+
+    companion object {
+        private const val CHANNEL_BACKUP = "backup_sync"
+        private const val NOTIFICATION_BACKUP_ID = 9002
+
+        /**
+         * Values that ship in the repository as instructions-to-self. Sending any of these to
+         * Google Play services produces ApiException 10 (DEVELOPER_ERROR), which reads like a
+         * broken account chooser to the user.
+         */
+        private val PLACEHOLDER_CLIENT_ID = Regex(
+            "(?i)^(your[_-]?|changeme|change[_-]?me|todo|tbd|xxx+|placeholder|dummy|example|test[_-]?)"
+        )
     }
 }

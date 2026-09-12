@@ -2,6 +2,13 @@ package com.example
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.app.ForegroundServiceStartNotAllowedException
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import android.content.Intent
+import androidx.compose.ui.platform.LocalContext
+import com.example.service.ObdKeepAliveService
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -25,6 +32,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.NavigationDrawerItem
+import androidx.compose.material3.rememberDrawerState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.ui.Alignment
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -42,6 +61,7 @@ import kotlinx.coroutines.launch
 
 sealed class Screen(val route: String, val title: String, val icon: ImageVector) {
     object Dashboard : Screen("dashboard", "Dashboard", Icons.Default.Speed)
+    object Insights : Screen("insights", "Insights", Icons.Default.Insights)
     object CarDoctor : Screen("car_doctor", "AI Doctor", Icons.Default.HealthAndSafety)
     object DrivingDashboard : Screen("driving_hud", "Auto HUD", Icons.Default.DirectionsCar)
     object Recordings : Screen("recordings", "Trips", Icons.Default.Folder)
@@ -61,8 +81,20 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector)
     }
     object PidConfig : Screen("pid_config", "Config", Icons.Default.Tune)
     object PidScanner : Screen("pid_scanner", "PID Scanner", Icons.Default.Search)
+    object CodingLab : Screen("coding_lab", "Coding Lab", Icons.Default.Build)
+    object RevTheater : Screen("rev_theater", "Rev Theater", Icons.Default.MusicNote)
     object Profiles : Screen("profiles", "Profiles", Icons.Default.VerifiedUser)
+    object FuelCosts : Screen("fuel_costs", "Fuel & Costs", Icons.Default.LocalGasStation)
+    object Maintenance : Screen("maintenance", "Maintenance", Icons.Default.Build)
+    object DriveBackup : Screen("drive_backup", "Drive Backup", Icons.Default.CloudUpload)
+    object Expenses : Screen("expenses", "Expenses", Icons.Default.ReceiptLong)
+    object Documents : Screen("documents", "Documents", Icons.Default.Description)
+    object Reminders : Screen("reminders", "Reminders", Icons.Default.Notifications)
+    object Reports : Screen("reports", "Reports", Icons.Default.QueryStats)
+    object CoachChat : Screen("coach_chat", "Coach Chat", Icons.Default.Chat)
+    object Trips : Screen("trips", "Trip Planner", Icons.Default.Map)
     object Settings : Screen("settings", "Settings", Icons.Default.Settings)
+    object About : Screen("about", "About & Fuel Guide", Icons.Default.Info)
 }
 
 class MainActivity : ComponentActivity() {
@@ -74,7 +106,14 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         setContent {
-            MyApplicationTheme {
+            val appearance by viewModel.settingsRepository.appearanceMode.collectAsState()
+            MyApplicationTheme(
+                darkTheme = when (appearance) {
+                    "LIGHT" -> false
+                    "SYSTEM" -> androidx.compose.foundation.isSystemInDarkTheme()
+                    else -> true
+                }
+            ) {
                 MainApp(viewModel = viewModel)
             }
         }
@@ -100,7 +139,13 @@ fun MainApp(viewModel: MainViewModel) {
         hasBluetoothPermission = allGranted
     }
 
+    val defaultBtAddress by viewModel.settingsRepository.defaultBtAddress.collectAsState()
+    val autoConnect by viewModel.settingsRepository.autoConnect.collectAsState()
+    val autoRecord by viewModel.settingsRepository.autoRecord.collectAsState()
+
     LaunchedEffect(Unit) {
+        viewModel.startSessionAutomation()
+        viewModel.refreshDueNotifications()
         val basePermissions = arrayOf(
             Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.ACCESS_COARSE_LOCATION
@@ -108,7 +153,8 @@ fun MainApp(viewModel: MainViewModel) {
         val requiredPermissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             basePermissions + arrayOf(
                 Manifest.permission.BLUETOOTH_CONNECT,
-                Manifest.permission.BLUETOOTH_SCAN
+                Manifest.permission.BLUETOOTH_SCAN,
+                Manifest.permission.POST_NOTIFICATIONS
             )
         } else {
             basePermissions + arrayOf(
@@ -119,8 +165,48 @@ fun MainApp(viewModel: MainViewModel) {
         permissionLauncher.launch(requiredPermissions)
     }
 
+    // Background keep-alive (2026-09-09): while the adapter is CONNECTED the process
+    // runs as a foreground service so Android cannot silently kill the OBD session.
+    val keepAliveConnection by viewModel.connectionState.collectAsState()
+    val keepAliveRecording by viewModel.isRecording.collectAsState()
+    val keepAliveContext = LocalContext.current
+    var keepAliveRetryPending by remember { mutableStateOf(false) }
+    val startKeepAlive: (Boolean) -> Boolean = { recording ->
+        val intent = Intent(keepAliveContext, ObdKeepAliveService::class.java)
+            .putExtra(ObdKeepAliveService.EXTRA_RECORDING, recording)
+        val result = runCatching { ContextCompat.startForegroundService(keepAliveContext, intent) }
+        if (result.exceptionOrNull() is ForegroundServiceStartNotAllowedException) {
+            keepAliveRetryPending = true
+        }
+        result.isSuccess
+    }
+    LaunchedEffect(keepAliveConnection, keepAliveRecording) {
+        if (keepAliveConnection == ConnectionState.CONNECTED) {
+            startKeepAlive(keepAliveRecording)
+        } else {
+            keepAliveRetryPending = false
+            runCatching { keepAliveContext.stopService(Intent(keepAliveContext, ObdKeepAliveService::class.java)) }
+        }
+    }
+    // QA H1: Android 12+ forbids starting a foreground service while the app is in the
+    // background; auto-connect can reach CONNECTED with the activity stopped. Retry on resume.
+    val keepAliveLifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(keepAliveLifecycleOwner, keepAliveConnection, keepAliveRetryPending) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME &&
+                keepAliveRetryPending &&
+                keepAliveConnection == ConnectionState.CONNECTED
+            ) {
+                if (startKeepAlive(keepAliveRecording)) keepAliveRetryPending = false
+            }
+        }
+        keepAliveLifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { keepAliveLifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     val bottomNavItems = listOf(
         Screen.Dashboard,
+        Screen.Insights,
         Screen.Garage,
         Screen.CarDoctor,
         Screen.Recordings,
@@ -128,6 +214,68 @@ fun MainApp(viewModel: MainViewModel) {
         Screen.Console
     )
 
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val drawerScope = rememberCoroutineScope()
+    val accentTheme by viewModel.settingsRepository.accent.collectAsState()
+    androidx.compose.runtime.LaunchedEffect(accentTheme) {
+        com.example.ui.theme.setAccentColor(
+            when (accentTheme) {
+                "RED" -> androidx.compose.ui.graphics.Color(0xFFFF2D3F)
+                "AMBER" -> androidx.compose.ui.graphics.Color(0xFFFFB300)
+                else -> androidx.compose.ui.graphics.Color(0xFF00E5FF)
+            }
+        )
+    }
+    val drawerItems = bottomNavItems + listOf(
+        Screen.FuelCosts, Screen.Maintenance, Screen.Expenses, Screen.Reports,
+        Screen.CoachChat, Screen.Trips, Screen.Reminders, Screen.Documents, Screen.DriveBackup,
+        Screen.PidScanner, Screen.CodingLab, Screen.RevTheater, Screen.Settings, Screen.About
+    )
+    val mainTabRoutes = bottomNavItems.map { it.route }.toSet()
+    var showQuickAdd by remember { mutableStateOf(false) }
+
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ModalDrawerSheet(
+                drawerContainerColor = MaterialTheme.colorScheme.surface
+            ) {
+                Spacer(modifier = Modifier.height(20.dp))
+                Text(
+                    "Kylaq TSI Coach",
+                    color = CyberCyan,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)
+                )
+                Text(
+                    "Skoda Kylaq 1.0 TSI - drive intelligence",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp)
+                )
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                drawerItems.forEach { screen ->
+                    NavigationDrawerItem(
+                        icon = { Icon(screen.icon, contentDescription = null) },
+                        label = { Text(screen.title) },
+                        selected = currentRoute == screen.route,
+                        onClick = {
+                            drawerScope.launch { drawerState.close() }
+                            if (currentRoute != screen.route) {
+                                navController.navigate(screen.route) {
+                                    popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                                    launchSingleTop = true
+                                    restoreState = true
+                                }
+                            }
+                        },
+                        modifier = Modifier.padding(horizontal = 10.dp)
+                    )
+                }
+            }
+        }
+    ) {
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         bottomBar = {
@@ -168,16 +316,16 @@ fun MainApp(viewModel: MainViewModel) {
             }
         }
     ) { innerPadding ->
+        Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
         NavHost(
             navController = navController,
             startDestination = Screen.Dashboard.route,
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
+            modifier = Modifier.fillMaxSize()
         ) {
             composable(Screen.Dashboard.route) {
                 DashboardScreen(
                     viewModel = viewModel,
+                    onOpenDrawer = { drawerScope.launch { drawerState.open() } },
                     onNavigateToRawMonitor = {
                         navController.navigate(Screen.RawMonitor.route)
                     },
@@ -200,6 +348,13 @@ fun MainApp(viewModel: MainViewModel) {
                         navController.navigate(Screen.PidScanner.route)
                     },
                     onOpenConnectDialog = { showConnectionDialog = true }
+                )
+            }
+
+            composable(Screen.Insights.route) {
+                InsightsScreen(
+                    viewModel = viewModel,
+                    onBack = { navController.popBackStack() }
                 )
             }
 
@@ -254,14 +409,37 @@ fun MainApp(viewModel: MainViewModel) {
 
                         composable(Screen.Garage.route) {
                 val allVehicles by viewModel.recordingManager.tripRepository.allVehiclesFlow.collectAsState(initial = emptyList())
+                val garageScope = rememberCoroutineScope()
                 VehicleGarageScreen(
                     vehicles = allVehicles,
                     onAddVehicle = { navController.navigate(Screen.AddVehicle.route) },
                     onAutoScan = { navController.navigate("auto_scan_obd") },
+                    onOpenProfiles = { navController.navigate(Screen.Profiles.route) },
                     onSelectVehicle = { vehicle ->
                         val name = if (vehicle.nickname.isNullOrBlank()) "${vehicle.make} ${vehicle.model}" else vehicle.nickname
                         viewModel.setVehicleName(name)
                         navController.navigate(Screen.VehicleProfile.createRoute(vehicle.id))
+                    },
+                    onUpdateVehicle = { v ->
+                        garageScope.launch { viewModel.recordingManager.tripRepository.insertVehicle(v) }
+                    },
+                    onDeleteVehicle = { v ->
+                        garageScope.launch { viewModel.recordingManager.tripRepository.deleteVehicle(v.id) }
+                    },
+                    onMoveVehicle = { vehicle, delta ->
+                        garageScope.launch {
+                            val list = allVehicles.toMutableList()
+                            val from = list.indexOfFirst { it.id == vehicle.id }
+                            val to = from + delta
+                            if (from >= 0 && to in list.indices) {
+                                val moved = list.removeAt(from)
+                                list.add(to, moved)
+                                // Re-index the whole garage so the manual order becomes explicit.
+                                list.forEachIndexed { i, v ->
+                                    viewModel.recordingManager.tripRepository.insertVehicle(v.copy(sortOrder = i))
+                                }
+                            }
+                        }
                     }
                 )
             }
@@ -270,12 +448,62 @@ fun MainApp(viewModel: MainViewModel) {
                 val vehicleId = backStackEntry.arguments?.getString("vehicleId")
                 val allVehicles by viewModel.recordingManager.tripRepository.allVehiclesFlow.collectAsState(initial = emptyList())
                 val vehicle = allVehicles.find { it.id == vehicleId }
+                val profileNow = remember(vehicleId) { System.currentTimeMillis() }
+                val fuelStats = remember(vehicleId) { viewModel.fuelLogRepository.stats() }
+                val ownershipRows = remember(vehicleId) {
+                    val nextDue = viewModel.maintenanceRepository.dueStates(profileNow)
+                        .filter {
+                            it.status == com.example.data.MaintenanceCatalog.DueStatus.DUE_SOON ||
+                                it.status == com.example.data.MaintenanceCatalog.DueStatus.OVERDUE
+                        }
+                        .minByOrNull { it.kmRemaining ?: Double.MAX_VALUE }
+                    listOf(
+                        "Avg Fuel Economy" to (fuelStats.avgKmPerL?.let { String.format("%.1f km/L (%d logs)", it, fuelStats.entryCount) } ?: "Not enough data"),
+                        "Running Cost" to (fuelStats.costPerKm?.let { String.format("%.2f/km", it) } ?: "--"),
+                        "Odometer" to (viewModel.maintenanceRepository.currentOdometerKm()?.let { String.format("%.0f km", it) } ?: "Not set"),
+                        "Next Maintenance" to (nextDue?.let { "${it.item.label} (${it.headline})" } ?: "Nothing due")
+                    )
+                }
+                val upcomingRows = remember(vehicleId) {
+                    val rows = mutableListOf<String>()
+                    viewModel.maintenanceRepository.dueStates(profileNow)
+                        .filter {
+                            it.status == com.example.data.MaintenanceCatalog.DueStatus.OVERDUE ||
+                                it.status == com.example.data.MaintenanceCatalog.DueStatus.DUE_SOON
+                        }
+                        .take(4)
+                        .forEach { rows.add("${it.item.label} - ${it.headline}") }
+                    viewModel.documentRepository.expiringWithin(30, profileNow)
+                        .forEach { pair ->
+                            val doc = pair.first
+                            val ms = pair.second
+                            rows.add(if (ms < 0) "${doc.type}: ${doc.title} EXPIRED" else "${doc.type}: ${doc.title} expires in ${ms / 86400000L} d")
+                        }
+                    rows
+                }
+                val recentRows = remember(vehicleId) {
+                    val cur = viewModel.settingsRepository.currencySymbol.value
+                    val items = mutableListOf<Pair<Long, String>>()
+                    viewModel.fuelLogRepository.entries().take(3).forEach {
+                        items.add(it.idMs to "${it.dateUtc.take(10)} · Fuel ${String.format("%.1f", it.liters)} L · $cur${String.format("%.0f", it.totalCost)}")
+                    }
+                    viewModel.maintenanceRepository.logs().take(3).forEach {
+                        items.add(it.dateMs to ("${it.dateUtc.take(10)} · Service ${it.itemId}" + (it.cost?.let { c -> " · $cur${String.format("%.0f", c)}" } ?: "")))
+                    }
+                    viewModel.expenseRepository.entries().take(3).forEach {
+                        items.add(it.idMs to "${it.dateUtc.take(10)} · ${it.category} · $cur${String.format("%.0f", it.amount)}")
+                    }
+                    items.sortedByDescending { it.first }.take(6).map { it.second }
+                }
                 com.example.ui.screens.VehicleProfileScreen(
                     vehicle = vehicle,
                     catalogRepository = viewModel.catalogRepository,
                     onBack = { navController.popBackStack() },
                     onNavigateToDtc = { navController.navigate(Screen.DtcScanner.route) },
-                    onNavigateToPidScanner = { navController.navigate(Screen.PidScanner.route) }
+                    onNavigateToPidScanner = { navController.navigate(Screen.PidScanner.route) },
+                    ownership = ownershipRows,
+                    upcoming = upcomingRows,
+                    recent = recentRows
                 )
             }
             
@@ -362,6 +590,18 @@ fun MainApp(viewModel: MainViewModel) {
                     onBack = { navController.popBackStack() }
                 )
             }
+            composable(Screen.RevTheater.route) {
+                com.example.ui.screens.RevTheaterScreen(
+                    viewModel = viewModel,
+                    onBack = { navController.popBackStack() }
+                )
+            }
+            composable(Screen.CodingLab.route) {
+                com.example.ui.screens.CodingLabScreen(
+                    viewModel = viewModel,
+                    onBack = { navController.popBackStack() }
+                )
+            }
             composable(Screen.Profiles.route) {
                 val profilesViewModel: com.example.ui.viewmodel.ProfilesViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
                 ProfilesScreen(
@@ -372,14 +612,99 @@ fun MainApp(viewModel: MainViewModel) {
                 )
             }
 
+            composable(Screen.FuelCosts.route) {
+                FuelCostsScreen(
+                    viewModel = viewModel,
+                    onBack = { navController.popBackStack() }
+                )
+            }
+            composable(Screen.Maintenance.route) {
+                MaintenanceScreen(
+                    viewModel = viewModel,
+                    onBack = { navController.popBackStack() }
+                )
+            }
+            composable(Screen.DriveBackup.route) {
+                DriveBackupScreen(
+                    viewModel = viewModel,
+                    onBack = { navController.popBackStack() }
+                )
+            }
+            composable(Screen.Expenses.route) {
+                ExpensesScreen(viewModel = viewModel, onBack = { navController.popBackStack() })
+            }
+            composable(Screen.Documents.route) {
+                DocumentsScreen(viewModel = viewModel, onBack = { navController.popBackStack() })
+            }
+            composable(Screen.Reminders.route) {
+                RemindersScreen(viewModel = viewModel, onBack = { navController.popBackStack() })
+            }
+            composable(Screen.Reports.route) {
+                ReportsScreen(viewModel = viewModel, onBack = { navController.popBackStack() })
+            }
+            composable(Screen.CoachChat.route) {
+                CoachChatScreen(viewModel = viewModel)
+            }
+            composable(Screen.Trips.route) {
+                TripsScreen(viewModel = viewModel, onBack = { navController.popBackStack() })
+            }
             composable(Screen.Settings.route) {
                 SettingsScreen(
                     viewModel = viewModel,
+                    onBack = { navController.popBackStack() },
+                    onOpenAbout = { navController.navigate(Screen.About.route) },
+                    onOpenPidConfig = { navController.navigate(Screen.PidConfig.route) },
+                    onOpenFuelCosts = { navController.navigate(Screen.FuelCosts.route) },
+                    onOpenMaintenance = { navController.navigate(Screen.Maintenance.route) },
+                    onOpenDriveBackup = { navController.navigate(Screen.DriveBackup.route) },
+                    onOpenExpenses = { navController.navigate(Screen.Expenses.route) },
+                    onOpenDocuments = { navController.navigate(Screen.Documents.route) },
+                    onOpenReminders = { navController.navigate(Screen.Reminders.route) },
+                    onOpenReports = { navController.navigate(Screen.Reports.route) }
+                )
+            }
+
+            composable(Screen.About.route) {
+                AboutScreen(
+                    viewModel = viewModel,
                     onBack = { navController.popBackStack() }
-                    
                 )
             }
         }
+        if (currentRoute in mainTabRoutes) {
+            FloatingActionButton(
+                onClick = { showQuickAdd = true },
+                modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+                containerColor = CyberCyan,
+                contentColor = MaterialTheme.colorScheme.surface
+            ) {
+                Icon(Icons.Default.Add, contentDescription = "Quick add")
+            }
+        }
+        }
+    }
+    }
+
+    if (showQuickAdd) {
+        AlertDialog(
+            onDismissRequest = { showQuickAdd = false },
+            title = { Text("Quick add") },
+            text = {
+                Column {
+                    listOf(
+                        "Fuel fill-up" to { viewModel.setQuickAdd("fuel"); navController.navigate(Screen.FuelCosts.route) },
+                        "Service" to { viewModel.setQuickAdd("service"); navController.navigate(Screen.Maintenance.route) },
+                        "Expense" to { viewModel.setQuickAdd("expense"); navController.navigate(Screen.Expenses.route) },
+                        "Document" to { viewModel.setQuickAdd("document"); navController.navigate(Screen.Documents.route) }
+                    ).forEach { (label, action) ->
+                        TextButton(onClick = { showQuickAdd = false; action() }) {
+                            Text(label, fontSize = 14.sp)
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showQuickAdd = false }) { Text("Close") } }
+        )
     }
 
 
@@ -394,7 +719,13 @@ fun MainApp(viewModel: MainViewModel) {
             onStartSimulation = {
                 viewModel.startSimulationMode()
             },
-            onDismiss = { showConnectionDialog = false }
+            onDismiss = { showConnectionDialog = false },
+            defaultAddress = defaultBtAddress,
+            onSetDefault = { address -> viewModel.settingsRepository.setDefaultBtAddress(address) },
+            autoConnect = autoConnect,
+            onAutoConnectChanged = { enabled -> viewModel.settingsRepository.setAutoConnect(enabled) },
+            autoRecord = autoRecord,
+            onAutoRecordChanged = { enabled -> viewModel.settingsRepository.setAutoRecord(enabled) }
         )
     }
 }

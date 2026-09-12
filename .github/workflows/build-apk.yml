@@ -2,11 +2,124 @@ name: Build Android APK
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches:
+      - main
   push:
     branches:
       - main
 
 jobs:
+  # FIX (CI never ran the tests): this workflow only executed `assembleDebug`, so a whole
+  # batch of failing and self-contradictory unit tests shipped unnoticed. Unit tests now run
+  # as their own job with their own commit status context (`ci/unit-tests`) so results are
+  # visible on every push and pull request without blocking APK artifacts. Once the suite is
+  # confirmed green, add `needs: unit-tests` to the `build` job to make it a hard gate.
+  unit-tests:
+    runs-on: ubuntu-latest
+
+    permissions:
+      statuses: write
+      # Needed to post the test-failure digest back onto the pull request.
+      pull-requests: write
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle 9.3.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+
+      # continue-on-error so the reporting steps below always run; the job is still
+      # failed at the end by "Fail the job when tests failed".
+      - name: Run unit tests
+        id: unit-tests
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle testDebugUnitTest -PciExcludeRobolectric=1 --stacktrace --continue 2>&1 | tee /tmp/unit-tests.log
+          STATUS=$?
+          if [ $STATUS -ne 0 ] && grep -q "ApplicationManager.getApplication() is null" /tmp/unit-tests.log; then
+            echo "KSP2 worker-init NPE flake detected - retrying once with ksp.incremental=false..."
+            gradle testDebugUnitTest -PciExcludeRobolectric=1 --stacktrace --continue -Pksp.incremental=false 2>&1 | tee /tmp/unit-tests.log
+            STATUS=$?
+          fi
+          exit $STATUS
+
+      # Actions logs and artifacts are served from domains that are not reachable from
+      # every environment that has to triage a red run, so the digest is parsed here and
+      # posted back to the pull request instead.
+      - name: Build test failure digest
+        if: always()
+        run: python3 tools/ci/collect_test_failures.py --log /tmp/unit-tests.log > /tmp/test-report.md
+
+      # Oracle guarantee: when gradle fails before/without parseable test results
+      # (compile errors, infra failures), post the raw log tail so a red run is
+      # ALWAYS diagnosable from the PR without touching the blocked log host.
+      - name: Fallback digest from log tail
+        if: always() && steps.unit-tests.outcome == 'failure'
+        run: |
+          if [ ! -s /tmp/test-report.md ]; then
+            {
+              echo "### CI failure tail (no parseable test report)"
+              echo ""
+              echo '```'
+              tail -n 100 /tmp/unit-tests.log
+              echo '```'
+            } > /tmp/test-report.md
+          fi
+
+      - name: Comment digest on the pull request
+        if: always() && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -s /tmp/test-report.md ]; then
+            gh pr comment "${{ github.event.pull_request.number }}" --body-file /tmp/test-report.md
+          fi
+
+      - name: Fail the job when tests failed
+        if: always() && steps.unit-tests.outcome == 'failure'
+        run: |
+          echo "Unit tests failed - see the pull-request comment and the unit-test-reports artifact."
+          exit 1
+
+      - name: Upload unit test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-reports
+          path: |
+            app/build/reports/tests/
+            app/build/test-results/
+          if-no-files-found: ignore
+
+      - name: Report commit status
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            STATE="success"
+            DESC="Unit tests passed"
+          else
+            STATE="failure"
+            DESC="Unit tests failed"
+          fi
+          gh api "repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -f state="$STATE" \
+            -f description="$DESC" \
+            -f context="ci/unit-tests" || echo "Status report failed (non-fatal)"
+
   build:
     runs-on: ubuntu-latest
 
@@ -31,7 +144,17 @@ jobs:
           gradle-version: '9.3.1'
 
       - name: Build debug APK
-        run: gradle assembleDebug --stacktrace
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle assembleDebug --stacktrace 2>&1 | tee /tmp/build.log
+          STATUS=$?
+          if [ $STATUS -ne 0 ] && grep -q "ApplicationManager.getApplication() is null" /tmp/build.log; then
+            echo "KSP2 worker-init NPE flake detected - retrying once with ksp.incremental=false..."
+            gradle assembleDebug --stacktrace -Pksp.incremental=false 2>&1 | tee /tmp/build.log
+            STATUS=$?
+          fi
+          exit $STATUS
 
       # Extract actual evaluated version metadata from the built APK using aapt.
       # This is the only reliable way to get the evaluated versionName and versionCode

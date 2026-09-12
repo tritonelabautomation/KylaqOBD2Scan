@@ -1,0 +1,220 @@
+package com.example.data
+
+import android.content.Context
+import android.content.SharedPreferences
+
+/**
+ * Škoda Kylaq 1.0 TSI maintenance catalogue + due-state engine (VehIQ-style health tracking,
+ * offline and free of any account).
+ *
+ * Intervals follow the Indian-market EA211 service plan: oil service every 15 000 km or 1 year,
+ * air/cabin filters and plugs on their own cycles, brake fluid time-based. `intervalDays == 0`
+ * means the item is distance-only.
+ */
+object MaintenanceCatalog {
+
+    data class ServiceItem(
+        val id: String,
+        val label: String,
+        val intervalKm: Double,
+        val intervalDays: Int,
+        val category: String
+    )
+
+    val KYLAQ_ITEMS: List<ServiceItem> = listOf(
+        ServiceItem("engine_oil", "Engine oil (5W-30, VW 504/507)", 15_000.0, 365, "Engine"),
+        ServiceItem("oil_filter", "Oil filter", 15_000.0, 365, "Engine"),
+        ServiceItem("air_filter", "Air filter (engine)", 30_000.0, 730, "Engine"),
+        ServiceItem("cabin_filter", "Cabin / pollen filter", 30_000.0, 365, "Cabin"),
+        ServiceItem("spark_plugs", "Spark plugs", 60_000.0, 1460, "Engine"),
+        ServiceItem("brake_fluid", "Brake fluid", 45_000.0, 730, "Brakes"),
+        ServiceItem("front_pads", "Front brake pads", 40_000.0, 0, "Brakes"),
+        ServiceItem("rear_pads", "Rear brake pads", 60_000.0, 0, "Brakes"),
+        ServiceItem("coolant", "Coolant (G12evo) check", 30_000.0, 730, "Engine"),
+        ServiceItem("tyres_rotate", "Tyre rotation", 10_000.0, 180, "Tyres")
+    )
+
+    data class ServiceLog(
+        val itemId: String,
+        val dateUtc: String,
+        val dateMs: Long,
+        val odometerKm: Double?,
+        val cost: Double?,
+        /** Workshop rating 1-5 (null = unrated). */
+        val rating: Int? = null,
+        /** Pre-service / workshop notes, sanitized on encode. */
+        val notes: String = ""
+    )
+
+    enum class DueStatus { UNKNOWN, GOOD, DUE_SOON, OVERDUE }
+
+    data class DueState(
+        val item: ServiceItem,
+        val last: ServiceLog?,
+        val kmRemaining: Double?,
+        val daysRemaining: Int?,
+        val status: DueStatus
+    ) {
+        val headline: String
+            get() = when (status) {
+                DueStatus.UNKNOWN -> "Not logged yet"
+                DueStatus.OVERDUE -> "Overdue"
+                DueStatus.DUE_SOON -> "Due soon"
+                DueStatus.GOOD -> buildString {
+                    kmRemaining?.let { append(String.format("%.0f km", it)) }
+                    daysRemaining?.let {
+                        if (isNotEmpty()) append(" / ")
+                        append("$it d")
+                    }
+                    if (isEmpty()) append("OK")
+                    append(" left")
+                }
+            }
+    }
+
+    private const val DUE_SOON_KM = 1500.0
+    private const val DUE_SOON_DAYS = 30
+    private const val MS_PER_DAY = 24L * 60 * 60 * 1000
+
+    /** Pure due-state evaluation — unit tested without Android. */
+    fun evaluate(
+        item: ServiceItem,
+        last: ServiceLog?,
+        currentOdometerKm: Double?,
+        nowMs: Long
+    ): DueState {
+        if (last == null) return DueState(item, null, null, null, DueStatus.UNKNOWN)
+
+        val kmRemaining = if (currentOdometerKm != null && last.odometerKm != null) {
+            last.odometerKm + item.intervalKm - currentOdometerKm
+        } else {
+            null
+        }
+        val daysRemaining = if (item.intervalDays > 0) {
+            ((last.dateMs + item.intervalDays * MS_PER_DAY - nowMs) / MS_PER_DAY).toInt()
+        } else {
+            null
+        }
+
+        val kmOver = kmRemaining != null && kmRemaining <= 0
+        val daysOver = daysRemaining != null && daysRemaining <= 0
+        val kmSoon = kmRemaining != null && kmRemaining <= DUE_SOON_KM
+        val daysSoon = daysRemaining != null && daysRemaining <= DUE_SOON_DAYS
+
+        val status = when {
+            kmOver || daysOver -> DueStatus.OVERDUE
+            kmSoon || daysSoon -> DueStatus.DUE_SOON
+            else -> DueStatus.GOOD
+        }
+        return DueState(item, last, kmRemaining, daysRemaining, status)
+    }
+}
+
+/** Durable service history (one line per logged service). */
+class MaintenanceRepository(context: Context) {
+
+    private val prefs: SharedPreferences =
+        context.getSharedPreferences("maintenance_prefs", Context.MODE_PRIVATE)
+
+    fun logs(): List<MaintenanceCatalog.ServiceLog> =
+        prefs.getString("service_log", null)
+            ?.split('\n')
+            ?.filter { it.isNotBlank() }
+            ?.mapNotNull { decode(it) }
+            ?: emptyList()
+
+    fun lastPerItem(): Map<String, MaintenanceCatalog.ServiceLog> =
+        logs().sortedBy { it.dateMs }.associateBy { it.itemId }
+
+    fun log(entry: MaintenanceCatalog.ServiceLog) {
+        val lines = logs().map { encode(it) }.toMutableList()
+        lines.add(0, encode(entry))
+        while (lines.size > 500) lines.removeAt(lines.size - 1)
+        prefs.edit().putString("service_log", lines.joinToString("\n")).apply()
+    }
+
+    fun currentOdometerKm(): Double? =
+        prefs.getString("odometer_km", null)?.toDoubleOrNull()
+
+    fun setCurrentOdometerKm(km: Double) =
+        prefs.edit().putString("odometer_km", String.format(java.util.Locale.US, "%.1f", km)).apply()
+
+    /** VehIQ "items I track": empty set = track everything. */
+    fun trackedItemIds(): Set<String> =
+        prefs.getString("tracked_items", null)?.split('|')?.filter { it.isNotBlank() }?.toSet() ?: emptySet()
+
+    fun setTrackedItemIds(ids: Set<String>) =
+        prefs.edit().putString("tracked_items", ids.joinToString("|")).apply()
+
+    /** VehIQ custom interval override per item: itemId to (km, days); null = catalog default. */
+    fun customIntervals(): Map<String, Pair<Double?, Int?>> =
+        prefs.getString("custom_intervals", null)?.split('\n')?.filter { it.isNotBlank() }?.mapNotNull { line ->
+            val p = line.split('|')
+            if (p.size != 3) null else Triple(p[0], p[1].toDoubleOrNull(), p[2].toIntOrNull())
+        }?.associate { it.first to (it.second to it.third) } ?: emptyMap()
+
+    fun setCustomInterval(itemId: String, km: Double?, days: Int?) {
+        val map = customIntervals().toMutableMap()
+        map[itemId] = km to days
+        prefs.edit().putString(
+            "custom_intervals",
+            map.entries.joinToString("\n") { "${it.key}|${it.value.first ?: "-"}|${it.value.second ?: "-"}" }
+        ).apply()
+    }
+
+    fun clearCustomInterval(itemId: String) {
+        val map = customIntervals().toMutableMap()
+        map.remove(itemId)
+        prefs.edit().putString(
+            "custom_intervals",
+            map.entries.joinToString("\n") { "${it.key}|${it.value.first ?: "-"}|${it.value.second ?: "-"}" }
+        ).apply()
+    }
+
+    /** Dusty roads, short trips, hot climate: scale every interval down by 25% (VW severe service). */
+    fun severeConditions(): Boolean = prefs.getBoolean("severe_conditions", false)
+
+    fun setSevereConditions(on: Boolean) = prefs.edit().putBoolean("severe_conditions", on).apply()
+
+    fun dueStates(nowMs: Long = System.currentTimeMillis()): List<MaintenanceCatalog.DueState> {
+        val lastMap = lastPerItem()
+        val odo = currentOdometerKm()
+        val overrides = customIntervals()
+        val factor = if (severeConditions()) 0.75 else 1.0
+        return MaintenanceCatalog.KYLAQ_ITEMS.map { item ->
+            val override = overrides[item.id]
+            val effective = item.copy(
+                intervalKm = (override?.first ?: item.intervalKm) * factor,
+                intervalDays = (((override?.second ?: item.intervalDays) * factor).toInt())
+            )
+            MaintenanceCatalog.evaluate(effective, lastMap[item.id], odo, nowMs)
+        }
+    }
+
+    private fun encode(l: MaintenanceCatalog.ServiceLog): String = listOf(
+        "s1", l.itemId, l.dateUtc, l.dateMs.toString(),
+        l.odometerKm?.let { String.format(java.util.Locale.US, "%.1f", it) } ?: "-",
+        l.cost?.let { String.format(java.util.Locale.US, "%.2f", it) } ?: "-",
+        l.rating?.toString() ?: "-",
+        l.notes.replace("|", "/").replace("\n", " ").trim().take(140)
+    ).joinToString("|")
+
+    private fun decode(line: String): MaintenanceCatalog.ServiceLog? {
+        val p = line.split('|')
+        // 6 fields = v1 logs (rating/notes added later); tolerate both.
+        if (p.size < 6 || p.size > 8 || p[0] != "s1") return null
+        return try {
+            MaintenanceCatalog.ServiceLog(
+                itemId = p[1],
+                dateUtc = p[2],
+                dateMs = p[3].toLong(),
+                odometerKm = p[4].toDoubleOrNull(),
+                cost = p[5].toDoubleOrNull(),
+                rating = p.getOrNull(6)?.toIntOrNull(),
+                notes = p.getOrNull(7) ?: ""
+            )
+        } catch (e: NumberFormatException) {
+            null
+        }
+    }
+}

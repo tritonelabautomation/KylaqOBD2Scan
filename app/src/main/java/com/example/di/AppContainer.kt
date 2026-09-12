@@ -2,6 +2,12 @@ package com.example.di
 
 import android.content.Context
 import com.example.bluetooth.BluetoothManager
+import com.example.data.DocumentRepository
+import com.example.data.ExpenseRepository
+import com.example.data.FuelLogRepository
+import com.example.data.ReminderRepository
+import com.example.data.TripPlanRepository
+import com.example.data.MaintenanceRepository
 import com.example.data.GpsManager
 import com.example.data.RawLogManager
 import com.example.data.RecordingManager
@@ -32,6 +38,12 @@ object AppContainer {
     lateinit var pidDiscoveryService: com.example.discovery.PidDiscoveryService
     lateinit var cloudBackupManager: com.example.backup.CloudBackupManager
     lateinit var catalogRepository: CatalogRepository
+    lateinit var fuelLogRepository: FuelLogRepository
+    lateinit var maintenanceRepository: MaintenanceRepository
+    lateinit var expenseRepository: ExpenseRepository
+    lateinit var documentRepository: DocumentRepository
+    lateinit var reminderRepository: ReminderRepository
+    lateinit var tripPlanRepository: TripPlanRepository
     
     fun init(context: Context) {
         if (isInitialized) return
@@ -55,6 +67,12 @@ object AppContainer {
             obdScheduler = ObdScheduler(recordingManager, settingsRepository)
             pidDiscoveryService = com.example.discovery.PidDiscoveryService(obdScheduler.capabilityManager)
             cloudBackupManager = com.example.backup.CloudBackupManager(appContext, settingsRepository, recordingManager)
+            fuelLogRepository = FuelLogRepository(appContext)
+            maintenanceRepository = MaintenanceRepository(appContext)
+            expenseRepository = ExpenseRepository(appContext)
+            documentRepository = DocumentRepository(appContext)
+            reminderRepository = ReminderRepository(appContext)
+            tripPlanRepository = TripPlanRepository(appContext)
             isInitialized = true
         }
     }

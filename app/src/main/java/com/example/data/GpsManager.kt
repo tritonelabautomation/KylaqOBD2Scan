@@ -72,9 +72,8 @@ class GpsManager(private val context: Context) : LocationListener {
     }
 
     override fun onLocationChanged(location: Location) {
-        if (lastLocation != null) {
-            totalDistance += lastLocation!!.distanceTo(location)
-        }
+        // QA fix: !! on a mutable property is a race-prone crash class; ?.let is equivalent and safe.
+        lastLocation?.let { totalDistance += it.distanceTo(location) }
         lastLocation = location
 
         _gpsData.value = GpsData(

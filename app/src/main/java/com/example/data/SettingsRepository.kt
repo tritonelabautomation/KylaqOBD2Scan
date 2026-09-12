@@ -67,6 +67,129 @@ class SettingsRepository(private val context: Context) {
         _lastBackupTimestamp.value = timestamp
     }
 
+    /**
+     * OAuth 2.0 **Web application** client ID used by Google Sign-In (Credential Manager).
+     *
+     * Stored on-device so sign-in can be configured without rebuilding the app: the value
+     * committed in `res/values/strings.xml` is a placeholder, and Google Play services
+     * rejects any request whose `serverClientId` is not registered for this exact package
+     * name + signing SHA-1 (ApiException 10 / DEVELOPER_ERROR).
+     */
+    private val _googleWebClientId = MutableStateFlow(prefs.getString("google_web_client_id", null))
+    val googleWebClientId: StateFlow<String?> = _googleWebClientId.asStateFlow()
+
+    /** Display name of the signed-in Google account (null when signed out). */
+    private val _googleAccountName = MutableStateFlow(prefs.getString("google_account_name", null))
+    val googleAccountName: StateFlow<String?> = _googleAccountName.asStateFlow()
+
+    fun setGoogleWebClientId(clientId: String?) {
+        val clean = clientId?.trim()?.takeIf { it.isNotEmpty() }
+        if (clean != null) {
+            prefs.edit().putString("google_web_client_id", clean).apply()
+        } else {
+            prefs.edit().remove("google_web_client_id").apply()
+        }
+        _googleWebClientId.value = clean
+    }
+
+    private val _defaultBtAddress = MutableStateFlow(prefs.getString("default_bt_address", null))
+    val defaultBtAddress: StateFlow<String?> = _defaultBtAddress.asStateFlow()
+
+    private val _autoConnect = MutableStateFlow(prefs.getBoolean("auto_connect_adapter", true))
+    val autoConnect: StateFlow<Boolean> = _autoConnect.asStateFlow()
+
+    private val _autoRecord = MutableStateFlow(prefs.getBoolean("auto_record_on_start", true))
+    val autoRecord: StateFlow<Boolean> = _autoRecord.asStateFlow()
+
+    /** The adapter auto-connect and both supervisors should use; null = pick by name. */
+    fun setDefaultBtAddress(address: String?) {
+        prefs.edit().putString("default_bt_address", address).apply()
+        _defaultBtAddress.value = address
+    }
+
+    fun setAutoConnect(enabled: Boolean) {
+        prefs.edit().putBoolean("auto_connect_adapter", enabled).apply()
+        _autoConnect.value = enabled
+    }
+
+    fun setAutoRecord(enabled: Boolean) {
+        prefs.edit().putBoolean("auto_record_on_start", enabled).apply()
+        _autoRecord.value = enabled
+    }
+
+    private val _midDisplayKmL = MutableStateFlow(
+        if (prefs.contains("mid_display_km_l")) prefs.getFloat("mid_display_km_l", 0f).toDouble() else null
+    )
+    val midDisplayKmL: StateFlow<Double?> = _midDisplayKmL.asStateFlow()
+
+    /** What the instrument cluster (MID/MFA) showed for the trip, for the About comparison. */
+    fun setMidDisplayKmL(value: Double?) {
+        val editor = prefs.edit()
+        if (value == null) editor.remove("mid_display_km_l") else editor.putFloat("mid_display_km_l", value.toFloat())
+        editor.apply()
+        _midDisplayKmL.value = value
+    }
+
+    // ---- AC & climate behaviour prefs (additive 2026-09-09) ----
+    private val _acSetTempC = MutableStateFlow(prefs.getFloat("ac_set_temp_c", 24f).toDouble())
+    val acSetTempC: StateFlow<Double> = _acSetTempC.asStateFlow()
+
+    fun setAcSetTempC(value: Double) {
+        prefs.edit().putFloat("ac_set_temp_c", value.toFloat()).apply()
+        _acSetTempC.value = value
+    }
+
+    private val _acAutoMode = MutableStateFlow(prefs.getBoolean("ac_auto_mode", false))
+    val acAutoMode: StateFlow<Boolean> = _acAutoMode.asStateFlow()
+
+    // ---- Fuelio-parity backup prefs (additive 2026-09-09) ----
+    private val _backupShowNotification = MutableStateFlow(prefs.getBoolean("backup_show_notification", true))
+    val backupShowNotification: StateFlow<Boolean> = _backupShowNotification.asStateFlow()
+
+    fun setBackupShowNotification(enabled: Boolean) {
+        prefs.edit().putBoolean("backup_show_notification", enabled).apply()
+        _backupShowNotification.value = enabled
+    }
+
+    private val _backupWifiOnly = MutableStateFlow(prefs.getBoolean("backup_wifi_only", false))
+    val backupWifiOnly: StateFlow<Boolean> = _backupWifiOnly.asStateFlow()
+
+    fun setBackupWifiOnly(enabled: Boolean) {
+        prefs.edit().putBoolean("backup_wifi_only", enabled).apply()
+        _backupWifiOnly.value = enabled
+    }
+
+    private val _backupDaily = MutableStateFlow(prefs.getBoolean("backup_daily", false))
+    val backupDaily: StateFlow<Boolean> = _backupDaily.asStateFlow()
+
+    private val _accent = MutableStateFlow(prefs.getString("accent_theme", "CYBER") ?: "CYBER")
+    val accent: StateFlow<String> = _accent.asStateFlow()
+
+    fun setAccent(name: String) {
+        prefs.edit().putString("accent_theme", name).apply()
+        _accent.value = name
+    }
+
+    fun setBackupDaily(enabled: Boolean) {
+        prefs.edit().putBoolean("backup_daily", enabled).apply()
+        _backupDaily.value = enabled
+    }
+
+    fun setAcAutoMode(enabled: Boolean) {
+        prefs.edit().putBoolean("ac_auto_mode", enabled).apply()
+        _acAutoMode.value = enabled
+    }
+
+    fun setGoogleAccountName(name: String?) {
+        if (!name.isNullOrBlank()) {
+            prefs.edit().putString("google_account_name", name.trim()).apply()
+            _googleAccountName.value = name.trim()
+        } else {
+            prefs.edit().remove("google_account_name").apply()
+            _googleAccountName.value = null
+        }
+    }
+
     private fun loadPollingMode(): PollingSpeedMode {
         val name = prefs.getString("polling_mode", PollingSpeedMode.NORMAL.name)
         return try {
@@ -111,6 +234,38 @@ class SettingsRepository(private val context: Context) {
         _initCommands.value = commands
     }
 
+    /**
+     * Resolves a stored decoder type, falling back to the shipped default for that PID.
+     *
+     * FIX: `DecoderType.valueOf()` throws on any unknown/renamed value, and because the
+     * whole load runs inside one try/catch a single corrupt entry used to discard every
+     * user PID customisation.
+     */
+    private fun parseDecoderType(stored: String, pidId: String): com.example.model.DecoderType {
+        if (stored.isNotBlank()) {
+            try {
+                return com.example.model.DecoderType.valueOf(stored)
+            } catch (_: IllegalArgumentException) {
+                // fall through to the shipped default
+            }
+        }
+        return DefaultPidDefinitions.getDefaults().firstOrNull { it.id == pidId }?.decoderType
+            ?: com.example.model.DecoderType.RESEARCH_RAW
+    }
+
+    /** Resolves a stored polling priority, falling back to the shipped default for that PID. */
+    private fun parsePriority(stored: String, pidId: String): com.example.model.PollingPriority {
+        if (stored.isNotBlank()) {
+            try {
+                return com.example.model.PollingPriority.valueOf(stored)
+            } catch (_: IllegalArgumentException) {
+                // fall through to the shipped default
+            }
+        }
+        return DefaultPidDefinitions.getDefaults().firstOrNull { it.id == pidId }?.priority
+            ?: com.example.model.PollingPriority.MEDIUM
+    }
+
     private fun loadPidDefinitions(): List<PidDefinition> {
         val jsonStr = prefs.getString("pid_definitions_json", null)
         if (jsonStr == null) {
@@ -134,10 +289,15 @@ class SettingsRepository(private val context: Context) {
                         expectedRxId = obj.optString("expectedRxId", "7E8"),
                         defaultIntervalMs = obj.optLong("defaultIntervalMs", 500L),
                         enabled = obj.optBoolean("enabled", true),
-                        decoderType = com.example.model.DecoderType.valueOf(obj.optString("decoderType", "RESEARCH_RAW")),
+                        decoderType = parseDecoderType(obj.optString("decoderType", ""), obj.optString("id")),
                         formulaDisplay = obj.optString("formulaDisplay", ""),
                         isResearch = obj.optBoolean("isResearch", false),
-                        description = obj.optString("description", "")
+                        description = obj.optString("description", ""),
+                        // FIX: polling priority was never persisted, so every saved PID came
+                        // back as MEDIUM and the scheduler lost its FAST-first ordering after
+                        // the first settings write (RPM/speed then refreshed as slowly as the
+                        // 5 s research PIDs).
+                        priority = parsePriority(obj.optString("priority", ""), obj.optString("id"))
                     )
                 )
             }
@@ -174,6 +334,7 @@ class SettingsRepository(private val context: Context) {
                     put("formulaDisplay", pid.formulaDisplay)
                     put("isResearch", pid.isResearch)
                     put("description", pid.description)
+                    put("priority", pid.priority.name)
                 }
                 arr.put(obj)
             }
@@ -193,5 +354,101 @@ class SettingsRepository(private val context: Context) {
     fun resetPidDefaults() {
         val defaults = DefaultPidDefinitions.getDefaults()
         savePidDefinitions(defaults)
+    }
+
+    // ---------------------------------------------------------------------
+    // Durable drive-insight logs. Coasting behaviour + mileage and closed
+    // fuel-tank segments are appended when a recording ends (see
+    // analysis/DriveInsightsStore.kt) so they survive app restarts.
+    // ---------------------------------------------------------------------
+
+    fun appendCoastLog(encoded: String) = appendInsightLog("drive_coast_log", encoded, 100)
+
+    fun readCoastLog(): List<String> = readInsightLog("drive_coast_log")
+
+    fun appendTankLog(encoded: String) = appendInsightLog("drive_tank_log", encoded, 60)
+
+    fun appendRideLog(encoded: String) = appendInsightLog("ride_log", encoded, 80)
+
+    fun readRideLog(): List<String> = readInsightLog("ride_log")
+
+    fun readTankLog(): List<String> = readInsightLog("drive_tank_log")
+
+    private fun appendInsightLog(key: String, encoded: String, maxEntries: Int) {
+        val existing = prefs.getString(key, null)
+        val lines = if (existing.isNullOrBlank()) mutableListOf() else existing.split('\n').toMutableList()
+        lines.add(0, encoded)
+        while (lines.size > maxEntries) lines.removeAt(lines.size - 1)
+        prefs.edit().putString(key, lines.joinToString("\n")).apply()
+    }
+
+    private fun readInsightLog(key: String): List<String> =
+        prefs.getString(key, null)?.split('\n')?.filter { it.isNotBlank() } ?: emptyList()
+
+    private val _remindersEnabled = MutableStateFlow(prefs.getBoolean("reminders_enabled", true))
+    val remindersEnabled: StateFlow<Boolean> = _remindersEnabled.asStateFlow()
+
+    fun setRemindersEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean("reminders_enabled", enabled).apply()
+        _remindersEnabled.value = enabled
+    }
+
+    private val _businessUsePct = MutableStateFlow(prefs.getInt("business_use_pct", 0))
+    val businessUsePct: StateFlow<Int> = _businessUsePct.asStateFlow()
+
+    /** Tax method "Actual Costs x business-use %": share of running costs claimed for work. */
+    fun setBusinessUsePct(pct: Int) {
+        prefs.edit().putInt("business_use_pct", pct.coerceIn(0, 100)).apply()
+        _businessUsePct.value = pct.coerceIn(0, 100)
+    }
+
+    private val _weeklyCheckIn = MutableStateFlow(prefs.getBoolean("weekly_check_in", true))
+    val weeklyCheckInEnabled: StateFlow<Boolean> = _weeklyCheckIn.asStateFlow()
+
+    fun setWeeklyCheckIn(enabled: Boolean) {
+        prefs.edit().putBoolean("weekly_check_in", enabled).apply()
+        _weeklyCheckIn.value = enabled
+    }
+
+    fun lastCheckInNotifiedMs(): Long = prefs.getLong("last_checkin_notified", 0L)
+
+    fun setLastCheckInNotifiedMs(ms: Long) = prefs.edit().putLong("last_checkin_notified", ms).apply()
+
+    private val _appearanceMode = MutableStateFlow(prefs.getString("appearance_mode", "DARK") ?: "DARK")
+    val appearanceMode: StateFlow<String> = _appearanceMode.asStateFlow()
+
+    fun setAppearanceMode(mode: String) {
+        prefs.edit().putString("appearance_mode", mode).apply()
+        _appearanceMode.value = mode
+    }
+
+    private val _unitsMetric = MutableStateFlow(prefs.getBoolean("units_metric", true))
+    val unitsMetric: StateFlow<Boolean> = _unitsMetric.asStateFlow()
+
+    fun setUnitsMetric(metric: Boolean) {
+        prefs.edit().putBoolean("units_metric", metric).apply()
+        _unitsMetric.value = metric
+    }
+
+    private val _currencySymbol = MutableStateFlow(prefs.getString("currency_symbol", "\u20B9") ?: "\u20B9")
+    val currencySymbol: StateFlow<String> = _currencySymbol.asStateFlow()
+
+    fun setCurrencySymbol(symbol: String) {
+        prefs.edit().putString("currency_symbol", symbol).apply()
+        _currencySymbol.value = symbol
+    }
+
+    fun monthlyBudget(): Double? = prefs.getString("monthly_budget", null)?.toDoubleOrNull()
+
+    fun setMonthlyBudget(amount: Double) =
+        prefs.edit().putString("monthly_budget", String.format(java.util.Locale.US, "%.2f", amount)).apply()
+
+    /** Persisted SAF tree URI of the chosen Google Drive backup folder (null = not linked). */
+    fun driveTreeUri(): String? = prefs.getString("drive_tree_uri", null)
+
+    fun setDriveTreeUri(uri: String?) {
+        prefs.edit().apply {
+            if (uri == null) remove("drive_tree_uri") else putString("drive_tree_uri", uri)
+        }.apply()
     }
 }

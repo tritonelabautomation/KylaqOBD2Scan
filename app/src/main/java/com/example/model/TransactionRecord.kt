@@ -30,7 +30,13 @@ enum class ResponseStatus {
      * UNKNOWN (which implies an unrecognized status from the ELM327). Carries the
      * safety reason in the transaction record's errorMessage field.
      */
-    BLOCKED
+    BLOCKED,
+    /**
+     * The frame answered a *different* PID than the one requested — i.e. a late or
+     * unsolicited response for an earlier request. Recorded for diagnostics but never
+     * used for telemetry or capability promotion (see ObdScheduler).
+     */
+    IGNORED_LATE_FRAME
 }
 
 /**

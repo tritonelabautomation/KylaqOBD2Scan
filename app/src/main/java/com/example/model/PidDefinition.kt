@@ -64,7 +64,37 @@ data class PidDefinition(
     val dataBytes: Int = 1,
     val supported: Boolean = false,
     val decoder: String = decoderType.name
-)
+) {
+    /** Service acknowledgement byte of a positive response (service 0x01 -> 0x41). */
+    val ackByte: Int? get() = service.trim().toIntOrNull(16)?.or(0x40)
+
+    /** Numeric value of the requested [pid] (hex), or null when the request has no PID byte. */
+    val pidValue: Int? get() = pid.trim().toIntOrNull(16)
+
+    /**
+     * True when [responseBytes] is a positive mode-01 response that echoes a *different*
+     * PID than the one this definition requests.
+     *
+     * Why this matters: the ELM327 can deliver the answer to the previous request while the
+     * current one is still being read. The Kylaq reference trace shows coolant frames
+     * (`7E90341056F`, `7E80341056F`) landing inside a `010C` read window. Decoding those as
+     * RPM yields INVALID_RESPONSE, which — if published — overwrites the good sample for
+     * that ECU and blanks the dashboard. Callers must log and skip such frames instead of
+     * feeding them to telemetry or capability promotion.
+     *
+     * Deliberately restricted to service 01: DTC (03/07) and VIN (09) responses do not echo
+     * a PID in byte 2, so the comparison would misfire there.
+     */
+    fun isLateFrameForOtherPid(responseBytes: List<Int>): Boolean {
+        if (service.trim().uppercase() != "01") return false
+        val requested = pidValue ?: return false
+        val ack = ackByte ?: return false
+        val frameService = responseBytes.firstOrNull() ?: return false
+        val framePid = responseBytes.getOrNull(1) ?: return false
+        if (frameService != ack) return false
+        return framePid != requested
+    }
+}
 
 object DefaultPidDefinitions {
     fun getDefaults(): List<PidDefinition> {
