@@ -239,6 +239,15 @@ private fun TripOverviewView(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
+            // Replicated OBDeleven trip-detail cards (owner reference screen 2, 2026-09-13)
+            TrackerSummaryCards(
+                summary = fuelSummary,
+                pricePerL = viewModel.fuelLogRepository.entries().maxByOrNull { it.idMs }?.pricePerL ?: 0.0,
+                speedPoints = samples.filter { it.pid.takeLast(2) == "0D" }
+                    .map { it.timestamp to (it.numericValue ?: 0.0) }
+            )
+        }
+        item {
             // Health Badge Card
             Surface(
                 modifier = Modifier.fillMaxWidth(),

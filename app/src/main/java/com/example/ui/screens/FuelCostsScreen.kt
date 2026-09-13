@@ -1,9 +1,12 @@
 package com.example.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -48,6 +51,7 @@ fun FuelCostsScreen(
     val entries = remember(refresh) { repo.entries() }
     val stats = remember(refresh) { repo.stats() }
     var showAdd by remember { mutableStateOf(false) }
+    var editTarget by remember { mutableStateOf<FuelLogCodec.FuelEntry?>(null) }
     val cur by viewModel.settingsRepository.currencySymbol.collectAsState()
 
     LaunchedEffect(Unit) { if (viewModel.takeQuickAdd("fuel")) showAdd = true }
@@ -55,7 +59,7 @@ fun FuelCostsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Fuel & Costs", fontWeight = FontWeight.Bold) },
+                title = { Text("Fuel expense tracker", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = CyberCyan)
@@ -77,6 +81,95 @@ fun FuelCostsScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = PaddingValues(vertical = 12.dp)
         ) {
+            // ── REPLICATED from owner reference screen 3 (OBDeleven Fuel expense tracker) ──
+            item {
+                Column(Modifier.fillMaxWidth().background(Color(0xFF1C1C1E), RoundedCornerShape(14.dp)).padding(14.dp)) {
+                    Text("Overview", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(12.dp))
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.LocalGasStation, null, tint = Color(0xFF8E8E93), modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(10.dp))
+                            Column {
+                                Text("%.1f l".format(entries.sumOf { it.liters }), color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                                Text("Total fuel amount", color = Color(0xFF8E8E93), fontSize = 10.sp)
+                            }
+                        }
+                        Box(Modifier.width(1.dp).height(34.dp).background(Color(0xFF2C2C2E)))
+                        Row(Modifier.weight(1f).padding(start = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.AccountBalanceWallet, null, tint = Color(0xFF8E8E93), modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(10.dp))
+                            Column {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("%.2f".format(entries.sumOf { it.liters * it.pricePerL }), color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                                    Spacer(Modifier.width(4.dp))
+                                    Icon(Icons.Default.Payments, null, tint = Color(0xFF8E8E93), modifier = Modifier.size(12.dp))
+                                }
+                                Text("Total spent", color = Color(0xFF8E8E93), fontSize = 10.sp)
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(14.dp))
+                    Button(
+                        onClick = { editTarget = null; showAdd = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0A84FF))
+                    ) {
+                        Text("Add fuel expense", color = Color.White, fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.width(6.dp))
+                        Icon(Icons.Default.Add, null, tint = Color.White, modifier = Modifier.size(16.dp))
+                    }
+                }
+            }
+            item { Text("Log history", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 6.dp)) }
+            entries.sortedByDescending { it.idMs }.forEach { entry ->
+                item {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(10.dp).border(1.5.dp, Color(0xFF636366), CircleShape))
+                        Spacer(Modifier.width(8.dp))
+                        Text(relativeLabel(entry.idMs), color = Color(0xFF8E8E93), fontSize = 11.sp, modifier = Modifier.weight(1f))
+                        Text(SimpleDateFormat("MMM d, HH:mm", Locale.US).format(Date(entry.idMs)), color = Color(0xFF8E8E93), fontSize = 11.sp)
+                    }
+                    Row(Modifier.padding(start = 4.dp, top = 6.dp, bottom = 10.dp)) {
+                        Box(Modifier.width(1.dp).height(92.dp).background(Color(0xFF2C2C2E)))
+                        Spacer(Modifier.width(14.dp))
+                        Column(Modifier.weight(1f).background(Color(0xFF1C1C1E), RoundedCornerShape(14.dp)).padding(12.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.LocalGasStation, null, tint = Color(0xFF8E8E93), modifier = Modifier.size(14.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    entry.odometerKm?.let { java.text.DecimalFormat("#,###").format(it) + " km" }
+                                        ?: "odometer not logged",
+                                    color = Color.White, fontSize = 13.sp
+                                )
+                            }
+                            Spacer(Modifier.height(10.dp))
+                            Row {
+                                Column(Modifier.weight(1f)) {
+                                    Text("%.1f l".format(entry.liters), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                    Text("Amount", color = Color(0xFF8E8E93), fontSize = 10.sp)
+                                }
+                                Column(Modifier.weight(1f)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text("%.2f".format(entry.liters * entry.pricePerL), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                        Spacer(Modifier.width(4.dp))
+                                        Icon(Icons.Default.Payments, null, tint = Color(0xFF8E8E93), modifier = Modifier.size(12.dp))
+                                    }
+                                    Text("Price", color = Color(0xFF8E8E93), fontSize = 10.sp)
+                                }
+                            }
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Box(
+                            Modifier.size(40.dp).background(Color(0xFF2C2C2E), RoundedCornerShape(10.dp))
+                                .clickable { editTarget = entry; showAdd = true },
+                            contentAlignment = Alignment.Center
+                        ) { Icon(Icons.Default.Edit, "Edit entry", tint = Color.White, modifier = Modifier.size(16.dp)) }
+                    }
+                }
+            }
+            item { Text("MORE ANALYTICS (Kylaq extras)", color = TextSecondaryDark, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 6.dp)) }
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FuelStatChip("AVG", stats.avgKmPerL?.let { String.format("%.1f km/L", it) } ?: "--", NeonEmerald, Modifier.weight(1f))
@@ -252,7 +345,8 @@ fun FuelCostsScreen(
 
     if (showAdd) {
         RefuelDialog(
-            onDismiss = { showAdd = false },
+            onDismiss = { showAdd = false; editTarget = null },
+            editEntry = editTarget,
             recentStations = entries.map { it.station }.filter { it.isNotBlank() }.distinct().take(4),
             onSave = { liters, price, odo, station, grade, note, partial, dateStr, timeStr ->
                 val cal = java.util.Calendar.getInstance()
@@ -263,6 +357,7 @@ fun FuelCostsScreen(
                         (dp[1].toIntOrNull() ?: 1) - 1, dp[2].toIntOrNull() ?: 1,
                         tp[0].toIntOrNull() ?: 12, tp[1].toIntOrNull() ?: 0, 0)
                 }
+                editTarget?.let { repo.delete(it.idMs) }
                 val ms = cal.timeInMillis
                 val utc = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
                     .apply { timeZone = TimeZone.getTimeZone("UTC") }
@@ -279,8 +374,21 @@ fun FuelCostsScreen(
                 odo?.let { viewModel.maintenanceRepository.setCurrentOdometerKm(it) }
                 refresh++
                 showAdd = false
+                editTarget = null
             }
         )
+    }
+}
+
+/** "2 days ago / A week ago / 3 weeks ago" like the reference timeline. */
+private fun relativeLabel(idMs: Long): String {
+    val days = ((System.currentTimeMillis() - idMs) / 86_400_000L).toInt()
+    return when {
+        days <= 0 -> "Today"
+        days == 1 -> "1 day ago"
+        days < 7 -> "$days days ago"
+        days < 14 -> "A week ago"
+        else -> "${days / 7} weeks ago"
     }
 }
 
@@ -307,6 +415,7 @@ private fun FuelStatChip(label: String, value: String, color: Color, modifier: M
 @Composable
 private fun RefuelDialog(
     onDismiss: () -> Unit,
+    editEntry: FuelLogCodec.FuelEntry? = null,
     recentStations: List<String>,
     onSave: (Double, Double, Double?, String, String, String, Boolean, String, String) -> Unit
 ) {
@@ -328,6 +437,24 @@ private fun RefuelDialog(
             nowCal.get(java.util.Calendar.HOUR_OF_DAY), nowCal.get(java.util.Calendar.MINUTE)))
     }
     val grades = listOf(FuelLogCodec.GRADE_UNKNOWN, FuelLogCodec.GRADE_X95, FuelLogCodec.GRADE_REGULAR)
+
+    LaunchedEffect(editEntry) {
+        editEntry?.let { e ->
+            liters = String.format(Locale.US, "%.2f", e.liters)
+            price = String.format(Locale.US, "%.2f", e.pricePerL)
+            total = String.format(Locale.US, "%.2f", e.liters * e.pricePerL)
+            odo = e.odometerKm?.let { String.format(Locale.US, "%.0f", it) } ?: ""
+            station = e.station
+            grade = e.grade
+            note = e.note
+            partial = e.partial
+            val local = SimpleDateFormat("yyyy-MM-dd'T'HH:mm", Locale.US)
+                .apply { timeZone = TimeZone.getDefault() }.format(Date(e.idMs))
+            val parts = local.split('T')
+            dateStr = parts[0]
+            timeStr = parts.getOrNull(1) ?: "12:00"
+        }
+    }
 
     // VehIQ's receipt scanner, free: pick a receipt photo, Gemini extracts litres/price/station
     // and prefills the form. Disabled (with a hint) when no API key is configured.
@@ -367,7 +494,7 @@ private fun RefuelDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Log a refuel") },
+        title = { Text(if (editEntry != null) "Edit refuel" else "Log a refuel") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 // VehIQ "Adding Fuel": fill any two of litres / price / total - the third computes.
