@@ -20,14 +20,16 @@ object ChartSampling {
      */
     fun <T> downsample(values: List<T>, maxPoints: Int): List<T> {
         if (maxPoints < 3 || values.size <= maxPoints) return values
+        // Integer index math on purpose: a float-stride loop (`i += stride`) can
+        // squeeze one extra sample past the budget at fp rounding edges (CI caught
+        // 601 > 600 on 5000 inputs). This form yields EXACTLY maxPoints strictly
+        // increasing indices, always including the first and the last sample.
         val out = ArrayList<T>(maxPoints)
-        val stride = (values.size - 1).toDouble() / (maxPoints - 1)
-        var i = 0.0
-        while (i < values.size - 1.0) {
-            out += values[i.toInt()]
-            i += stride
+        val last = values.size - 1
+        for (k in 0 until maxPoints - 1) {
+            out += values[(k * last) / (maxPoints - 1)]
         }
-        out += values.last()
+        out += values[last]
         return out
     }
 }
