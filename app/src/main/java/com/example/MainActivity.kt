@@ -94,6 +94,7 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector)
     object Reports : Screen("reports", "Reports", Icons.Default.QueryStats)
     object CoachChat : Screen("coach_chat", "Coach Chat", Icons.Default.Chat)
     object Trips : Screen("trips", "Trip Planner", Icons.Default.Map)
+    object TripsOverview : Screen("trip_overview", "Trip Overview", Icons.Default.CalendarMonth)
     object Settings : Screen("settings", "Settings", Icons.Default.Settings)
     object About : Screen("about", "About & Fuel Guide", Icons.Default.Info)
 }
@@ -229,7 +230,7 @@ fun MainApp(viewModel: MainViewModel) {
     }
     val drawerItems = bottomNavItems + listOf(
         Screen.FuelCosts, Screen.FuelSavings, Screen.Maintenance, Screen.Expenses, Screen.Reports,
-        Screen.CoachChat, Screen.Trips, Screen.Reminders, Screen.Documents, Screen.DriveBackup,
+        Screen.CoachChat, Screen.Trips, Screen.TripsOverview, Screen.Reminders, Screen.Documents, Screen.DriveBackup,
         Screen.PidScanner, Screen.CodingLab, Screen.RevTheater, Screen.Settings, Screen.About
     )
     val mainTabRoutes = bottomNavItems.map { it.route }.toSet()
@@ -617,6 +618,13 @@ fun MainApp(viewModel: MainViewModel) {
                 FuelCostsScreen(
                     viewModel = viewModel,
                     onBack = { navController.popBackStack() }
+                )
+            }
+            composable(Screen.TripsOverview.route) {
+                TripsOverviewScreen(
+                    viewModel = viewModel,
+                    onBack = { navController.popBackStack() },
+                    onOpenTrip = { tripId -> navController.navigate("trip_detail/$tripId") }
                 )
             }
             composable(Screen.FuelSavings.route) {
