@@ -85,6 +85,7 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector)
     object RevTheater : Screen("rev_theater", "Rev Theater", Icons.Default.MusicNote)
     object Profiles : Screen("profiles", "Profiles", Icons.Default.VerifiedUser)
     object FuelCosts : Screen("fuel_costs", "Fuel & Costs", Icons.Default.LocalGasStation)
+    object FuelSavings : Screen("fuel_savings", "Save Fuel", Icons.Default.Savings)
     object Maintenance : Screen("maintenance", "Maintenance", Icons.Default.Build)
     object DriveBackup : Screen("drive_backup", "Drive Backup", Icons.Default.CloudUpload)
     object Expenses : Screen("expenses", "Expenses", Icons.Default.ReceiptLong)
@@ -227,7 +228,7 @@ fun MainApp(viewModel: MainViewModel) {
         )
     }
     val drawerItems = bottomNavItems + listOf(
-        Screen.FuelCosts, Screen.Maintenance, Screen.Expenses, Screen.Reports,
+        Screen.FuelCosts, Screen.FuelSavings, Screen.Maintenance, Screen.Expenses, Screen.Reports,
         Screen.CoachChat, Screen.Trips, Screen.Reminders, Screen.Documents, Screen.DriveBackup,
         Screen.PidScanner, Screen.CodingLab, Screen.RevTheater, Screen.Settings, Screen.About
     )
@@ -616,6 +617,15 @@ fun MainApp(viewModel: MainViewModel) {
                 FuelCostsScreen(
                     viewModel = viewModel,
                     onBack = { navController.popBackStack() }
+                )
+            }
+            composable(Screen.FuelSavings.route) {
+                FuelSavingsGuideScreen(
+                    viewModel = viewModel,
+                    onBack = { navController.popBackStack() },
+                    onOpenFuelCosts = { navController.navigate(Screen.FuelCosts.route) },
+                    onOpenDtc = { navController.navigate(Screen.DtcScanner.route) },
+                    onOpenMaintenance = { navController.navigate(Screen.Maintenance.route) }
                 )
             }
             composable(Screen.Maintenance.route) {
