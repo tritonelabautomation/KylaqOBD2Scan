@@ -40,6 +40,11 @@ fun TelemetryDashboardContent(
                 m[key4] = when (st) {
                     com.example.model.CapabilityStatus.NOT_SUPPORTED -> "NOT SUPPORTED BY ECU"
                     com.example.model.CapabilityStatus.TIMEOUT -> "no answer (timeout)"
+                    // QA/QC fuel audit 2026-09-13 (F-4): a VALIDATED pid whose live query hits a
+                    // transient NO_DATA / CAN error used to fall into the else branch and keep the
+                    // silent "Not available" - failure states must be loud (Batch-17 doctrine).
+                    com.example.model.CapabilityStatus.NO_DATA -> "no data from ECU"
+                    com.example.model.CapabilityStatus.CAN_ERROR -> "CAN bus error"
                     else -> cur ?: "probing..."
                 }
             }

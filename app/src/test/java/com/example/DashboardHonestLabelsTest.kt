@@ -29,6 +29,17 @@ class DashboardHonestLabelsTest {
     }
 
     @Test
+    fun `transient failure labels pass through verbatim and are not flagged as live error`() {
+        // QA/QC fuel audit 2026-09-13 (F-4): validated PIDs hitting transient NO_DATA /
+        // CAN_ERROR must show a loud reason instead of collapsing to silent "Not available".
+        val map = mapOf("015E" to "no data from ECU", "019D" to "CAN bus error")
+        assertEquals("no data from ECU", formatLiveValue(map, "015E"))
+        assertEquals("CAN bus error", formatLiveValue(map, "019D"))
+        assertFalse(isLiveError(map, "015E"))
+        assertFalse(isLiveError(map, "019D"))
+    }
+
+    @Test
     fun `probing and timeout labels pass through verbatim`() {
         assertEquals("probing...", formatLiveValue(mapOf("0144" to "probing..."), "0144"))
         assertEquals("no answer (timeout)", formatLiveValue(mapOf("0144" to "no answer (timeout)"), "0144"))

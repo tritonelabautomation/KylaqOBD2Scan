@@ -90,11 +90,23 @@ class DecoderRealWorldVerificationTest {
             listOf(0x41, 0x46, 0x41))
         assertEquals(25.0, r.numericValue!!, 0.01)
     }
-    // ─── 7. Fuel Rate (PID 0x9D) — ((A*256)+B)/20 ───────────────────
-    @Test fun fuelRate_419D00220022_decodes1_7() {
-        val r = PidDecoder.decode(pid("019D", DecoderType.FUEL_RATE_20),
+    // ─── 7. Fuel Rate MASS (PID 0x9D) — g/s = ((A*256)+B)/10 ────────
+    // QA/QC fuel audit 2026-09-13 (F-2): this test previously asserted /20 (the $5E volume
+    // formula) on $9D, locking the wrong decoder and masking the ProfileDefinitions bug.
+    // J1979 $9D = engine fuel rate MASS, g/s, 4 data bytes (A,B used; C,D reserved).
+    @Test fun fuelRateMass_419D00220022_decodes3_4gs() {
+        val r = PidDecoder.decode(pid("019D", DecoderType.FUEL_RATE_MASS_10),
             listOf(0x41, 0x9D, 0x00, 0x22, 0x00, 0x22))
+        assertEquals(3.4, r.numericValue!!, 0.01)
+        assertEquals("g/s", r.unit)
+    }
+
+    // ─── 7b. Fuel Rate VOLUME (PID 0x5E) — L/h = ((A*256)+B)/20 ──────
+    @Test fun fuelRateVolume_415E0022_decodes1_7lh() {
+        val r = PidDecoder.decode(pid("015E", DecoderType.FUEL_RATE_20),
+            listOf(0x41, 0x5E, 0x00, 0x22))
         assertEquals(1.7, r.numericValue!!, 0.01)
+        assertEquals("L/h", r.unit)
     }
 
     // ─── 8. Voltage (PID 0x42) — ((A*256)+B)/1000 ───────────────────
