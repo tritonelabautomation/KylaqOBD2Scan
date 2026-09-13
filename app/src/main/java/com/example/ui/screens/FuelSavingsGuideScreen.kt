@@ -140,7 +140,8 @@ fun FuelSavingsGuideScreen(
             // ── STEP 2: DRIVE SMOOTHLY ────────────────────────────────────────
             item {
                 GuideCard("2 · DRIVE SMOOTHLY — the 23 % lever", Icons.Default.SportsMartialArts) {
-                    Bullet("Speeding + aggressive driving burns up to 23 % more fuel than calm driving (transport-research literature).")
+                    Bullet("Aggressive driving burns 23 % more fuel than normal driving on curves - and up to 59 % more in stop-and-go work zones (Transportation Research Part D 126, 2024: naturalistic second-by-second data + Autonomie drive-cycle simulations).")
+                    Bullet("Everyday range from ORNL/SAE: 10-40 % worse mileage in stop-and-go traffic, 15-30 % at highway speeds - about $0.25-1 per gallon thrown away.")
                     Bullet("Every hard launch and every late brake throws away momentum you paid for in petrol.")
                     Bullet("The coffee-cup rule: drive like a full cup is on your dash. If passengers rock forward/back, your km/L is dropping.")
                     Bullet("Watch your own numbers: Insights scores acceleration/braking per ride; the trip fuel card shows litres burned per trip.")
