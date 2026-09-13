@@ -77,7 +77,13 @@ The in-app counterpart shipped as RED-by-default (`c271a47`).
    cluster firmware or simply *not offered/not ported* is only answerable empirically on the car.
 
 **Owner test plan (the only way to settle it):**
-1. OBDeleven NextGen device + **PRO/ULTIMATE** plan (SFD auto-unlock included; device ~₹8-10k, plan ~₹5k/yr).
+1. Get OBDeleven hardware + plan with SFD auto-unlock. India pricing snapshot 2026-09-13 (Amazon.in):
+   **NextGen Pro Pack ₹15,999** (coupon ₹15,679; drops to ~₹13k on sale) — PRO plan already includes
+   *Coding, Adaptations and SFD unlocking (VAG-only)*, which is everything this task needs.
+   **NextGen Ultimate Pack ₹25,999** (MRP ₹31,999) only adds One-Click-App credits — overkill here.
+   Cheaper alternatives: a Hyderabad VAG coder's remote/same-day session (codemyVAG ₹2-5k/feature,
+   +91 784 000 2005 — ask them point-blank whether they can write `17 → default_color` on Kylaq Sig+
+   with their SFD2 access), or a Kylaq/VAG owners-club member who already owns OBDeleven PRO.
 2. Ignition ON, engine OFF → Control Units → **17 (Dashboard/Instruments)** → Adaptation → search `color`.
 3. If `default_color` (or similar RGB channel) appears: **screenshot/backup the stock value first**, then write
    `{250,0,0}` (platform-proven GT Red) or `{230,0,0}` (codemyVAG's GT/Monte Carlo Red `#E60000`).
