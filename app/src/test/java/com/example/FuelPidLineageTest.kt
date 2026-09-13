@@ -131,4 +131,5 @@ class FuelPidLineageTest {
         val decoded = decode("019D", listOf(0x41, 0x9D, 0x00, 0x08)).numericValue!!
         assert(decoded / airFuelGs < 2.0) { "9D scale drifted from physics: ratio ${decoded / airFuelGs}" }
         assert(decoded * 5.0 / airFuelGs > 2.0) { "old /10 scale must stay rejected" }
+    }
 }
