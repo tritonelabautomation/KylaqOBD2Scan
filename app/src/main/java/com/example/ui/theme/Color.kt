@@ -10,7 +10,9 @@ import androidx.compose.ui.graphics.Color
  * AMBER) restyle every screen live - owner request 2026-09-09 ("MID red theme" wish,
  * implemented in-app; car-side coding is research-only, see docs/reference/vag-coding-research.md).
  */
-var CyberCyan by androidx.compose.runtime.mutableStateOf(Color(0xFF00E5FF))
+// Initial value is RED SPORT so the very first composed frame matches the
+// DEFAULT_ACCENT="RED" preference (no cyan flash before MainActivity's LaunchedEffect).
+var CyberCyan by androidx.compose.runtime.mutableStateOf(Color(0xFFFF2D3F))
 
 fun setAccentColor(c: Color) {
     CyberCyan = c

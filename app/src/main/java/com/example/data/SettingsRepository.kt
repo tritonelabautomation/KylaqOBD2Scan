@@ -18,6 +18,17 @@ enum class PollingSpeedMode(val displayName: String, val multiplier: Float, val 
 
 class SettingsRepository(private val context: Context) {
 
+    companion object {
+        /**
+         * Owner request 2026-09-12: "yes I want red theme on MID". The car's instrument
+         * cluster firmware exposes no colour-theme channel on Kylaq (see
+         * docs/reference/vag-coding-research.md), so the app's own telemetry face - the
+         * MID substitute on your phone/HUD - defaults to RED SPORT out of the box.
+         * Users who explicitly picked CYBER/AMBER keep their stored choice.
+         */
+        const val DEFAULT_ACCENT = "RED"
+    }
+
     private val prefs: SharedPreferences = context.getSharedPreferences("obd_research_prefs", Context.MODE_PRIVATE)
 
     private val _pollingMode = MutableStateFlow(loadPollingMode())
@@ -162,7 +173,7 @@ class SettingsRepository(private val context: Context) {
     private val _backupDaily = MutableStateFlow(prefs.getBoolean("backup_daily", false))
     val backupDaily: StateFlow<Boolean> = _backupDaily.asStateFlow()
 
-    private val _accent = MutableStateFlow(prefs.getString("accent_theme", "CYBER") ?: "CYBER")
+    private val _accent = MutableStateFlow(prefs.getString("accent_theme", DEFAULT_ACCENT) ?: DEFAULT_ACCENT)
     val accent: StateFlow<String> = _accent.asStateFlow()
 
     fun setAccent(name: String) {
