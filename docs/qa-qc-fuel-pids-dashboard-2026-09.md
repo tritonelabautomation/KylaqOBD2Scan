@@ -84,3 +84,31 @@ surfaces (Profiles test screen, one masking test, transient-failure labels) — 
 post-mortem predicted: nothing contradicted itself statically within a single file; the contradictions lived
 *between* files. The new cross-source agreement test (FuelPidLineageTest §1) makes that class CI-visible for
 every shared PID, not just fuel ones.
+
+---
+
+## Addendum 2026-09-13b — F-6: 0x9D resolution recalibrated against the REAL CAR (owner live telemetry)
+
+**Trigger:** 33 on-car screenshots (idle, coolant 49-65 °C, AC on/off) showed `Engine Fuel Rate
+(Mass) 0.80-1.40 "g/s"` and `Idle Fuel Rate 3.87-6.77 L/h` - physically impossible for a warm
+1.0 TSI (idle mechanical power would imply ~10 kW).
+
+**Cross-check (stoichiometric speed-density):** MAP 37 kPa, 978 rpm, IAT 30 °C, lambda 1.000 →
+air ≈ 2.6 g/s (VE 0.75) → fuel ≈ **0.15-0.19 g/s**. Observed raw counts 8-14 match this ONLY at
+**0.02 g/s per count (/50)** (≡ 0.1 L/h); the spec-mirror resolution /10 g/s is 4-5× off.
+Secondary mirrors are leads, the car is the oracle (standing rule).
+
+**Fix:** `FUEL_RATE_MASS_10` → `FUEL_RATE_MASS_50` (÷50) in PidDecoder + catalog + profile +
+simulator byte scale; guards: owner-idle-frame test (raw 8 → 0.16 g/s → 0.77 L/h), and a
+stoichiometric cross-check test locking the calibration ratio < 2× while rejecting the old scale.
+
+## Addendum 2026-09-13c — live-telemetry UX triage (same screenshot batch)
+
+| # | Observation | Verdict / action |
+|---|---|---|
+| T-1 | Bottom navigation bar visible on every screen (label even truncated "Dashboar d") | **FIXED** - bar removed; Batch-16 mandate is hamburger drawer only |
+| T-2 | FAB (+) covered the "Test Profile" button on the dashboard profile card | **FIXED** - verification row padded clear of the FAB zone |
+| T-3 | `Coolant Temp 2 (Radiator)` showed **-37 °C** (uninitialised raw) as a real number | **FIXED** - plausibility gates on TEMP_MINUS_40 / CATALYST_TEMP decoders: out-of-range raw → numeric null + "implausible raw - no data" (loud, per Batch-17) |
+| T-4 | 015E "NOT SUPPORTED BY ECU", 0161 not supported, gear "Not available / Not detected" at standstill, VIN flaky between connects | **CORRECT behaviour** - honest labels; gear at standstill IS N/P (Range row shows P/N); VIN re-read button present |
+| T-5 | GPS altitude live (465 m Hyderabad) but trip-detail altitude cells show honest "--" | **KNOWN gap** - altitude not persisted into telemetry samples; parked as additive follow-up (store GPSALT sample rows) |
+| T-6 | Intermittent "Not available" flicker on 0146/0133/0163 between polls | **ACCEPTED** - scheduler rotation + capability honesty; values return on next cycle |

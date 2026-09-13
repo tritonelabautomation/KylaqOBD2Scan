@@ -94,11 +94,22 @@ class DecoderRealWorldVerificationTest {
     // QA/QC fuel audit 2026-09-13 (F-2): this test previously asserted /20 (the $5E volume
     // formula) on $9D, locking the wrong decoder and masking the ProfileDefinitions bug.
     // J1979 $9D = engine fuel rate MASS, g/s, 4 data bytes (A,B used; C,D reserved).
-    @Test fun fuelRateMass_419D00220022_decodes3_4gs() {
-        val r = PidDecoder.decode(pid("019D", DecoderType.FUEL_RATE_MASS_10),
+    @Test fun fuelRateMass_419D00220022_decodes0_68gs() {
+        // F-6 (2026-09-13): resolution recalibrated to 0.02 g/s per count (/50) against owner
+        // live telemetry + stoichiometric air-model cross-check; /10 gave impossible idle L/h.
+        val r = PidDecoder.decode(pid("019D", DecoderType.FUEL_RATE_MASS_50),
             listOf(0x41, 0x9D, 0x00, 0x22, 0x00, 0x22))
-        assertEquals(3.4, r.numericValue!!, 0.01)
+        assertEquals(0.68, r.numericValue!!, 0.01)
         assertEquals("g/s", r.unit)
+    }
+
+    @Test fun fuelRateMass_ownerIdleFrame_419D0008_isPhysical() {
+        // Owner's real Kylaq idle frame equivalent (raw count 8): 0.16 g/s = 0.77 L/h warm idle.
+        val r = PidDecoder.decode(pid("019D", DecoderType.FUEL_RATE_MASS_50),
+            listOf(0x41, 0x9D, 0x00, 0x08))
+        assertEquals(0.16, r.numericValue!!, 0.001)
+        val lh = r.numericValue!! * 3600.0 / 745.0
+        assert(lh in 0.5..1.2) { "idle L/h implausible: $lh" }
     }
 
     // ─── 7b. Fuel Rate VOLUME (PID 0x5E) — L/h = ((A*256)+B)/20 ──────

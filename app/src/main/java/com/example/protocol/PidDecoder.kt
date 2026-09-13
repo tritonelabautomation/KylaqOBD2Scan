@@ -144,11 +144,15 @@ object PidDecoder {
             }
 
             DecoderType.TEMP_MINUS_40 -> {
-                val value = (a - 40).toDouble()
+                // Plausibility gate (2026-09-13, owner screenshot showed -37 C coolant-2):
+                // an uninitialised ECU raw must surface as NO DATA, never as a fake number.
+                val computed = (a - 40).toDouble()
+                val plausible = computed in -30.0..210.0
+                val value = if (plausible) computed else null
                 DecodedResult(
                     parameterName = pidDef.name,
                     numericValue = value,
-                    displayValue = String.format(Locale.US, "%.0f", value),
+                    displayValue = if (plausible) String.format(Locale.US, "%.0f", computed) else "implausible raw - no data",
                     unit = "°C",
                     rawPayloadHex = rawHex,
                     dataBytes = dataBytes,
@@ -274,11 +278,13 @@ object PidDecoder {
             }
 
             DecoderType.CATALYST_TEMP -> {
-                val value = (((a * 256.0) + b) / 10.0) - 40.0
+                val computed = (((a * 256.0) + b) / 10.0) - 40.0
+                val plausible = computed in -30.0..1200.0
+                val value = if (plausible) computed else null
                 DecodedResult(
                     parameterName = pidDef.name,
                     numericValue = value,
-                    displayValue = String.format(Locale.US, "%.1f", value),
+                    displayValue = if (plausible) String.format(Locale.US, "%.1f", computed) else "implausible raw - no data",
                     unit = "°C",
                     rawPayloadHex = rawHex,
                     dataBytes = dataBytes,
@@ -394,8 +400,13 @@ object PidDecoder {
                 )
             }
 
-            DecoderType.FUEL_RATE_MASS_10 -> {
-                val value = ((a * 256.0) + b) / 10.0
+            DecoderType.FUEL_RATE_MASS_50 -> {
+                // REAL-CAR CALIBRATION 2026-09-13 (owner live telemetry, Kylaq EA211): secondary
+                // spec mirrors said /10 g/s, but that yields 3.9-6.8 L/h at warm idle - physically
+                // impossible. Stoichiometric speed-density cross-check (MAP 37 kPa, 978 rpm,
+                // IAT 30 C, lambda 1.000 => ~0.15-0.19 g/s) matches raw counts 8-14 ONLY at
+                // /50 (0.02 g/s per count, == 0.1 L/h). See docs/qa-qc-fuel-pids-dashboard F-6.
+                val value = ((a * 256.0) + b) / 50.0
                 DecodedResult(
                     parameterName = pidDef.name,
                     numericValue = value,

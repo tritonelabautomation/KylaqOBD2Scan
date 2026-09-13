@@ -52,7 +52,7 @@ class FuelPidLineageTest {
     fun `standard profile covers both fuel-rate PIDs with correct decoders`() {
         val byId = ProfileDefinitions.standardObdRequests.associateBy { it.id }
         assertEquals(DecoderType.FUEL_RATE_20, byId.getValue("015E").decoderType)
-        assertEquals(DecoderType.FUEL_RATE_MASS_10, byId.getValue("019D").decoderType)
+        assertEquals(DecoderType.FUEL_RATE_MASS_50, byId.getValue("019D").decoderType)
     }
 
     // ── 3. Dashboard fuel-tile coverage: every PID the fuel section of
@@ -77,9 +77,9 @@ class FuelPidLineageTest {
     fun `fuel decoder math matches J1979 hand computations`() {
         // $5E engine fuel rate (volume): raw 34 -> 34/20 = 1.7 L/h
         assertEquals(1.7, decode("015E", listOf(0x41, 0x5E, 0x00, 0x22)).numericValue!!, 0.001)
-        // $9D engine fuel rate (mass): raw 34 -> 34/10 = 3.4 g/s (4-byte response, C/D reserved)
+        // $9D engine fuel rate (mass): raw 34 -> 34/50 = 0.68 g/s (F-6 real-car calibration)
         val mass = decode("019D", listOf(0x41, 0x9D, 0x00, 0x22, 0x00, 0x22))
-        assertEquals(3.4, mass.numericValue!!, 0.001)
+        assertEquals(0.68, mass.numericValue!!, 0.001)
         assertEquals("g/s", mass.unit)
         // $0A fuel pressure: A=100 -> 300 kPa
         assertEquals(300.0, decode("010A", listOf(0x41, 0x0A, 0x64)).numericValue!!, 0.001)
@@ -119,3 +119,18 @@ class FuelPidLineageTest {
         assertNotNull("km/L must compute from mass-derived litres", s.kmPerLiter)
     }
 }
+
+    /**
+     * F-6 guard: the calibrated 0x9D scale must agree with the stoichiometric air model
+     * within 2x at the owner's captured idle state (MAP 37 kPa, 978 rpm, IAT 30 C),
+     * while the old /10 scale disagreeed by 4.5x - this test locks the calibration.
+     */
+    @Test
+    fun `019D calibration agrees with stoichiometric air model at owner idle`() {
+        val airFuelGs = com.example.engine.PowertrainModel.airModelFuelGs(37.0, 978.0, 30.0)
+        assert(airFuelGs in 0.14..0.20) { "air model idle fuel implausible: $airFuelGs" }
+        val decoded = decode("019D", listOf(0x41, 0x9D, 0x00, 0x08)).numericValue!!
+        assert(decoded / airFuelGs < 2.0) { "9D scale drifted from physics: ratio ${decoded / airFuelGs}" }
+        assert(decoded * 5.0 / airFuelGs > 2.0) { "old /10 scale must stay rejected" }
+    }
+

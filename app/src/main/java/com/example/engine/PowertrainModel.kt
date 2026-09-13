@@ -214,6 +214,17 @@ object PowertrainModel {
         efficiencySweep(rpmPerKmh, massKg).minByOrNull { it.second }
 
     /** km/L from L/100 km, guarding division by zero. */
+    /**
+     * Speed-density stoichiometric fuel-mass estimate (g/s) for the EA211 1.0 TSI -
+     * the physics cross-check that recalibrated PID 0x9D on 2026-09-13 (F-6):
+     * air g/s = VE * (disp/2) * (rpm/60) * rho(MAP, IAT); fuel = air / 14.7 at lambda 1.
+     */
+    fun airModelFuelGs(mapKpa: Double, rpm: Double, iatC: Double, ve: Double = 0.75): Double {
+        val rhoGL = (mapKpa * 1000.0) / (287.0 * (iatC + 273.15)) / 1000.0 * 1000.0 / 1000.0
+        val airGs = ve * 0.5 * (rpm / 60.0) * ((mapKpa * 1000.0) / (287.0 * (iatC + 273.15))) / 1000.0
+        return airGs / 14.7
+    }
+
     fun kmPerLiter(lp100: Double?): Double? =
         if (lp100 == null || lp100 <= 0.001) null else 100.0 / lp100
 

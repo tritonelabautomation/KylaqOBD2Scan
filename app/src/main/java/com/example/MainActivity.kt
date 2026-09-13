@@ -280,43 +280,6 @@ fun MainApp(viewModel: MainViewModel) {
     ) {
     Scaffold(
         modifier = Modifier.fillMaxSize(),
-        bottomBar = {
-            NavigationBar(
-                containerColor = MaterialTheme.colorScheme.surface,
-                tonalElevation = 8.dp
-            ) {
-                bottomNavItems.forEach { screen ->
-                    // FIX (bug: tab highlight inconsistent on nested screens)
-                    val isCurrentScreen = currentRoute == screen.route ||
-                            (screen.route == Screen.PidDetail.route && currentRoute?.startsWith("pid_detail") == true) ||
-                            (screen.route == Screen.Recordings.route && currentRoute?.startsWith("trip_detail") == true) ||
-                            (screen.route == Screen.Garage.route && (currentRoute?.startsWith("vehicle_profile") == true || currentRoute?.startsWith("add_vehicle") == true))
-
-                    NavigationBarItem(
-                        icon = { Icon(screen.icon, contentDescription = screen.title) },
-                        label = { Text(screen.title, fontSize = 10.sp, fontWeight = if (isCurrentScreen) FontWeight.Bold else FontWeight.Normal) },
-                        selected = isCurrentScreen,
-                        onClick = {
-                            if (!isCurrentScreen) {
-                                navController.navigate(screen.route) {
-                                    popUpTo(Screen.Dashboard.route) {
-                                        saveState = true
-                                    }
-                                    launchSingleTop = true
-                                    restoreState = true
-                                }
-                            }
-                        },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = CyberCyan,
-                            selectedTextColor = CyberCyan,
-                            indicatorColor = MaterialTheme.colorScheme.surfaceVariant
-                        ),
-                        modifier = Modifier.testTag("nav_item_${screen.title.lowercase().replace(" ", "_")}")
-                    )
-                }
-            }
-        }
     ) { innerPadding ->
         Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
         NavHost(

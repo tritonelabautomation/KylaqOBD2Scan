@@ -902,7 +902,8 @@ fun ProtocolVerificationControl(
                     Text(statusText, color = statusColor, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                 }
                 
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // 2026-09-13 owner screenshot: FAB covered "Test Profile" - keep the row clear.
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(end = 64.dp)) {
                     OutlinedButton(
                         onClick = onShowBatchTest,
                         enabled = isConnected,

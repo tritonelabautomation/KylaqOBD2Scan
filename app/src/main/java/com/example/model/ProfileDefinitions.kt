@@ -27,10 +27,11 @@ object ProfileDefinitions {
         DiagnosticRequest("0151", "Fuel Type", "01", "51", "Vehicle fuel type", DecoderType.FUEL_TYPE_ENUM),
         DiagnosticRequest("0152", "Ethanol Fuel %", "01", "52", "Ethanol fuel percentage", DecoderType.PERCENT_255),
         DiagnosticRequest("015E", "Engine Fuel Rate (Vol)", "01", "5E", "Engine fuel rate (volume, L/h)", DecoderType.FUEL_RATE_20),
-        // QA/QC fuel audit 2026-09-13 (F-1): was FUEL_RATE_20 (L/h) - J1979 $9D is MASS flow,
-        // g/s = ((A*256)+B)/10, matching DefaultPidDefinitions. Profile screen showed half the
-        // value with the wrong unit.
-        DiagnosticRequest("019D", "Engine Fuel Rate (Mass)", "01", "9D", "Engine fuel rate (mass, g/s)", DecoderType.FUEL_RATE_MASS_10),
+        // QA/QC fuel audit 2026-09-13 (F-1 then F-6): was FUEL_RATE_20 (L/h); F-1 moved it to the
+        // mass decoder; F-6 (owner live telemetry + stoichiometric air-model cross-check)
+        // recalibrated the mass resolution to 0.02 g/s per count (/50) - /10 produced
+        // physically impossible 4-7 L/h idle readings on the EA211.
+        DiagnosticRequest("019D", "Engine Fuel Rate (Mass)", "01", "9D", "Engine fuel rate (mass, g/s)", DecoderType.FUEL_RATE_MASS_50),
         // QA/QC fuel audit 2026-09-13 (F-3): "(manifold vacuum)" is the $22 wording; J1979 $23 is
         // fuel rail GAUGE pressure (diesel/GDI), 10 kPa/bit - the formula was already correct.
         DiagnosticRequest("0123", "Fuel Rail Pressure", "01", "23", "Fuel rail gauge pressure (direct injection)", DecoderType.FUEL_RAIL_PRESSURE)

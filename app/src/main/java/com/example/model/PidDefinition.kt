@@ -22,7 +22,7 @@ enum class DecoderType {
     TORQUE_PCT,           // A - 125
     TORQUE_NM,            // A * 256 + B
     FUEL_RATE_20,         // ((A * 256) + B) / 20.0 (Volume: L/h) - PID 015E
-    FUEL_RATE_MASS_10,    // ((A * 256) + B) / 10.0 (Mass: g/s) - PID 019D
+    FUEL_RATE_MASS_50,    // ((A * 256) + B) / 50.0 (Mass: g/s, 0.02/bit) - PID 019D, real-car calibrated 2026-09-13
     FUEL_PRESSURE_3_KPA,  // A * 3 (kPa gauge) - PID 010A
     MAF_100,              // ((A * 256) + B) / 100.0 (Air Flow: g/s) - PID 0110
     INJECTION_TIMING_128, // ((((A * 256) + B) - 26880) / 128.0) ° - PID 015D
@@ -241,8 +241,8 @@ object DefaultPidDefinitions {
                 expectedRxId = "7E8",
                 defaultIntervalMs = 400L,
                 enabled = true,
-                decoderType = DecoderType.FUEL_RATE_MASS_10,
-                formulaDisplay = "((A * 256) + B) / 10.0",
+                decoderType = DecoderType.FUEL_RATE_MASS_50,
+                formulaDisplay = "((A * 256) + B) / 50.0",
                 description = "Mass engine fuel rate (g/s)",
                 priority = PollingPriority.MEDIUM
             ),
