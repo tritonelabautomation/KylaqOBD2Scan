@@ -219,9 +219,18 @@ object PowertrainModel {
      * the physics cross-check that recalibrated PID 0x9D on 2026-09-13 (F-6):
      * air g/s = VE * (disp/2) * (rpm/60) * rho(MAP, IAT); fuel = air / 14.7 at lambda 1.
      */
-    fun airModelFuelGs(mapKpa: Double, rpm: Double, iatC: Double, ve: Double = 0.75): Double {
-        val rhoGL = (mapKpa * 1000.0) / (287.0 * (iatC + 273.15)) / 1000.0 * 1000.0 / 1000.0
-        val airGs = ve * 0.5 * (rpm / 60.0) * ((mapKpa * 1000.0) / (287.0 * (iatC + 273.15))) / 1000.0
+    fun airModelFuelGs(
+        mapKpa: Double,
+        rpm: Double,
+        iatC: Double,
+        ve: Double = 0.75,
+        displacementL: Double = 1.0
+    ): Double {
+        // rho in kg/m^3 == g/L (P / (R_specific * T))
+        val rhoGramsPerLitre = (mapKpa * 1000.0) / (287.0 * (iatC + 273.15))
+        // 4-stroke: one intake event per 2 crank revolutions -> rpm/120 events per second
+        val intakeEventsPerSec = rpm / 120.0
+        val airGs = ve * intakeEventsPerSec * displacementL * rhoGramsPerLitre
         return airGs / 14.7
     }
 

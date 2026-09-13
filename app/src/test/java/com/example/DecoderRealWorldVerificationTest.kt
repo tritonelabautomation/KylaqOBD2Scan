@@ -196,12 +196,14 @@ class DecoderRealWorldVerificationTest {
 
     // ─── 18. PID 0x67 sentinel: Skoda Kylaq ECU returns 0x03 ──────
     // as a "no sensor" sentinel for the secondary coolant probe.
-    // Decoder formula is A-40, which correctly yields -37 for 0x03.
-    // The numeric value is correct; the UI should suppress this impossible reading.
-    @Test fun coolant2_4167035043_sentinelDecodesNegative37() {
+    // Formula A-40 yields -37 for 0x03, which the plausibility gate
+    // (-30..210 C, added 2026-09-13 after owner live screenshots, T-3)
+    // rejects: the sentinel must surface as NO DATA, never a fake number.
+    @Test fun coolant2_4167035043_sentinelRejectedAsNoData() {
         val r = PidDecoder.decode(pid("0167", DecoderType.TEMP_MINUS_40),
             listOf(0x41, 0x67, 0x03, 0x50, 0x43))
-        assertEquals(-37.0, r.numericValue!!, 0.01)
+        assertNull(r.numericValue)
+        assertEquals("implausible raw - no data", r.displayValue)
     }
 
     // ─── 19. NO DATA handling: must not contaminate UI ───────────────
