@@ -65,6 +65,15 @@ class LiveTelemetryStore {
     /** Display strings keyed by plain PID id (e.g. `"010C"` -> `"976 RPM"`). */
     val decodedMap: StateFlow<Map<String, String>> = _decodedMap.asStateFlow()
 
+    /**
+     * Freeze-frame memory (2026-09-13): the last CONFIRMED valid sample per PID.
+     * A failed sample replaces its ECU's entry in [byPid] (same ECU key), so without
+     * this memory one lost CAN frame would leave primary selection with nothing but
+     * the failure and blank the tile. [effectivePrimary] falls back to this value
+     * while a failure wins [byPid], until the staleness supervisor ages it.
+     */
+    private val lastValid = ConcurrentHashMap<String, LiveTelemetryValue>()
+
     private val _numericMap = MutableStateFlow<Map<String, Double>>(emptyMap())
     /** Numeric values keyed by plain PID id, for charts and the powertrain engines. */
     val numericMap: StateFlow<Map<String, Double>> = _numericMap.asStateFlow()
@@ -123,6 +132,7 @@ class LiveTelemetryStore {
     ) {
         val ecuKey = normalizeEcu(ecuId)
         byPid.getOrPut(pidId) { ConcurrentHashMap() }[ecuKey] = item
+        if (item.isValid && !item.isStale) lastValid[pidId] = item
         republish(pidId, preferredEcu)
     }
 
@@ -168,6 +178,13 @@ class LiveTelemetryStore {
                 republish(pidId, preferredEcuFor(pidId))
             }
         }
+        lastValid.forEach { (pidId, item) ->
+            if (!item.isStale && nowMonotonic - item.timestampMonotonic > thresholdFor(pidId)) {
+                lastValid[pidId] = item.copy(isStale = true)
+                changed = true
+                republish(pidId, preferredEcuFor(pidId))
+            }
+        }
         if (changed) _telemetryMap.value = flatten()
         return changed
     }
@@ -182,7 +199,19 @@ class LiveTelemetryStore {
 
     /** The whole [LiveTelemetryValue] backing the plain-PID view, if any. */
     fun primary(pidId: String, preferredEcu: String? = null): LiveTelemetryValue? =
-        selectPrimary(byPid[pidId]?.entries?.toList().orEmpty(), preferredEcu)?.value
+        effectivePrimary(pidId, preferredEcu)
+
+    /**
+     * What the plain-PID view actually shows: the primary selection, except while a
+     * failure marker wins and a confirmed value is still inside its staleness budget -
+     * then the confirmed value freeze-frames (with the stale marker once it ages).
+     */
+    private fun effectivePrimary(pidId: String, preferredEcu: String?): LiveTelemetryValue? {
+        val winner = selectPrimary(byPid[pidId]?.entries?.toList().orEmpty(), preferredEcu)?.value
+            ?: return null
+        val frozen = lastValid[pidId]
+        return if (frozen != null && qualityTier(winner) >= 2 && qualityTier(frozen) <= 1) frozen else winner
+    }
 
     /** ECU ids currently holding a sample for [pidId] (sorted, deterministic). */
     fun ecusFor(pidId: String): List<String> =
@@ -193,6 +222,7 @@ class LiveTelemetryStore {
 
     fun clear() {
         byPid.clear()
+        lastValid.clear()
         _telemetryMap.value = emptyMap()
         _decodedMap.value = emptyMap()
         _numericMap.value = emptyMap()
@@ -260,10 +290,7 @@ class LiveTelemetryStore {
      * display never depends on which ECU answered last.
      */
     private fun republish(pidId: String, preferredEcu: String?) {
-        val entries = byPid[pidId]?.entries?.toList()
-        if (entries.isNullOrEmpty()) return
-
-        val winnerValue = selectPrimary(entries, preferredEcu)?.value ?: return
+        val winnerValue = effectivePrimary(pidId, preferredEcu) ?: return
 
         val display = when {
             // Stale but VALID: keep the last known number, append the honest marker
