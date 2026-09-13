@@ -40,10 +40,19 @@ fun FuelSavingsGuideScreen(
     onOpenDtc: () -> Unit,
     onOpenMaintenance: () -> Unit
 ) {
-    val baseline = remember { FuelSavingsCoach.baseline(viewModel.fuelLogRepository.entries()) }
+    // QA/QC 2026-09-13: reactive to fuel-log mutations (add/delete/import) even when the
+    // user returns from Fuel & Costs via back-navigation (remember{} alone would stay stale).
+    val changeTick by viewModel.fuelLogRepository.changeTick.collectAsState()
+    var baseline by remember {
+        mutableStateOf(FuelSavingsCoach.baseline(viewModel.fuelLogRepository.entries()))
+    }
+    LaunchedEffect(changeTick) {
+        baseline = FuelSavingsCoach.baseline(viewModel.fuelLogRepository.entries())
+    }
     val idlePerHour = FuelSavingsCoach.idleRupeesPerHour(baseline.latestPricePerL)
     val idlePer10Min = FuelSavingsCoach.idleRupeesPer10Min(baseline.latestPricePerL)
-    val acWorstLh = remember { FuelSavingsCoach.acExtraLh("AC", autoMode = false, ambientC = null, setTempC = null) }
+    // True model extreme (Hyderabad summer: 45 C outside, 18 C set), NOT the unknown-temps fallback.
+    val acWorstLh = remember { FuelSavingsCoach.acExtraLh("AC", autoMode = false, ambientC = 45.0, setTempC = 18.0) }
     val acTypicalLh = remember { FuelSavingsCoach.acExtraLh("AC", autoMode = true, ambientC = 35.0, setTempC = 24.0) }
 
     Scaffold(
@@ -160,7 +169,7 @@ fun FuelSavingsGuideScreen(
                         Bullet("IDLING burns ~0.8 L/h warm — log one fill-up and this line shows YOUR ₹/hour cost.")
                     }
                     Bullet(
-                        "A/C: typical AUTO use at 35 °C ambient adds ≈ %.2f L/h; extreme cooling up to ≈ %.2f L/h (this app's AC model: 1.1 kW + 0.10 kW/Δ°C, AUTO ×0.75). ".format(acTypicalLh, acWorstLh) +
+                        "A/C: typical AUTO use at 35 °C ambient adds ≈ %.2f L/h; a Hyderabad-summer max-cool run (45 °C out, 18 °C set) up to ≈ %.2f L/h (this app's AC model: 1.1 kW + 0.10 kW/Δ°C capped 4.0, AUTO ×0.75). ".format(acTypicalLh, acWorstLh) +
                             "On short city trips a maxed A/C can cut economy by >25 % — vent the hot air with windows first, then close and run moderate A/C on recirc."
                     )
                     Bullet("Windows vs A/C: windows fine below ~60 km/h; above that, drag makes moderate A/C the cheaper choice.")

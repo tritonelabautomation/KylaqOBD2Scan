@@ -24,6 +24,7 @@ import com.example.analysis.WeeklyTripOverview.DriveBand
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.MainViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -48,7 +49,13 @@ fun TripsOverviewScreen(
     var overview by remember { mutableStateOf<WeeklyTripOverview.WeekOverview?>(null) }
     var loading by remember { mutableStateOf(true) }
 
-    LaunchedEffect(weekOffset) {
+    // QA/QC 2026-09-13: refresh when a trip is inserted/completed while this screen is open
+    // (e.g. a simulated EA211 drive finishing) - signature = trip count + newest start.
+    val tripSignature by repo.allTripsFlow
+        .map { list -> (list.size to (list.maxOfOrNull { it.startTimestamp } ?: 0L)) }
+        .collectAsState(initial = 0 to 0L)
+
+    LaunchedEffect(weekOffset, tripSignature) {
         loading = true
         val now = System.currentTimeMillis()
         val trips = withContext(Dispatchers.IO) { repo.recentTrips(300) }

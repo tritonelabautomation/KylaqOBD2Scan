@@ -87,6 +87,8 @@ class FuelSavingsCoachTest {
         assertEquals(0.706, FuelSavingsCoach.acExtraLh("AC", false, null, null), 0.01)
         // typical hot day, AUTO: delta 11 C modulated by 0.75
         assertEquals(0.613, FuelSavingsCoach.acExtraLh("AC", true, 35.0, 24.0), 0.01)
+        // Hyderabad-summer extreme: delta 27 C -> 1.1+2.7=3.8 kW -> 3.8/2.691666 = 1.412 L/h
+        assertEquals(1.41, FuelSavingsCoach.acExtraLh("AC", false, 45.0, 18.0), 0.01)
         // blower-only and off
         assertTrue(FuelSavingsCoach.acExtraLh("BLOWER", false, null, null) < 0.06)
         assertEquals(0.0, FuelSavingsCoach.acExtraLh("OFF", false, null, null), 0.001)

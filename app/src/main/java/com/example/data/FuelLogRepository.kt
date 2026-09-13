@@ -260,6 +260,16 @@ class FuelLogRepository(context: Context) {
     private val prefs: SharedPreferences =
         context.getSharedPreferences("fuel_log_prefs", Context.MODE_PRIVATE)
 
+    private val _changeTick = kotlinx.coroutines.flow.MutableStateFlow(0L)
+
+    /**
+     * QA/QC 2026-09-13: bumped on EVERY mutation so derived-UI (Save Fuel baseline,
+     * cost cards) recomputes instead of serving a remembered stale snapshot.
+     */
+    val changeTick: kotlinx.coroutines.flow.StateFlow<Long> = _changeTick
+
+    private fun bump() { _changeTick.value = _changeTick.value + 1L }
+
     fun entries(): List<FuelLogCodec.FuelEntry> =
         prefs.getString("fuel_log", null)
             ?.split('\n')
@@ -272,11 +282,13 @@ class FuelLogRepository(context: Context) {
         lines.add(0, FuelLogCodec.encode(entry))
         while (lines.size > 500) lines.removeAt(lines.size - 1)
         prefs.edit().putString("fuel_log", lines.joinToString("\n")).apply()
+        bump()
     }
 
     fun delete(idMs: Long) {
         val remaining = entries().filterNot { it.idMs == idMs }
         prefs.edit().putString("fuel_log", remaining.joinToString("\n") { FuelLogCodec.encode(it) }).apply()
+        bump()
     }
 
     /**
@@ -338,5 +350,6 @@ class FuelLogRepository(context: Context) {
     /** Bulk replace (used by CSV merge import). */
     fun replaceAll(entries: List<FuelLogCodec.FuelEntry>) {
         prefs.edit().putString("fuel_log", entries.take(500).joinToString("\n") { FuelLogCodec.encode(it) }).apply()
+        bump()
     }
 }
