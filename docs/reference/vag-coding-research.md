@@ -24,6 +24,26 @@
 [hidden-feature-list-for-skoda-kylaq-signature-plus](https://codemyvag.in/code-my-skoda-vw-car/hidden-feature-list-for-skoda-kylaq-signature-plus)
 confirms the variant spec (**MID Type: Digital, Infotainment: 10 Inch**, post-April-2024 build) and lists as purchasable unlocks: **Display Sport Menu on Infotainment** and **Change Color Theme of Infotainment System** (plus XDS, throttle response, offroad menu, beats audio, etc.). Crucially it also lists **"Features NOT available: … Features related to Digital Cluster"** — i.e. the MID theme ask is off-limits even for their ODIS/OBDeleven-class tooling on this car. A Kylaq-specific demo video exists ([youtube.com/watch?v=rPT322tLMbo](https://www.youtube.com/watch?v=rPT322tLMbo)). The two feature pages themselves are marketing-only (no channel numbers, no values) — the service runs via WhatsApp (+91 784 000 2005, DirectShift, Greater Noida West).
 
+**Re-verification 2026-09-13 (owner counter-example).** The owner challenged the verdict with the generic page
+[Change Color Theme of MID](https://codemyvag.in/unlock-hidden-feature/enable-change-color-theme-of-mid-in-skoda-volkswagen-cars).
+All three pages were re-fetched live the same day and read in full:
+
+1. The MID-colour page is a **generic explainer/marketing page**: a 256-entry RGB name/hex table
+   (Red `#FF0000`, GT / Monte Carlo Red `#E60000`, Cherry Red `#D2042D`, …), benefits copy and a
+   WhatsApp CTA. It carries **no compatibility table and never mentions the Kylaq**.
+2. codeMyVAG gates availability **per car and per variant**. The live Kylaq **Signature Plus** page
+   (re-fetched 2026-09-13) still shows 12 purchasable features — MID colour theme is not among them;
+   the only colour offering is **Change Color Theme of Infotainment System** (10-inch screen, module 5F) —
+   and still lists **"Features NOT available → Features related to Digital Cluster"**, the category the
+   MID theme belongs to.
+3. Sibling Kushaq Monte Carlo is split further into build-date sub-variant pages, confirming the
+   vendor's own model: the MID-theme product targets specific clusters on specific cars/variants —
+   not the Kylaq's cluster generation.
+
+Verdict **unchanged and now owner-counter-example-hardened**: the red theme obtainable from this vendor
+on a Kylaq Signature+ is the infotainment one (5F + SFD2, remote/same-day sessions incl. Hyderabad).
+The in-app counterpart shipped as RED-by-default (`c271a47`).
+
 ### 3.2 Independent Indian coder (TecUpdater) — theme colours confirmed
 [tecupdater.com/hidden-feature-unlocks-vw-skoda-mqb](https://tecupdater.com/hidden-feature-unlocks-vw-skoda-mqb/) independently documents, for Kushaq/Taigun/Slavia/Virtus/**Kylaq**: "The MIB2/MIB3 infotainment UI supports multiple colour theme options hidden in standard settings. Available accent colours: **Red, Amber, and Blue**", the sport menu as "performance data views **present in firmware but suppressed on India-spec variants**", and notes post-April-2024 cars (which includes Kylaq) have "a revised ECU structure". Cluster-side goodies (GTI-scale tacho, RPM bar) are explicitly **Virtual Cockpit variants only**. Two independent vendors agreeing = strong validation.
 
