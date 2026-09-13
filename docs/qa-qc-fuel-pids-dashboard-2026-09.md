@@ -112,3 +112,28 @@ stoichiometric cross-check test locking the calibration ratio < 2× while reject
 | T-4 | 015E "NOT SUPPORTED BY ECU", 0161 not supported, gear "Not available / Not detected" at standstill, VIN flaky between connects | **CORRECT behaviour** - honest labels; gear at standstill IS N/P (Range row shows P/N); VIN re-read button present |
 | T-5 | GPS altitude live (465 m Hyderabad) but trip-detail altitude cells show honest "--" | **KNOWN gap** - altitude not persisted into telemetry samples; parked as additive follow-up (store GPSALT sample rows) |
 | T-6 | Intermittent "Not available" flicker on 0146/0133/0163 between polls | **ACCEPTED** - scheduler rotation + capability honesty; values return on next cycle |
+
+## Addendum 2026-09-13 (evening): dashboard update-consistency audit, always-expanded board, trends UI/UX (owner batch 2, 32 live screenshots 20:45-20:48 IST)
+
+Owner report: "inconsistency in dashboard board update ... keep dashboard always expand mode so i no need to click and see data ... Trends are not proper".
+
+### T-7 Always-expanded dashboard (owner directive)
+`TelemetrySectionCard` was collapsible; Combustion & Trim, Temperatures, Air & Turbo and GPS & Telemetry started COLLAPSED, hiding live telemetry behind taps (visible in screenshots as folded headers with chevrons). The toggle, chevron and AnimatedVisibility were removed entirely (not defaulted open) so no state or accidental header tap can fold the board again. All eight sections now render their rows unconditionally.
+
+### T-8 Dashboard update inconsistency - root cause and fix
+Screenshot evidence: at 20:47 Engine RPM + Vehicle Speed show red "Not available" while Engine Load / torque in the SAME card are live; AI Doctor at the same moment shows "Engine RPM: Not available (stale)" beside a live 63 °C coolant; at 20:45 Baro/Throttle/Pedal-D are "Not available" and live again at 20:48.
+Root cause: polling is a SERIAL round-robin - each cycle walks every due PID with a full CAN round-trip, so a PID's real refresh gap is the whole cycle (3-8 s with 30+ enabled PIDs), while the fixed staleness budgets were 2.5 s (fast tier). Healthy tiles therefore aged into "stale" BETWEEN two successful refreshes, and the old display policy replaced a stale-but-valid number with the blank "Not available (stale)" which `formatLiveValue` then red-flagged. Three coordinated fixes:
+1. `LiveTelemetryStore.adaptiveStaleThresholdMs(tierFloor, ewmaGap)` - budget = max(tier floor, 2 x EWMA(observed per-PID query gap) + 1.5 s). `ObdScheduler` measures the gap between consecutive query attempts per PID (EWMA 3:1) and feeds it to the staleness supervisor. A real dropout still surfaces once it outlives the adaptive budget.
+2. Stale-but-valid samples keep their NUMBER with an honest marker: "970 RPM (stale)" (replaces "Not available (stale)"). `numericMap` still drops stale entries so integrators/gauges never consume aged values.
+3. `formatLiveValue`/`isLiveError` treat the "(stale)" suffix as data, not error - no red flip-flop on live tiles.
+Guard tests: `DashboardUpdateConsistencyTest` (adaptive budget math, stale marker visibility, formatter policy) + updated `LiveTelemetryStoreTest`.
+
+### T-9 Trends UI/UX (owner: "Trends are not proper")
+Screenshot evidence (Insights 20:47): yellow boost spikes drawn BELOW the plot box; green fuel line sawtoothing to zero.
+1. `InsightsScreen.TrendCard`: `fuelLh ?: 0.0` / `boostKpa ?: 0.0` fabricated physical zeros for every momentary NO_DATA in the 1 Hz log - the sawtooth was missing data, not engine behaviour. Series now use `mapNotNull` (gaps, not zeros).
+2. `XyPlot`: hard-coded `minY = 0` clipped negative series outside the canvas (gauge boost at idle ~ -60 kPa) - the below-box spikes. Y range now spans the padded data minimum and a solid zero baseline is drawn when the window crosses zero; range labels follow.
+3. `SimpleLineChart` (trip trend rows, HUD sparklines): bare min-max polyline amplified ±2 % wobble into full-height swings and showed no magnitudes. Now: 12 % range padding, dashed mid baseline, max/min value labels, point dots for sparse series, gradient fill. API unchanged (defaults).
+4. `TripDetailScreen` Trends tab: plotted in time order, downsampled to <= 600 evenly spaced points via new pure `analysis.ChartSampling` (first/last sample always kept), y-axis max/mid/min labels in a right gutter, point dots for sparse trips, and a start/end time + span + sample-count row so trips of different lengths no longer look identical.
+
+### T-10 Verified NOT bugs in this batch
+Trip integration counters (0.017 L/12 s ... 0.283 L/206 s across the 20:45-20:48 shots) are monotonic - one continuous trip, no reset bug. Idle 3.87/4.35/6.77 L/h and -37 °C coolant-2 in these shots are the pre-F-6/T-3 build (already shipped in 3627b7d). Bottom nav bar in these shots likewise predates the T-1 removal.

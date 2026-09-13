@@ -63,9 +63,17 @@ fun XyPlot(
 
     val minX = allPoints.minOf { it.first }
     val maxX = allPoints.maxOf { it.first }
-    val minY = 0f
+    // 2026-09-13 (owner: "Trends are not proper"): the hard-coded zero floor clipped
+    // negative series OUTSIDE the plot box - gauge boost at idle is roughly -60 kPa
+    // and its spikes were drawn below the chart in the owner screenshots. The range
+    // now spans the data minimum (padded), and a solid zero baseline is drawn when
+    // the series crosses zero.
+    val rawMinY = allPoints.minOf { it.second }
     val rawMaxY = allPoints.maxOf { it.second }
-    val maxY = if (rawMaxY <= 0f) 1f else rawMaxY * 1.1f
+    val spanRawY = rawMaxY - rawMinY
+    val padY = if (spanRawY > 1e-6f) spanRawY * 0.08f else maxOf(kotlin.math.abs(rawMaxY) * 0.1f, 1f)
+    val minY = minOf(0f, rawMinY) - padY
+    val maxY = maxOf(0f, rawMaxY) + padY
     val spanX = if (maxX - minX < 1e-6f) 1f else maxX - minX
     val spanY = if (maxY - minY < 1e-6f) 1f else maxY - minY
 
@@ -104,6 +112,16 @@ fun XyPlot(
                     end = Offset(x, size.height),
                     strokeWidth = 1f,
                     pathEffect = dash
+                )
+            }
+            // zero baseline when the plotted window crosses zero
+            if (minY < 0f) {
+                val zeroY = size.height - (0f - minY) / spanY * size.height
+                drawLine(
+                    color = TextSecondaryDark.copy(alpha = 0.55f),
+                    start = Offset(0f, zeroY),
+                    end = Offset(size.width, zeroY),
+                    strokeWidth = 2f
                 )
             }
             // marker

@@ -244,9 +244,14 @@ private fun TrendCard(snapshot: DriveAnalytics.DriveSnapshot) {
     ) {
         XyPlot(
             series = listOf(
+                // 2026-09-13 (owner: "Trends are not proper"): `?: 0.0` on nullable
+                // samples fabricated physical zeros - every momentary NO_DATA in the
+                // 1 Hz log drew a fake fuel-cut plunge to 0 and a fake 0-boost dip
+                // (the green sawtooth in the owner screenshots). Missing samples are
+                // gaps now, not zeros.
                 XySeries("speed km/h", CyberCyan, recent.map { (it.timestampMonotonicMs - t0) / 1000f to it.speedKmh.toFloat() }),
-                XySeries("fuel L/h ×5", NeonEmerald, recent.map { (it.timestampMonotonicMs - t0) / 1000f to ((it.fuelLh ?: 0.0) * 5).toFloat() }),
-                XySeries("boost kPa", ElectricAmber, recent.map { (it.timestampMonotonicMs - t0) / 1000f to (it.boostKpa ?: 0.0).toFloat() })
+                XySeries("fuel L/h ×5", NeonEmerald, recent.mapNotNull { r -> r.fuelLh?.let { (r.timestampMonotonicMs - t0) / 1000f to (it * 5).toFloat() } }),
+                XySeries("boost kPa", ElectricAmber, recent.mapNotNull { r -> r.boostKpa?.let { (r.timestampMonotonicMs - t0) / 1000f to it.toFloat() } })
             ),
             xLabel = "time →",
             yLabel = "mixed units",

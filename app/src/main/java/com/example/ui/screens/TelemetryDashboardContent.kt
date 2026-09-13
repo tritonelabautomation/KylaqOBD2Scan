@@ -54,14 +54,6 @@ fun TelemetryDashboardContent(
         }
         m
     }
-    var expandedDriving by remember { mutableStateOf(true) }
-    var expandedEconomy by remember { mutableStateOf(true) }
-    var expandedEngine by remember { mutableStateOf(true) }
-    var expandedFuel by remember { mutableStateOf(true) }
-    var expandedCombustion by remember { mutableStateOf(false) }
-    var expandedTemp by remember { mutableStateOf(false) }
-    var expandedAir by remember { mutableStateOf(false) }
-    var expandedGps by remember { mutableStateOf(false) }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
 
@@ -70,8 +62,6 @@ fun TelemetryDashboardContent(
             title = "DRIVING & TRANSMISSION (6-AT)",
             icon = Icons.Default.DirectionsCar,
             color = CyberCyan,
-            isExpanded = expandedDriving,
-            onToggle = { expandedDriving = !expandedDriving }
         ) {
             val stateName = drivingState?.state?.name ?: "UNKNOWN"
             val stateColor = when (drivingState?.state?.name) {
@@ -123,8 +113,6 @@ fun TelemetryDashboardContent(
             title = "POWERTRAIN FUEL ECONOMY",
             icon = Icons.Default.LocalGasStation,
             color = NeonEmerald,
-            isExpanded = expandedEconomy,
-            onToggle = { expandedEconomy = !expandedEconomy }
         ) {
             if (realtimeEconomy?.isIdle == true) {
                 val idleVal = realtimeEconomy.idleConsumptionLh?.let { String.format(Locale.US, "%.2f L/h", it) } ?: "—"
@@ -181,8 +169,6 @@ fun TelemetryDashboardContent(
             title = "ENGINE DYNAMICS",
             icon = Icons.Default.Speed,
             color = CyberCyan,
-            isExpanded = expandedEngine,
-            onToggle = { expandedEngine = !expandedEngine }
         ) {
             MetricRowWithSource("Engine RPM", formatLiveValue(effectiveLive, "010C"), isLiveError(effectiveLive, "010C"), source = "PID 010C (STANDARD)")
             MetricRowWithSource("Vehicle Speed", formatLiveValue(effectiveLive, "010D"), isLiveError(effectiveLive, "010D"), source = "PID 010D (STANDARD)")
@@ -197,8 +183,6 @@ fun TelemetryDashboardContent(
             title = "FUEL & INJECTION",
             icon = Icons.Default.EvStation,
             color = ElectricAmber,
-            isExpanded = expandedFuel,
-            onToggle = { expandedFuel = !expandedFuel }
         ) {
             MetricRowWithSource("Engine Fuel Rate (Volume)", formatLiveValue(effectiveLive, "015E"), isLiveError(effectiveLive, "015E"), source = "PID 015E (L/h)")
             MetricRowWithSource("Engine Fuel Rate (Mass)", formatLiveValue(effectiveLive, "019D"), isLiveError(effectiveLive, "019D"), source = "PID 019D (g/s)")
@@ -216,8 +200,6 @@ fun TelemetryDashboardContent(
             title = "COMBUSTION & TRIM",
             icon = Icons.Default.Tune,
             color = ElectricAmber,
-            isExpanded = expandedCombustion,
-            onToggle = { expandedCombustion = !expandedCombustion }
         ) {
             MetricRowWithSource("Short Term Fuel Trim B1", formatLiveValue(effectiveLive, "0106"), isLiveError(effectiveLive, "0106"), source = "PID 0106")
             MetricRowWithSource("Long Term Fuel Trim B1", formatLiveValue(effectiveLive, "0107"), isLiveError(effectiveLive, "0107"), source = "PID 0107")
@@ -230,8 +212,6 @@ fun TelemetryDashboardContent(
             title = "TEMPERATURES",
             icon = Icons.Default.DeviceThermostat,
             color = WarningRed,
-            isExpanded = expandedTemp,
-            onToggle = { expandedTemp = !expandedTemp }
         ) {
             MetricRowWithSource("Engine Coolant Temp", formatLiveValue(effectiveLive, "0105"), isLiveError(effectiveLive, "0105"), source = "PID 0105 (°C)")
             MetricRowWithSource("Intake Air Temp", formatLiveValue(effectiveLive, "010F"), isLiveError(effectiveLive, "010F"), source = "PID 010F (°C)")
@@ -245,8 +225,6 @@ fun TelemetryDashboardContent(
             title = "AIR & TURBO BOOST",
             icon = Icons.Default.Compress,
             color = Color(0xFF81D4FA),
-            isExpanded = expandedAir,
-            onToggle = { expandedAir = !expandedAir }
         ) {
             MetricRowWithSource("Intake MAP (Boost)", formatLiveValue(effectiveLive, "010B"), isLiveError(effectiveLive, "010B"), source = "PID 010B (kPa)")
             MetricRowWithSource("MAF Air Flow", formatLiveValue(effectiveLive, "0110"), isLiveError(effectiveLive, "0110"), source = "PID 0110 (g/s)")
@@ -263,8 +241,6 @@ fun TelemetryDashboardContent(
             title = "GPS & TELEMETRY",
             icon = Icons.Default.GpsFixed,
             color = Color(0xFFB39DDB),
-            isExpanded = expandedGps,
-            onToggle = { expandedGps = !expandedGps }
         ) {
             if (gpsData.isAvailable) {
                 MetricRowWithSource("GPS Speed", String.format(Locale.US, "%.1f km/h", gpsData.speedKmh), source = "HARDWARE GPS")

@@ -166,6 +166,20 @@ class ObdScheduler(
      */
     private var currentCanHeader = ""
 
+    /**
+     * Adaptive staleness inputs (2026-09-13, owner: "dashboard update inconsistency").
+     * The poll loop is a serial round-robin: every cycle walks ALL due PIDs one after
+     * another, so a PID's real refresh gap is the whole cycle time (3-8 s with 30+
+     * enabled PIDs), not its configured interval. The fixed tier budgets (fast 2.5 s)
+     * were shorter than the real cadence, so healthy tiles aged into "(stale)" between
+     * refreshes and the board flickered. [queryGapEwmaMs] tracks the observed gap
+     * between consecutive query attempts per PID; the staleness supervisor turns it
+     * into a budget via [LiveTelemetryStore.adaptiveStaleThresholdMs]. Reset per
+     * session together with [currentCanHeader].
+     */
+    private val queryGapEwmaMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private val lastQueryAttemptMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
     fun startPolling(scope: CoroutineScope, transport: ElmTransport) {
         if (_isPolling.value) return
         _isPolling.value = true
@@ -173,6 +187,8 @@ class ObdScheduler(
         // The adapter was (re)initialised outside this scheduler: its ATSH header is
         // unknown, so force the first query to re-send it.
         currentCanHeader = ""
+        queryGapEwmaMs.clear()
+        lastQueryAttemptMs.clear()
 
         // Launch periodic staleness check supervisor.
         // Per-ECU-PID staleness tracking: "7E8_010C" and "7E9_010C" age independently,
@@ -182,7 +198,12 @@ class ObdScheduler(
                 delay(1000L)
                 telemetryStore.markStale(
                     nowMonotonic = SystemClock.elapsedRealtime(),
-                    thresholdFor = { pidId -> staleThresholdMsFor(pidId) },
+                    thresholdFor = { pidId ->
+                        LiveTelemetryStore.adaptiveStaleThresholdMs(
+                            tierFloorMs = staleTierFloorMsFor(pidId),
+                            ewmaGapMs = queryGapEwmaMs[pidId.uppercase()]
+                        )
+                    },
                     preferredEcuFor = { pidId -> capabilityManager.getPreferredEcuForPid(pidId) }
                 )
             }
@@ -281,20 +302,37 @@ class ObdScheduler(
         // FIX: drop the cached ATSH header. The next session may talk to a different
         // adapter (or the same one after an ATZ reset), so the header must be re-sent.
         currentCanHeader = ""
+        queryGapEwmaMs.clear()
+        lastQueryAttemptMs.clear()
     }
 
     /**
-     * Staleness budget per PID tier. Mirrors the polling intervals in
-     * [com.example.model.DefaultPidDefinitions]: fast signals go stale after 2.5 s,
-     * medium after 5 s, slow/research signals after 15 s.
+     * Staleness FLOOR per PID tier (the adaptive part lives in
+     * [LiveTelemetryStore.adaptiveStaleThresholdMs]). Mirrors the polling intervals in
+     * [com.example.model.DefaultPidDefinitions]: fast signals never get less than 2.5 s,
+     * medium 5 s, slow/research signals 15 s - but when the observed round-robin cadence
+     * is slower, the budget grows with it so healthy tiles do not flicker.
      */
-    private fun staleThresholdMsFor(pidId: String): Long = when (pidId.uppercase()) {
+    private fun staleTierFloorMsFor(pidId: String): Long = when (pidId.uppercase()) {
         "010C", "010D", "0111", "0149", "0162" -> 2500L // Fast items
         "015E", "019D", "0104", "010B", "0110", "0105" -> 5000L // Medium items
         else -> 15000L // Slow items
     }
 
     private suspend fun executePidQuery(transport: ElmTransport, pidDef: PidDefinition) {
+        // Adaptive staleness: measure the gap between consecutive attempts for this PID
+        // (that gap IS its real refresh cadence under serial round-robin polling).
+        val attemptNow = SystemClock.elapsedRealtime()
+        val ewmaKey = pidDef.id.uppercase()
+        lastQueryAttemptMs[ewmaKey]?.let { prev ->
+            val gap = attemptNow - prev
+            if (gap in 1L..60_000L) {
+                val prevEwma = queryGapEwmaMs[ewmaKey]
+                queryGapEwmaMs[ewmaKey] = if (prevEwma == null) gap else (prevEwma * 3L + gap) / 4L
+            }
+        }
+        lastQueryAttemptMs[ewmaKey] = attemptNow
+
         // Resolve target ECU CAN addressing:
         // Use verified validating ECU physical request address if known, else def.canHeader, else settings, else 7DF
         val validatingEcu = capabilityManager.getValidatingEcuForPid(pidDef.id)

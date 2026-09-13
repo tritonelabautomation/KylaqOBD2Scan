@@ -212,12 +212,16 @@ class LiveTelemetryStoreTest {
     }
 
     @Test
-    fun testAllSamplesStaleShowsStalePlaceholderAndDropsNumeric() {
+    fun testAllSamplesStaleKeepsLastValueWithStaleMarkerAndDropsNumeric() {
+        // 2026-09-13 policy (owner: dashboard update inconsistency): a stale-but-valid
+        // sample keeps its NUMBER with an honest "(stale)" marker instead of blanking
+        // to "Not available (stale)". Numeric views still drop it so no integrator or
+        // gauge consumes an aged value.
         publish(RPM, ENGINE, "970", "RPM", 970.0, timestamp = 1_000L)
 
         store.markStale(nowMonotonic = 60_000L, thresholdFor = { 2_000L }, preferredEcuFor = { ENGINE })
 
-        assertEquals(LiveTelemetryStore.STALE_DISPLAY, store.decodedMap.value[RPM])
+        assertEquals("970 RPM" + LiveTelemetryStore.STALE_SUFFIX, store.decodedMap.value[RPM])
         assertNull(store.numericMap.value[RPM])
         assertNull(store.numericValue(RPM))
     }

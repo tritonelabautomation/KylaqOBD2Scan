@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import android.content.Context
+import android.graphics.Paint
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
@@ -21,6 +22,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -36,6 +39,10 @@ import com.example.ui.viewmodel.MainViewModel
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import kotlin.math.abs
 
 enum class TripDetailTab {
     OVERVIEW,
@@ -390,7 +397,13 @@ private fun TripTrendsView(
     )
 
     val targetSamples = samples.filter { it.pid.equals(selectedPid.removePrefix("01"), ignoreCase = true) || it.pid.equals(selectedPid, ignoreCase = true) }
-    val numericValues = targetSamples.mapNotNull { it.numericValue }
+    // 2026-09-13 (owner: "Trends are not proper"): plot in TIME order, bounded to
+    // <= 600 evenly spaced points, and label the axes. A bare min-max polyline with
+    // no scale reads as noise; thousands of raw points made the canvas heavy.
+    val timedPoints = targetSamples
+        .mapNotNull { smp -> smp.numericValue?.let { smp.timestamp to it } }
+        .sortedBy { it.first }
+    val numericValues = timedPoints.map { it.second }
 
     Column(
         modifier = Modifier.fillMaxSize().padding(16.dp),
@@ -427,35 +440,88 @@ private fun TripTrendsView(
                     Text("Insufficient sample points to render trend", color = TextSecondaryDark, fontSize = 12.sp)
                 }
             } else {
+                val plot = com.example.analysis.ChartSampling.downsample(timedPoints, 600)
                 val minVal = numericValues.minOrNull() ?: 0.0
                 val maxVal = numericValues.maxOrNull() ?: 1.0
-                val range = if (maxVal - minVal > 0.001) maxVal - minVal else 1.0
+                val rawRange = maxVal - minVal
+                // 6 % head/foot padding: the curve must not touch the box edges and a
+                // near-flat series must not be amplified into full-height swings.
+                val pad = if (rawRange > 0.001) rawRange * 0.06 else maxOf(abs(maxVal) * 0.05, 0.5)
+                val plotMin = minVal - pad
+                val plotRange = rawRange + 2 * pad
 
                 Canvas(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-                    val w = size.width
                     val h = size.height
+                    val labelGutter = 46.dp.toPx()
+                    val plotW = (size.width - labelGutter).coerceAtLeast(1f)
 
-                    // Grid lines
-                    drawLine(Color(0xFF2A2D3A), Offset(0f, 0f), Offset(w, 0f), strokeWidth = 1f)
-                    drawLine(Color(0xFF2A2D3A), Offset(0f, h / 2f), Offset(w, h / 2f), strokeWidth = 1f)
-                    drawLine(Color(0xFF2A2D3A), Offset(0f, h), Offset(w, h), strokeWidth = 1f)
+                    // Grid lines across the plot area only (gutter stays clean for labels)
+                    drawLine(Color(0xFF2A2D3A), Offset(0f, 0f), Offset(plotW, 0f), strokeWidth = 1f)
+                    drawLine(Color(0xFF2A2D3A), Offset(0f, h / 2f), Offset(plotW, h / 2f), strokeWidth = 1f)
+                    drawLine(Color(0xFF2A2D3A), Offset(0f, h), Offset(plotW, h), strokeWidth = 1f)
+
+                    val stepX = plotW / (plot.size - 1)
+                    val yOf = { v: Double -> h - (((v - plotMin) / plotRange) * h).toFloat() }
 
                     val path = Path()
-                    val stepX = w / (numericValues.size - 1)
-
-                    numericValues.forEachIndexed { i, v ->
-                        val normY = ((v - minVal) / range).toFloat()
-                        val y = h - (normY * h)
+                    plot.forEachIndexed { i, (_, v) ->
                         val x = i * stepX
+                        val y = yOf(v)
                         if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
                     }
-
                     drawPath(
                         path = path,
                         color = CyberCyan,
-                        style = Stroke(width = 3.dp.toPx())
+                        style = Stroke(width = 2.5.dp.toPx())
                     )
+                    // sparse series (few samples in this trip) show every point
+                    if (plot.size <= 12) {
+                        plot.forEachIndexed { i, (_, v) ->
+                            drawCircle(color = CyberCyan, radius = 4.dp.toPx(), center = Offset(i * stepX, yOf(v)))
+                        }
+                    }
+
+                    // y-axis labels: max / mid / min in the right gutter
+                    val textSize = 10.sp.toPx()
+                    val paint = Paint().apply {
+                        color = TextSecondaryDark.toArgb()
+                        this.textSize = textSize
+                        isAntiAlias = true
+                    }
+                    val fmt = { v: Double ->
+                        if (abs(v) >= 100.0) String.format(Locale.US, "%.0f", v)
+                        else String.format(Locale.US, "%.1f", v)
+                    }
+                    drawContext.canvas.nativeCanvas.apply {
+                        drawText(fmt(maxVal), plotW + 6f, textSize, paint)
+                        drawText(fmt(plotMin + plotRange / 2.0), plotW + 6f, h / 2f + textSize / 2f, paint)
+                        drawText(fmt(minVal), plotW + 6f, h, paint)
+                    }
                 }
+            }
+        }
+
+        // Time context: which window the trend line covers (was invisible before,
+        // so two trips of very different lengths looked identical).
+        if (timedPoints.size >= 2) {
+            val timeFmt = remember { SimpleDateFormat("HH:mm:ss", Locale.US) }
+            val spanSec = (timedPoints.last().first - timedPoints.first().first) / 1000L
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    timeFmt.format(Date(timedPoints.first().first)),
+                    color = TextSecondaryDark, fontSize = 10.sp, fontFamily = FontFamily.Monospace
+                )
+                Text(
+                    "${spanSec / 60}m ${spanSec % 60}s span \u00b7 ${timedPoints.size} samples",
+                    color = TextSecondaryDark, fontSize = 10.sp
+                )
+                Text(
+                    timeFmt.format(Date(timedPoints.last().first)),
+                    color = TextSecondaryDark, fontSize = 10.sp, fontFamily = FontFamily.Monospace
+                )
             }
         }
 

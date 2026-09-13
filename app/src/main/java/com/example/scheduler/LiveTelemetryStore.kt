@@ -71,8 +71,38 @@ class LiveTelemetryStore {
     /** Display text used when a PID's last sample has gone stale. */
     companion object {
         const val NO_ECU = "DEFAULT"
-        const val STALE_DISPLAY = "Not available (stale)"
+
+        /**
+         * Marker appended to the last known value while a sample is stale:
+         * `"970 RPM (stale)"`. Replaces the old `"Not available (stale)"` blank-out
+         * (2026-09-13, owner: dashboard updates look inconsistent). A stale-but-valid
+         * number stays readable with an honest marker; only genuinely missing data
+         * shows a placeholder.
+         */
+        const val STALE_SUFFIX = " (stale)"
+
         private const val ENGINE_ECU = "7E8"
+
+        /**
+         * Staleness budget that adapts to the OBSERVED poll cadence.
+         *
+         * Root cause of the owner-reported update inconsistency: polling is a serial
+         * round-robin - every cycle walks all due PIDs one after another, so the
+         * effective refresh gap of a PID is the whole cycle time (easily 3-8 s with
+         * 30+ enabled PIDs and per-command CAN round-trips). The fixed tier budgets
+         * (fast 2.5 s) were SHORTER than that real cadence, so healthy tiles aged
+         * into "(stale)" between every two refreshes and the board flickered between
+         * live values and red placeholders while the car was streaming data.
+         *
+         * Budget = max(tier floor, 2 x EWMA of the observed refresh gap + 1.5 s
+         * margin). A real dropout still surfaces: once the ECU stops answering, the
+         * sample ages past the adaptive budget and gets the stale marker.
+         *
+         * Pure JVM - unit tested.
+         */
+        fun adaptiveStaleThresholdMs(tierFloorMs: Long, ewmaGapMs: Long?): Long =
+            if (ewmaGapMs == null || ewmaGapMs <= 0L) tierFloorMs
+            else maxOf(tierFloorMs, ewmaGapMs * 2L + 1_500L)
     }
 
     /**
@@ -229,7 +259,11 @@ class LiveTelemetryStore {
         val winnerValue = selectPrimary(entries, preferredEcu)?.value ?: return
 
         val display = when {
-            winnerValue.isStale && winnerValue.isValid -> STALE_DISPLAY
+            // Stale but VALID: keep the last known number, append the honest marker
+            // (see STALE_SUFFIX). numericMap still drops the entry so integrators and
+            // gauges never consume an aged value - only the readable text persists.
+            winnerValue.isStale && winnerValue.isValid ->
+                "${winnerValue.displayValue} ${winnerValue.unit}".trim() + STALE_SUFFIX
             // Invalid samples carry a human readable placeholder ("Not available", raw hex
             // for research PIDs); joining the unit onto those produced "Not available RPM".
             !winnerValue.isValid -> winnerValue.displayValue
