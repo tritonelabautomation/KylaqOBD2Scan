@@ -8,6 +8,7 @@ import com.example.protocol.IsoTpParser
 import com.example.protocol.PidDecoder
 import com.example.scheduler.LiveTelemetryStore
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
