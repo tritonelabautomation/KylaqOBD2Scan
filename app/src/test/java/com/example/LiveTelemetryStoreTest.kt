@@ -183,8 +183,24 @@ class LiveTelemetryStoreTest {
     }
 
     @Test
-    fun testTimeoutOnOnlyEcuReportsUnavailableWithoutUnitSuffix() {
+    fun testTimeoutOnOnlyEcuFreezeFramesLastValueThenAgesToStale() {
+        // 2026-09-13 freeze-frame policy (owner screenshots: tiles blinking red one
+        // second after a good number): ONE lost frame must not blank an in-budget
+        // value; once the value ages past its budget it carries the stale marker.
         publish(RPM, ENGINE, "970", "RPM", 970.0)
+        publishTimeout(RPM, ENGINE)
+
+        assertEquals("freeze-frame keeps the last confirmed value on screen",
+            "970 RPM", store.decodedMap.value[RPM])
+        assertEquals(970.0, store.numericMap.value[RPM]!!, 0.0001)
+
+        store.markStale(nowMonotonic = 60_000L, thresholdFor = { 2_000L }, preferredEcuFor = { ENGINE })
+        assertEquals("970 RPM" + LiveTelemetryStore.STALE_SUFFIX, store.decodedMap.value[RPM])
+        assertNull("aged values must leave the numeric view", store.numericMap.value[RPM])
+    }
+
+    @Test
+    fun testFailureWithoutAnyValueReportsPlaceholderWithoutUnitSuffix() {
         publishTimeout(RPM, ENGINE)
 
         assertEquals("Not available", store.decodedMap.value[RPM])

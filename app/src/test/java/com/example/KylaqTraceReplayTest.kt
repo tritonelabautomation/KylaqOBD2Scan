@@ -8,6 +8,7 @@ import com.example.protocol.IsoTpParser
 import com.example.protocol.PidDecoder
 import com.example.scheduler.LiveTelemetryStore
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -207,8 +208,15 @@ class KylaqTraceReplayTest {
         assertEquals(13.332, store.telemetryMap.value["${SECONDARY}_0142"]!!.numericValue!!, 0.001)
 
         // 010F — answered by 7E8 only, and its final transaction was NO DATA.
-        assertNull(store.numericValue("010F", ENGINE))
-        assertEquals("Not available", store.decodedMap.value["010F"])
+        // Freeze-frame policy (2026-09-13): the failure is recorded (transport failure,
+        // never "unsupported") but the last confirmed value keeps displaying instead of
+        // blanking the tile one second after a good reading; the staleness supervisor
+        // adds the "(stale)" marker once the value ages past its budget.
+        assertFalse("the NO DATA frame must be recorded as a failure for 7E8",
+            store.telemetryMap.value["${ENGINE}_010F"]!!.isValid)
+        assertNotNull("freeze-frame keeps the last confirmed IAT on screen",
+            store.numericValue("010F", ENGINE))
+        assertNotEquals("Not available", store.decodedMap.value["010F"])
     }
 
     @Test

@@ -57,6 +57,7 @@ fun DashboardScreen(
     val canResponseCount by viewModel.canResponseCount.collectAsState()
     val errorCount by viewModel.errorCount.collectAsState()
     val liveDecodedMap by viewModel.liveDecodedMap.collectAsState()
+    val liveNumericMap by viewModel.liveNumericMap.collectAsState()
     val pidCapabilities by viewModel.pidCapabilities.collectAsState()
     val pidRawHistory by viewModel.pidRawHistory.collectAsState()
     val isRecording by viewModel.isRecording.collectAsState()
@@ -76,7 +77,10 @@ fun DashboardScreen(
     val acAutoMode by viewModel.acAutoMode.collectAsState()
     var acTagUi by remember { mutableStateOf(viewModel.rideAc) }
     val acLearning = remember(viewModel, connectionState, acTagUi) { viewModel.acLearning() }
-    val acSpeed = liveDecodedMap["010D"]?.toDoubleOrNull() ?: 0.0
+    // 2026-09-13 inconsistency fix: decoded strings carry units ("12 km/h"), so
+    // toDoubleOrNull() on them was ALWAYS null -> acSpeed stuck at 0.0 and the AC
+    // ON-vs-OFF learning gate (speed > 5 km/h) could never open. Use the numeric view.
+    val acSpeed = liveNumericMap["010D"] ?: 0.0
     val acBaselineLh = remember(realtimeEconomy, acSpeed) {
         val kmL = realtimeEconomy?.smoothedKmL
         if (acSpeed > 5.0 && kmL != null && kmL > 0.5) acSpeed / kmL
@@ -137,7 +141,7 @@ fun DashboardScreen(
             onToggleAuto = { viewModel.setAcAutoMode(!acAutoMode) },
             setTempC = acSetTempC,
             onSetTemp = { viewModel.setAcSetTempC(it) },
-            ambientC = liveDecodedMap["0146"]?.toDoubleOrNull(),
+            ambientC = liveNumericMap["0146"],
             baselineLh = acBaselineLh,
             onKmL = acLearning?.onKmL,
             offKmL = acLearning?.offKmL,

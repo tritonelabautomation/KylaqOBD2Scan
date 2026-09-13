@@ -137,3 +137,14 @@ Screenshot evidence (Insights 20:47): yellow boost spikes drawn BELOW the plot b
 
 ### T-10 Verified NOT bugs in this batch
 Trip integration counters (0.017 L/12 s ... 0.283 L/206 s across the 20:45-20:48 shots) are monotonic - one continuous trip, no reset bug. Idle 3.87/4.35/6.77 L/h and -37 °C coolant-2 in these shots are the pre-F-6/T-3 build (already shipped in 3627b7d). Bottom nav bar in these shots likewise predates the T-1 removal.
+
+## Addendum 2026-09-13 (night): freeze-frame display policy + unit-parse inconsistency (owner re-report of dashboard inconsistency)
+
+### T-11 Freeze-frame: one lost CAN frame must never blank a tile
+Remaining blink source after T-8: a fresh explicit failure (timeout / NO DATA) outranked a still-in-budget valid sample in primary-ECU selection, so a single lost frame showed "Not available" until the next cycle succeeded (visible in the 20:45-20:48 shots: Baro / Throttle / Pedal-D alternating). `LiveTelemetryStore.qualityTier` now orders: fresh valid > in-budget-or-stale valid (freeze-frame) > fresh failure > stale failure. A failure with NO in-budget value anywhere still shows its loud placeholder. Once the frozen value ages past its adaptive budget it carries "(stale)"; numericMap keeps serving integrators only while the winner is non-stale, and trip integration is driven by RX frame events (`onTelemetrySignalUpdated` is only invoked on the decoded-frame path), so frozen numerics can never double-count. Tests updated: `LiveTelemetryStoreTest.testTimeoutOnOnlyEcuFreezeFramesLastValueThenAgesToStale`, `...testFailureWithoutAnyValueReportsPlaceholderWithoutUnitSuffix`, `KylaqTraceReplayTest` 010F expectation.
+
+### T-12 Decoded-string unit-parse bugs (AC card "OUT --" + dead AC learning)
+`liveDecodedMap` values carry units ("25 °C", "12 km/h"). Two call sites parsed them with bare `toDoubleOrNull()`, which is ALWAYS null:
+1. `DashboardScreen` ambientC (AC & Climate card) - the card showed "OUT -- / delta --" while Ambient Air Temp was live in the Temperatures card (owner screenshots 20:45-20:48): a visible cross-card inconsistency.
+2. `DashboardScreen` acSpeed - stuck at 0.0, so the AC ON-vs-OFF economy learning gate (speed > 5 km/h) could NEVER open; the "LEARNED" row could never populate no matter how much the owner drove.
+Both now read `viewModel.liveNumericMap` (unit-free numeric view, stale-excluded). AiDoctorScreen already stripped non-numeric characters and was unaffected.

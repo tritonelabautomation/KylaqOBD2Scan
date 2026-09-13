@@ -44,9 +44,10 @@ import java.util.concurrent.ConcurrentHashMap
  * 1. the evidence-based preferred ECU for that PID (capability discovery),
  * 2. else the canonical engine ECU `7E8`,
  * 3. else the alphabetically first responding ECU (deterministic),
- * 4. sample quality outranks ECU identity: a fresh value beats a fresh failure marker,
- *    which beats a stale value. So if the preferred ECU stops answering, a still-responding
- *    secondary ECU takes over automatically, and one timeout never blanks the dashboard.
+ * 4. sample quality outranks ECU identity: a fresh value beats everything, an in-budget or
+ *    stale value beats a fresh failure marker (freeze-frame), and a fresh failure beats only
+ *    a stale failure. So if the preferred ECU stops answering, a still-responding secondary
+ *    ECU takes over automatically, and one timeout never blanks the dashboard.
  *
  * The class is intentionally free of `android.*` dependencies so it can be unit
  * tested on a plain JVM.
@@ -213,20 +214,26 @@ class LiveTelemetryStore {
      * Sample quality tiers, best first:
      *
      *  * 0 — fresh, decodable value
-     *  * 1 — fresh explicit failure (timeout / NO DATA / malformed)
-     *  * 2 — stale sample that still holds a last known value
+     *  * 1 — stale sample that still holds a last known value (freeze-frame)
+     *  * 2 — fresh explicit failure (timeout / NO DATA / malformed)
      *  * 3 — stale failure
      *
      * Tiering before ECU rank is what makes multi-ECU failover correct: a live timeout on
-     * the preferred ECU (tier 1) loses to live data from a secondary ECU (tier 0), so the
-     * dashboard keeps showing the value 7E9 is still reporting. It still beats a value
-     * nobody has confirmed recently (tier 2), because "no answer right now" is the more
-     * honest statement than a number that has not been refreshed.
+     * the preferred ECU loses to live data from a secondary ECU (tier 0), so the dashboard
+     * keeps showing the value 7E9 is still reporting.
+     *
+     * FREEZE-FRAME (2026-09-13, owner live screenshots: tiles blinking red "Not available"
+     * one second after showing a good number): a fresh explicit failure used to outrank a
+     * still-in-budget value, so ONE lost CAN frame blanked the tile until the next cycle.
+     * Automotive cluster practice is freeze-frame with an indicator: the last confirmed
+     * value keeps displaying (plain while inside its staleness budget, "(stale)" once past
+     * it) and only a failure with NO in-budget value anywhere shows the placeholder.
+     * Integrators stay protected either way - numericMap only serves non-stale winners.
      */
     private fun qualityTier(item: LiveTelemetryValue): Int = when {
         !item.isStale && item.isValid -> 0
-        !item.isStale -> 1
-        item.isValid -> 2
+        item.isValid -> 1
+        !item.isStale -> 2
         else -> 3
     }
 
