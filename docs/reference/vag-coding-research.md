@@ -101,6 +101,39 @@ belongs to OBDeleven (licensed) or a pro coder with current SFD2 access.
 Corrected headline verdict: **MID red theme = platform-recipe exists (17 → `default_color` RGB), Kylaq
 unverified, SFD2-gated, testable with OBDeleven PRO/ULTIMATE — not "impossible for everyone".**
 
+### 3.1c Deep sweep 2026-09-13 ("try your best") — Kylaq-specific OBDeleven state of play
+
+1. **Kylaq is an officially supported OBDeleven model.** Forum thread 38477
+   ([Skoda Kylaq 2025 — Requesting Support](https://forum.obdeleven.com/thread/38477/skoda-kylaq-2025-requesting-support)):
+   Feb 2025 the car was detected as "Non VAG"; the One-Click-App developer added the model profile
+   (Feb 28, 2025), received a **full backup from a real Kylaq owner** (Mar 11, 2025) and published
+   Kylaq OCAs by **May 2, 2025**. Kylaq also appears in the official model picker at
+   [obdeleven.com/customizations/skoda](https://obdeleven.com/customizations/skoda).
+2. **Published Kylaq OCAs today** ([official May-2025 list](https://obdeleven.com/new-one-click-apps-added-in-may-2025)):
+   ACC Distance Settings Menu, Air Conditioner Compressor Activation, Traffic Sign Speed Warning,
+   Window Calibration. **No cluster-theme app for Kylaq yet** — but the request pipeline is live and
+   demonstrably responsive (Slavia: requested Nov 2022 → apps shipped May 2023; Kylaq profile:
+   requested Feb 2025 → shipped May 2025). Precedent for the honest negative: VW Taos 2023
+   "Digital Cockpit Theme" request → developer verdict *"Looks like your instrument cluster doesn't
+   support this feature"* (thread 20801). Either answer settles the Kylaq question **officially, for free**.
+3. **Official store options** ([obdeleven.com/skoda](https://obdeleven.com/skoda), VW-Group-licensed, 14-day money-back):
+   OBDeleven 3 + 200 credits **€114.99** (no coding — wrong tier); **PRO Pack + 100 credits €139.99**
+   (device + 12-month PRO: coding, adaptations, SFD unlock — the right tier); ULTIMATE €259.99.
+   Amazon.in equivalents: NextGen Pro Pack ₹15,999, Ultimate ₹25,999.
+4. **The decisive caveat, in OBDeleven's own words** (site FAQ, current): *"Important for 2024+ models:
+   New Volkswagen Group vehicles starting from 2024 include updated security measures (UNECE R155 & R156,
+   often referred to as 'SFD2') that limit full access to all control units. OBDeleven can still communicate
+   with the main gateway unit, but advanced features like full scans and adaptations **may be restricted**.
+   We're actively working with VAG and updating our software…"* Combined with the moderator's May-2026
+   note on 2025 Skodas, a 2026-build Kylaq adaptation write may be gated until their SFD2 rollout matures.
+
+**Best-judgement odds (stated honestly):** the `default_color` channel plausibly exists in the Kylaq's
+MQB-A0-IN digital MID (same family as Taigun 1L/Kushaq/Slavia/Virtus, where it is proven). Two gates remain:
+(a) Skoda India firmware enablement on this cluster — codemyVAG's exclusion and CarDekho's "colour theme is
+not configurable" hint it may be absent; (b) SFD2 write restriction on 2026 builds. **Gate (a) can be
+settled for ₹0 by asking the OBDeleven OCA developer, who already holds a full Kylaq backup** — that is the
+recommended first move; the €139.99 PRO Pack path comes second.
+
 ### 3.2 Independent Indian coder (TecUpdater) — theme colours confirmed
 [tecupdater.com/hidden-feature-unlocks-vw-skoda-mqb](https://tecupdater.com/hidden-feature-unlocks-vw-skoda-mqb/) independently documents, for Kushaq/Taigun/Slavia/Virtus/**Kylaq**: "The MIB2/MIB3 infotainment UI supports multiple colour theme options hidden in standard settings. Available accent colours: **Red, Amber, and Blue**", the sport menu as "performance data views **present in firmware but suppressed on India-spec variants**", and notes post-April-2024 cars (which includes Kylaq) have "a revised ECU structure". Cluster-side goodies (GTI-scale tacho, RPM bar) are explicitly **Virtual Cockpit variants only**. Two independent vendors agreeing = strong validation.
 
