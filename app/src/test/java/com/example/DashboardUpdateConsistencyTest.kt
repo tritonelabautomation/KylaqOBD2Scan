@@ -3,6 +3,7 @@ package com.example
 import com.example.analysis.ChartSampling
 import com.example.scheduler.LiveTelemetryStore
 import com.example.ui.screens.formatLiveValue
+import com.example.ui.screens.numericWithStaleFallback
 import com.example.ui.screens.isLiveError
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -102,6 +103,45 @@ class DashboardUpdateConsistencyTest {
         assertEquals("Not available", formatLiveValue(map, "0105"))
         assertFalse("legacy stale placeholder would still render as error",
             isLiveError(mapOf("0105" to "Not available (stale)"), "0105").not())
+    }
+
+    // --------------------------------------------- poll cadence / AC-related PIDs
+
+    @Test
+    fun priorityFloorsMatchTheDocumentedBands() {
+        assertEquals(100L, com.example.model.PollingPriority.FAST.floorMs)
+        assertEquals(400L, com.example.model.PollingPriority.MEDIUM.floorMs)
+        assertEquals(2000L, com.example.model.PollingPriority.SLOW.floorMs)
+    }
+
+    @Test
+    fun noEnabledCataloguePidCanPollFasterThanItsTierFloor() {
+        // Root cause 2026-09-13: 114/153 entries inherited the 250 ms constructor
+        // default, so validated SLOW PIDs (ambient 0146 = the AC card's only live
+        // input, trims, tank...) came due on every serial pass and the board
+        // updated in lurches. The scheduler clamps with priority.floorMs.
+        val defs = com.example.model.DefaultPidDefinitions.getDefaults()
+        for (d in defs) {
+            val effective = maxOf(d.defaultIntervalMs, d.priority.floorMs)
+            assertTrue("${d.id} effective interval $effective below floor ${d.priority.floorMs}",
+                effective >= d.priority.floorMs)
+        }
+        val ambient = defs.first { it.id == "0146" }
+        assertTrue("ambient must stay in the documented SLOW band",
+            maxOf(ambient.defaultIntervalMs, ambient.priority.floorMs) in 2000L..5000L)
+        val ambientDup = defs.first { it.id == "01BD" }
+        assertTrue("the duplicate ambient research PID must not spam at 250 ms",
+            maxOf(ambientDup.defaultIntervalMs, ambientDup.priority.floorMs) >= 2000L)
+    }
+
+    @Test
+    fun acCardAmbientFallsBackToStaleDisplayNumber() {
+        assertEquals(25.0, numericWithStaleFallback(null, "25 °C (stale)")!!, 1e-9)
+        assertEquals(25.0, numericWithStaleFallback(null, "25 °C")!!, 1e-9)
+        assertEquals(-5.0, numericWithStaleFallback(null, "-5 °C")!!, 1e-9)
+        assertEquals("numeric view wins when fresh", 26.0, numericWithStaleFallback(26.0, "25 °C (stale)")!!, 1e-9)
+        assertNull(numericWithStaleFallback(null, "Not available"))
+        assertNull(numericWithStaleFallback(null, null))
     }
 
     // --------------------------------------------------------- chart downsampling

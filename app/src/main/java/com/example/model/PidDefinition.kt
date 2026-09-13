@@ -34,10 +34,22 @@ enum class DecoderType {
 /**
  * Priority polling tier to prevent bus overload
  */
-enum class PollingPriority {
-    FAST,   // 100-250ms: RPM, Speed, Throttle, Accelerator, Torque
-    MEDIUM, // 400-800ms: Fuel rates, MAP, MAF, Load, Coolant, Rail Pressure
-    SLOW    // 2000-5000ms: Fuel type, Ethanol %, Fuel level, Baro, Voltage, Ambient
+enum class PollingPriority(val floorMs: Long) {
+    FAST(100L),   // 100-250ms: RPM, Speed, Throttle, Accelerator, Torque
+    MEDIUM(400L), // 400-800ms: Fuel rates, MAP, MAF, Load, Coolant, Rail Pressure
+    SLOW(2000L);  // 2000-5000ms: Fuel type, Ethanol %, Fuel level, Baro, Voltage, Ambient
+
+    /**
+     * Minimum poll interval for this tier (2026-09-13 root-cause fix, owner:
+     * "AC/compressor related PIDs not updating correct"). 114 of 153 catalogue
+     * entries never set an explicit interval and inherited the 250 ms constructor
+     * default - so every validated SLOW PID (ambient 0146, trims, tank level, ...)
+     * came due on EVERY serial round-robin pass. That inflated the cycle time,
+     * burned ELM327 bandwidth on queries whose value cannot change that fast,
+     * raised collision/timeout rates and made the whole board - AC tiles
+     * included - update in lurches. The scheduler now clamps every interval to
+     * at least the tier floor documented above.
+     */
 }
 
 /**

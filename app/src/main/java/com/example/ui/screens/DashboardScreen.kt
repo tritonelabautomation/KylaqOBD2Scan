@@ -141,7 +141,7 @@ fun DashboardScreen(
             onToggleAuto = { viewModel.setAcAutoMode(!acAutoMode) },
             setTempC = acSetTempC,
             onSetTemp = { viewModel.setAcSetTempC(it) },
-            ambientC = liveNumericMap["0146"],
+            ambientC = numericWithStaleFallback(liveNumericMap["0146"], liveDecodedMap["0146"]),
             baselineLh = acBaselineLh,
             onKmL = acLearning?.onKmL,
             offKmL = acLearning?.offKmL,

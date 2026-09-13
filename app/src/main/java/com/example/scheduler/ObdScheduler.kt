@@ -240,7 +240,12 @@ class ObdScheduler(
                         continue
                     }
 
-                    val intervalMs = (pidDef.defaultIntervalMs * speedMode.multiplier).toLong().coerceAtLeast(60L)
+                    // Priority floor: catalogue entries without an explicit interval
+                    // inherit a 250 ms default, which made validated SLOW PIDs (ambient,
+                    // trims, tank...) due on every serial pass and inflated the cycle -
+                    // see PollingPriority.floorMs.
+                    val intervalMs = (maxOf(pidDef.defaultIntervalMs, pidDef.priority.floorMs) *
+                        speedMode.multiplier).toLong().coerceAtLeast(60L)
                     val lastTime = lastPollTimeMap[pidDef.id] ?: 0L
                     val now = SystemClock.elapsedRealtime()
 
