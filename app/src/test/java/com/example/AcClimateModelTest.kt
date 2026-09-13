@@ -43,6 +43,24 @@ class AcClimateModelTest {
     }
 
     @Test
+    fun `hardware identity matches the owner nameplate and VAG catalogue`() {
+        // 2026-09-13: owner photographed the compressor label (VW AG 2QD 820 803,
+        // mfr no. FM10S14x); VAG catalogue titles the part "with electro-magnetic
+        // coupling"; aftermarket cross-ref types it 7VL (7-cyl variable), 6PK pulley.
+        assertEquals("2QD 820 803", AcClimateModel.HW_PART_NUMBER)
+        assert(AcClimateModel.HW_COMPRESSOR_TYPE.contains("variable")) { "Kylaq compressor is variable-displacement" }
+        assert(AcClimateModel.HW_CLUTCH.contains("clutch")) { "part ships with an electromagnetic clutch" }
+    }
+
+    @Test
+    fun `clutch open means zero parasitic floor - not a clutchless minimum`() {
+        // A clutchless variable compressor would still drag ~0.2-0.4 kW at minimum
+        // stroke with AC OFF; THIS hardware has a clutch, so OFF must price at 0.
+        assertEquals(0.0, AcClimateModel.compressorLoadKw("OFF", true, 40.0, 18.0), 1e-9)
+        assertEquals(0.0, AcClimateModel.compressorLoadKw("OFF", false, null, null), 1e-9)
+    }
+
+    @Test
     fun `delta needs both temperatures`() {
         assertNull(AcClimateModel.deltaC(null, 24.0))
         assertEquals(11.0, AcClimateModel.deltaC(35.0, 24.0)!!, 1e-9)

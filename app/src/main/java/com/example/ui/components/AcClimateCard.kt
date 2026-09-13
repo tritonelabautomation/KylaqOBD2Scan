@@ -139,7 +139,11 @@ fun AcClimateCard(
             fontSize = 10.sp
         )
         Text(
-            "J1979 exposes no compressor/setpoint PID - state is owner-tagged; OUT = PID 0146; AUTO modulates load x0.75.",
+            "HW: VW ${AcClimateModel.HW_PART_NUMBER} - ${AcClimateModel.HW_COMPRESSOR_TYPE}, ${AcClimateModel.HW_CLUTCH}, ${AcClimateModel.HW_PULLEY}. Clutch open = zero drag at AC OFF; load follows cabin demand, not rpm.",
+            color = TextSecondaryDark, fontSize = 9.sp
+        )
+        Text(
+            "J1979 exposes no compressor/setpoint PID - state is owner-tagged; OUT = PID 0146; AUTO modulates load x0.75 (assumption - comfort-CAN not observable).",
             color = TextSecondaryDark, fontSize = 9.sp
         )
     }
