@@ -124,3 +124,19 @@ is J1979 read-only by design and stays that way.
 
 **Zero-spend ceiling:** route 1 gives you the definitive answer for ₹0; the app itself is already red by
 default (`c271a47`). Actual cluster/infotainment writes require routes 2-4 — borrowed, hired, or shop-paid.
+
+### Bonus request lines for the same coder session — ambient/backlight menu (MST2)
+
+Mined 2026-09-13 from github.com/mrfixpl/mib2-backlight-menu (Golf MK7 MST2 research; Kylaq
+applicability UNVERIFIED — phrase as a question to the coder, see
+`docs/reference/skoda-github-ecosystem-survey.md` §A). If the session in route 2/3/4 happens
+anyway, ask for these `0x5F` adaptations in the same sitting:
+
+- `0x5F` → adaptation → `Car_Function_Adaptations_Gen2` → `menu_display_ambient_illumination` = `active`
+- `0x5F` → adaptation → `Car_Function_Adaptations_Gen2` → `menu_display_ambient_illumination_over_threshold_high` = `active`
+- `0x5F` → adaptation → `Car_Function_Adaptations_Gen2` → `Interieur light 0x08` = `activated`
+- `0x5F` → adaptation → `Car_Function_Adaptations_Gen2` → `Interieur light 0x08 msg bus` = `comfort data bus`
+
+Upstream author needed a facelift variant long-coding (bytes 0-2) on his 2016 Golf for the submenu
+to appear, and his BCM (`0x09`) side is still TODO — so expect "maybe" answers, and never let
+anyone flash `.gcc`/`.mcf` zone files on a warranty car.
