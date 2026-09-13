@@ -19,7 +19,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.ui.text.TextAlign
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.analysis.TripFuelSummary
@@ -286,7 +288,7 @@ fun TripsOverviewScreen(
                         Box(Modifier.size(40.dp).background(TtInner, CircleShape).clickable { weekOffset-- }, contentAlignment = Alignment.Center) {
                             Icon(Icons.Default.ChevronLeft, "Previous week", tint = TtWhite, modifier = Modifier.size(20.dp))
                         }
-                        Text(ov.rangeLabel, color = TtWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f), textAlign = androidx.compose.ui.text.TextAlign.Center)
+                        Text(ov.rangeLabel, color = TtWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
                         Icon(Icons.Default.KeyboardDoubleArrowRight, "Jump to this week", tint = TtWhite, modifier = Modifier.size(20.dp).clickable { weekOffset = 0 })
                         Spacer(Modifier.width(10.dp))
                         Box(Modifier.size(40.dp).background(TtInner, CircleShape).clickable(enabled = weekOffset < 0) { if (weekOffset < 0) weekOffset++ }, contentAlignment = Alignment.Center) {

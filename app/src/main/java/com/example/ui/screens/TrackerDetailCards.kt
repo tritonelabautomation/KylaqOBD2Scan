@@ -67,12 +67,12 @@ fun TrackerSummaryCards(
             TkDivider()
             TkRow {
                 TkStat(Icons.Default.Speed, "%.0f km/h".format(summary.averageSpeedKmh), "Avg speed", withDivider = true)
-                TkStat(Icons.Default.Gauge, "%.0f km/h".format(summary.maxSpeedKmh), "Max speed")
+                TkStat(Icons.Default.RocketLaunch, "%.0f km/h".format(summary.maxSpeedKmh), "Max speed")
             }
             TkDivider()
             TkRow {
                 TkStat(Icons.Default.Terrain, "-- m", "Max altitude *", withDivider = true)
-                TkStat(Icons.Default.Elevation, "-- m", "Altitude dif. *")
+                TkStat(Icons.Default.TrendingUp, "-- m", "Altitude dif. *")
             }
             Spacer(Modifier.height(6.dp))
             Text("* altitude is not persisted by the OBD recorder - honest blank, never invented", color = TkDim, fontSize = 9.sp)

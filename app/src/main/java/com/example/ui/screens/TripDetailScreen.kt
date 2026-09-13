@@ -171,7 +171,13 @@ fun TripDetailScreen(
                 TripDetailTab.OVERVIEW -> {
                     Column {
                         TripFuelLogCard(fuelSummary)
-                        TripOverviewView(trip = trip, sampleCount = samples.size, rawCount = rawLogs.size, analysis = aiAnalysis)
+                        TripOverviewView(
+                            trip = trip, sampleCount = samples.size, rawCount = rawLogs.size, analysis = aiAnalysis,
+                            summary = fuelSummary,
+                            pricePerL = viewModel.fuelLogRepository.entries().maxByOrNull { it.idMs }?.pricePerL ?: 0.0,
+                            speedPoints = samples.filter { it.pid.takeLast(2) == "0D" }
+                                .map { it.timestamp to (it.numericValue ?: 0.0) }
+                        )
                     }
                 }
                 TripDetailTab.TRENDS -> {
@@ -225,7 +231,10 @@ private fun TripOverviewView(
     trip: TripEntity?,
     sampleCount: Int,
     rawCount: Int,
-    analysis: AiAnalysisEntity?
+    analysis: AiAnalysisEntity?,
+    summary: com.example.analysis.TripFuelSummary.Summary,
+    pricePerL: Double,
+    speedPoints: List<Pair<Long, Double>>
 ) {
     if (trip == null) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -240,12 +249,7 @@ private fun TripOverviewView(
     ) {
         item {
             // Replicated OBDeleven trip-detail cards (owner reference screen 2, 2026-09-13)
-            TrackerSummaryCards(
-                summary = fuelSummary,
-                pricePerL = viewModel.fuelLogRepository.entries().maxByOrNull { it.idMs }?.pricePerL ?: 0.0,
-                speedPoints = samples.filter { it.pid.takeLast(2) == "0D" }
-                    .map { it.timestamp to (it.numericValue ?: 0.0) }
-            )
+            TrackerSummaryCards(summary = summary, pricePerL = pricePerL, speedPoints = speedPoints)
         }
         item {
             // Health Badge Card
