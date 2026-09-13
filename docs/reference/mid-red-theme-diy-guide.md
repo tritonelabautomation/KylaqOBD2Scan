@@ -102,3 +102,25 @@ Kylaq OCAs don't include it yet — request it in thread 38477 rather than guess
 Adaptation writes are logged (SFD exists precisely to record who changed what). A cluster/infotainment
 warranty claim could see the modification. Rolling back restores the stock value but not necessarily the
 history. Risk is small for cosmetic adaptations — your call, made with eyes open.
+
+---
+
+## Addendum 2026-09-13 — NO-DEVICE routes (owner: "I don't want to buy any devices")
+
+Owning an OBDeleven is only one of four ways to get this done. The write itself needs a VW-licensed
+tool + SFD token exactly once; it does not need to be *yours*.
+
+| Route | Cost | What you do | Outcome |
+|---|---|---|---|
+| **1. Free knowledge first** | ₹0 | Post the drafted question in OBDeleven forum thread 38477 (devs hold a real Kylaq backup: does module 17 expose `default_color`?) + WhatsApp codemyVAG the drafted message | Settles whether the MID channel exists on Kylaq **before anyone is paid**. If devs say "cluster doesn't support it" → stop; only the infotainment red (route 4) is real |
+| **2. Borrow a member's device** | ₹0-2k goodwill | Hyderabad VAG/Kylaq owners groups (WhatsApp/FB/Team-BHP): "Any member with OBDeleven PRO? 30-min session, I'll pay for your time." Owner performs the Phase 3-6 steps himself under the member's login | True DIY without ownership. PRO plan travels with the member's account |
+| **3. Local VAG tuning shop** | ₹1-3k session | Shops with OBDeleven/VCDS-class tools; hand them this guide's Phase 4/6 verbatim (`17 → default_color` RGB {250,0,0}; `5F → Skinning` = 2) | Someone else's licensed tool, your instructions, your car |
+| **4. Pro coder remote/same-day** | ₹2-5k per feature | codemyVAG (+91 784 000 2005, Hyderabad remote/same-day) or TecUpdater — book **infotainment Red theme + Sport menu** (both officially sold for Kylaq Sig+); ask them point-blank about the MID channel with the thread-18748 recipe quoted | The guaranteed-red path (infotainment). MID only if their SFD2 tooling confirms it |
+
+**What will NOT work (don't waste time or get scammed):** any phone app + generic ELM327/BT dongle claiming
+to code VAG clusters. The write needs UDS security access (`0x27`) and an SFD token minted on Volkswagen
+servers under licence — no free app has it, and post-2024 (SFD2) even VCDS-era tricks are dead. KylaqOBD2Scan
+is J1979 read-only by design and stays that way.
+
+**Zero-spend ceiling:** route 1 gives you the definitive answer for ₹0; the app itself is already red by
+default (`c271a47`). Actual cluster/infotainment writes require routes 2-4 — borrowed, hired, or shop-paid.
