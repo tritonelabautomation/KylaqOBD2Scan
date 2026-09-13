@@ -130,7 +130,10 @@ class DashboardUpdateConsistencyTest {
         val ambient = defs.first { it.id == "0146" }
         assertTrue("ambient must stay in the documented SLOW band",
             maxOf(ambient.defaultIntervalMs, ambient.priority.floorMs) in 2000L..5000L)
-        val ambientDup = defs.first { it.id == "01BD" }
+        // 01BD (duplicate ambient research PID) lives in the lookup catalogue, not
+        // the poll set - but the floor must hold there too in case a saved profile
+        // ever promotes it into the polling list.
+        val ambientDup = com.example.model.StandardPidCatalog.getAllKnownPids().first { it.id == "01BD" }
         assertTrue("the duplicate ambient research PID must not spam at 250 ms",
             maxOf(ambientDup.defaultIntervalMs, ambientDup.priority.floorMs) >= 2000L)
     }
