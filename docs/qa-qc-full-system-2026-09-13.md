@@ -112,3 +112,19 @@ Fixes (honesty gate):
   Compose screens, Android framework wrappers (BT manager, GPS, audio, Auto service) and Room
   DAOs - not JVM-unit-testable; their logic cores (decoders, models, analyzers, stores, codecs)
   are the tested 59. UI behaviour is covered by the on-device verification passes instead.
+
+### Same-day sweep (3) — Rev Theater reachability + audible-on-silent-phone
+Owner: drawer screenshot showed no RevHeadz entry; asked for a thorough check incl.
+"does it really play sound when connected with OBD".
+1. **Drawer was an unscrollable Column** (24 items): on a phone the tail entries
+   (Rev Theater, PID Scanner, Coding Lab, Settings, About) fell below the fold and were
+   unreachable. Now wrapped in `verticalScroll(rememberScrollState())`.
+2. **AudioTrack used CONTENT_TYPE_SONIFICATION** - the system-sounds stream, which
+   silent/vibrate profiles mute on many skins (owner's status bar showed vibrate).
+   Now CONTENT_TYPE_MUSIC: follows media volume, silent-profile-proof.
+3. **On-device proof-of-audio lamp**: Rev Theater shows "AUDIO: rendering <profile> ·
+   buffers N · media-volume controlled" while running (buffersWritten counter from the
+   render thread). If the counter climbs and nothing is heard, media volume/DND is the
+   cause - diagnosable without a debugger. LIVE-OBD path re-verified by reading:
+   START -> AudioTrack thread; loop pushes PID 010C rpm / 0104 load when
+   ConnectionState.CONNECTED && rpm>0; falls back to labelled MANUAL sliders otherwise.

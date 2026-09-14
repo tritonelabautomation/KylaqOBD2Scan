@@ -73,6 +73,7 @@ fun RevTheaterScreen(
     var manualRpm by remember { mutableStateOf(0.0f) }
     var manualThrottle by remember { mutableStateOf(0.2f) }
     var volume by remember { mutableStateOf(0.8f) }
+    var audioTick by remember { mutableStateOf(0L) }
 
     val live by viewModel.liveNumericMap.collectAsState()
     val connection by viewModel.connectionState.collectAsState()
@@ -95,6 +96,7 @@ fun RevTheaterScreen(
             if (wanted.id != player.profile.id) player.start(wanted)
             player.rpm = if (rpm > 0.0) rpm else profile.idleRpm
             player.throttle = throttle
+            audioTick = player.buffersWritten
             delay(80)
         }
     }
@@ -206,6 +208,15 @@ fun RevTheaterScreen(
                 Slider(value = manualRpm, onValueChange = { manualRpm = it }, valueRange = 0f..profile.redlineRpm.toFloat())
                 Text("THROTTLE  ${(manualThrottle * 100).toInt()}%", color = TextSecondaryDark, fontSize = 10.sp)
                 Slider(value = manualThrottle, onValueChange = { manualThrottle = it })
+            }
+            // On-device proof-of-audio: if this counter climbs, the render thread and
+            // AudioTrack are alive; if sound is still inaudible, media volume / DND is
+            // the culprit - not the app.
+            if (engineOn) {
+                Text(
+                    "AUDIO: rendering ${player.profile.id} · buffers $audioTick · media-volume controlled",
+                    color = NeonEmerald, fontSize = 10.sp, fontWeight = FontWeight.Bold
+                )
             }
             Text("VOLUME  ${(volume * 100).toInt()}%", color = TextSecondaryDark, fontSize = 10.sp)
             Slider(value = volume, onValueChange = { volume = it })

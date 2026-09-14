@@ -18,6 +18,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -257,6 +259,10 @@ fun MainApp(viewModel: MainViewModel) {
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp)
                 )
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                // 2026-09-14 owner screenshot: the sheet is a plain Column, so on a
+                // phone the last drawer entries (Rev Theater, PID Scanner, Coding Lab,
+                // Settings, About) fell below the fold and were UNREACHABLE. Scroll fix.
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                 drawerItems.forEach { screen ->
                     NavigationDrawerItem(
                         icon = { Icon(screen.icon, contentDescription = null) },
@@ -274,6 +280,7 @@ fun MainApp(viewModel: MainViewModel) {
                         },
                         modifier = Modifier.padding(horizontal = 10.dp)
                     )
+                }
                 }
             }
         }

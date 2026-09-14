@@ -23,6 +23,9 @@ class EngineAudioPlayer {
     @Volatile private var volumeValue: Float = 0.8f
     @Volatile var running: Boolean = false
         private set
+    /** Buffers rendered since start() - on-screen proof the audio thread is alive. */
+    @Volatile var buffersWritten: Long = 0L
+        private set
 
     private var thread: Thread? = null
     private var track: AudioTrack? = null
@@ -34,6 +37,7 @@ class EngineAudioPlayer {
             return
         }
         profile = initialProfile
+        buffersWritten = 0L
         running = true
         thread = Thread({
             // Synth state is sized to the profile's harmonic count - when the user
@@ -50,7 +54,10 @@ class EngineAudioPlayer {
             val at = AudioTrack(
                 AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    // 2026-09-14: SONIFICATION follows the system-sounds stream, which
+                    // silent/vibrate profiles mute on many skins - the engine sounded
+                    // "dead" on a ringer-silent phone. MUSIC follows media volume.
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
                     .build(),
                 AudioFormat.Builder()
                     .setSampleRate(EngineSoundSynth.SAMPLE_RATE)
@@ -76,6 +83,7 @@ class EngineAudioPlayer {
                     val effectiveRpm = if (rpm > 0.0) rpm else current.idleRpm
                     synth.render(state, current, effectiveRpm, throttle, buffer)
                     at.write(buffer, 0, buffer.size)
+                    buffersWritten++
                 }
             } finally {
                 runCatching { at.stop() }
