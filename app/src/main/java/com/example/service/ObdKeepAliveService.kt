@@ -88,7 +88,7 @@ class ObdKeepAliveService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val notification: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_stat_kylaq)
             .setContentTitle(notificationTitle(recording))
             .setContentText(notificationText(recording))
             .setOngoing(true)

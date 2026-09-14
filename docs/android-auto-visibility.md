@@ -42,3 +42,21 @@ verify AA UI changes without the vehicle.
 AA shows whatever the phone app already has: connect the ELM327 in the phone app first
 (Bluetooth), then AA mirrors the live dashboard panes. AA never talks to the dongle
 itself.
+
+## Round 2 (owner followed all 5 steps, AA still empty) - residual causes & fixes
+Owner screenshots proved Developer mode + Unknown sources ON. Remaining suspects, in order:
+1. **Stale APK** - About screen shows `build <commit count>`; the manifest fix landed at
+   count 128, so the installed APK must read **build 129 or higher**.
+2. **AA caches its car-app scan at start** - after installing a new APK: force-stop the
+   Android Auto app (or reboot the phone) once, then reconnect.
+3. **"Customise Launcher"** (AA Settings, visible in owner screenshot) - apps can be
+   toggled OFF from the vehicle launcher strip there; ensure Kylaq TSI Coach is enabled.
+4. **Bind-time crash hid the app**: `ObdCarSession.onCreateScreen` rethrew any throwable,
+   failing the whole AA bind -> invisible app, no user-visible error. Now serves
+   `ObdFallbackScreen` (diagnostic PaneTemplate) so the app ALWAYS appears; the fallback
+   pane names the failure and points to the phone app.
+5. **Black-dot notification**: keep-alive notification used the adaptive mipmap as
+   smallIcon; status bars render those as a silhouette dot. New monochrome
+   `drawable/ic_stat_kylaq` (white alpha glyph) fixes shade + AA media-style icons.
+6. If 1-5 hold and the head unit still omits the Apps grid entry, the OEM AA skin is
+   restricting the launcher; prove the phone side with the Desktop Head Unit emulator.
