@@ -47,12 +47,14 @@ fun AcClimateCard(
     onKmL: Double?,
     offKmL: Double?,
     learnedRides: Int,
+    connected: Boolean,
     modifier: Modifier = Modifier
 ) {
     val delta = AcClimateModel.deltaC(ambientC, setTempC)
-    val loadKw = AcClimateModel.compressorLoadKw(acTag, autoMode, ambientC, setTempC)
-    val penaltyLh = AcClimateModel.fuelPenaltyLh(loadKw)
-    val penaltyPct = AcClimateModel.penaltyPercent(penaltyLh, baselineLh)
+    // 2026-09-14 honesty gate: no OBD link -> no compressor/fuel numbers at all.
+    val loadKw = AcClimateModel.liveCompressorLoadKw(connected, acTag, autoMode, ambientC, setTempC)
+    val penaltyLh = loadKw?.let { AcClimateModel.fuelPenaltyLh(it) }
+    val penaltyPct = penaltyLh?.let { AcClimateModel.penaltyPercent(it, baselineLh) }
 
     Column(
         modifier = modifier
@@ -120,12 +122,31 @@ fun AcClimateCard(
 
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("COMPRESSOR", color = TextSecondaryDark, fontSize = 10.sp)
-            Text(String.format(Locale.US, "%.2f kW", loadKw), color = if (loadKw > 0.05) ElectricAmber else TextSecondaryDark, fontSize = 12.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+            Text(
+                if (loadKw != null) String.format(Locale.US, "%.2f kW", loadKw) else "--",
+                color = if (loadKw != null && loadKw > 0.05) ElectricAmber else TextSecondaryDark, fontSize = 12.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace
+            )
             Text("FUEL COST", color = TextSecondaryDark, fontSize = 10.sp)
-            Text(String.format(Locale.US, "+%.2f L/h", penaltyLh), color = if (penaltyLh > 0.05) ElectricAmber else TextSecondaryDark, fontSize = 12.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+            Text(
+                if (penaltyLh != null) String.format(Locale.US, "+%.2f L/h", penaltyLh) else "--",
+                color = if (penaltyLh != null && penaltyLh > 0.05) ElectricAmber else TextSecondaryDark, fontSize = 12.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace
+            )
             if (penaltyPct != null) {
                 Text(String.format(Locale.US, "(+%.0f%%)", penaltyPct), color = ElectricAmber, fontSize = 10.sp, fontWeight = FontWeight.Bold)
             }
+        }
+
+        // Honesty line: explain exactly why numbers are absent / assumed.
+        if (loadKw == null) {
+            Text(
+                "NO OBD LINK - kW and L/h print only from live telemetry (model needs PID 0146 ambient + your AC tag). Tag state now; it is stored per ride.",
+                color = TextSecondaryDark, fontSize = 10.sp
+            )
+        } else if (delta == null && acTag == "AC") {
+            Text(
+                "Model estimate - ambient (PID 0146) not reporting, assumed delta-T ${AcClimateModel.FALLBACK_DELTA_C.toInt()} C.",
+                color = TextSecondaryDark, fontSize = 10.sp
+            )
         }
 
         Text(

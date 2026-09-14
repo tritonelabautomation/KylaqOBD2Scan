@@ -145,7 +145,8 @@ fun DashboardScreen(
             baselineLh = acBaselineLh,
             onKmL = acLearning?.onKmL,
             offKmL = acLearning?.offKmL,
-            learnedRides = acLearning?.rides ?: 0
+            learnedRides = acLearning?.rides ?: 0,
+            connected = isConnected
         )
 
         // Vehicle & Connection Status Banner

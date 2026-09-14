@@ -37,6 +37,7 @@ import kotlinx.coroutines.launch
 import org.json.JSONArray
 import java.util.Locale
 
+import com.example.bluetooth.ConnectionState
 import com.example.model.ChatMessage
 import com.example.model.MessageSender
 
@@ -108,13 +109,15 @@ fun AiDoctorScreen(
     // Compute live health score from active live telemetry
     // QA/QC 2026-09-13: the old regex-strip parse of display strings dropped minus
     // signs and depended on unit suffixes; use the numeric view with stale fallback.
-    val liveScore = remember(liveDecodedMap, liveNumericMap) {
-        var score = 100
-        val voltStr = numericWithStaleFallback(liveNumericMap["0142"], liveDecodedMap["0142"])
-        val coolantStr = numericWithStaleFallback(liveNumericMap["0105"], liveDecodedMap["0105"])
-        if (voltStr != null && voltStr < 12.4 && voltStr > 0) score -= 15
-        if (coolantStr != null && coolantStr > 108.0) score -= 25
-        score.coerceIn(0, 100)
+    // 2026-09-14 honesty gate: no link / no samples -> null -> UI shows "--".
+    // The old logic started at 100 and only deducted on bad live readings, so a
+    // disconnected app displayed a perfect 100/100 with zero evidence.
+    val liveScore = remember(liveDecodedMap, liveNumericMap, connectionState) {
+        com.example.ai.AiDoctorScoring.liveHealthScore(
+            connected = connectionState == ConnectionState.CONNECTED,
+            volt = numericWithStaleFallback(liveNumericMap["0142"], liveDecodedMap["0142"]),
+            coolantC = numericWithStaleFallback(liveNumericMap["0105"], liveDecodedMap["0105"])
+        )
     }
 
     Scaffold(
@@ -238,7 +241,7 @@ fun AiDoctorScreen(
 
 @Composable
 private fun HealthReviewTab(
-    liveScore: Int,
+    liveScore: Int?,
     report: CarDoctorReport?,
     vehicleName: String,
     liveDecodedMap: Map<String, String>,
@@ -260,6 +263,7 @@ private fun HealthReviewTab(
                 border = androidx.compose.foundation.BorderStroke(1.dp, CyberCyan.copy(alpha = 0.4f))
             ) {
                 Column(modifier = Modifier.padding(18.dp)) {
+                    val shownScore = report?.healthScore ?: liveScore
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -270,11 +274,11 @@ private fun HealthReviewTab(
                             Spacer(modifier = Modifier.height(4.dp))
                             Row(verticalAlignment = Alignment.Bottom) {
                                 Text(
-                                    text = "${report?.healthScore ?: liveScore}",
+                                    text = if (shownScore != null) "$shownScore" else "--",
                                     fontSize = 44.sp,
                                     fontWeight = FontWeight.Black,
                                     fontFamily = FontFamily.Monospace,
-                                    color = if ((report?.healthScore ?: liveScore) >= 80) NeonEmerald else ElectricAmber
+                                    color = if (shownScore != null && shownScore >= 80) NeonEmerald else if (shownScore != null) ElectricAmber else TextSecondaryDark
                                 )
                                 Text(" / 100", fontSize = 16.sp, color = TextSecondaryDark, modifier = Modifier.padding(bottom = 6.dp))
                             }
@@ -282,7 +286,7 @@ private fun HealthReviewTab(
 
                         Surface(
                             shape = RoundedCornerShape(10.dp),
-                            color = (if ((report?.healthScore ?: liveScore) >= 80) NeonEmerald else ElectricAmber).copy(alpha = 0.15f)
+                            color = (if (shownScore != null && shownScore >= 80) NeonEmerald else if (shownScore != null) ElectricAmber else TextSecondaryDark).copy(alpha = 0.15f)
                         ) {
                             Row(
                                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
@@ -293,11 +297,11 @@ private fun HealthReviewTab(
                                     modifier = Modifier
                                         .size(8.dp)
                                         .clip(CircleShape)
-                                        .background(if ((report?.healthScore ?: liveScore) >= 80) NeonEmerald else ElectricAmber)
+                                        .background(if (shownScore != null && shownScore >= 80) NeonEmerald else if (shownScore != null) ElectricAmber else TextSecondaryDark)
                                 )
                                 Text(
-                                    text = report?.overallHealth ?: if (liveScore >= 80) "NORMAL" else "ATTENTION",
-                                    color = if ((report?.healthScore ?: liveScore) >= 80) NeonEmerald else ElectricAmber,
+                                    text = report?.overallHealth ?: if (shownScore == null) "NO DATA" else if (shownScore >= 80) "NORMAL" else "ATTENTION",
+                                    color = if (shownScore != null && shownScore >= 80) NeonEmerald else if (shownScore != null) ElectricAmber else TextSecondaryDark,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 12.sp
                                 )

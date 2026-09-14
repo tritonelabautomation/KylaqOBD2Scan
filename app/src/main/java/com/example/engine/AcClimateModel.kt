@@ -89,6 +89,22 @@ object AcClimateModel {
         else -> 0.0
     }
 
+    /**
+     * LIVE-DISPLAY GATE (2026-09-14, owner: bedroom screenshots showed 1.43/1.90 kW
+     * and +0.53/+0.71 L/h with NO OBD link - pure model output from the assumed
+     * delta-T, presented as readings). Without an actual adapter link there is no
+     * telemetry behind any climate number, so the display layer must print nothing.
+     * Returns null unless [connected]; the un-gated [compressorLoadKw] stays for
+     * documented worked examples (Fuel Savings Guide) and tests.
+     */
+    fun liveCompressorLoadKw(
+        connected: Boolean,
+        acTag: String,
+        autoMode: Boolean,
+        ambientC: Double?,
+        setTempC: Double?
+    ): Double? = if (!connected) null else compressorLoadKw(acTag, autoMode, ambientC, setTempC)
+
     /** Litres per hour the compressor load costs at [DRIVETRAIN_EFFICIENCY]. */
     fun fuelPenaltyLh(loadKw: Double): Double =
         loadKw / (DRIVETRAIN_EFFICIENCY * FUEL_ENERGY_MJ_PER_L / 3.6)

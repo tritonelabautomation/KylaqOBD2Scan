@@ -61,6 +61,22 @@ class AcClimateModelTest {
     }
 
     @Test
+    fun `no OBD link prints no compressor number at all`() {
+        // 2026-09-14 owner bedroom screenshots: modelled kW/L-h with zero telemetry.
+        assertNull(AcClimateModel.liveCompressorLoadKw(false, "AC", false, null, null))
+        assertNull(AcClimateModel.liveCompressorLoadKw(false, "AC", true, 35.0, 24.0))
+        assertNull(AcClimateModel.liveCompressorLoadKw(false, "BLOWER", false, 35.0, 24.0))
+        assertNull(AcClimateModel.liveCompressorLoadKw(false, "OFF", false, 35.0, 24.0))
+    }
+
+    @Test
+    fun `connected link restores the documented model values`() {
+        assertEquals(2.2, AcClimateModel.liveCompressorLoadKw(true, "AC", false, 35.0, 24.0)!!, 1e-9)
+        assertEquals(1.9, AcClimateModel.liveCompressorLoadKw(true, "AC", false, null, 24.0)!!, 1e-9)
+        assertEquals(0.0, AcClimateModel.liveCompressorLoadKw(true, "OFF", false, 35.0, 24.0)!!, 1e-9)
+    }
+
+    @Test
     fun `delta needs both temperatures`() {
         assertNull(AcClimateModel.deltaC(null, 24.0))
         assertEquals(11.0, AcClimateModel.deltaC(35.0, 24.0)!!, 1e-9)

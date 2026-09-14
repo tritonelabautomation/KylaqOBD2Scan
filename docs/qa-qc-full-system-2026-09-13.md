@@ -69,3 +69,33 @@ Fix (species level, so it cannot regress):
    updated for the required parameter.
 
 Known-open list: T-5 altitude persistence; AC AUTO ×0.75 assumption; no J1979 compressor PID (doctrine).
+
+---
+
+## Addendum 2026-09-14 (2) — NO fabricated readings without an OBD link
+
+Owner (bedroom screenshots, adapter never paired, engine never started): the AC & Climate card
+printed **COMPRESSOR 1.43/1.90 kW, FUEL COST +0.53/+0.71 L/h, BLOWER 0.15 kW** and the AI Doctor
+printed a perfect **100/100 VEHICLE HEALTH SCORE** — all with `OUT --` and every link dot grey.
+Root cause: both features computed *model output* from *assumed inputs* and rendered it in the
+same visual language as measured telemetry.
+- AC card: `compressorLoadKw()` falls back to `FALLBACK_DELTA_C = 8 °C` when PID 0146 ambient is
+  null; nothing checked the connection state (DashboardScreen had `isConnected` at line 96 but
+  never passed it to the card).
+- AI Doctor: live score started at 100 and only deducted on bad LIVE readings → no data = 100.
+
+Fixes (honesty gate):
+1. `AcClimateModel.liveCompressorLoadKw(connected, …)` returns **null** without a link; the card
+   takes `connected` from DashboardScreen and prints `--` for kW and L/h, plus an explicit line
+   "NO OBD LINK - kW and L/h print only from live telemetry…". State chips and the hardware/
+   nameplate notes remain (they are facts, not readings).
+2. Connected but ambient absent (0146 unsupported car): numbers stay model output but the card
+   now says so: "Model estimate - ambient not reporting, assumed delta-T 8 C."
+3. New `ai/AiDoctorScoring.liveHealthScore(connected, volt, coolantC): Int?` — null unless
+   CONNECTED **and** ≥1 live sample; hero card shows `--`, badge shows `NO DATA`.
+4. Guard tests: `AcClimateModelTest` (no link → null for AC/BLOWER/OFF; link restores 2.2/1.9/0.0)
+   and new `AiDoctorScoringTest` (no link → null even with alarming values; connected-no-samples
+   → null; deductions 15/25).
+5. Unchanged by design: Fuel Savings Guide worked examples carry explicit example temperatures
+   (35/24, 45/18) and name the model — documentation, not readings. Driving HUD already renders
+   `--` from the live map when disconnected.
