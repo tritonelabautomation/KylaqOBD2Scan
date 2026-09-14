@@ -44,6 +44,7 @@ object AppContainer {
     lateinit var documentRepository: DocumentRepository
     lateinit var reminderRepository: ReminderRepository
     lateinit var tripPlanRepository: TripPlanRepository
+    lateinit var manualRepository: com.example.manual.ManualRepository
     
     fun init(context: Context) {
         if (isInitialized) return
@@ -73,6 +74,7 @@ object AppContainer {
             documentRepository = DocumentRepository(appContext)
             reminderRepository = ReminderRepository(appContext)
             tripPlanRepository = TripPlanRepository(appContext)
+            manualRepository = com.example.manual.ManualRepository(appContext)
             isInitialized = true
         }
     }

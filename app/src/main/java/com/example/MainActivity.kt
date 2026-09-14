@@ -22,6 +22,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -92,6 +93,7 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector)
     object DriveBackup : Screen("drive_backup", "Drive Backup", Icons.Default.CloudUpload)
     object Expenses : Screen("expenses", "Expenses", Icons.Default.ReceiptLong)
     object Documents : Screen("documents", "Documents", Icons.Default.Description)
+    object OwnerManual : Screen("owner_manual", "Owner's Manual", Icons.AutoMirrored.Filled.MenuBook)
     object Reminders : Screen("reminders", "Reminders", Icons.Default.Notifications)
     object Reports : Screen("reports", "Reports", Icons.Default.QueryStats)
     object CoachChat : Screen("coach_chat", "Coach Chat", Icons.Default.Chat)
@@ -232,7 +234,7 @@ fun MainApp(viewModel: MainViewModel) {
     }
     val drawerItems = bottomNavItems + listOf(
         Screen.FuelCosts, Screen.FuelSavings, Screen.Maintenance, Screen.Expenses, Screen.Reports,
-        Screen.CoachChat, Screen.Trips, Screen.TripsOverview, Screen.Reminders, Screen.Documents, Screen.DriveBackup,
+        Screen.CoachChat, Screen.Trips, Screen.TripsOverview, Screen.Reminders, Screen.Documents, Screen.OwnerManual, Screen.DriveBackup,
         Screen.PidScanner, Screen.CodingLab, Screen.RevTheater, Screen.Settings, Screen.About
     )
     val mainTabRoutes = bottomNavItems.map { it.route }.toSet()
@@ -632,6 +634,9 @@ fun MainApp(viewModel: MainViewModel) {
             }
             composable(Screen.Documents.route) {
                 DocumentsScreen(viewModel = viewModel, onBack = { navController.popBackStack() })
+            }
+            composable(Screen.OwnerManual.route) {
+                OwnerManualScreen(onBack = { navController.popBackStack() })
             }
             composable(Screen.Reminders.route) {
                 RemindersScreen(viewModel = viewModel, onBack = { navController.popBackStack() })

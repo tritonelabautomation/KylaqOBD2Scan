@@ -178,3 +178,20 @@ constants; three adoptions, rest already consistent or not applicable.
 | Combine trips if gap <20 s | trips = recording sessions (no auto-split at lights) | not applicable, documented |
 | Tank 50 L / price 115 Rs/L | per-fill logged prices; no hardcoded defaults | not applicable (his pump price matches Hyderabad); tank noted for range feature later |
 | Ignore supported flag 0166-0183 (unchecked default) | bitmap discovery, never ignores flags | consistent-by-design |
+
+### Same-day sweep (7) — Owner's Manual portal integration (jypma/King4s skoda-manual)
+Owner proposed integrating official Skoda manuals via github.com/jypma/skoda-manual. Audit:
+original Nov-2023 script is obsolete (hand-copied cookies; its /w/ show-path now returns
+"Forbidden - access restricted"), but the King4s fork (Feb 2026, pushed Sep 2026) proves the
+2026 platform mints an anonymous per-VIN session via POST /api/entrypoint/V1/direct/ - no
+cookies, no login. Adopted the PROTOCOL (not the script) natively in Kotlin:
+com.example.manual (PortalClient/Json/Cache/Repository) + ManualViewModel + OwnerManualScreen
+(drawer "Owner's Manual"): VIN/part-number connect (India importer 663 en_IN first, Denmark
+004 en_GB fallback), TOC browse, JS-disabled WebView section viewer with /public/media
+interception, local search (TOC + cached pages), resumable offline pack, VIN prefill from
+garage. Legal posture: NO manual content in APK/repo - runtime fetch to the owner's device
+with the owner's own VIN, private cache, on-screen (c) Skoda Auto attribution, portal
+deep-link escape hatch. 24 unit tests (OwnerManualPortalTest): form switching, re-auth-once
+on SecurityContext expiry, tree/bodyHtml/media parsing incl. 2026 absolute data-src format,
+hashed-filename cache roundtrips. Full contract + verification checklist:
+docs/owner-manual-integration.md.
