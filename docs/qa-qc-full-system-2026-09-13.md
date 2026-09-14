@@ -160,3 +160,21 @@ Conclusion: two links everywhere - OBD = telemetry, phone media stream = audio. 
 LIVE mode is functionally RevHeadz's OBD2 Drive mode; banner now documents the routing + the
 AUX/USB/AA-vs-BT latency tip with the citation. No code-path change was needed - the audio
 stream was already the phone media stream (CONTENT_TYPE_MUSIC since sweep (3)).
+
+### Same-day sweep (6) — Car Scanner reference-settings cross-validation
+Owner forwarded Car Scanner ELM OBD2 "Vehicle options" + "Fuel consumption" screenshots
+and asked whether they are useful. Verdict: yes, as an INDEPENDENT cross-check of our
+constants; three adoptions, rest already consistent or not applicable.
+
+| Car Scanner line (his Kylaq config) | Ours | Action |
+|---|---|---|
+| Engine RPM scaling 1/4 "do not touch" | RPM ((A*256)+B)/4 | consistent, locked by decoder tests |
+| Displacement 1.0 L / 3 cylinders / Gasoline / stoich | PowertrainModel 1.0 TSI 3-cyl, AFR 14.7 | consistent |
+| Injector performance 250 cc/min | idle model 1.05 L/h | cross-anchor: 3x250 cc/min = 45 L/h @100% duty -> idle = ~2.3% duty, sane; comment added |
+| GPS horizontal accuracy threshold 40 m | no gate existed | ADOPTED: GpsManager drops fixes >40 m horizontal, keeps last good fix |
+| VW TP 2.0 "Open session" before DTC ops (checked) | DTC read sent 03 only | ADOPTED: UDS 10 03 extended session first, refusal tolerated |
+| Detect zero fuel consumption (DFCO) checked | coast/fuel-cut engine 20-130 km/h | consistent |
+| Always calculate fuel consumption / cycle consumption | 019D mass rate + MAF air model, always-on | consistent |
+| Combine trips if gap <20 s | trips = recording sessions (no auto-split at lights) | not applicable, documented |
+| Tank 50 L / price 115 Rs/L | per-fill logged prices; no hardcoded defaults | not applicable (his pump price matches Hyderabad); tank noted for range feature later |
+| Ignore supported flag 0166-0183 (unchecked default) | bitmap discovery, never ignores flags | consistent-by-design |

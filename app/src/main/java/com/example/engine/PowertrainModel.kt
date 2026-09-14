@@ -52,7 +52,8 @@ object PowertrainModel {
     // idle frames read raw 9D counts 8-14 -> 0.16-0.28 g/s -> 0.77-1.35 L/h; the old
     // 0.8 sat at the very bottom of the measured band. Median ~1.05 L/h now anchors
     // coast/idle detectors, coaching text and the idle-vs-model trend comparison.
-    const val IDLE_FUEL_LH = 1.05
+    const val IDLE_FUEL_LH = 1.05 // cross-anchor 2026-09-14: VAG injector rating 250 cc/min x 3 = 45 L/h at 100 %
+    // duty (Car Scanner default), so 1.05 L/h idle = ~2.3 % duty - physically sane
 
     /** Rotating-mass allowance (flywheel, wheels, driveshafts) as a multiplier on vehicle mass. */
     const val ROTATING_MASS_FACTOR = 1.05

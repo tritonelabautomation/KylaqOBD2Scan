@@ -71,7 +71,18 @@ class GpsManager(private val context: Context) : LocationListener {
         }
     }
 
+    /**
+     * Horizontal accuracy gate (2026-09-14 cross-validation: Car Scanner's VAG default
+     * thresholds are 40 m horizontal / 50 m vertical / 2 m/s speed). Fixes worse than
+     * this are dropped instead of poisoning trip distance, coast detection and the
+     * speed series; the last good fix stays published.
+     */
+    const val MAX_HORIZONTAL_ACCURACY_M = 40f
+
     override fun onLocationChanged(location: Location) {
+        if (location.hasAccuracy() && location.accuracy > MAX_HORIZONTAL_ACCURACY_M) {
+            return // multipath/canyon fix - keep the last good one
+        }
         // QA fix: !! on a mutable property is a race-prone crash class; ?.let is equivalent and safe.
         lastLocation?.let { totalDistance += it.distanceTo(location) }
         lastLocation = location

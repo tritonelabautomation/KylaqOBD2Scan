@@ -774,6 +774,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (!transport.isConnected) return
         
         viewModelScope.launch {
+            // VW TP 2.0 (2026-09-14 cross-validation: Car Scanner's "Send Open session
+            // request before DTC operations", enabled by default for VAG cars): open a
+            // UDS extended diagnostic session first. Refusal (0x7F / NO DATA) is
+            // tolerated - default-session reads still work on many ECUs.
+            val sessResp = transport.sendCommand("10 03", 2000L)
+            android.util.Log.i("OBDLogger/DTC", "UDS 10 03 open session -> ${sessResp.rawText.trim()}")
             val resp = transport.sendCommand("03", 5000L)
             val isoTp = com.example.protocol.IsoTpParser.reassembleLines(resp.lines)
             val allDtcs = mutableListOf<String>()
