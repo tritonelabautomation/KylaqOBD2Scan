@@ -59,6 +59,7 @@ fun AiDoctorScreen(
     val tripRepo = viewModel.recordingManager.tripRepository
 
     val liveDecodedMap by viewModel.liveDecodedMap.collectAsStateWithLifecycle()
+    val liveNumericMap by viewModel.liveNumericMap.collectAsStateWithLifecycle()
     val savedRecordings by viewModel.savedRecordings.collectAsStateWithLifecycle()
     val vehicleName by viewModel.vehicleName.collectAsStateWithLifecycle()
 

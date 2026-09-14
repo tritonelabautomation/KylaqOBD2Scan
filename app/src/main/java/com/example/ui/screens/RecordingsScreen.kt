@@ -254,9 +254,9 @@ fun RecordingsScreen(
 
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                contentPadding = PaddingValues(bottom = 96.dp)
             ) {
-                contentPadding = PaddingValues(bottom = 96.dp),
                 items(savedRecordings, key = { it.metadata.sessionId }) { rec ->
                     RecordingItemCard(
                         recording = rec,

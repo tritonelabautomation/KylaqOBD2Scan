@@ -78,9 +78,9 @@ fun InsightsScreen(
 
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = PaddingValues(bottom = 96.dp)
         ) {
-            contentPadding = PaddingValues(bottom = 96.dp),
             item { SweetSpotCard(snapshot) }
             item { FuelVsSpeedCard(snapshot) }
             item { TorquePowerCard(snapshot) }
