@@ -142,3 +142,21 @@ sports packs, (c) does it play through the CAR speakers via OBD?
    car speakers. Supercharger whine explicitly labelled NOT modelled.
 3. Recordings remain out of scope: RevHeadz's catalogue is licensed/paid; this app ships
    synthesis only (no-paywall mandate + copyright).
+
+### Same-day sweep (5) — "RevHeadz plays through car speakers via OBD": VERDICT
+Owner forwarded RevHeadz screenshots (OBD-II button, GT3 packs) claiming the reference app
+plays sound through car speakers *via OBD*. Primary-source audit says otherwise:
+- RevHeadz official OBD2 manual (revheadz.com.au/obd/instructions.htm): the adapter supplies
+  DATA ("entering Drive mode ... will use OBD2 data to drive the sound simulation"); for audio
+  it says "We recommend using an aux cable from your phone/tablet to your car sound system aux
+  input" and "Avoid using Bluetooth audio output ... it introduces significant lag".
+- Google Play listing: "connect your device to a home or car sound system"; OBD2 section only
+  promises RPM/speed sync ("Requires an OBD-II compliant vehicle that reports RPM or Speed").
+- Developer APK text: "After pairing the adapter, ROUTE YOUR PHONE AUDIO to your car speakers".
+- The "plays through speakers via OBD" myth traces to third-party bundle marketing (Amazon
+  "Wrrummer" headline); its own bullets describe the same two-link setup (OBD for data,
+  phone->stereo AUX/BT/USB for audio).
+Conclusion: two links everywhere - OBD = telemetry, phone media stream = audio. Our Rev Theater
+LIVE mode is functionally RevHeadz's OBD2 Drive mode; banner now documents the routing + the
+AUX/USB/AA-vs-BT latency tip with the citation. No code-path change was needed - the audio
+stream was already the phone media stream (CONTENT_TYPE_MUSIC since sweep (3)).

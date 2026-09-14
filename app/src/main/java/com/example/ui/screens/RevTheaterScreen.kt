@@ -130,8 +130,11 @@ fun RevTheaterScreen(
                 Text(
                     "SYNTHESISED sound from real firing physics (rpm/60 x cylinders/2) - not licensed " +
                         "recordings like RevHeadz. Set it up PARKED; the driver never fiddles while moving. " +
-                        "AUDIO PATH: plays from THIS phone (or its paired Bluetooth / Android Auto media " +
-                        "output). The OBD-II dongle carries telemetry ONLY - it can never feed your car speakers.",
+                        "AUDIO PATH (verified against RevHeadz's own OBD2 manual, revheadz.com.au/obd/" +
+                        "instructions.htm): the OBD dongle carries REV DATA only - in RevHeadz AND here. " +
+                        "Sound leaves THIS phone's media stream: for car speakers use AUX / USB / Android " +
+                        "Auto (tightest sync) or head-unit Bluetooth media (RevHeadz warns BT audio adds " +
+                        "lag - same physics applies here). No app can push audio through an OBD-II port.",
                     color = ElectricAmber, fontSize = 10.sp, modifier = Modifier.padding(10.dp)
                 )
             }
