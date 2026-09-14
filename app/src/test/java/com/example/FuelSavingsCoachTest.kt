@@ -75,8 +75,9 @@ class FuelSavingsCoachTest {
 
     @Test
     fun `idle cost is priced at the latest pump price`() {
-        assertEquals(84.8, FuelSavingsCoach.idleRupeesPerHour(106.0)!!, 0.001)
-        assertEquals(84.8 / 6.0, FuelSavingsCoach.idleRupeesPer10Min(106.0)!!, 0.001)
+        val idleLh = com.example.engine.PowertrainModel.IDLE_FUEL_LH // calibrated to the owner's car (median 1.05 L/h)
+        assertEquals(idleLh * 106.0, FuelSavingsCoach.idleRupeesPerHour(106.0)!!, 0.001)
+        assertEquals(idleLh * 106.0 / 6.0, FuelSavingsCoach.idleRupeesPer10Min(106.0)!!, 0.001)
         assertNull(FuelSavingsCoach.idleRupeesPerHour(null))
         assertNull(FuelSavingsCoach.idleRupeesPerHour(0.0))
     }

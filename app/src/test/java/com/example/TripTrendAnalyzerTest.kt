@@ -34,7 +34,7 @@ class TripTrendAnalyzerTest {
     }
 
     @Test
-    fun `idle window measures actual burn against the 0_8 Lh model`() {
+    fun `idle window measures actual burn against the model constant`() {
         // 4 samples x 5 s = 15 s of moving first (not idle), then idle block:
         // prev observation speed 0 & rpm 900 for three 5 s intervals = 15 s idle at 1.2 L/h.
         val samples = mutableListOf(
@@ -59,9 +59,10 @@ class TripTrendAnalyzerTest {
         val p = TripTrendAnalyzer.analyze(samples).single()
         assertTrue("idle seconds ~35, was ${p.idleSec}", p.idleSec in 30.0..40.0)
         assertEquals(1.2, p.idleActualLh!!, 0.05)
-        // model expects 0.8 L/h -> measured is +50%
-        assertTrue("excess ~50%, was ${p.idleExcessPct}", p.idleExcessPct!! in 40.0..60.0)
-        assertEquals(0.8 * p.idleSec / 3600.0, p.idleModelL, 1e-9)
+        // derived from the calibrated constant (1.05 L/h): measured 1.2 -> +14.3%
+        val expectedExcess = (1.2 / TripTrendAnalyzer.MODEL_IDLE_LH - 1.0) * 100.0
+        assertEquals(expectedExcess, p.idleExcessPct!!, 0.5)
+        assertEquals(TripTrendAnalyzer.MODEL_IDLE_LH * p.idleSec / 3600.0, p.idleModelL, 1e-9)
     }
 
     @Test
