@@ -78,8 +78,8 @@ class PidDecoderAdversarialTest {
             decoderType = DecoderType.EQUIVALENCE_RATIO, isResearch = false,
             defaultIntervalMs = 500L
         )
-        // 0x2000 / 32768 = 1.000 lambda
-        val result = PidDecoder.decode(lambdaPid, listOf(0x41, 0x44, 0x20, 0x00))
+        // 0x8000 / 32768 = 1.000 lambda
+        val result = PidDecoder.decode(lambdaPid, listOf(0x41, 0x44, 0x80, 0x00))
         assertEquals(1.0, result.numericValue!!, 1e-9)
     }
 
