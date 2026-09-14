@@ -149,7 +149,7 @@ fun AboutScreen(
                     Row {
                         Column {
                             Text(
-                                recorded.takeIf { trip.isFuelIntegrated && it > 0 }?.let { String.format("%.2f", it) } ?: "--",
+                                recorded.takeIf { trip.isFuelIntegrated && it > 0 }?.let { String.format(java.util.Locale.US, "%.2f", it) } ?: "--",
                                 color = NeonEmerald,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 20.sp
@@ -159,7 +159,7 @@ fun AboutScreen(
                         Spacer(modifier = Modifier.width(24.dp))
                         Column {
                             Text(
-                                mid?.let { String.format("%.2f", it) } ?: "--",
+                                mid?.let { String.format(java.util.Locale.US, "%.2f", it) } ?: "--",
                                 color = CyberCyan,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 20.sp
@@ -170,7 +170,7 @@ fun AboutScreen(
                         Column {
                             val delta = if (mid != null && recorded > 0) recorded - mid else null
                             Text(
-                                delta?.let { String.format("%+.2f", it) } ?: "--",
+                                delta?.let { String.format(java.util.Locale.US, "%+.2f", it) } ?: "--",
                                 color = when {
                                     delta == null -> TextSecondaryDark
                                     abs(delta) <= 0.75 -> NeonEmerald
@@ -184,9 +184,9 @@ fun AboutScreen(
                     }
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        "Trip basis: ${String.format("%.1f", trip.distanceKm)} km, " +
-                            "${String.format("%.2f", trip.totalFuelLiters)} L integrated, " +
-                            "avg speed ${String.format("%.0f", trip.averageSpeedKmh)} km/h. " +
+                        "Trip basis: ${String.format(java.util.Locale.US, "%.1f", trip.distanceKm)} km, " +
+                            "${String.format(java.util.Locale.US, "%.2f", trip.totalFuelLiters)} L integrated, " +
+                            "avg speed ${String.format(java.util.Locale.US, "%.0f", trip.averageSpeedKmh)} km/h. " +
                             "A gap up to ~0.5-0.8 km/L is normal (cluster rounding and calibration); " +
                             "a large gap usually means the cluster is optimistically calibrated.",
                         color = TextSecondaryDark,

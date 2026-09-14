@@ -173,9 +173,9 @@ class FuelQualityAnalyzer(
         val economyDelta = (best.kmPerLiter ?: 0.0) - (worst.kmPerLiter ?: 0.0)
         return buildString {
             append("Tank ${best.index} behaved like the better fuel: ")
-            append(String.format("%+.1f° cruise ignition timing", timingDelta))
+            append(String.format(java.util.Locale.US, "%+.1f° cruise ignition timing", timingDelta))
             if (best.kmPerLiter != null && worst.kmPerLiter != null) {
-                append(String.format(", %+.2f km/L", economyDelta))
+                append(String.format(java.util.Locale.US, ", %+.2f km/L", economyDelta))
             }
             append(", ${best.knockRetardEvents} vs ${worst.knockRetardEvents} knock-retard events ")
             append("against Tank ${worst.index}. Higher octane lets the ECU hold spark advance; ")

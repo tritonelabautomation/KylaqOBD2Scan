@@ -232,9 +232,9 @@ fun TripsScreen(
                         scope.launch {
                             val prompt = buildString {
                                 append("Plan a road trip: ${plan.name}, from ${plan.from} to ${plan.to}, ")
-                                append("distance ${String.format("%.0f", plan.distanceKm)} km, ")
+                                append("distance ${String.format(java.util.Locale.US, "%.0f", plan.distanceKm)} km, ")
                                 append("car: Skoda Kylaq 1.0 TSI (petrol).")
-                                plan.budget?.let { append(" Budget $cur${String.format("%.0f", it)}.") }
+                                plan.budget?.let { append(" Budget $cur${String.format(java.util.Locale.US, "%.0f", it)}.") }
                                 if (plan.note.isNotBlank()) append(" Note: ${plan.note}.")
                             }
                             val ai = GeminiTextClient.generate(
@@ -377,7 +377,7 @@ private fun TripCard(
                 Column(Modifier.weight(1f)) {
                     Text(plan.name, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                     Text(
-                        "${plan.from} \u2192 ${plan.to} \u00B7 ${String.format("%.0f", plan.distanceKm)} km \u00B7 " +
+                        "${plan.from} \u2192 ${plan.to} \u00B7 ${String.format(java.util.Locale.US, "%.0f", plan.distanceKm)} km \u00B7 " +
                             SimpleDateFormat("dd MMM", Locale.getDefault()).format(Date(plan.dateMs)),
                         color = TextSecondaryDark, fontSize = 11.sp
                     )
@@ -435,8 +435,8 @@ private fun TripDialog(
     var name by remember { mutableStateOf(initial?.name ?: "") }
     var from by remember { mutableStateOf(initial?.from ?: "") }
     var to by remember { mutableStateOf(initial?.to ?: "") }
-    var distance by remember { mutableStateOf(initial?.distanceKm?.let { String.format("%.0f", it) } ?: "") }
-    var budget by remember { mutableStateOf(initial?.budget?.let { String.format("%.0f", it) } ?: "") }
+    var distance by remember { mutableStateOf(initial?.distanceKm?.let { String.format(java.util.Locale.US, "%.0f", it) } ?: "") }
+    var budget by remember { mutableStateOf(initial?.budget?.let { String.format(java.util.Locale.US, "%.0f", it) } ?: "") }
     var note by remember { mutableStateOf(initial?.note ?: "") }
 
     AlertDialog(

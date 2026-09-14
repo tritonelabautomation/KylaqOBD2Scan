@@ -169,4 +169,4 @@ fun XyPlot(
 }
 
 private fun fmt(value: Float): String =
-    if (value >= 100f) value.toInt().toString() else String.format("%.1f", value)
+    if (value >= 100f) value.toInt().toString() else String.format(java.util.Locale.US, "%.1f", value)

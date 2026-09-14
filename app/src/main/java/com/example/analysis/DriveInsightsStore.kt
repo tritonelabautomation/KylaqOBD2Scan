@@ -33,6 +33,7 @@ object DriveInsightsStore {
     ) {
         val display: String
             get() = String.format(
+                java.util.Locale.US,
                 "%s · %.1f km · %.0f s · %d cut / %d idle · saved %.2f L vs idle",
                 savedAtUtc.take(16).replace('T', ' '),
                 distanceKm, coastSeconds, fuelCutEvents, neutralEvents, savedVsIdleL
@@ -60,8 +61,8 @@ object DriveInsightsStore {
             get() = buildString {
                 append(savedAtUtc.take(10))
                 append(" · score ").append(score)
-                kmPerLiter?.let { append(String.format(" · %.1f km/L", it)) }
-                avgCruiseTimingDeg?.let { append(String.format(" · cruise timing %.1f°", it)) }
+                kmPerLiter?.let { append(String.format(java.util.Locale.US, " · %.1f km/L", it)) }
+                avgCruiseTimingDeg?.let { append(String.format(java.util.Locale.US, " · cruise timing %.1f°", it)) }
                 append(" · knock ").append(knockRetardEvents)
                 gradeTag?.let { append(" · ").append(it) }
             }

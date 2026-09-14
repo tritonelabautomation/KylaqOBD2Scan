@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -79,6 +80,7 @@ fun InsightsScreen(
             modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            contentPadding = PaddingValues(bottom = 96.dp),
             item { SweetSpotCard(snapshot) }
             item { FuelVsSpeedCard(snapshot) }
             item { TorquePowerCard(snapshot) }
@@ -131,7 +133,7 @@ private fun SweetSpotCard(snapshot: DriveAnalytics.DriveSnapshot) {
             )
             Stat(
                 "AT SWEET SPOT",
-                snapshot.sweetSpotKmL?.let { String.format("%.1f km/L", it) } ?: "--"
+                snapshot.sweetSpotKmL?.let { String.format(java.util.Locale.US, "%.1f km/L", it) } ?: "--"
             )
             Stat(
                 "YOUR BEST BAND",
@@ -140,14 +142,14 @@ private fun SweetSpotCard(snapshot: DriveAnalytics.DriveSnapshot) {
             )
             Stat(
                 "MEASURED",
-                snapshot.bestMeasuredKmL?.let { String.format("%.1f km/L", it) } ?: "--",
+                snapshot.bestMeasuredKmL?.let { String.format(java.util.Locale.US, "%.1f km/L", it) } ?: "--",
                 color = ElectricAmber
             )
         }
         Spacer(modifier = Modifier.height(4.dp))
         Text(
             "Top-gear ratio learned: " +
-                (snapshot.measuredRpmPerKmh?.let { String.format("%.1f rpm per km/h", it) } ?: "still learning…") +
+                (snapshot.measuredRpmPerKmh?.let { String.format(java.util.Locale.US, "%.1f rpm per km/h", it) } ?: "still learning…") +
                 ". Drag grows with speed squared, so consumption above the sweet spot climbs fast; " +
                 "below it, low load and throttle pumping losses win instead.",
             color = TextSecondaryDark,
@@ -217,15 +219,15 @@ private fun TorquePowerCard(snapshot: DriveAnalytics.DriveSnapshot) {
         Row(modifier = Modifier.padding(top = 6.dp)) {
             Stat(
                 "LIVE TORQUE",
-                snapshot.measuredTorqueNm?.let { String.format("%.0f Nm", it) } ?: "--"
+                snapshot.measuredTorqueNm?.let { String.format(java.util.Locale.US, "%.0f Nm", it) } ?: "--"
             )
             Stat(
                 "LIVE POWER",
-                snapshot.measuredPowerKw?.let { String.format("%.1f kW", it) } ?: "--"
+                snapshot.measuredPowerKw?.let { String.format(java.util.Locale.US, "%.1f kW", it) } ?: "--"
             )
             Stat(
                 "DEMAND",
-                snapshot.demandedTorqueNm?.let { String.format("%.0f Nm", it) } ?: "--",
+                snapshot.demandedTorqueNm?.let { String.format(java.util.Locale.US, "%.0f Nm", it) } ?: "--",
                 color = ElectricAmber
             )
         }
@@ -275,9 +277,9 @@ private fun CoastCard(
         Row {
             Stat("COAST EVENTS", "${coast.eventCount}")
             Stat("NEUTRAL / CUT", "${coast.neutralEvents}/${coast.fuelCutEvents}", color = ElectricAmber)
-            Stat("DISTANCE", String.format("%.2f km", coast.totalKm))
-            Stat("SAVED vs CRUISE", String.format("%.2f L", coast.totalSavedVsCruiseL))
-            Stat("SAVED vs IDLE", String.format("%.2f L", coast.totalSavedVsIdleL))
+            Stat("DISTANCE", String.format(java.util.Locale.US, "%.2f km", coast.totalKm))
+            Stat("SAVED vs CRUISE", String.format(java.util.Locale.US, "%.2f L", coast.totalSavedVsCruiseL))
+            Stat("SAVED vs IDLE", String.format(java.util.Locale.US, "%.2f L", coast.totalSavedVsIdleL))
         }
         Spacer(modifier = Modifier.height(4.dp))
         val mode = snapshot.activeCoastMode
@@ -320,18 +322,18 @@ private fun TurboCard(snapshot: DriveAnalytics.DriveSnapshot) {
             Row {
                 Stat(
                     "BOOST NOW",
-                    turbo.boostKpa?.let { String.format("%.0f kPa", it) } ?: "--",
+                    turbo.boostKpa?.let { String.format(java.util.Locale.US, "%.0f kPa", it) } ?: "--",
                     color = if (turbo.isBoosting) ElectricAmber else CyberCyan
                 )
-                Stat("PEAK", String.format("%.0f kPa", turbo.peakBoostKpa))
+                Stat("PEAK", String.format(java.util.Locale.US, "%.0f kPa", turbo.peakBoostKpa))
                 Stat(
                     "VACUUM",
-                    turbo.vacuumKpa?.let { String.format("%.0f", it) } ?: "--",
+                    turbo.vacuumKpa?.let { String.format(java.util.Locale.US, "%.0f", it) } ?: "--",
                     color = CyberCyan
                 )
                 Stat(
                     "TIP-IN LAG",
-                    turbo.averageLagMs?.let { String.format("%.1f s", it / 1000.0) } ?: "--",
+                    turbo.averageLagMs?.let { String.format(java.util.Locale.US, "%.1f s", it / 1000.0) } ?: "--",
                     color = WarningRed
                 )
                 Stat("OVERBOOST", "${turbo.overBoostEvents}", color = WarningRed)
@@ -351,8 +353,8 @@ private fun TurboCard(snapshot: DriveAnalytics.DriveSnapshot) {
             )
             turbo.chargeTempC?.let {
                 Text(
-                    "Charge-air temperature ${String.format("%.0f", it)} °C" +
-                        (turbo.wastegatePct?.let { w -> " • wastegate duty ${String.format("%.0f", w)} %" } ?: ""),
+                    "Charge-air temperature ${String.format(java.util.Locale.US, "%.0f", it)} °C" +
+                        (turbo.wastegatePct?.let { w -> " • wastegate duty ${String.format(java.util.Locale.US, "%.0f", w)} %" } ?: ""),
                     color = TextSecondaryDark,
                     fontSize = 11.sp
                 )
@@ -384,12 +386,12 @@ private fun TanksCard(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        (tank.kmPerLiter?.let { String.format("%.1f km/L", it) } ?: "-- km/L").padEnd(12),
+                        (tank.kmPerLiter?.let { String.format(java.util.Locale.US, "%.1f km/L", it) } ?: "-- km/L").padEnd(12),
                         color = NeonEmerald,
                         fontSize = 12.sp
                     )
                     Text(
-                        (tank.avgCruiseTimingDeg?.let { String.format("%.1f°", it) } ?: "--°").padEnd(8),
+                        (tank.avgCruiseTimingDeg?.let { String.format(java.util.Locale.US, "%.1f°", it) } ?: "--°").padEnd(8),
                         color = ElectricAmber,
                         fontSize = 12.sp
                     )
@@ -501,27 +503,27 @@ private fun RideXrayCard(rides: List<com.example.analysis.RideBehaviorRecorder.R
                         .padding(vertical = 4.dp)
                 ) {
                     Text(
-                        "${r.dateUtc.take(10)} · ${String.format("%.0f", r.durationSec / 60.0)} min · " +
-                            "${String.format("%.1f", r.distanceKm)} km · selector ${r.modeTag}",
+                        "${r.dateUtc.take(10)} · ${String.format(java.util.Locale.US, "%.0f", r.durationSec / 60.0)} min · " +
+                            "${String.format(java.util.Locale.US, "%.1f", r.distanceKm)} km · selector ${r.modeTag}",
                         color = NeonEmerald, fontSize = 11.sp, fontWeight = FontWeight.Bold
                     )
                     val top = r.stateSeconds.entries.sortedByDescending { it.value }.take(4)
                     Text(
                         top.joinToString("  ") {
-                            "${it.key.replace('_', ' ').lowercase()} ${String.format("%.0f", if (r.durationSec > 0) it.value / r.durationSec * 100 else 0.0)}%"
+                            "${it.key.replace('_', ' ').lowercase()} ${String.format(java.util.Locale.US, "%.0f", if (r.durationSec > 0) it.value / r.durationSec * 100 else 0.0)}%"
                         },
                         color = Color.White, fontSize = 10.sp
                     )
                     val gears = r.gearSeconds.withIndex().drop(1).filter { it.value >= 5.0 }
-                        .joinToString(" ") { "G${it.index}:${String.format("%.0f", it.value)}s" }
+                        .joinToString(" ") { "G${it.index}:${String.format(java.util.Locale.US, "%.0f", it.value)}s" }
                     Text(
-                        "gears ${gears.ifBlank { "n/a" }} · climbed ${String.format("%.0f", r.elevationGainM)} m · " +
-                            "descended ${String.format("%.0f", r.elevationLossM)} m",
+                        "gears ${gears.ifBlank { "n/a" }} · climbed ${String.format(java.util.Locale.US, "%.0f", r.elevationGainM)} m · " +
+                            "descended ${String.format(java.util.Locale.US, "%.0f", r.elevationLossM)} m",
                         color = TextSecondaryDark, fontSize = 10.sp
                     )
                     r.avgUpshiftRpm?.let { up ->
                         Text(
-                            "${r.shiftCount} shift(s), avg upshift ${String.format("%.1f", up / 1000.0)}k rpm - " +
+                            "${r.shiftCount} shift(s), avg upshift ${String.format(java.util.Locale.US, "%.1f", up / 1000.0)}k rpm - " +
                                 if (r.sportLikeShiftMap) "prolonged sport-map shifts" else "economy D-map shifts",
                             color = if (r.sportLikeShiftMap) ElectricAmber else TextSecondaryDark,
                             fontSize = 10.sp
@@ -531,10 +533,10 @@ private fun RideXrayCard(rides: List<com.example.analysis.RideBehaviorRecorder.R
                     if (convTotal > 0.0) {
                         val highSlip = r.converterSlipShare > 0.25 && r.converterSlipSec > 60.0
                         Text(
-                            "converter: locked ${String.format("%.0f", r.converterLockedSec)}s · slip " +
-                                "${String.format("%.0f", r.converterSlipSec)}s " +
-                                "(${String.format("%.0f", r.converterSlipShare * 100.0)}%)" +
-                                (r.maxSlipRpm?.let { " · max +${String.format("%.0f", it)} rpm" } ?: ""),
+                            "converter: locked ${String.format(java.util.Locale.US, "%.0f", r.converterLockedSec)}s · slip " +
+                                "${String.format(java.util.Locale.US, "%.0f", r.converterSlipSec)}s " +
+                                "(${String.format(java.util.Locale.US, "%.0f", r.converterSlipShare * 100.0)}%)" +
+                                (r.maxSlipRpm?.let { " · max +${String.format(java.util.Locale.US, "%.0f", it)} rpm" } ?: ""),
                             color = if (highSlip) ElectricAmber else TextSecondaryDark,
                             fontSize = 10.sp
                         )
@@ -548,24 +550,24 @@ private fun RideXrayCard(rides: List<com.example.analysis.RideBehaviorRecorder.R
                     if (r.paddleShifts > 0) {
                         Text(
                             "paddle shifts (M): ${r.paddleUp} up / ${r.paddleDown} down" +
-                                (r.avgPaddleRpm?.let { " @ ${String.format("%.0f", it)} rpm" } ?: ""),
+                                (r.avgPaddleRpm?.let { " @ ${String.format(java.util.Locale.US, "%.0f", it)} rpm" } ?: ""),
                             color = ElectricAmber, fontSize = 10.sp
                         )
                     }
                     r.voltAvgV?.let { v ->
                         val weak = v < 13.2 || (r.voltMinV ?: v) < 11.5
                         Text(
-                            "battery: ${String.format("%.1f", r.voltMinV ?: v)}-${String.format("%.1f", r.voltMaxV ?: v)} V " +
-                                "(avg ${String.format("%.2f", v)} V)" +
+                            "battery: ${String.format(java.util.Locale.US, "%.1f", r.voltMinV ?: v)}-${String.format("%.1f", r.voltMaxV ?: v)} V " +
+                                "(avg ${String.format(java.util.Locale.US, "%.2f", v)} V)" +
                                 if (weak) " - low: charging system / heavy electrical load (AC, blower)" else "",
                             color = if (weak) WarningRed else TextSecondaryDark,
                             fontSize = 10.sp
                         )
                     }
                     val acParts = listOfNotNull(
-                        r.acOffKmL?.let { "AC off ${String.format("%.1f", it)} km/L (${String.format("%.1f", r.acOffKm)} km)" },
-                        r.acOnKmL?.let { "AC on ${String.format("%.1f", it)} km/L (${String.format("%.1f", r.acOnKm)} km)" },
-                        r.blowerKmL?.let { "blower ${String.format("%.1f", it)} km/L" }
+                        r.acOffKmL?.let { "AC off ${String.format(java.util.Locale.US, "%.1f", it)} km/L (${String.format("%.1f", r.acOffKm)} km)" },
+                        r.acOnKmL?.let { "AC on ${String.format(java.util.Locale.US, "%.1f", it)} km/L (${String.format("%.1f", r.acOnKm)} km)" },
+                        r.blowerKmL?.let { "blower ${String.format(java.util.Locale.US, "%.1f", it)} km/L" }
                     )
                     if (acParts.size >= 2) {
                         Text(
@@ -574,7 +576,7 @@ private fun RideXrayCard(rides: List<com.example.analysis.RideBehaviorRecorder.R
                         )
                         r.acFuelPenaltyPct?.let { pen ->
                             Text(
-                                "AC compressor cost this ride: +${String.format("%.0f", pen)}% fuel vs AC-off segments",
+                                "AC compressor cost this ride: +${String.format(java.util.Locale.US, "%.0f", pen)}% fuel vs AC-off segments",
                                 color = ElectricAmber, fontSize = 10.sp
                             )
                         }
@@ -587,8 +589,8 @@ private fun RideXrayCard(rides: List<com.example.analysis.RideBehaviorRecorder.R
             if (upTrend.size >= 2) {
                 val drift = (upTrend.last() - upTrend.first()) / upTrend.first() * 100.0
                 Text(
-                    "shift-point trend (${upTrend.size} rides): ${String.format("%.0f", upTrend.first())} → " +
-                        "${String.format("%.0f", upTrend.last())} rpm (${if (drift >= 0) "+" else ""}${String.format("%.0f", drift)}%)" +
+                    "shift-point trend (${upTrend.size} rides): ${String.format(java.util.Locale.US, "%.0f", upTrend.first())} → " +
+                        "${String.format(java.util.Locale.US, "%.0f", upTrend.last())} rpm (${if (drift >= 0) "+" else ""}${String.format("%.0f", drift)}%)" +
                         if (kotlin.math.abs(drift) > 8.0) " - notable drift, check driving style/mode mix" else "",
                     color = if (kotlin.math.abs(drift) > 8.0) ElectricAmber else TextSecondaryDark,
                     fontSize = 10.sp
@@ -599,7 +601,7 @@ private fun RideXrayCard(rides: List<com.example.analysis.RideBehaviorRecorder.R
                 val first = slipTrend.first().converterSlipShare * 100.0
                 val last = slipTrend.last().converterSlipShare * 100.0
                 Text(
-                    "converter-slip trend: ${String.format("%.0f", first)}% → ${String.format("%.0f", last)}% of measured drivetrain time" +
+                    "converter-slip trend: ${String.format(java.util.Locale.US, "%.0f", first)}% → ${String.format("%.0f", last)}% of measured drivetrain time" +
                         if (last > first + 5.0) " - rising slip: ATF/TCC watch item" else "",
                     color = if (last > first + 5.0) ElectricAmber else TextSecondaryDark,
                     fontSize = 10.sp
@@ -614,8 +616,8 @@ private fun RideXrayCard(rides: List<com.example.analysis.RideBehaviorRecorder.R
                 if (onFuel > 0.005 && offFuel > 0.005) {
                     val pen = ((onFuel / onKm) / (offFuel / offKm) - 1.0) * 100.0
                     Text(
-                        "AC vs no-AC (${acRides.size} tagged ride(s)): ${String.format("%.1f", onKm / onFuel)} vs " +
-                            "${String.format("%.1f", offKm / offFuel)} km/L - your AC costs +${String.format("%.0f", pen)}% fuel",
+                        "AC vs no-AC (${acRides.size} tagged ride(s)): ${String.format(java.util.Locale.US, "%.1f", onKm / onFuel)} vs " +
+                            "${String.format(java.util.Locale.US, "%.1f", offKm / offFuel)} km/L - your AC costs +${String.format("%.0f", pen)}% fuel",
                         color = ElectricAmber, fontSize = 10.sp
                     )
                 }
@@ -624,9 +626,9 @@ private fun RideXrayCard(rides: List<com.example.analysis.RideBehaviorRecorder.R
             val sUp = rides.filter { it.modeTag != "D" }.mapNotNull { it.avgUpshiftRpm }
             if (dUp.isNotEmpty() && sUp.isNotEmpty()) {
                 Text(
-                    "D vs S behaviour: D rides upshift at ${String.format("%.1f", dUp.average() / 1000.0)}k rpm, " +
-                        "S/M at ${String.format("%.1f", sUp.average() / 1000.0)}k rpm - sport holds gears " +
-                        "${String.format("%.0f", sUp.average() - dUp.average())} rpm longer.",
+                    "D vs S behaviour: D rides upshift at ${String.format(java.util.Locale.US, "%.1f", dUp.average() / 1000.0)}k rpm, " +
+                        "S/M at ${String.format(java.util.Locale.US, "%.1f", sUp.average() / 1000.0)}k rpm - sport holds gears " +
+                        "${String.format(java.util.Locale.US, "%.0f", sUp.average() - dUp.average())} rpm longer.",
                     color = CyberCyan, fontSize = 10.sp
                 )
             }
@@ -650,8 +652,8 @@ private fun GearboxCard(model: com.example.engine.Aq250GearModel) {
             color = Color.White, fontSize = 10.sp
         )
         Text(
-            "ATF ${com.example.engine.Aq250GearModel.ATF_SPEC}: ${String.format("%.1f", com.example.engine.Aq250GearModel.ATF_FILL_L)} L total · " +
-                "India service drain-and-fill ${String.format("%.0f", com.example.engine.Aq250GearModel.ATF_CHANGE_L)} L · level top-up ~${String.format("%.0f", com.example.engine.Aq250GearModel.ATF_LEVEL_TOPUP_L)} L",
+            "ATF ${com.example.engine.Aq250GearModel.ATF_SPEC}: ${String.format(java.util.Locale.US, "%.1f", com.example.engine.Aq250GearModel.ATF_FILL_L)} L total · " +
+                "India service drain-and-fill ${String.format(java.util.Locale.US, "%.0f", com.example.engine.Aq250GearModel.ATF_CHANGE_L)} L · level top-up ~${String.format("%.0f", com.example.engine.Aq250GearModel.ATF_LEVEL_TOPUP_L)} L",
             color = ElectricAmber, fontSize = 10.sp
         )
         Text(
@@ -670,7 +672,7 @@ private fun GearboxCard(model: com.example.engine.Aq250GearModel) {
         val scales = model.calibratedScales()
         Text(
             "Learned rpm per km/h per gear (${model.totalSamples()} cruise samples): " +
-                scales.joinToString(" ") { "G${it.first}:${String.format("%.1f", it.second)}" },
+                scales.joinToString(" ") { "G${it.first}:${String.format(java.util.Locale.US, "%.1f", it.second)}" },
             color = TextSecondaryDark, fontSize = 10.sp
         )
         Text(

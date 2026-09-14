@@ -907,29 +907,29 @@ private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summar
             Spacer(modifier = Modifier.height(8.dp))
             Row {
                 Column(modifier = Modifier.padding(end = 18.dp)) {
-                    Text(String.format("%.2f L", summary.fuelLiters), color = NeonEmerald, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text(String.format(java.util.Locale.US, "%.2f L", summary.fuelLiters), color = NeonEmerald, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                     Text("FUEL BURNED", color = TextSecondaryDark, fontSize = 10.sp)
                 }
                 Column(modifier = Modifier.padding(end = 18.dp)) {
-                    Text(String.format("%.1f km", summary.distanceKm), color = NeonEmerald, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text(String.format(java.util.Locale.US, "%.1f km", summary.distanceKm), color = NeonEmerald, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                     Text("DISTANCE", color = TextSecondaryDark, fontSize = 10.sp)
                 }
                 Column(modifier = Modifier.padding(end = 18.dp)) {
-                    Text(summary.kmPerLiter?.let { String.format("%.1f", it) } ?: "--", color = ElectricAmber, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text(summary.kmPerLiter?.let { String.format(java.util.Locale.US, "%.1f", it) } ?: "--", color = ElectricAmber, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                     Text("KM/L", color = TextSecondaryDark, fontSize = 10.sp)
                 }
                 Column {
-                    Text(summary.litersPer100Km?.let { String.format("%.1f", it) } ?: "--", color = ElectricAmber, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text(summary.litersPer100Km?.let { String.format(java.util.Locale.US, "%.1f", it) } ?: "--", color = ElectricAmber, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                     Text("L/100KM", color = TextSecondaryDark, fontSize = 10.sp)
                 }
             }
             Spacer(modifier = Modifier.height(6.dp))
             Text(
-                "Avg ${String.format("%.0f", summary.averageSpeedKmh)} km/h (moving " +
-                    "${String.format("%.0f", summary.movingAverageSpeedKmh)}), max " +
-                    "${String.format("%.0f", summary.maxSpeedKmh)} km/h • coasting " +
-                    "${String.format("%.0f", summary.coastSeconds)} s • idling " +
-                    "${String.format("%.0f", summary.idleSeconds)} s",
+                "Avg ${String.format(java.util.Locale.US, "%.0f", summary.averageSpeedKmh)} km/h (moving " +
+                    "${String.format(java.util.Locale.US, "%.0f", summary.movingAverageSpeedKmh)}), max " +
+                    "${String.format(java.util.Locale.US, "%.0f", summary.maxSpeedKmh)} km/h • coasting " +
+                    "${String.format(java.util.Locale.US, "%.0f", summary.coastSeconds)} s • idling " +
+                    "${String.format(java.util.Locale.US, "%.0f", summary.idleSeconds)} s",
                 color = TextSecondaryDark,
                 fontSize = 11.sp
             )
@@ -958,7 +958,7 @@ private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summar
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
                     "Time by speed band: " + summary.speedHistogram.joinToString("  ") {
-                        "${it.first}-${it.first + 10}: ${String.format("%.0f", it.second / 60.0)}m"
+                        "${it.first}-${it.first + 10}: ${String.format(java.util.Locale.US, "%.0f", it.second / 60.0)}m"
                     },
                     color = TextSecondaryDark,
                     fontSize = 11.sp

@@ -41,7 +41,7 @@ fun MaintenanceScreen(
     val repo = viewModel.maintenanceRepository
     var refresh by remember { mutableStateOf(0) }
     val states = remember(refresh) { repo.dueStates() }
-    var odoText by remember { mutableStateOf(repo.currentOdometerKm()?.let { String.format("%.0f", it) } ?: "") }
+    var odoText by remember { mutableStateOf(repo.currentOdometerKm()?.let { String.format(java.util.Locale.US, "%.0f", it) } ?: "") }
     var logTarget by remember { mutableStateOf<MaintenanceCatalog.ServiceItem?>(null) }
     var pickItem by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
@@ -177,7 +177,7 @@ fun MaintenanceScreen(
                                 buildString {
                                     append(state.item.category)
                                     append(" · every ")
-                                    append(String.format("%.0f", state.item.intervalKm / 1000.0))
+                                    append(String.format(java.util.Locale.US, "%.0f", state.item.intervalKm / 1000.0))
                                     append("k km")
                                     if (state.item.intervalDays > 0) {
                                         append(" / ")
@@ -253,8 +253,8 @@ fun MaintenanceScreen(
                             }
                             Text(
                                 buildString {
-                                    l.odometerKm?.let { append(String.format("%.0f km", it)); append(" · ") }
-                                    l.cost?.let { append(String.format("₹%.0f", it)) }
+                                    l.odometerKm?.let { append(String.format(java.util.Locale.US, "%.0f km", it)); append(" · ") }
+                                    l.cost?.let { append(String.format(java.util.Locale.US, "₹%.0f", it)) }
                                     if (l.notes.isNotBlank()) {
                                         if (isNotEmpty()) append(" · ")
                                         append(l.notes)
@@ -327,20 +327,20 @@ fun MaintenanceScreen(
                     Text(
                         st.last?.let {
                             "Last logged ${it.dateUtc.take(10)}" +
-                                (it.odometerKm?.let { o -> " at ${String.format("%.0f", o)} km" } ?: " (no odometer)")
+                                (it.odometerKm?.let { o -> " at ${String.format(java.util.Locale.US, "%.0f", o)} km" } ?: " (no odometer)")
                         } ?: "Never logged - the item starts UNKNOWN and ages from first tracking.",
                         fontSize = 12.sp, color = TextSecondaryDark
                     )
                     Text(
-                        "Interval: ${String.format("%.0f", st.item.intervalKm / 1000.0)}k km" +
+                        "Interval: ${String.format(java.util.Locale.US, "%.0f", st.item.intervalKm / 1000.0)}k km" +
                             (if (st.item.intervalDays > 0) " / ${st.item.intervalDays} days" else "") +
-                            ". Current odometer: ${odo?.let { String.format("%.0f km", it) } ?: "not set"}.",
+                            ". Current odometer: ${odo?.let { String.format(java.util.Locale.US, "%.0f km", it) } ?: "not set"}.",
                         fontSize = 12.sp, color = TextSecondaryDark
                     )
                     st.kmRemaining?.let {
                         Text(
-                            if (it < 0) "You are ${String.format("%.0f", -it)} km PAST the distance deadline."
-                            else "${String.format("%.0f", it)} km left before the distance deadline.",
+                            if (it < 0) "You are ${String.format(java.util.Locale.US, "%.0f", -it)} km PAST the distance deadline."
+                            else "${String.format(java.util.Locale.US, "%.0f", it)} km left before the distance deadline.",
                             fontSize = 12.sp,
                             color = if (it < 0) WarningRed else NeonEmerald
                         )
@@ -419,7 +419,7 @@ fun MaintenanceScreen(
     intervalTarget?.let { item ->
         val current = remember(item.id, refresh) { repo.customIntervals()[item.id] }
         var kmText by remember(item.id) {
-            mutableStateOf((current?.first ?: item.intervalKm).let { String.format("%.0f", it) })
+            mutableStateOf((current?.first ?: item.intervalKm).let { String.format(java.util.Locale.US, "%.0f", it) })
         }
         var daysText by remember(item.id) {
             mutableStateOf((current?.second ?: item.intervalDays).let { if (it > 0) it.toString() else "" })
@@ -430,7 +430,7 @@ fun MaintenanceScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        "Catalog: ${String.format("%.0f", item.intervalKm / 1000.0)}k km" +
+                        "Catalog: ${String.format(java.util.Locale.US, "%.0f", item.intervalKm / 1000.0)}k km" +
                             (if (item.intervalDays > 0) " / ${item.intervalDays} days" else "") +
                             (if (current != null) " (overridden)" else ""),
                         fontSize = 11.sp, color = TextSecondaryDark
@@ -475,7 +475,7 @@ fun MaintenanceScreen(
                         odometerKm = odo, cost = cost, rating = rating, notes = notes
                     )
                 )
-                odo?.let { repo.setCurrentOdometerKm(it); odoText = String.format("%.0f", it) }
+                odo?.let { repo.setCurrentOdometerKm(it); odoText = String.format(java.util.Locale.US, "%.0f", it) }
                 logTarget = null
                 refresh++
             }

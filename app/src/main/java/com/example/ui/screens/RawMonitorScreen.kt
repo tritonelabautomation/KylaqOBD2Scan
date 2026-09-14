@@ -197,7 +197,8 @@ fun RawMonitorScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(Color(0xFF070B0E))
-                    .testTag("raw_transactions_list")
+                    .testTag("raw_transactions_list"),
+                contentPadding = PaddingValues(bottom = 96.dp),
             ) {
                 items(filteredTransactions, key = { it.id }) { tx ->
                     RawTransactionRow(

@@ -61,7 +61,7 @@ object MaintenanceCatalog {
                 DueStatus.OVERDUE -> "Overdue"
                 DueStatus.DUE_SOON -> "Due soon"
                 DueStatus.GOOD -> buildString {
-                    kmRemaining?.let { append(String.format("%.0f km", it)) }
+                    kmRemaining?.let { append(String.format(java.util.Locale.US, "%.0f km", it)) }
                     daysRemaining?.let {
                         if (isNotEmpty()) append(" / ")
                         append("$it d")

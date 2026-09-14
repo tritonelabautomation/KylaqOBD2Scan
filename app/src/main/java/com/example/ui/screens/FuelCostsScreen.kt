@@ -172,14 +172,14 @@ fun FuelCostsScreen(
             item { Text("MORE ANALYTICS (Kylaq extras)", color = TextSecondaryDark, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 6.dp)) }
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FuelStatChip("AVG", stats.avgKmPerL?.let { String.format("%.1f km/L", it) } ?: "--", NeonEmerald, Modifier.weight(1f))
-                    FuelStatChip("LAST", stats.lastKmPerL?.let { String.format("%.1f km/L", it) } ?: "--", NeonEmerald, Modifier.weight(1f))
-                    FuelStatChip("$cur/L", stats.lastPricePerL?.let { String.format("%.1f", it) } ?: "--", TextSecondaryDark, Modifier.weight(1f))
+                    FuelStatChip("AVG", stats.avgKmPerL?.let { String.format(java.util.Locale.US, "%.1f km/L", it) } ?: "--", NeonEmerald, Modifier.weight(1f))
+                    FuelStatChip("LAST", stats.lastKmPerL?.let { String.format(java.util.Locale.US, "%.1f km/L", it) } ?: "--", NeonEmerald, Modifier.weight(1f))
+                    FuelStatChip("$cur/L", stats.lastPricePerL?.let { String.format(java.util.Locale.US, "%.1f", it) } ?: "--", TextSecondaryDark, Modifier.weight(1f))
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FuelStatChip("$cur/KM", stats.costPerKm?.let { String.format("%.2f", it) } ?: "--", CyberCyan, Modifier.weight(1f))
-                    FuelStatChip("30-DAY $cur", stats.cost30d?.let { String.format("%.0f", it) } ?: "--", ElectricAmber, Modifier.weight(1f))
-                    FuelStatChip("MONTH $cur", stats.costThisMonth?.let { String.format("%.0f", it) } ?: "--", ElectricAmber, Modifier.weight(1f))
+                    FuelStatChip("$cur/KM", stats.costPerKm?.let { String.format(java.util.Locale.US, "%.2f", it) } ?: "--", CyberCyan, Modifier.weight(1f))
+                    FuelStatChip("30-DAY $cur", stats.cost30d?.let { String.format(java.util.Locale.US, "%.0f", it) } ?: "--", ElectricAmber, Modifier.weight(1f))
+                    FuelStatChip("MONTH $cur", stats.costThisMonth?.let { String.format(java.util.Locale.US, "%.0f", it) } ?: "--", ElectricAmber, Modifier.weight(1f))
                 }
                 val stationStats = repo.stationStats()
                 if (stationStats.isNotEmpty()) {
@@ -196,8 +196,8 @@ fun FuelCostsScreen(
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Text(st.name, color = Color.White, fontSize = 11.sp, modifier = Modifier.weight(1f))
                                     Text("${st.visits}x", color = TextSecondaryDark, fontSize = 10.sp)
-                                    Text(String.format("avg %.1f", st.avgPrice), color = CyberCyan, fontSize = 10.sp)
-                                    Text(String.format("best %.1f", st.bestPrice), color = NeonEmerald, fontSize = 10.sp)
+                                    Text(String.format(java.util.Locale.US, "avg %.1f", st.avgPrice), color = CyberCyan, fontSize = 10.sp)
+                                    Text(String.format(java.util.Locale.US, "best %.1f", st.bestPrice), color = NeonEmerald, fontSize = 10.sp)
                                 }
                             }
                         }
@@ -300,7 +300,7 @@ fun FuelCostsScreen(
                                     Text(entry.dateUtc.take(10), color = Color.White, fontSize = 12.sp, modifier = Modifier.weight(1f))
                                     val prev = prevOdoById[entry.idMs]
                                     if (entry.odometerKm != null && prev != null && entry.odometerKm > prev) {
-                                        Text(String.format("+%.0f km", entry.odometerKm - prev), color = TextSecondaryDark, fontSize = 10.sp)
+                                        Text(String.format(java.util.Locale.US, "+%.0f km", entry.odometerKm - prev), color = TextSecondaryDark, fontSize = 10.sp)
                                     }
                                 }
                                 Text(
@@ -310,12 +310,12 @@ fun FuelCostsScreen(
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     val kmL = intervalById[entry.idMs]
                                     Text(
-                                        if (kmL != null) String.format("km/L: %.2f", kmL) else "km/L: --",
+                                        if (kmL != null) String.format(java.util.Locale.US, "km/L: %.2f", kmL) else "km/L: --",
                                         color = if (kmL != null) NeonEmerald else TextSecondaryDark,
                                         fontSize = 11.sp, fontWeight = FontWeight.Bold
                                     )
                                     if (kmL != null && kmL > 0.1) {
-                                        Text(String.format("₹%.2f/km", entry.pricePerL / kmL), color = CyberCyan, fontSize = 10.sp)
+                                        Text(String.format(java.util.Locale.US, "₹%.2f/km", entry.pricePerL / kmL), color = CyberCyan, fontSize = 10.sp)
                                     }
                                     if (entry.partial) {
                                         Text("PARTIAL", color = ElectricAmber, fontSize = 9.sp, fontWeight = FontWeight.Bold)
@@ -394,7 +394,7 @@ private fun relativeLabel(idMs: Long): String {
 
 private fun monthLabel(idMs: Long): String {
     val cal = java.util.Calendar.getInstance().apply { timeInMillis = idMs }
-    return String.format("%s %d",
+    return String.format(java.util.Locale.US, "%s %d",
         cal.getDisplayName(java.util.Calendar.MONTH, java.util.Calendar.LONG, java.util.Locale.US),
         cal.get(java.util.Calendar.YEAR))
 }

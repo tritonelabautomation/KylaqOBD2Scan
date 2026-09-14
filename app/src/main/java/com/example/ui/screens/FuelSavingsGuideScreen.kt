@@ -83,7 +83,7 @@ fun FuelSavingsGuideScreen(
                     if (baseline.recentKmL != null) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                String.format("%.1f", baseline.recentKmL),
+                                String.format(java.util.Locale.US, "%.1f", baseline.recentKmL),
                                 color = NeonEmerald, fontSize = 40.sp, fontWeight = FontWeight.Bold
                             )
                             Spacer(Modifier.width(8.dp))

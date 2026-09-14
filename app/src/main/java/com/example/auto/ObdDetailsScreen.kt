@@ -253,7 +253,7 @@ class ObdDetailsScreen(carContext: CarContext) : Screen(carContext) {
     private fun format(value: Double?): String {
         val v = value ?: return "--"
         if (!v.isFinite()) return "--"
-        val rounded = if (abs(v) >= 100) v.toLong().toString() else String.format("%.1f", v)
+        val rounded = if (abs(v) >= 100) v.toLong().toString() else String.format(java.util.Locale.US, "%.1f", v)
         return rounded
     }
 

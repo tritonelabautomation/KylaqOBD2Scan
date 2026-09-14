@@ -140,7 +140,8 @@ fun AdapterConsoleScreen(
                     state = listState,
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(10.dp)
+                        .padding(10.dp),
+                    contentPadding = PaddingValues(bottom = 96.dp),
                 ) {
                     items(rawLogs, key = { it.id }) { log ->
                         val textColor = when {

@@ -35,8 +35,8 @@ object FuelLogCodec {
         val display: String
             get() = buildString {
                 append(dateUtc.take(10))
-                append(" · ").append(String.format("%.2f L", liters))
-                append(" · ₹").append(String.format("%.0f", totalCost))
+                append(" · ").append(String.format(java.util.Locale.US, "%.2f L", liters))
+                append(" · ₹").append(String.format(java.util.Locale.US, "%.0f", totalCost))
                 append(" · ").append(grade)
                 if (station.isNotBlank()) append(" · ").append(station)
             }

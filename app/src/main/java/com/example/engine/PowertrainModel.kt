@@ -48,7 +48,11 @@ object PowertrainModel {
     const val TANK_CAPACITY_L = 45.0
 
     /** Typical warm-idle consumption of a 1.0 TSI, used as a coasting baseline. */
-    const val IDLE_FUEL_LH = 0.8
+    // QA/QC 2026-09-13 re-calibration (owner telemetry is the oracle): post-F-6 live
+    // idle frames read raw 9D counts 8-14 -> 0.16-0.28 g/s -> 0.77-1.35 L/h; the old
+    // 0.8 sat at the very bottom of the measured band. Median ~1.05 L/h now anchors
+    // coast/idle detectors, coaching text and the idle-vs-model trend comparison.
+    const val IDLE_FUEL_LH = 1.05
 
     /** Rotating-mass allowance (flywheel, wheels, driveshafts) as a multiplier on vehicle mass. */
     const val ROTATING_MASS_FACTOR = 1.05

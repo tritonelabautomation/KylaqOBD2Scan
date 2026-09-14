@@ -105,10 +105,12 @@ fun AiDoctorScreen(
     }
 
     // Compute live health score from active live telemetry
-    val liveScore = remember(liveDecodedMap) {
+    // QA/QC 2026-09-13: the old regex-strip parse of display strings dropped minus
+    // signs and depended on unit suffixes; use the numeric view with stale fallback.
+    val liveScore = remember(liveDecodedMap, liveNumericMap) {
         var score = 100
-        val voltStr = liveDecodedMap["0142"]?.replace(Regex("[^0-9.]"), "")?.toDoubleOrNull()
-        val coolantStr = liveDecodedMap["0105"]?.replace(Regex("[^0-9.]"), "")?.toDoubleOrNull()
+        val voltStr = numericWithStaleFallback(liveNumericMap["0142"], liveDecodedMap["0142"])
+        val coolantStr = numericWithStaleFallback(liveNumericMap["0105"], liveDecodedMap["0105"])
         if (voltStr != null && voltStr < 12.4 && voltStr > 0) score -= 15
         if (coolantStr != null && coolantStr > 108.0) score -= 25
         score.coerceIn(0, 100)
@@ -245,7 +247,8 @@ private fun HealthReviewTab(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+        contentPadding = PaddingValues(bottom = 96.dp)
     ) {
         item {
             // Hero Health Score Gauge Card
@@ -360,7 +363,8 @@ private fun SubsystemsTab(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(bottom = 96.dp)
     ) {
         item {
             SubsystemCard(
@@ -465,7 +469,8 @@ private fun RecommendationsTab(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        contentPadding = PaddingValues(bottom = 96.dp)
     ) {
         item {
             Text("ACTIONABLE DIAGNOSTIC RECOMMENDATIONS", color = CyberCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)

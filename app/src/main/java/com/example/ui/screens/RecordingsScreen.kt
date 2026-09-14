@@ -224,7 +224,7 @@ fun RecordingsScreen(
                         val idlePts = trends.filter { it.idleActualLh != null }
                         if (idlePts.size >= 2) {
                             Text(
-                                "idle burn vs math model (model = 0.80 L/h):",
+                                "idle burn vs math model (model = %.2f L/h):".format(java.util.Locale.US, com.example.analysis.TripTrendAnalyzer.MODEL_IDLE_LH),
                                 color = TextSecondaryDark, fontSize = 10.sp
                             )
                             SimpleLineChart(
@@ -235,9 +235,9 @@ fun RecordingsScreen(
                             val f = idlePts.first()
                             val l = idlePts.last()
                             Text(
-                                "idle ${String.format("%.2f", f.idleActualLh!!)} → ${String.format("%.2f", l.idleActualLh!!)} L/h " +
-                                    "(model 0.80)" +
-                                    (l.idleExcessPct?.let { " · latest ${if (it >= 0) "+" else ""}${String.format("%.0f", it)}% vs model" } ?: ""),
+                                "idle ${String.format(java.util.Locale.US, "%.2f", f.idleActualLh!!)} → ${String.format("%.2f", l.idleActualLh!!)} L/h " +
+                                    "(model %.2f)".format(java.util.Locale.US, com.example.analysis.TripTrendAnalyzer.MODEL_IDLE_LH) +
+                                    (l.idleExcessPct?.let { " · latest ${if (it >= 0) "+" else ""}${String.format(java.util.Locale.US, "%.0f", it)}% vs model" } ?: ""),
                                 color = if ((l.idleExcessPct ?: 0.0) > 25.0) WarningRed else TextSecondaryDark,
                                 fontSize = 10.sp
                             )
@@ -256,6 +256,7 @@ fun RecordingsScreen(
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                contentPadding = PaddingValues(bottom = 96.dp),
                 items(savedRecordings, key = { it.metadata.sessionId }) { rec ->
                     RecordingItemCard(
                         recording = rec,
@@ -527,7 +528,7 @@ private fun TrendRow(label: String, values: List<Double>, fmt: String, color: Co
             Text(label, color = TextSecondaryDark, fontSize = 10.sp)
             Text(
                 "${String.format(fmt, first)} → ${String.format(fmt, last)} " +
-                    "(${if (drift >= 0) "+" else ""}${String.format("%.0f", drift)}%)",
+                    "(${if (drift >= 0) "+" else ""}${String.format(java.util.Locale.US, "%.0f", drift)}%)",
                 color = color, fontSize = 10.sp, fontWeight = FontWeight.SemiBold
             )
         }

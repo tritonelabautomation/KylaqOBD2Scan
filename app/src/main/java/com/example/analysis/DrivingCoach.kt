@@ -26,9 +26,9 @@ object DrivingCoach {
             when {
                 delta > 15.0 -> out.add(
                     Tip(
-                        "You cruise ${String.format("%.0f", delta)} km/h above your sweet spot",
+                        "You cruise ${String.format(java.util.Locale.US, "%.0f", delta)} km/h above your sweet spot",
                         "For your measured top-gear ratio the Kylaq needs the least fuel at about " +
-                            "${String.format("%.0f", sweet)} km/h. Aerodynamic drag grows with the " +
+                            "${String.format(java.util.Locale.US, "%.0f", sweet)} km/h. Aerodynamic drag grows with the " +
                             "square of speed, so every 10 km/h above that costs roughly 8-12 % more " +
                             "fuel on your 32 km route.",
                         Tip.Severity.WARN
@@ -36,8 +36,8 @@ object DrivingCoach {
                 )
                 delta < -20.0 && average > 20.0 -> out.add(
                     Tip(
-                        "Very low average speed: ${String.format("%.0f", average)} km/h",
-                        "Below about ${String.format("%.0f", sweet)} km/h the engine runs at low load " +
+                        "Very low average speed: ${String.format(java.util.Locale.US, "%.0f", average)} km/h",
+                        "Below about ${String.format(java.util.Locale.US, "%.0f", sweet)} km/h the engine runs at low load " +
                             "and high throttle-loss efficiency. If traffic allows, steady 55-75 km/h in " +
                             "the highest gear is the cheap zone for this engine.",
                         Tip.Severity.INFO
@@ -46,8 +46,8 @@ object DrivingCoach {
                 else -> out.add(
                     Tip(
                         "Average speed is inside the efficient band",
-                        "Your moving average of ${String.format("%.0f", average)} km/h sits near the " +
-                            "${String.format("%.0f", sweet)} km/h sweet spot of the 1.0 TSI. Keep the " +
+                        "Your moving average of ${String.format(java.util.Locale.US, "%.0f", average)} km/h sits near the " +
+                            "${String.format(java.util.Locale.US, "%.0f", sweet)} km/h sweet spot of the 1.0 TSI. Keep the " +
                             "speed steady and the turbo stays off the boost side of the map.",
                         Tip.Severity.GOOD
                     )
@@ -82,8 +82,8 @@ object DrivingCoach {
         if (coast.fuelCutEvents > 0 || coast.neutralEvents > 0) {
             out.add(
                 Tip(
-                    "Coasting: ${String.format("%.1f", coast.totalKm)} km, " +
-                        "${String.format("%.2f", coast.totalSavedVsCruiseL)} L saved",
+                    "Coasting: ${String.format(java.util.Locale.US, "%.1f", coast.totalKm)} km, " +
+                        "${String.format(java.util.Locale.US, "%.2f", coast.totalSavedVsCruiseL)} L saved",
                     if (coast.neutralEvents > coast.fuelCutEvents) {
                         "Most of your coasting happened at idle rpm (drivetrain disengaged). It is " +
                             "smooth but burns idle fuel and loses engine braking; staying in gear " +
@@ -102,10 +102,10 @@ object DrivingCoach {
             val liters = snapshot.idleSeconds / 3600.0 * PowertrainModel.IDLE_FUEL_LH
             out.add(
                 Tip(
-                    "${String.format("%.0f", snapshot.idleSeconds / 60.0)} min idling this session",
+                    "${String.format(java.util.Locale.US, "%.0f", snapshot.idleSeconds / 60.0)} min idling this session",
                     "A warm 1.0 TSI burns about ${PowertrainModel.IDLE_FUEL_LH} L/h standing still — " +
-                        "that is ${String.format("%.2f", liters)} L, or " +
-                        "${String.format("%.1f", liters / maxOf(0.5, trip.totalFuelLiters) * 100)} % of " +
+                        "that is ${String.format(java.util.Locale.US, "%.2f", liters)} L, or " +
+                        "${String.format(java.util.Locale.US, "%.1f", liters / maxOf(0.5, trip.totalFuelLiters) * 100)} % of " +
                         "the trip fuel, for zero distance.",
                     Tip.Severity.WARN
                 )
@@ -118,7 +118,7 @@ object DrivingCoach {
             if (tank.cruiseTimingSamples >= 30 && timing != null && timing < 20.0) {
                 out.add(
                     Tip(
-                        "Cruise ignition advance is low (${String.format("%.1f", timing)}°)",
+                        "Cruise ignition advance is low (${String.format(java.util.Locale.US, "%.1f", timing)}°)",
                         "Healthy cruise advance on this engine is roughly 20-35°. Persistent low " +
                             "advance or positive long-term trim usually means lower-octane fuel — " +
                             "compare this tank against a 95 RON (X95) fill in the Tanks table.",
@@ -137,7 +137,7 @@ object DrivingCoach {
             if (lag != null && lag > 2500) {
                 out.add(
                     Tip(
-                        "Average tip-in lag ${String.format("%.1f", lag / 1000.0)} s",
+                        "Average tip-in lag ${String.format(java.util.Locale.US, "%.1f", lag / 1000.0)} s",
                         "The wastegated turbo of the 1.0 TSI needs exhaust energy: below ~1800 rpm a " +
                             "pedal stab takes seconds to reach boost. For overtakes, plan ahead or let " +
                             "the gearbox drop a gear so you start above 2000 rpm.",
@@ -163,13 +163,13 @@ object DrivingCoach {
             val ratio = trip.averageKmL / arai
             out.add(
                 Tip(
-                    "Trip: ${String.format("%.1f", trip.averageKmL)} km/L over " +
-                        "${String.format("%.1f", trip.distanceKm)} km",
+                    "Trip: ${String.format(java.util.Locale.US, "%.1f", trip.averageKmL)} km/L over " +
+                        "${String.format(java.util.Locale.US, "%.1f", trip.distanceKm)} km",
                     if (ratio >= 0.85) {
-                        "That is ${String.format("%.0f", ratio * 100)} % of the ARAI figure (19.0 km/L) " +
+                        "That is ${String.format(java.util.Locale.US, "%.0f", ratio * 100)} % of the ARAI figure (19.0 km/L) " +
                             "— genuinely efficient driving for a turbo petrol in Indian traffic."
                     } else {
-                        "That is ${String.format("%.0f", ratio * 100)} % of the ARAI figure (19.0 km/L). " +
+                        "That is ${String.format(java.util.Locale.US, "%.0f", ratio * 100)} % of the ARAI figure (19.0 km/L). " +
                             "The usual levers, in order: steady speed near the sweet spot, earlier " +
                             "lift-off, less idling, and gentler launches."
                     },

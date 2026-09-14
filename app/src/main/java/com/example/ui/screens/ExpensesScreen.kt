@@ -85,7 +85,7 @@ fun ExpensesScreen(
         val buckets = sortedMapOf<String, Double>()
         rows.forEach { r ->
             cal.time = Date(r.sortKey)
-            val key = String.format("%04d-%02d", cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1)
+            val key = String.format(java.util.Locale.US, "%04d-%02d", cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1)
             buckets[key] = (buckets[key] ?: 0.0) + r.amount
         }
         buckets.toList().takeLast(8)
@@ -102,7 +102,7 @@ fun ExpensesScreen(
                     IconButton(onClick = {
                         val sb = StringBuilder("date,kind,detail,amount_inr\n")
                         rows.forEach { sb.append(it.dateUtc).append(',').append(it.kind).append(',')
-                            .append(it.label.replace(',', ' ')).append(',').append(String.format("%.2f", it.amount)).append('\n') }
+                            .append(it.label.replace(',', ' ')).append(',').append(String.format(java.util.Locale.US, "%.2f", it.amount)).append('\n') }
                         val out = File(context.cacheDir, "kylaq-expenses.csv")
                         out.writeText(sb.toString())
                         val downloads = File(context.getExternalFilesDir(null), "Downloads").apply { mkdirs() }
@@ -180,7 +180,7 @@ fun ExpensesScreen(
                             Text(r.dateUtc.take(10), color = TextSecondaryDark, fontSize = 10.sp)
                         }
                         Text(
-                            if (r.amount > 0) String.format("%s%.0f", cur, r.amount) else "--",
+                            if (r.amount > 0) String.format(java.util.Locale.US, "%s%.0f", cur, r.amount) else "--",
                             color = ElectricAmber, fontSize = 13.sp, fontWeight = FontWeight.Bold
                         )
                         if (r.kind == "Other") {
@@ -222,7 +222,7 @@ private fun ExpenseDialog(
     var note by remember { mutableStateOf("") }
     val voice = rememberVoiceLauncher { transcript ->
         note = transcript
-        VoiceParse.amount(transcript)?.let { amount = String.format("%.0f", it) }
+        VoiceParse.amount(transcript)?.let { amount = String.format(java.util.Locale.US, "%.0f", it) }
     }
 
     AlertDialog(

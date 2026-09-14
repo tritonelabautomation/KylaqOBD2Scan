@@ -384,7 +384,7 @@ fun DashboardScreen(
             onPidClick = { pidId -> onNavigateToPidDetail(pidId) }
         )
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(96.dp)) // FAB clearance (QA/QC 2026-09-13)
     }
 }
 
@@ -493,7 +493,7 @@ fun RecordingControlBar(
     val durationFormatted = remember(recordingDurationSeconds) {
         val min = recordingDurationSeconds / 60
         val sec = recordingDurationSeconds % 60
-        String.format("%02d:%02d", min, sec)
+        String.format(java.util.Locale.US, "%02d:%02d", min, sec)
     }
 
     Card(

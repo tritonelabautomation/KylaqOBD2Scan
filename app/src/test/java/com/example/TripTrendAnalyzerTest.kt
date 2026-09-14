@@ -92,4 +92,13 @@ class TripTrendAnalyzerTest {
         assertEquals(2000.0, pts["t1"]!!.avgRpm!!, 0.01)
         assertEquals(4000.0, pts["t2"]!!.avgRpm!!, 0.01)
     }
+
+    @Test
+    fun `idle model constant stays synced with PowertrainModel`() {
+        // QA/QC 2026-09-13: the analyzer keeps a local copy of the idle constant to
+        // stay dependency-free; drift between the two would silently corrupt the
+        // idle-vs-model trend comparison.
+        assertEquals(com.example.engine.PowertrainModel.IDLE_FUEL_LH,
+            TripTrendAnalyzer.MODEL_IDLE_LH, 1e-12)
+    }
 }

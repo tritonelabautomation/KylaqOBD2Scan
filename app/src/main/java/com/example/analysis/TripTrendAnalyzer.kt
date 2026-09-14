@@ -42,7 +42,7 @@ object TripTrendAnalyzer {
     const val PID_FUEL_MASS = "019D"
 
     /** Matches PowertrainModel.IDLE_FUEL_LH - kept local so the analyzer stays dependency-free. */
-    const val MODEL_IDLE_LH = 0.8
+    const val MODEL_IDLE_LH = 1.05
 
     /** 178 Nm reference: J1979 torque percent -> Nm. */
     const val NM_PER_PERCENT = 1.78

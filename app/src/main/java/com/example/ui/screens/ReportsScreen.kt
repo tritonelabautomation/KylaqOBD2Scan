@@ -61,7 +61,7 @@ fun ReportsScreen(
         val buckets = sortedMapOf<String, Double>()
         fun add(ts: Long, amount: Double) {
             cal.time = Date(ts)
-            val key = String.format("%04d-%02d", cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1)
+            val key = String.format(java.util.Locale.US, "%04d-%02d", cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1)
             buckets[key] = (buckets[key] ?: 0.0) + amount
         }
         fuel.forEach { add(it.idMs, it.totalCost) }
@@ -81,7 +81,7 @@ fun ReportsScreen(
         pts
     }
 
-    var budget by remember { mutableStateOf(settings.monthlyBudget()?.let { String.format("%.0f", it) } ?: "") }
+    var budget by remember { mutableStateOf(settings.monthlyBudget()?.let { String.format(java.util.Locale.US, "%.0f", it) } ?: "") }
     val budgetValue = budget.toDoubleOrNull()
     val thisMonthSpend = monthlySpend.lastOrNull()?.second ?: 0.0
 
@@ -109,9 +109,9 @@ fun ReportsScreen(
         ) {
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Metric("YTD SPEND", String.format("%s%.0f", cur, ytdSpend), ElectricAmber, Modifier.weight(1f))
-                Metric("COST/KM", fuelStats.costPerKm?.let { String.format("%s%.2f", cur, it) } ?: "--", CyberCyan, Modifier.weight(1f))
-                Metric("AVG", fuelStats.avgKmPerL?.let { String.format("%.1f km/L", it) } ?: "--", NeonEmerald, Modifier.weight(1f))
+                Metric("YTD SPEND", String.format(java.util.Locale.US, "%s%.0f", cur, ytdSpend), ElectricAmber, Modifier.weight(1f))
+                Metric("COST/KM", fuelStats.costPerKm?.let { String.format(java.util.Locale.US, "%s%.2f", cur, it) } ?: "--", CyberCyan, Modifier.weight(1f))
+                Metric("AVG", fuelStats.avgKmPerL?.let { String.format(java.util.Locale.US, "%.1f km/L", it) } ?: "--", NeonEmerald, Modifier.weight(1f))
             }
             val businessPct by settings.businessUsePct.collectAsState()
             if (businessPct > 0) {
@@ -157,7 +157,7 @@ fun ReportsScreen(
                             color = if (fraction > 1) ResearchPurple else NeonEmerald,
                         )
                         Text(
-                            String.format("spent %s%.0f of %s%.0f (%.0f%%)", cur, thisMonthSpend, cur, b, fraction * 100),
+                            String.format(java.util.Locale.US, "spent %s%.0f of %s%.0f (%.0f%%)", cur, thisMonthSpend, cur, b, fraction * 100),
                             color = if (fraction > 1) ResearchPurple else TextSecondaryDark, fontSize = 11.sp
                         )
                     }
@@ -179,6 +179,7 @@ fun ReportsScreen(
                     estimate?.let { e ->
                         Text(
                             String.format(
+                                java.util.Locale.US,
                                 "fuel %s%.0f + tolls %s%.0f = %s%.0f · %.1f h drive · rideshare would cost %s%.0f (you save %s%.0f)",
                                 cur, e.fuelCost, cur, e.tollCost, cur, e.totalCost, e.driveHours, cur, e.rideshareCost, cur, e.savingVsRideshare
                             ),

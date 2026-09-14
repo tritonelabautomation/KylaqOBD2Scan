@@ -423,9 +423,9 @@ fun MainApp(viewModel: MainViewModel) {
                         }
                         .minByOrNull { it.kmRemaining ?: Double.MAX_VALUE }
                     listOf(
-                        "Avg Fuel Economy" to (fuelStats.avgKmPerL?.let { String.format("%.1f km/L (%d logs)", it, fuelStats.entryCount) } ?: "Not enough data"),
-                        "Running Cost" to (fuelStats.costPerKm?.let { String.format("%.2f/km", it) } ?: "--"),
-                        "Odometer" to (viewModel.maintenanceRepository.currentOdometerKm()?.let { String.format("%.0f km", it) } ?: "Not set"),
+                        "Avg Fuel Economy" to (fuelStats.avgKmPerL?.let { String.format(java.util.Locale.US, "%.1f km/L (%d logs)", it, fuelStats.entryCount) } ?: "Not enough data"),
+                        "Running Cost" to (fuelStats.costPerKm?.let { String.format(java.util.Locale.US, "%.2f/km", it) } ?: "--"),
+                        "Odometer" to (viewModel.maintenanceRepository.currentOdometerKm()?.let { String.format(java.util.Locale.US, "%.0f km", it) } ?: "Not set"),
                         "Next Maintenance" to (nextDue?.let { "${it.item.label} (${it.headline})" } ?: "Nothing due")
                     )
                 }
@@ -450,13 +450,13 @@ fun MainApp(viewModel: MainViewModel) {
                     val cur = viewModel.settingsRepository.currencySymbol.value
                     val items = mutableListOf<Pair<Long, String>>()
                     viewModel.fuelLogRepository.entries().take(3).forEach {
-                        items.add(it.idMs to "${it.dateUtc.take(10)} · Fuel ${String.format("%.1f", it.liters)} L · $cur${String.format("%.0f", it.totalCost)}")
+                        items.add(it.idMs to "${it.dateUtc.take(10)} · Fuel ${String.format(java.util.Locale.US, "%.1f", it.liters)} L · $cur${String.format("%.0f", it.totalCost)}")
                     }
                     viewModel.maintenanceRepository.logs().take(3).forEach {
-                        items.add(it.dateMs to ("${it.dateUtc.take(10)} · Service ${it.itemId}" + (it.cost?.let { c -> " · $cur${String.format("%.0f", c)}" } ?: "")))
+                        items.add(it.dateMs to ("${it.dateUtc.take(10)} · Service ${it.itemId}" + (it.cost?.let { c -> " · $cur${String.format(java.util.Locale.US, "%.0f", c)}" } ?: "")))
                     }
                     viewModel.expenseRepository.entries().take(3).forEach {
-                        items.add(it.idMs to "${it.dateUtc.take(10)} · ${it.category} · $cur${String.format("%.0f", it.amount)}")
+                        items.add(it.idMs to "${it.dateUtc.take(10)} · ${it.category} · $cur${String.format(java.util.Locale.US, "%.0f", it.amount)}")
                     }
                     items.sortedByDescending { it.first }.take(6).map { it.second }
                 }
