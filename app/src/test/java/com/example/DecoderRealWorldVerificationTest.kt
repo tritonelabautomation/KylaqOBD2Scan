@@ -23,7 +23,8 @@ class DecoderRealWorldVerificationTest {
     private fun pid(id: String, dec: DecoderType) = PidDefinition(
         id = id, service = "01", pid = id.removePrefix("01"),
         name = "Test $id", shortName = id, unit = "",
-        decoderType = dec, isResearch = false
+        decoderType = dec, isResearch = false,
+        defaultIntervalMs = 500L
     )
 
     // ─── 1. RPM (PID 0x0C) — ((A*256)+B)/4 ──────────────────────────

@@ -44,7 +44,10 @@ enum class PollingPriority(val floorMs: Long) {
      * "AC/compressor related PIDs not updating correct"). 114 of 153 catalogue
      * entries never set an explicit interval and inherited the 250 ms constructor
      * default - so every validated SLOW PID (ambient 0146, trims, tank level, ...)
-     * came due on EVERY serial round-robin pass. That inflated the cycle time,
+     * came due on EVERY serial round-robin pass. Since 2026-09-14 the interval is a
+     * REQUIRED constructor parameter and all 153 catalogue entries declare one
+     * explicitly (FAST 100-250 ms, MEDIUM 400-800 ms, SLOW 2000-5000 ms); this
+     * floor remains as the runtime safety clamp. That inflated the cycle time,
      * burned ELM327 bandwidth on queries whose value cannot change that fast,
      * raised collision/timeout rates and made the whole board - AC tiles
      * included - update in lurches. The scheduler now clamps every interval to
@@ -64,7 +67,10 @@ data class PidDefinition(
     val unit: String,                       // e.g. "RPM"
     val canHeader: String = "7DF",          // Default functional broadcast, or "7E0" for ECM direct
     val expectedRxId: String = "7E8",       // Expected ECM CAN response ID
-    val defaultIntervalMs: Long = 250L,
+    // REQUIRED (no default since 2026-09-14, owner: "enabled PIDs have no explicit
+    // polling interval"): every PID must declare its own poll interval so nothing can
+    // silently inherit a constructor value again.
+    val defaultIntervalMs: Long,
     val enabled: Boolean = true,
     val decoderType: DecoderType = DecoderType.RESEARCH_RAW,
     val formulaDisplay: String = "",
@@ -721,7 +727,7 @@ object DefaultPidDefinitions {
                 unit = "RAW",
                 canHeader = "7DF",
                 expectedRxId = "7E8",
-                defaultIntervalMs = 1500L,
+                defaultIntervalMs = 2000L, // was 1500 ms, below the SLOW floor (scheduler clamped it anyway)
                 enabled = true,
                 decoderType = DecoderType.RESEARCH_RAW,
                 formulaDisplay = "Raw Hex Preservation",
@@ -751,13 +757,17 @@ object StandardPidCatalog {
                 id = "0101", service = "01", pid = "01",
                 name = "Monitor Status Since DTCs Cleared",
                 shortName = "Monitors", unit = "Bitmask",
-                dataBytes = 4, description = "Status of OBD readiness monitors"
+                dataBytes = 4, description = "Status of OBD readiness monitors",
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             PidDefinition(
                 id = "0102", service = "01", pid = "02",
                 name = "Freeze DTC",
                 shortName = "Freeze DTC", unit = "Code",
-                dataBytes = 2, description = "DTC that triggered freeze frame storage"
+                dataBytes = 2, description = "DTC that triggered freeze frame storage",
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             PidDefinition(
                 id = "0107", service = "01", pid = "07",
@@ -765,7 +775,9 @@ object StandardPidCatalog {
                 shortName = "LTFT B1", unit = "%",
                 dataBytes = 1, decoderType = DecoderType.FUEL_TRIM,
                 formulaDisplay = "(A - 128) * 100 / 128",
-                description = "Long-term secondary fuel adaptation trim for bank 1"
+                description = "Long-term secondary fuel adaptation trim for bank 1",
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             PidDefinition(
                 id = "0108", service = "01", pid = "08",
@@ -773,7 +785,9 @@ object StandardPidCatalog {
                 shortName = "STFT B2", unit = "%",
                 dataBytes = 1, decoderType = DecoderType.FUEL_TRIM,
                 formulaDisplay = "(A - 128) * 100 / 128",
-                description = "Short-term fuel trim for cylinder bank 2"
+                description = "Short-term fuel trim for cylinder bank 2",
+                priority = PollingPriority.FAST,
+                defaultIntervalMs = 150L
             ),
             PidDefinition(
                 id = "0109", service = "01", pid = "09",
@@ -781,7 +795,9 @@ object StandardPidCatalog {
                 shortName = "LTFT B2", unit = "%",
                 dataBytes = 1, decoderType = DecoderType.FUEL_TRIM,
                 formulaDisplay = "(A - 128) * 100 / 128",
-                description = "Long-term fuel trim for cylinder bank 2"
+                description = "Long-term fuel trim for cylinder bank 2",
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             PidDefinition(
                 id = "010A", service = "01", pid = "0A",
@@ -789,7 +805,9 @@ object StandardPidCatalog {
                 shortName = "Fuel Press", unit = "kPa",
                 dataBytes = 1, decoderType = DecoderType.FUEL_PRESSURE_3_KPA,
                 formulaDisplay = "A * 3",
-                description = "Low-pressure fuel system gauge pressure"
+                description = "Low-pressure fuel system gauge pressure",
+                priority = PollingPriority.MEDIUM,
+                defaultIntervalMs = 500L
             ),
             PidDefinition(
                 id = "010E", service = "01", pid = "0E",
@@ -797,55 +815,73 @@ object StandardPidCatalog {
                 shortName = "Timing", unit = "°",
                 dataBytes = 1, decoderType = DecoderType.TIMING_ADVANCE,
                 formulaDisplay = "A / 2 - 64",
-                description = "Ignition timing advance before top dead center (BTDC)"
+                description = "Ignition timing advance before top dead center (BTDC)",
+                priority = PollingPriority.MEDIUM,
+                defaultIntervalMs = 500L
             ),
             PidDefinition(
                 id = "0112", service = "01", pid = "12",
                 name = "Commanded Secondary Air Status",
                 shortName = "Sec Air", unit = "Status",
-                dataBytes = 1, description = "Secondary air injection status"
+                dataBytes = 1, description = "Secondary air injection status",
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             PidDefinition(
                 id = "0113", service = "01", pid = "13",
                 name = "Oxygen Sensors Present (2 Banks)",
                 shortName = "O2 Present", unit = "Bitmask",
-                dataBytes = 1, description = "Bitmask indicating oxygen sensors present across 2 banks"
+                dataBytes = 1, description = "Bitmask indicating oxygen sensors present across 2 banks",
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             PidDefinition(
                 id = "0114", service = "01", pid = "14",
                 name = "O2 Sensor 1 Voltage & Short Term Trim",
                 shortName = "O2 B1S1", unit = "V",
-                dataBytes = 2, description = "Bank 1 Sensor 1 oxygen sensor output voltage"
+                dataBytes = 2, description = "Bank 1 Sensor 1 oxygen sensor output voltage",
+                priority = PollingPriority.FAST,
+                defaultIntervalMs = 150L
             ),
             PidDefinition(
                 id = "0115", service = "01", pid = "15",
                 name = "O2 Sensor 2 Voltage & Short Term Trim",
                 shortName = "O2 B1S2", unit = "V",
-                dataBytes = 2, description = "Bank 1 Sensor 2 post-cat oxygen sensor output"
+                dataBytes = 2, description = "Bank 1 Sensor 2 post-cat oxygen sensor output",
+                priority = PollingPriority.FAST,
+                defaultIntervalMs = 150L
             ),
             PidDefinition(
                 id = "011C", service = "01", pid = "1C",
                 name = "OBD Standard Conformance",
                 shortName = "OBD Std", unit = "Enum",
-                dataBytes = 1, description = "OBD standard requirements to which vehicle is certified"
+                dataBytes = 1, description = "OBD standard requirements to which vehicle is certified",
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             PidDefinition(
                 id = "011F", service = "01", pid = "1F",
                 name = "Run Time Since Engine Start",
                 shortName = "Run Time", unit = "s",
-                dataBytes = 2, description = "Accumulated engine running seconds since start"
+                dataBytes = 2, description = "Accumulated engine running seconds since start",
+                priority = PollingPriority.MEDIUM,
+                defaultIntervalMs = 500L
             ),
             PidDefinition(
                 id = "0121", service = "01", pid = "21",
                 name = "Distance Traveled With MIL On",
                 shortName = "MIL Dist", unit = "km",
-                dataBytes = 2, description = "Cumulative distance driven while malfunction indicator lamp is active"
+                dataBytes = 2, description = "Cumulative distance driven while malfunction indicator lamp is active",
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             PidDefinition(
                 id = "0122", service = "01", pid = "22",
                 name = "Fuel Rail Pressure (Vacuum Relative)",
                 shortName = "Rail Press Vac", unit = "kPa",
-                dataBytes = 2, description = "Fuel rail pressure relative to manifold vacuum"
+                dataBytes = 2, description = "Fuel rail pressure relative to manifold vacuum",
+                priority = PollingPriority.MEDIUM,
+                defaultIntervalMs = 500L
             ),
             PidDefinition(
                 id = "0123", service = "01", pid = "23",
@@ -853,7 +889,9 @@ object StandardPidCatalog {
                 shortName = "Rail Press", unit = "kPa",
                 dataBytes = 2, decoderType = DecoderType.FUEL_RAIL_PRESSURE,
                 formulaDisplay = "((A * 256) + B) * 10",
-                description = "High-pressure direct injection rail pressure"
+                description = "High-pressure direct injection rail pressure",
+                priority = PollingPriority.MEDIUM,
+                defaultIntervalMs = 500L
             ),
             PidDefinition(
                 id = "012C", service = "01", pid = "2C",
@@ -861,13 +899,17 @@ object StandardPidCatalog {
                 shortName = "Cmd EGR", unit = "%",
                 dataBytes = 1, decoderType = DecoderType.PERCENT_255,
                 formulaDisplay = "A * 100 / 255",
-                description = "Commanded exhaust gas recirculation valve position"
+                description = "Commanded exhaust gas recirculation valve position",
+                priority = PollingPriority.MEDIUM,
+                defaultIntervalMs = 500L
             ),
             PidDefinition(
                 id = "012D", service = "01", pid = "2D",
                 name = "EGR Error",
                 shortName = "EGR Error", unit = "%",
-                dataBytes = 1, description = "EGR system position error relative to setpoint"
+                dataBytes = 1, description = "EGR system position error relative to setpoint",
+                priority = PollingPriority.MEDIUM,
+                defaultIntervalMs = 500L
             ),
             PidDefinition(
                 id = "012F", service = "01", pid = "2F",
@@ -875,25 +917,33 @@ object StandardPidCatalog {
                 shortName = "Fuel Level", unit = "%",
                 dataBytes = 1, decoderType = DecoderType.PERCENT_255,
                 formulaDisplay = "A * 100 / 255",
-                description = "Fuel level sender input from tank sender unit"
+                description = "Fuel level sender input from tank sender unit",
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             PidDefinition(
                 id = "0130", service = "01", pid = "30",
                 name = "Warm-ups Since Codes Cleared",
                 shortName = "Warm-ups", unit = "Count",
-                dataBytes = 1, description = "Number of engine warm-up cycles since diagnostic memory reset"
+                dataBytes = 1, description = "Number of engine warm-up cycles since diagnostic memory reset",
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             PidDefinition(
                 id = "0131", service = "01", pid = "31",
                 name = "Distance Traveled Since Codes Cleared",
                 shortName = "Clr Dist", unit = "km",
-                dataBytes = 2, description = "Odometer distance traveled since DTCs reset"
+                dataBytes = 2, description = "Odometer distance traveled since DTCs reset",
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             PidDefinition(
                 id = "0132", service = "01", pid = "32",
                 name = "Evaporative System Vapor Pressure",
                 shortName = "EVAP Press", unit = "Pa",
-                dataBytes = 2, description = "Fuel tank evaporative emission pressure sensor"
+                dataBytes = 2, description = "Fuel tank evaporative emission pressure sensor",
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             PidDefinition(
                 id = "013D", service = "01", pid = "3D",
@@ -901,13 +951,17 @@ object StandardPidCatalog {
                 shortName = "Cat B2S1", unit = "°C",
                 dataBytes = 2, decoderType = DecoderType.CATALYST_TEMP,
                 formulaDisplay = "((A * 256) + B) / 10 - 40",
-                description = "Cylinder bank 2 pre-catalyst bed temperature"
+                description = "Cylinder bank 2 pre-catalyst bed temperature",
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             PidDefinition(
                 id = "0141", service = "01", pid = "41",
                 name = "Monitor Status This Drive Cycle",
                 shortName = "Drive Monitors", unit = "Bitmask",
-                dataBytes = 4, description = "Readiness status of system monitors during current ignition drive cycle"
+                dataBytes = 4, description = "Readiness status of system monitors during current ignition drive cycle",
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             PidDefinition(
                 id = "0143", service = "01", pid = "43",
@@ -915,7 +969,9 @@ object StandardPidCatalog {
                 shortName = "Abs Load", unit = "%",
                 dataBytes = 2, decoderType = DecoderType.PERCENT_LOAD_255,
                 formulaDisplay = "((A * 256) + B) / 2.55",
-                description = "Normalized thermodynamic air charge mass per stroke"
+                description = "Normalized thermodynamic air charge mass per stroke",
+                priority = PollingPriority.MEDIUM,
+                defaultIntervalMs = 500L
             ),
             PidDefinition(
                 id = "0144", service = "01", pid = "44",
@@ -923,7 +979,9 @@ object StandardPidCatalog {
                 shortName = "Cmd Lambda", unit = "λ",
                 dataBytes = 2, decoderType = DecoderType.EQUIVALENCE_RATIO,
                 formulaDisplay = "((A * 256) + B) / 32768",
-                description = "Target air-fuel equivalence ratio commanded by ECU"
+                description = "Target air-fuel equivalence ratio commanded by ECU",
+                priority = PollingPriority.MEDIUM,
+                defaultIntervalMs = 500L
             ),
             PidDefinition(
                 id = "0145", service = "01", pid = "45",
@@ -931,7 +989,9 @@ object StandardPidCatalog {
                 shortName = "Rel Throttle", unit = "%",
                 dataBytes = 1, decoderType = DecoderType.PERCENT_255,
                 formulaDisplay = "A * 100 / 255",
-                description = "Relative throttle angle above learned idle stop"
+                description = "Relative throttle angle above learned idle stop",
+                priority = PollingPriority.FAST,
+                defaultIntervalMs = 150L
             ),
             PidDefinition(
                 id = "0147", service = "01", pid = "47",
@@ -939,7 +999,9 @@ object StandardPidCatalog {
                 shortName = "Throttle B", unit = "%",
                 dataBytes = 1, decoderType = DecoderType.PERCENT_255,
                 formulaDisplay = "A * 100 / 255",
-                description = "Secondary throttle potentiometer sensor B"
+                description = "Secondary throttle potentiometer sensor B",
+                priority = PollingPriority.FAST,
+                defaultIntervalMs = 150L
             ),
             PidDefinition(
                 id = "0148", service = "01", pid = "48",
@@ -947,7 +1009,9 @@ object StandardPidCatalog {
                 shortName = "Throttle C", unit = "%",
                 dataBytes = 1, decoderType = DecoderType.PERCENT_255,
                 formulaDisplay = "A * 100 / 255",
-                description = "Throttle angle channel C"
+                description = "Throttle angle channel C",
+                priority = PollingPriority.FAST,
+                defaultIntervalMs = 150L
             ),
             PidDefinition(
                 id = "014C", service = "01", pid = "4C",
@@ -955,19 +1019,25 @@ object StandardPidCatalog {
                 shortName = "Cmd Throttle", unit = "%",
                 dataBytes = 1, decoderType = DecoderType.PERCENT_255,
                 formulaDisplay = "A * 100 / 255",
-                description = "Electronic throttle body drive motor commanded duty"
+                description = "Electronic throttle body drive motor commanded duty",
+                priority = PollingPriority.FAST,
+                defaultIntervalMs = 150L
             ),
             PidDefinition(
                 id = "014D", service = "01", pid = "4D",
                 name = "Time Run With MIL On",
                 shortName = "MIL Time", unit = "min",
-                dataBytes = 2, description = "Engine operating minutes with check engine lamp illuminated"
+                dataBytes = 2, description = "Engine operating minutes with check engine lamp illuminated",
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             PidDefinition(
                 id = "014E", service = "01", pid = "4E",
                 name = "Time Since Trouble Codes Cleared",
                 shortName = "Clr Time", unit = "min",
-                dataBytes = 2, description = "Engine operating minutes accumulated since DTC memory clear"
+                dataBytes = 2, description = "Engine operating minutes accumulated since DTC memory clear",
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             PidDefinition(
                 id = "015C", service = "01", pid = "5C",
@@ -975,7 +1045,9 @@ object StandardPidCatalog {
                 shortName = "Oil Temp", unit = "°C",
                 dataBytes = 1, decoderType = DecoderType.TEMP_MINUS_40,
                 formulaDisplay = "A - 40",
-                description = "Engine crankcase sump oil temperature"
+                description = "Engine crankcase sump oil temperature",
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             PidDefinition(
                 id = "015D", service = "01", pid = "5D",
@@ -983,7 +1055,9 @@ object StandardPidCatalog {
                 shortName = "Inj Timing", unit = "°",
                 dataBytes = 2, decoderType = DecoderType.INJECTION_TIMING_128,
                 formulaDisplay = "((A * 256 + B) - 26880) / 128",
-                description = "Main fuel injection pulse start angle relative to TDC"
+                description = "Main fuel injection pulse start angle relative to TDC",
+                priority = PollingPriority.MEDIUM,
+                defaultIntervalMs = 500L
             ),
 
             // ─── 0153 Absolute Evap Vapor Pressure ───────────────────────
@@ -993,7 +1067,8 @@ object StandardPidCatalog {
                 shortName = "Evap Abs", unit = "kPa",
                 dataBytes = 2, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Absolute evaporative emission system vapor pressure",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 0154 Evap Vapor Pressure (Relative) ─────────────────────
             PidDefinition(
@@ -1002,7 +1077,8 @@ object StandardPidCatalog {
                 shortName = "Evap Rel", unit = "kPa",
                 dataBytes = 2, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Evap system vapor pressure relative to atmospheric",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 0155 Short Term O2 Trim Bank 1 ──────────────────────────
             PidDefinition(
@@ -1011,7 +1087,8 @@ object StandardPidCatalog {
                 shortName = "ST O2 B1", unit = "%",
                 dataBytes = 2, decoderType = DecoderType.FUEL_TRIM,
                 description = "Short-term O2 sensor fuel trim, bank 1",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 0156 O2 Sensor Voltage B1S1 ────────────────────────────
             PidDefinition(
@@ -1020,7 +1097,8 @@ object StandardPidCatalog {
                 shortName = "O2 B1S1", unit = "V",
                 dataBytes = 2, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Pre-cat O2 sensor voltage (B1S1)",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 0157 O2 Sensor Voltage B1S2 ────────────────────────────
             PidDefinition(
@@ -1029,7 +1107,8 @@ object StandardPidCatalog {
                 shortName = "O2 B1S2", unit = "V",
                 dataBytes = 2, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Post-cat O2 sensor voltage (B1S2)",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 0158 O2 Sensor Voltage B2S1 ────────────────────────────
             PidDefinition(
@@ -1038,7 +1117,8 @@ object StandardPidCatalog {
                 shortName = "O2 B2S1", unit = "V",
                 dataBytes = 2, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Pre-cat O2 sensor voltage (B2S1) - bank 2",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 0159 O2 Sensor Voltage B2S2 ────────────────────────────
             PidDefinition(
@@ -1047,7 +1127,8 @@ object StandardPidCatalog {
                 shortName = "O2 B2S2", unit = "V",
                 dataBytes = 2, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Post-cat O2 sensor voltage (B2S2) - bank 2",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 015A Generator RPM ───────────────────────────────────────
             PidDefinition(
@@ -1056,7 +1137,8 @@ object StandardPidCatalog {
                 shortName = "Alt RPM", unit = "RPM",
                 dataBytes = 1, decoderType = DecoderType.RAW_A_KPA,
                 description = "Alternator/generator rotation speed",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 015B Engine Coolant Temperature 3 (alt) ─────────────────
             PidDefinition(
@@ -1065,7 +1147,8 @@ object StandardPidCatalog {
                 shortName = "Coolant 3B", unit = "°C",
                 dataBytes = 1, decoderType = DecoderType.TEMP_MINUS_40,
                 description = "Tertiary engine coolant temperature (Bosch)",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 015F Engine Oil Life Remaining ──────────────────────────
             PidDefinition(
@@ -1074,7 +1157,8 @@ object StandardPidCatalog {
                 shortName = "Oil Life", unit = "%",
                 dataBytes = 1, decoderType = DecoderType.PERCENT_255,
                 description = "Remaining useful oil life percentage (0-100%)",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 0164 Engine Reference Torque (extended) ────────────────
             PidDefinition(
@@ -1083,7 +1167,8 @@ object StandardPidCatalog {
                 shortName = "Ref Tq Ext", unit = "Nm",
                 dataBytes = 2, decoderType = DecoderType.TORQUE_NM,
                 description = "Extended reference torque for current engine operating point",
-                priority = PollingPriority.MEDIUM
+                priority = PollingPriority.MEDIUM,
+                defaultIntervalMs = 500L
             ),
             // ─── 0165 Turbocharger Boost Pressure ────────────────────────
             PidDefinition(
@@ -1092,7 +1177,8 @@ object StandardPidCatalog {
                 shortName = "Boost", unit = "kPa",
                 dataBytes = 2, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Manifold absolute pressure after turbocharger (EA211)",
-                priority = PollingPriority.FAST
+                priority = PollingPriority.FAST,
+                defaultIntervalMs = 150L
             ),
             // ─── 0166 Charge Air Cooler Temperature ───────────────────────
             PidDefinition(
@@ -1101,7 +1187,8 @@ object StandardPidCatalog {
                 shortName = "Charge T", unit = "°C",
                 dataBytes = 1, decoderType = DecoderType.TEMP_MINUS_40,
                 description = "Intercooler / charge air cooler outlet temperature",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 0168 Intake Air Temperature 2 (alt) ─────────────────────
             PidDefinition(
@@ -1110,7 +1197,8 @@ object StandardPidCatalog {
                 shortName = "IAT 2 Alt", unit = "°C",
                 dataBytes = 1, decoderType = DecoderType.TEMP_MINUS_40,
                 description = "Secondary intake air temperature (post-throttle body, EA211)",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 0169 Boost Pressure (alternative) ────────────────────────
             PidDefinition(
@@ -1119,7 +1207,8 @@ object StandardPidCatalog {
                 shortName = "Boost 2", unit = "kPa",
                 dataBytes = 1, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Alternative boost pressure encoding (kPa relative)",
-                priority = PollingPriority.FAST
+                priority = PollingPriority.FAST,
+                defaultIntervalMs = 150L
             ),
             // ─── 016A VVT Phase (Intake Cam) ──────────────────────────────
             PidDefinition(
@@ -1128,7 +1217,8 @@ object StandardPidCatalog {
                 shortName = "VVT Phase", unit = "°",
                 dataBytes = 1, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Variable valve timing phase angle (intake camshaft)",
-                priority = PollingPriority.MEDIUM
+                priority = PollingPriority.MEDIUM,
+                defaultIntervalMs = 500L
             ),
             // ─── 016B VVT Control Duty ───────────────────────────────────
             PidDefinition(
@@ -1137,7 +1227,8 @@ object StandardPidCatalog {
                 shortName = "VVT Duty", unit = "%",
                 dataBytes = 1, decoderType = DecoderType.PERCENT_255,
                 description = "Variable valve timing actuator control duty cycle",
-                priority = PollingPriority.MEDIUM
+                priority = PollingPriority.MEDIUM,
+                defaultIntervalMs = 500L
             ),
             // ─── 016C Coolant Pump Status ─────────────────────────────────
             PidDefinition(
@@ -1146,7 +1237,8 @@ object StandardPidCatalog {
                 shortName = "Coolant Pump", unit = "",
                 dataBytes = 1, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Electric coolant pump operating state (bitmask)",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 016E Wastegate Actuator Command ──────────────────────────
             PidDefinition(
@@ -1155,7 +1247,8 @@ object StandardPidCatalog {
                 shortName = "WG Cmd", unit = "%",
                 dataBytes = 1, decoderType = DecoderType.PERCENT_255,
                 description = "Turbocharger wastegate actuator position command",
-                priority = PollingPriority.FAST
+                priority = PollingPriority.FAST,
+                defaultIntervalMs = 150L
             ),
             // ─── 016F Engine Coolant Flow Rate ────────────────────────────
             PidDefinition(
@@ -1164,7 +1257,8 @@ object StandardPidCatalog {
                 shortName = "Coolant Flow", unit = "L/min",
                 dataBytes = 1, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Engine coolant volumetric flow rate",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 0171 Control Module Power Supply ─────────────────────────
             PidDefinition(
@@ -1173,7 +1267,8 @@ object StandardPidCatalog {
                 shortName = "CM Pwr", unit = "V",
                 dataBytes = 1, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Control module internal supply voltage (0.1V units)",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 0172 Exhaust Gas Pressure ────────────────────────────────
             PidDefinition(
@@ -1182,7 +1277,8 @@ object StandardPidCatalog {
                 shortName = "Exh P", unit = "kPa",
                 dataBytes = 1, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Exhaust back-pressure upstream of turbocharger",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 0173 Turbocharger Speed ──────────────────────────────────
             PidDefinition(
@@ -1191,7 +1287,8 @@ object StandardPidCatalog {
                 shortName = "Turbo RPM", unit = "RPM",
                 dataBytes = 2, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Turbocharger shaft rotational speed (RPM)",
-                priority = PollingPriority.MEDIUM
+                priority = PollingPriority.MEDIUM,
+                defaultIntervalMs = 500L
             ),
             // ─── 0174 Turbocharger Temperature 1/2 ──────────────────────────
             PidDefinition(
@@ -1200,7 +1297,8 @@ object StandardPidCatalog {
                 shortName = "Turbo T 1", unit = "°C",
                 dataBytes = 2, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Turbocharger bearing/turbine temperature (B1, B2)",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 0175 Turbocharger Temperature 3/4 ─────────────────────────
             PidDefinition(
@@ -1209,7 +1307,8 @@ object StandardPidCatalog {
                 shortName = "Turbo T 2", unit = "°C",
                 dataBytes = 2, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Turbocharger compressor outlet temperature (B1, B2)",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 0176 Charge Air Cooler Temperature (alt) ─────────────────
             PidDefinition(
@@ -1218,7 +1317,8 @@ object StandardPidCatalog {
                 shortName = "CAC T Alt", unit = "°C",
                 dataBytes = 1, decoderType = DecoderType.TEMP_MINUS_40,
                 description = "Alternative charge air cooler temperature sensor",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 0177 EGT Bank 1 / Bank 2 ─────────────────────────────────
             PidDefinition(
@@ -1227,7 +1327,8 @@ object StandardPidCatalog {
                 shortName = "EGT B1/B2", unit = "°C",
                 dataBytes = 4, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Exhaust gas temperature bank 1 and bank 2",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 0178 O2 Sensor Voltage B3S1 ──────────────────────────────
             PidDefinition(
@@ -1236,7 +1337,8 @@ object StandardPidCatalog {
                 shortName = "O2 B3S1", unit = "V",
                 dataBytes = 2, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Pre-cat O2 sensor voltage (B3S1) - bank 3",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 0179 O2 Sensor Voltage B3S2 ──────────────────────────────
             PidDefinition(
@@ -1245,7 +1347,8 @@ object StandardPidCatalog {
                 shortName = "O2 B3S2", unit = "V",
                 dataBytes = 2, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Post-cat O2 sensor voltage (B3S2) - bank 3",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 017A O2 Sensor Voltage B4S1 ──────────────────────────────
             PidDefinition(
@@ -1254,7 +1357,8 @@ object StandardPidCatalog {
                 shortName = "O2 B4S1", unit = "V",
                 dataBytes = 2, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Pre-cat O2 sensor voltage (B4S1) - bank 4",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 017B O2 Sensor Voltage B4S2 ──────────────────────────────
             PidDefinition(
@@ -1263,7 +1367,8 @@ object StandardPidCatalog {
                 shortName = "O2 B4S2", unit = "V",
                 dataBytes = 2, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Post-cat O2 sensor voltage (B4S2) - bank 4",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 017C EGR Temperature ─────────────────────────────────────
             PidDefinition(
@@ -1272,7 +1377,8 @@ object StandardPidCatalog {
                 shortName = "EGR Temp", unit = "°C",
                 dataBytes = 2, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Exhaust gas recirculation inlet/outlet temperature",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 017D Throttle Position (Alternative) ─────────────────────
             PidDefinition(
@@ -1281,7 +1387,8 @@ object StandardPidCatalog {
                 shortName = "TPS Alt", unit = "%",
                 dataBytes = 1, decoderType = DecoderType.PERCENT_255,
                 description = "Alternative throttle position encoding (0-100%)",
-                priority = PollingPriority.FAST
+                priority = PollingPriority.FAST,
+                defaultIntervalMs = 150L
             ),
             // ─── 017E Engine Running Time ──────────────────────────────────
             PidDefinition(
@@ -1290,7 +1397,8 @@ object StandardPidCatalog {
                 shortName = "Run Time", unit = "min",
                 dataBytes = 2, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Total engine operating time since start (minutes)",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 017F NOx Sensor (post-DPF) ────────────────────────────────
             PidDefinition(
@@ -1299,7 +1407,8 @@ object StandardPidCatalog {
                 shortName = "NOx", unit = "ppm",
                 dataBytes = 4, decoderType = DecoderType.RESEARCH_RAW,
                 description = "NOx concentration after diesel particulate filter",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 0180 DPF Temperature ────────────────────────────────────
             PidDefinition(
@@ -1308,7 +1417,8 @@ object StandardPidCatalog {
                 shortName = "DPF Temp", unit = "°C",
                 dataBytes = 2, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Diesel particulate filter inlet/outlet temperature",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 0181 DPF Soot Load ──────────────────────────────────────
             PidDefinition(
@@ -1317,7 +1427,8 @@ object StandardPidCatalog {
                 shortName = "DPF Soot", unit = "%",
                 dataBytes = 2, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Diesel particulate filter soot load estimate",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 0182 DPF Ash Load ───────────────────────────────────────
             PidDefinition(
@@ -1326,7 +1437,8 @@ object StandardPidCatalog {
                 shortName = "DPF Ash", unit = "%",
                 dataBytes = 2, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Diesel particulate filter ash load estimate",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 0183 DPF Regeneration Status ────────────────────────────
             PidDefinition(
@@ -1335,7 +1447,8 @@ object StandardPidCatalog {
                 shortName = "DPF Regen", unit = "",
                 dataBytes = 4, decoderType = DecoderType.RESEARCH_RAW,
                 description = "DPF regeneration status, distance to next regen",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 0186 Estimated Fuel Filament ────────────────────────────
             PidDefinition(
@@ -1344,7 +1457,8 @@ object StandardPidCatalog {
                 shortName = "Fuel Deg", unit = "%",
                 dataBytes = 2, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Fuel system fuel filament degradation estimate (BOSCH)",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 0187 Estimated Fuel Injector Correction ─────────────────
             PidDefinition(
@@ -1353,7 +1467,8 @@ object StandardPidCatalog {
                 shortName = "Inj Corr", unit = "%",
                 dataBytes = 2, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Fuel injector correction factor (BOSCH)",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 018A Injection Quantity ────────────────────────────────
             PidDefinition(
@@ -1362,7 +1477,8 @@ object StandardPidCatalog {
                 shortName = "Inj Qty", unit = "mm³",
                 dataBytes = 2, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Actual fuel injection quantity per stroke (mm³)",
-                priority = PollingPriority.MEDIUM
+                priority = PollingPriority.MEDIUM,
+                defaultIntervalMs = 500L
             ),
             // ─── 018B Fuel Pump Command ─────────────────────────────────
             PidDefinition(
@@ -1371,7 +1487,8 @@ object StandardPidCatalog {
                 shortName = "FP Cmd", unit = "%",
                 dataBytes = 1, decoderType = DecoderType.PERCENT_255,
                 description = "Fuel pump command (low pressure circuit)",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 018D Engine Start Enable ───────────────────────────────
             PidDefinition(
@@ -1380,7 +1497,8 @@ object StandardPidCatalog {
                 shortName = "Start Enable", unit = "",
                 dataBytes = 1, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Engine start enable signal status (bitmask)",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 018F Engine Oil Temp 2 ────────────────────────────────
             PidDefinition(
@@ -1389,7 +1507,8 @@ object StandardPidCatalog {
                 shortName = "Oil Temp 2", unit = "°C",
                 dataBytes = 1, decoderType = DecoderType.TEMP_MINUS_40,
                 description = "Secondary engine oil temperature sensor",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 0191 Intake Air Mass ──────────────────────────────────
             PidDefinition(
@@ -1398,7 +1517,8 @@ object StandardPidCatalog {
                 shortName = "Air Mass", unit = "g/s",
                 dataBytes = 2, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Intake manifold air mass flow rate (g/s)",
-                priority = PollingPriority.FAST
+                priority = PollingPriority.FAST,
+                defaultIntervalMs = 150L
             ),
             // ─── 0192 Turbo Vapor Pressure ──────────────────────────────
             PidDefinition(
@@ -1407,7 +1527,8 @@ object StandardPidCatalog {
                 shortName = "Turbo Vap", unit = "kPa",
                 dataBytes = 1, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Vapor pressure at turbo compressor inlet",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 0193 Battery Voltage / Module Voltage ───────────────────
             PidDefinition(
@@ -1416,7 +1537,8 @@ object StandardPidCatalog {
                 shortName = "Module V", unit = "V",
                 dataBytes = 2, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Alternative module voltage (e.g. 0.01V units)",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 0194 NOx Reagent (DEF/AdBlue) ─────────────────────────
             PidDefinition(
@@ -1425,7 +1547,8 @@ object StandardPidCatalog {
                 shortName = "DEF Level", unit = "%",
                 dataBytes = 1, decoderType = DecoderType.PERCENT_255,
                 description = "Diesel exhaust fluid (AdBlue) tank level",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 0195 NOx Reagent Consumption ───────────────────────────
             PidDefinition(
@@ -1434,7 +1557,8 @@ object StandardPidCatalog {
                 shortName = "DEF Use", unit = "L/h",
                 dataBytes = 2, decoderType = DecoderType.RESEARCH_RAW,
                 description = "DEF/AdBlue consumption rate",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 0196 NOx Reagent Range ────────────────────────────────
             PidDefinition(
@@ -1443,7 +1567,8 @@ object StandardPidCatalog {
                 shortName = "DEF Range", unit = "km",
                 dataBytes = 2, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Estimated DEF/AdBlue driving range (km)",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 0197 SCR Inducement System Status ──────────────────────
             PidDefinition(
@@ -1452,7 +1577,8 @@ object StandardPidCatalog {
                 shortName = "SCR Induc", unit = "",
                 dataBytes = 4, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Selective Catalytic Reduction inducement system state",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 0198 SCR Catalyst Temperature ──────────────────────────
             PidDefinition(
@@ -1461,7 +1587,8 @@ object StandardPidCatalog {
                 shortName = "SCR Temp", unit = "°C",
                 dataBytes = 2, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Selective Catalytic Reduction catalyst temperature",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 0199 SCR Catalyst Efficiency ───────────────────────────
             PidDefinition(
@@ -1470,7 +1597,8 @@ object StandardPidCatalog {
                 shortName = "SCR Eff", unit = "%",
                 dataBytes = 2, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Selective Catalytic Reduction catalyst NOx efficiency",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 01A0 Transmission Sump Temp / Generic ───────────────────
             PidDefinition(
@@ -1479,7 +1607,8 @@ object StandardPidCatalog {
                 shortName = "T Sump T", unit = "°C",
                 dataBytes = 1, decoderType = DecoderType.TEMP_MINUS_40,
                 description = "Automatic transmission fluid (sump) temperature",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 01A1 Clutch Status / PRNDL ────────────────────────────
             PidDefinition(
@@ -1488,7 +1617,8 @@ object StandardPidCatalog {
                 shortName = "PRNDL", unit = "",
                 dataBytes = 1, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Transmission clutch / PRNDL status (bitmask)",
-                priority = PollingPriority.MEDIUM
+                priority = PollingPriority.MEDIUM,
+                defaultIntervalMs = 500L
             ),
             // ─── 01A2 Transmission Oil Pressure ────────────────────────
             PidDefinition(
@@ -1497,7 +1627,8 @@ object StandardPidCatalog {
                 shortName = "T Oil P", unit = "kPa",
                 dataBytes = 2, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Automatic transmission line pressure",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 01A3 Transmission Oil Temperature ─────────────────────
             PidDefinition(
@@ -1506,7 +1637,8 @@ object StandardPidCatalog {
                 shortName = "T Oil T", unit = "°C",
                 dataBytes = 1, decoderType = DecoderType.TEMP_MINUS_40,
                 description = "Automatic transmission oil (sump) temperature",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 01A5 OBD Requirements / Vehicle Identification ────────────
             PidDefinition(
@@ -1515,7 +1647,8 @@ object StandardPidCatalog {
                 shortName = "OBD Req", unit = "",
                 dataBytes = 4, decoderType = DecoderType.RESEARCH_RAW,
                 description = "OBD requirements and vehicle identification data",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 01A6 OBD Vehicle Identification Number ────────────────
             PidDefinition(
@@ -1524,7 +1657,8 @@ object StandardPidCatalog {
                 shortName = "VIN", unit = "",
                 dataBytes = 4, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Vehicle identification number (partial / encoded)",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 01A7 OBD Vehicle ID / Calibration ──────────────────────
             PidDefinition(
@@ -1533,7 +1667,8 @@ object StandardPidCatalog {
                 shortName = "Cal ID", unit = "",
                 dataBytes = 4, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Vehicle calibration identification (partial / encoded)",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 01A8 OBD ECU Name ─────────────────────────────────────
             PidDefinition(
@@ -1542,7 +1677,8 @@ object StandardPidCatalog {
                 shortName = "ECU Name", unit = "",
                 dataBytes = 4, decoderType = DecoderType.RESEARCH_RAW,
                 description = "ECU name / part number (partial / encoded)",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 01A9 OBD Readiness Monitor Status ───────────────────
             PidDefinition(
@@ -1551,7 +1687,8 @@ object StandardPidCatalog {
                 shortName = "Readiness", unit = "",
                 dataBytes = 4, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Comprehensive OBD readiness/monitor status",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 01AA Fuel Rail Pressure (injection) ─────────────────
             PidDefinition(
@@ -1560,7 +1697,8 @@ object StandardPidCatalog {
                 shortName = "FRP Inj", unit = "kPa",
                 dataBytes = 2, decoderType = DecoderType.RESEARCH_RAW,
                 description = "High pressure fuel rail pressure (common rail)",
-                priority = PollingPriority.MEDIUM
+                priority = PollingPriority.MEDIUM,
+                defaultIntervalMs = 500L
             ),
             // ─── 01AB Fuel Rail Pressure (vacuum) ────────────────────
             PidDefinition(
@@ -1569,7 +1707,8 @@ object StandardPidCatalog {
                 shortName = "FRP Vac", unit = "kPa",
                 dataBytes = 1, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Low pressure fuel rail pressure (vacuum side)",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 01AC Battery Voltage (extended) ─────────────────────
             PidDefinition(
@@ -1578,7 +1717,8 @@ object StandardPidCatalog {
                 shortName = "Batt V Ext", unit = "V",
                 dataBytes = 2, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Battery voltage (0.001V units, alternator direct)",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 01AD Battery Current ─────────────────────────────────
             PidDefinition(
@@ -1587,7 +1727,8 @@ object StandardPidCatalog {
                 shortName = "Batt I", unit = "A",
                 dataBytes = 2, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Battery current (amperes, signed)",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 01AE Battery Temperature ─────────────────────────────
             PidDefinition(
@@ -1596,7 +1737,8 @@ object StandardPidCatalog {
                 shortName = "Batt T", unit = "°C",
                 dataBytes = 1, decoderType = DecoderType.TEMP_MINUS_40,
                 description = "Battery pack temperature (HEV/PHEV/EV)",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 01B0 Hybrid/EV System Voltage ───────────────────────
             PidDefinition(
@@ -1605,7 +1747,8 @@ object StandardPidCatalog {
                 shortName = "HV Voltage", unit = "V",
                 dataBytes = 2, decoderType = DecoderType.RESEARCH_RAW,
                 description = "High-voltage system voltage (HEV/EV)",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 01B1 Hybrid/EV System Current ───────────────────────
             PidDefinition(
@@ -1614,7 +1757,8 @@ object StandardPidCatalog {
                 shortName = "HV Current", unit = "A",
                 dataBytes = 2, decoderType = DecoderType.RESEARCH_RAW,
                 description = "High-voltage system current (HEV/EV)",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 01B2 Hybrid Battery Pack State of Charge ────────────
             PidDefinition(
@@ -1623,7 +1767,8 @@ object StandardPidCatalog {
                 shortName = "HV SOC", unit = "%",
                 dataBytes = 1, decoderType = DecoderType.PERCENT_255,
                 description = "High-voltage battery state of charge (HEV/PHEV/EV)",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 01B5 ESC Steering Wheel Angle ─────────────────────────
             PidDefinition(
@@ -1632,7 +1777,8 @@ object StandardPidCatalog {
                 shortName = "Steer Ang", unit = "°",
                 dataBytes = 2, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Steering wheel angle (degrees, signed)",
-                priority = PollingPriority.FAST
+                priority = PollingPriority.FAST,
+                defaultIntervalMs = 150L
             ),
             // ─── 01B6 Lateral Acceleration ────────────────────────────
             PidDefinition(
@@ -1641,7 +1787,8 @@ object StandardPidCatalog {
                 shortName = "Lat G", unit = "g",
                 dataBytes = 2, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Lateral acceleration (g, signed)",
-                priority = PollingPriority.MEDIUM
+                priority = PollingPriority.MEDIUM,
+                defaultIntervalMs = 500L
             ),
             // ─── 01B7 Longitudinal Acceleration ───────────────────────
             PidDefinition(
@@ -1650,7 +1797,8 @@ object StandardPidCatalog {
                 shortName = "Long G", unit = "g",
                 dataBytes = 2, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Longitudinal acceleration (g, signed)",
-                priority = PollingPriority.MEDIUM
+                priority = PollingPriority.MEDIUM,
+                defaultIntervalMs = 500L
             ),
             // ─── 01B8 Yaw Rate ────────────────────────────────────────
             PidDefinition(
@@ -1659,7 +1807,8 @@ object StandardPidCatalog {
                 shortName = "Yaw Rate", unit = "°/s",
                 dataBytes = 2, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Yaw rate (degrees per second, signed)",
-                priority = PollingPriority.MEDIUM
+                priority = PollingPriority.MEDIUM,
+                defaultIntervalMs = 500L
             ),
             // ─── 01BA Brake Pedal Position ────────────────────────────
             PidDefinition(
@@ -1668,7 +1817,8 @@ object StandardPidCatalog {
                 shortName = "Brake Pos", unit = "%",
                 dataBytes = 1, decoderType = DecoderType.PERCENT_255,
                 description = "Brake pedal travel position (0-100%)",
-                priority = PollingPriority.FAST
+                priority = PollingPriority.FAST,
+                defaultIntervalMs = 150L
             ),
             // ─── 01BB Cruise Control Status ───────────────────────────
             PidDefinition(
@@ -1677,7 +1827,8 @@ object StandardPidCatalog {
                 shortName = "CC Status", unit = "",
                 dataBytes = 1, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Cruise control system status (bitmask)",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 01BC Cruise Control Set Speed ───────────────────────
             PidDefinition(
@@ -1686,7 +1837,8 @@ object StandardPidCatalog {
                 shortName = "CC Speed", unit = "km/h",
                 dataBytes = 1, decoderType = DecoderType.RESEARCH_RAW,
                 description = "Cruise control set speed (km/h)",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             // ─── 01BD Ambient Air Temperature ────────────────────────
             PidDefinition(
@@ -1695,7 +1847,8 @@ object StandardPidCatalog {
                 shortName = "Amb T", unit = "°C",
                 dataBytes = 1, decoderType = DecoderType.TEMP_MINUS_40,
                 description = "Outside / ambient air temperature",
-                priority = PollingPriority.SLOW
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             )
         )
 
@@ -1732,7 +1885,11 @@ object StandardPidCatalog {
             decoderType = DecoderType.RESEARCH_RAW,
             formulaDisplay = "Raw Value",
             supported = isSupported,
-            description = "Standard SAE J1979 OBD-II Mode 01 Parameter ($clean)"
+            description = "Standard SAE J1979 OBD-II Mode 01 Parameter ($clean)",
+            // Conservative explicit interval for uncatalogued discoveries (2026-09-14:
+            // no PID may rely on a constructor default any more).
+            priority = PollingPriority.MEDIUM,
+            defaultIntervalMs = 500L
         )
     }
 

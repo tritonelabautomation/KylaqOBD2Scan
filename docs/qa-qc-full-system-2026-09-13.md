@@ -35,3 +35,37 @@ same day with guard tests where the behaviour is pure JVM.
   ON/OFF economy accumulates in both AUTO states (evidence rule).
 * J1979 exposes no compressor PID - hardware identity lives in
   docs/reference/kylaq-ac-compressor-hardware.md instead.
+
+---
+
+## Addendum 2026-09-14 — explicit polling intervals for EVERY PID
+
+Owner: *"enabled PID's have no explicit polling interval — can you check all PID's have polling interval?"*
+
+Audit result: the 39-entry poll set (`DefaultPidDefinitions.getDefaults()`) was fully explicit
+(sub-task I), but **114 of 153 catalogue entries** — the whole `StandardPidCatalog` "additional"
+J1979 set (113) plus the `lookup()` generic discovery fallback (1) — declared **no interval at all**
+and inherited the 250 ms constructor default with an implicit MEDIUM priority. These entries feed
+`PidDiscoveryService` → the PID Scanner screen, and any of them can be promoted into polling via
+PID Config, carrying the undeclared 250 ms with them.
+
+Fix (species level, so it cannot regress):
+
+1. **Constructor default removed** — `defaultIntervalMs: Long` is now a REQUIRED parameter of
+   `PidDefinition`. The compiler rejects any future PID (catalogue, discovery fallback, custom,
+   test) that does not declare its own polling interval.
+2. **All 114 entries given explicit priority + interval** inside the documented bands
+   (FAST 100–250 ms → 150, MEDIUM 400–800 ms → 500, SLOW 2000–5000 ms → 3000), assigned by
+   J1979 semantics: O2 sensor voltages/STFT/throttle positions FAST; rail pressure, EGR, lambda,
+   load, timing MEDIUM; monitors, counters, VIN/calibration IDs, catalyst/DPF/SCR temperatures,
+   tank level SLOW. Discovery fallback for uncatalogued PIDs: MEDIUM/500 ms (matches the
+   PID Config dialog + persisted-JSON fallback of 500 ms).
+3. **One pre-existing band violation found and fixed:** poll-set research PID 01A6 declared
+   SLOW but 1500 ms (below the 2000 ms floor — the scheduler was silently clamping it). Now 2000 ms.
+4. **Guard tests** (`PidCatalogIntervalTest`): every poll-set and catalogue entry must declare an
+   interval ≥ its tier floor and ≤ 5000 ms; uncatalogued fallback must be MEDIUM/500; the 01BD
+   ambient duplicate must stay SLOW ≥ 2000 ms. Local pre-check: 152 literal intervals, 0 violations.
+5. Test constructors in `PidDecoderAdversarialTest` (5) and `DecoderRealWorldVerificationTest` (1)
+   updated for the required parameter.
+
+Known-open list: T-5 altitude persistence; AC AUTO ×0.75 assumption; no J1979 compressor PID (doctrine).
