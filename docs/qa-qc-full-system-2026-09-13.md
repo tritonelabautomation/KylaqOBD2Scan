@@ -128,3 +128,17 @@ Owner: drawer screenshot showed no RevHeadz entry; asked for a thorough check in
    cause - diagnosable without a debugger. LIVE-OBD path re-verified by reading:
    START -> AudioTrack thread; loop pushes PID 010C rpm / 0104 load when
    ConnectionState.CONNECTED && rpm>0; falls back to labelled MANUAL sliders otherwise.
+
+### Same-day sweep (4) — Rev Theater: owner pack request + audio-path truth
+Owner verified Rev Theater on device (AUDIO lamp climbing = render thread alive) and asked:
+(a) real car sounds? (b) add Dodge Charger/Challenger/SRT/Hellcat + European & Japanese
+sports packs, (c) does it play through the CAR speakers via OBD?
+1. **Six new physics packs** (12 total): 6.4 HEMI V8 (Charger/Challenger), 6.2 SC HEMI
+   (SRT Hellcat), 4.0 Flat-6 (Stuttgart GT3), 4.0 Twin-Turbo V8 (Euro GT), 3.8 Twin-Turbo
+   V6 (Godzilla), 2.0 VTEC Turbo (Type R). Chip rows now `chunked(3)` so any pack count
+   lays out. Guard test asserts 12 packs + firing-Hz physics for HEMI/Hellcat/flat-6.
+2. **Honesty banner states the audio path**: sound comes from the PHONE (or its paired
+   BT / Android Auto media output). OBD-II carries telemetry only - it can never feed
+   car speakers. Supercharger whine explicitly labelled NOT modelled.
+3. Recordings remain out of scope: RevHeadz's catalogue is licensed/paid; this app ships
+   synthesis only (no-paywall mandate + copyright).

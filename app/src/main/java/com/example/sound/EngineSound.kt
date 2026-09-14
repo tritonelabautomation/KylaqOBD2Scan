@@ -81,7 +81,56 @@ object EngineSoundProfiles {
         note = "RevHeadz ships one too - two-stroke anger"
     )
 
-    val ALL = listOf(TSI_TRIPLE, V8_MUSCLE, V12_ITALIAN, ROTARY, V4_SPORTBIKE, CHAINSAW)
+    // ── 2026-09-14 owner request: American muscle + European & Japanese sports ──
+    // All packs remain PHYSICS SYNTHESIS (firing frequency + harmonic character),
+    // never licensed recordings - see the honesty note at the top of this file.
+    val HEMI_PUSHROD = EngineProfile(
+        id = "hemi57", name = "6.4 HEMI V8 (Charger/Challenger)", cylinders = 8,
+        idleRpm = 700.0, redlineRpm = 6200.0,
+        harmonics = listOf(1.0, 0.70, 0.45, 0.30, 0.18, 0.10),
+        drive = 2.6, rumble = 0.45, backfire = 0.05,
+        note = "Pushrod HEMI lope - heavy low-order harmonics, lazy overlap rumble"
+    )
+    val HELLCAT_SRT = EngineProfile(
+        id = "hellcat", name = "6.2 SC HEMI V8 (SRT Hellcat)", cylinders = 8,
+        idleRpm = 750.0, redlineRpm = 6500.0,
+        harmonics = listOf(1.0, 0.80, 0.50, 0.35, 0.25, 0.15),
+        drive = 3.2, rumble = 0.50, backfire = 0.12,
+        note = "Supercharged 6.2 SRT - max grit; blower whine is NOT modelled (synth limit)"
+    )
+    val EURO_FLAT6 = EngineProfile(
+        id = "flat6na", name = "4.0 Flat-6 (Stuttgart GT3)", cylinders = 6,
+        idleRpm = 750.0, redlineRpm = 9000.0,
+        harmonics = listOf(1.0, 0.50, 0.40, 0.25, 0.20, 0.15),
+        drive = 1.8, rumble = 0.15, backfire = 0.08,
+        note = "NA flat-6 9k screamer - light rumble, bright harmonic tail"
+    )
+    val EURO_TTV8 = EngineProfile(
+        id = "ttv8eu", name = "4.0 Twin-Turbo V8 (Euro GT)", cylinders = 8,
+        idleRpm = 700.0, redlineRpm = 7200.0,
+        harmonics = listOf(1.0, 0.60, 0.35, 0.22, 0.12, 0.06),
+        drive = 2.4, rumble = 0.30, backfire = 0.15,
+        note = "Twin-turbo V8 - cross-plane burble with overrun pop-and-bang"
+    )
+    val JDM_V6TT = EngineProfile(
+        id = "v6ttjp", name = "3.8 Twin-Turbo V6 (Godzilla)", cylinders = 6,
+        idleRpm = 800.0, redlineRpm = 7100.0,
+        harmonics = listOf(1.0, 0.55, 0.38, 0.24, 0.14, 0.08),
+        drive = 2.2, rumble = 0.28, backfire = 0.10,
+        note = "Twin-turbo V6 growl - GT-R character, hard cut at 7100"
+    )
+    val JDM_VTEC = EngineProfile(
+        id = "vtecr", name = "2.0 VTEC Turbo (Type R)", cylinders = 4,
+        idleRpm = 850.0, redlineRpm = 7000.0,
+        harmonics = listOf(1.0, 0.45, 0.50, 0.30, 0.25, 0.18),
+        drive = 2.0, rumble = 0.12, backfire = 0.06,
+        note = "High-rev VTEC turbo - bright top end, VTEC kick is in your wrist"
+    )
+
+    val ALL = listOf(
+        TSI_TRIPLE, V8_MUSCLE, V12_ITALIAN, ROTARY, V4_SPORTBIKE, CHAINSAW,
+        HEMI_PUSHROD, HELLCAT_SRT, EURO_FLAT6, EURO_TTV8, JDM_V6TT, JDM_VTEC
+    )
 
     fun byId(id: String): EngineProfile = ALL.firstOrNull { it.id == id } ?: TSI_TRIPLE
 

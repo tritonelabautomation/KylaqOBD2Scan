@@ -129,7 +129,9 @@ fun RevTheaterScreen(
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                 Text(
                     "SYNTHESISED sound from real firing physics (rpm/60 x cylinders/2) - not licensed " +
-                        "recordings like RevHeadz. Set it up PARKED; the driver never fiddles while moving.",
+                        "recordings like RevHeadz. Set it up PARKED; the driver never fiddles while moving. " +
+                        "AUDIO PATH: plays from THIS phone (or its paired Bluetooth / Android Auto media " +
+                        "output). The OBD-II dongle carries telemetry ONLY - it can never feed your car speakers.",
                     color = ElectricAmber, fontSize = 10.sp, modifier = Modifier.padding(10.dp)
                 )
             }
@@ -186,14 +188,11 @@ fun RevTheaterScreen(
 
             // ---- Engine packs ----
             Text("ENGINE PACK", color = TextSecondaryDark, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                EngineSoundProfiles.ALL.take(3).forEach { p ->
-                    FilterChip(selected = profileId == p.id, onClick = { profileId = p.id }, label = { Text(p.name, fontSize = 9.sp, maxLines = 1) })
-                }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                EngineSoundProfiles.ALL.drop(3).forEach { p ->
-                    FilterChip(selected = profileId == p.id, onClick = { profileId = p.id }, label = { Text(p.name, fontSize = 9.sp, maxLines = 1) })
+            EngineSoundProfiles.ALL.chunked(3).forEach { rowPacks ->
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    rowPacks.forEach { p ->
+                        FilterChip(selected = profileId == p.id, onClick = { profileId = p.id }, label = { Text(p.name, fontSize = 9.sp, maxLines = 1) })
+                    }
                 }
             }
             Text(profile.note, color = TextSecondaryDark, fontSize = 10.sp)

@@ -81,7 +81,12 @@ class EngineSoundSynthTest {
             assertTrue("${p.id} drive", p.drive > 0.0)
             assertTrue("${p.id} backfire", p.backfire in 0.0..1.0)
         }
-        assertEquals(6, EngineSoundProfiles.ALL.size)
+        assertEquals(12, EngineSoundProfiles.ALL.size)
+        // American muscle firing physics: 8 cyl = 4 pulses/rev
+        assertEquals(400.0, EngineSoundProfiles.firingFrequencyHz(EngineSoundProfiles.HEMI_PUSHROD, 6000.0), 1e-9)
+        assertEquals(433.3333, EngineSoundProfiles.firingFrequencyHz(EngineSoundProfiles.HELLCAT_SRT, 6500.0), 0.001)
+        // Stuttgart flat-6 at 9k: 6/2=3 pulses/rev
+        assertEquals(450.0, EngineSoundProfiles.firingFrequencyHz(EngineSoundProfiles.EURO_FLAT6, 9000.0), 1e-9)
         assertEquals(EngineSoundProfiles.TSI_TRIPLE, EngineSoundProfiles.byId("tsi3"))
         assertEquals(EngineSoundProfiles.TSI_TRIPLE, EngineSoundProfiles.byId("nonexistent"))
     }
