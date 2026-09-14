@@ -77,7 +77,7 @@ class GpsManager(private val context: Context) : LocationListener {
      * this are dropped instead of poisoning trip distance, coast detection and the
      * speed series; the last good fix stays published.
      */
-    const val MAX_HORIZONTAL_ACCURACY_M = 40f
+    val MAX_HORIZONTAL_ACCURACY_M = 40f
 
     override fun onLocationChanged(location: Location) {
         if (location.hasAccuracy() && location.accuracy > MAX_HORIZONTAL_ACCURACY_M) {
