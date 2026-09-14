@@ -265,11 +265,16 @@ object PidDecoder {
             }
 
             DecoderType.EQUIVALENCE_RATIO -> {
-                val value = ((a * 256.0) + b) / 32768.0
+                // J1979 error indicator: 0xFFFF on ratio PIDs means NOT AVAILABLE.
+                // Unguarded it decodes to a plausible-looking lambda 2.000 - a fake
+                // reading (2026-09-14 sweep: "issues you forgot to test").
+                val raw = (a * 256) + b
+                val available = raw != 0xFFFF
+                val value = if (available) raw / 32768.0 else null
                 DecodedResult(
                     parameterName = pidDef.name,
                     numericValue = value,
-                    displayValue = String.format(Locale.US, "%.3f", value),
+                    displayValue = if (available) String.format(Locale.US, "%.3f", raw / 32768.0) else "no data (J1979 0xFFFF)",
                     unit = "λ",
                     rawPayloadHex = rawHex,
                     dataBytes = dataBytes,

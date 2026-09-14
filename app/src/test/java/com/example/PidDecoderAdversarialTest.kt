@@ -53,6 +53,36 @@ class PidDecoderAdversarialTest {
         defaultIntervalMs = 500L
     )
 
+    // ── Category 0: J1979 error sentinels must not fake a reading ──────────
+
+    @Test
+    fun testLambdaErrorSentinel_ffff_decodesToNoData() {
+        val lambdaPid = PidDefinition(
+            id = "0144", service = "01", pid = "44",
+            name = "Commanded Equivalence Ratio (Lambda)",
+            shortName = "Lambda", unit = "λ",
+            decoderType = DecoderType.EQUIVALENCE_RATIO, isResearch = false,
+            defaultIntervalMs = 500L
+        )
+        val result = PidDecoder.decode(lambdaPid, listOf(0x41, 0x44, 0xFF, 0xFF))
+        assertNull("0xFFFF is the J1979 not-available indicator, not lambda 2.000",
+            result.numericValue)
+    }
+
+    @Test
+    fun testLambdaNormalValue_stillDecodes() {
+        val lambdaPid = PidDefinition(
+            id = "0144", service = "01", pid = "44",
+            name = "Commanded Equivalence Ratio (Lambda)",
+            shortName = "Lambda", unit = "λ",
+            decoderType = DecoderType.EQUIVALENCE_RATIO, isResearch = false,
+            defaultIntervalMs = 500L
+        )
+        // 0x2000 / 32768 = 1.000 lambda
+        val result = PidDecoder.decode(lambdaPid, listOf(0x41, 0x44, 0x20, 0x00))
+        assertEquals(1.0, result.numericValue!!, 1e-9)
+    }
+
     // ── Category 1: Wrong PID byte ────────────────────────────────────────
 
     @Test

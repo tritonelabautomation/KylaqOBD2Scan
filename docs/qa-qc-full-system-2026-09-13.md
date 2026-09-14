@@ -99,3 +99,16 @@ Fixes (honesty gate):
 5. Unchanged by design: Fuel Savings Guide worked examples carry explicit example temperatures
    (35/24, 45/18) and name the model — documentation, not readings. Driving HUD already renders
    `--` from the live map when disconnected.
+
+### Same-day sweep, remaining findings
+- **J1979 0xFFFF error sentinel on EQUIVALENCE_RATIO** (λ PIDs 0144/0124-012B): unguarded it
+  decoded the not-available indicator as a plausible λ 2.000. Now `numericValue = null`,
+  display "no data (J1979 0xFFFF)". Guard tests in PidDecoderAdversarialTest.
+- **Verified already-guarded (no action):** persisted-CSV parses (try/catch → null), RawLogManager
+  bounded+synchronized buffer, duration divisions (`coerceAtLeast` in TripDriveAnalysis /
+  WeeklyTripOverview), chart empty/single-point guards (XyPlot), ELM327 read framing
+  (accumulator until terminator), no SimpleDateFormat locale holes.
+- **Honest coverage map:** 59 of 143 main classes referenced by unit tests. The 84 unreferenced are
+  Compose screens, Android framework wrappers (BT manager, GPS, audio, Auto service) and Room
+  DAOs - not JVM-unit-testable; their logic cores (decoders, models, analyzers, stores, codecs)
+  are the tested 59. UI behaviour is covered by the on-device verification passes instead.
