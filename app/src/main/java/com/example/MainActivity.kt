@@ -262,7 +262,16 @@ fun MainApp(viewModel: MainViewModel) {
                 // 2026-09-14 owner screenshot: the sheet is a plain Column, so on a
                 // phone the last drawer entries (Rev Theater, PID Scanner, Coding Lab,
                 // Settings, About) fell below the fold and were UNREACHABLE. Scroll fix.
-                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                // weight(1f) gives this list an EXACT bounded slot of the remaining sheet
+                // height - without it some sheet implementations measure children
+                // unbounded, the scroll range collapses to zero and the tail entries
+                // (Rev Theater ... About) stay clipped below the fold (owner: "there is
+                // no scroll when select hamburger").
+                Column(
+                    modifier = Modifier
+                        .weight(1f, fill = false)
+                        .verticalScroll(rememberScrollState())
+                ) {
                 drawerItems.forEach { screen ->
                     NavigationDrawerItem(
                         icon = { Icon(screen.icon, contentDescription = null) },
