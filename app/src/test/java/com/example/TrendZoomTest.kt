@@ -42,7 +42,9 @@ class TrendZoomTest {
         val right = zoomWindow(zoomed, centroidFrac = 0.5, zoomFactor = 1.0, panFrac = 0.1)
         assertEquals(0.2, right.span, 1e-9)
         assertTrue("fingers right -> window left", right.startFrac < zoomed.startFrac)
-        assertEquals(0.3, right.startFrac, 1e-9)
+        // Pan is proportional to the VISIBLE span: dragging the full plot width moves the
+        // window exactly one screenful (1:1 feel). 0.1 of a screen -> 0.1 * 0.2 = 0.02.
+        assertEquals(0.38, right.startFrac, 1e-9)
     }
 
     @Test
