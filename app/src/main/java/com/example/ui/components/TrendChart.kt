@@ -155,7 +155,7 @@ fun TrendChart(
                 label,
                 2f,
                 y + textSize / 2f,
-                paint
+                textPaint
             )
         }
 
