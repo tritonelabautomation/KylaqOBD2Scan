@@ -251,7 +251,13 @@ fun TelemetryDashboardContent(
         ) {
             if (gpsData.isAvailable) {
                 MetricRowWithSource("GPS Speed", String.format(Locale.US, "%.1f km/h", gpsData.speedKmh), source = "HARDWARE GPS")
-                MetricRowWithSource("Altitude", String.format(Locale.US, "%.0f m", gpsData.altitudeMeters), source = "HARDWARE GPS")
+                MetricRowWithSource(
+                    "Altitude",
+                    // A fix without altitude carries the meaningless 0.0 default: show the
+                    // honest blank instead of claiming sea level (no-fake-values rule).
+                    if (gpsData.hasAltitude) String.format(Locale.US, "%.0f m", gpsData.altitudeMeters) else "-- m",
+                    source = "HARDWARE GPS"
+                )
                 MetricRowWithSource("Distance Traveled", String.format(Locale.US, "%.2f km", gpsData.distanceTraveledMeters / 1000f), source = "HARDWARE GPS")
                 MetricRowWithSource("GPS Accuracy", String.format(Locale.US, "%.0f m", gpsData.accuracyMeters), source = "HARDWARE GPS")
             } else {

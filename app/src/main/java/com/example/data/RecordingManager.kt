@@ -159,8 +159,14 @@ class RecordingManager(
                 "70" -> currentSample.copy(timestampUtc = tx.timestampUtc, timestampMonotonic = tx.timestampMonotonic, boostPressureRaw = tx.rawPayload)
                 else -> currentSample.copy(timestampUtc = tx.timestampUtc, timestampMonotonic = tx.timestampMonotonic)
             }
-            currentSample = updated
-            activeSampleList.add(updated)
+            // Per-sample GPS altitude for the trip log (owner 2026-09-15). Stamped on every
+            // row so the samples CSV carries the elevation profile; null when no accuracy-gated
+            // fix with altitude exists at that moment - never the 0.0 default.
+            val withAltitude = updated.copy(
+                altitudeM = com.example.di.AppContainer.currentAltitudeM()
+            )
+            currentSample = withAltitude
+            activeSampleList.add(withAltitude)
         }
     }
 
@@ -181,15 +187,27 @@ class RecordingManager(
 
         val rawLogFile = rawLogManager.stopFileLogging()
 
+        // GPS altitude window for this trip (owner 2026-09-15 fix: altitude was captured
+        // live but never persisted - the trip summary showed an honest "-- m" blank).
+        // Null only when the recording never had an accuracy-gated GPS fix with altitude.
+        val altStats = com.example.di.AppContainer.tripAltitudeStats()
+        // The trip log files must carry the same altitude window as the database row, or a
+        // backup -> reinstall -> import round trip silently strips elevation from every past
+        // trip and the restored summary degrades back to "-- m".
+        val metadataWithAltitude = metadata.copy(
+            maxAltitudeM = altStats?.maxAltitudeM,
+            minAltitudeM = altStats?.minAltitudeM
+        )
+
         // Generate files
         val sessionDir = File(recordingsDir, "session_${metadata.sessionId}").apply { mkdirs() }
         val txCsvFile = File(sessionDir, "${metadata.sessionId}_transactions.csv")
         val sampleCsvFile = File(sessionDir, "${metadata.sessionId}_samples.csv")
         val jsonFile = File(sessionDir, "${metadata.sessionId}.json")
 
-        CsvExporter.exportTransactionsToCsv(txCsvFile, metadata, txList)
+        CsvExporter.exportTransactionsToCsv(txCsvFile, metadataWithAltitude, txList)
         CsvExporter.exportSynchronizedSamplesToCsv(sampleCsvFile, sampleList)
-        JsonExporter.exportToJson(jsonFile, metadata, txList)
+        JsonExporter.exportToJson(jsonFile, metadataWithAltitude, txList)
 
         // Copy raw log if available
         val destRawLog = if (rawLogFile != null && rawLogFile.exists()) {
@@ -212,12 +230,8 @@ class RecordingManager(
         val detectedEcus = txList.mapNotNull { it.canRxId.takeIf { id -> id.isNotBlank() } }.distinct().joinToString(", ").ifBlank { "7E8" }
         val durationSec = maxOf(1L, (endTimestamp - sessionStartTimestamp) / 1000)
 
-        // GPS altitude window for this trip (owner 2026-09-15 fix: altitude was captured
-        // live but never persisted — the trip summary showed an honest "-- m" blank).
-        // Null only when the recording never had an accuracy-gated GPS fix with altitude.
-        val altStats = com.example.di.AppContainer.tripAltitudeStats()
-
-        // Save complete entities into Room Database
+        // Save complete entities into Room Database (altStats computed above, before the
+        // trip log files were written, so the JSON/CSV and the row agree).
         val tripEntity = TripEntity(
             id = metadata.sessionId,
             title = metadata.sessionName,

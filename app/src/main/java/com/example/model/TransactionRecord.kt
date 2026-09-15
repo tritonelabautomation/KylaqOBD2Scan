@@ -83,7 +83,14 @@ data class SynchronizedSample(
     val engineTorquePct: Double? = null,
     val voltageV: Double? = null,
     val fuelPressureRaw: String? = null,
-    val boostPressureRaw: String? = null
+    val boostPressureRaw: String? = null,
+    /**
+     * GPS altitude at this sample, from accuracy-gated fixes that reported altitude.
+     * Null = no GPS altitude at that moment; it is never back-filled or interpolated
+     * (no-fake-values rule). Added 2026-09-15 so the trip log carries the elevation
+     * profile, not just the trip-summary min/max.
+     */
+    val altitudeM: Double? = null
 )
 
 /**
@@ -114,5 +121,12 @@ data class RecordingMetadata(
     val canBitrate: String = "500 kbps",
     val startTimeUtc: String,
     var endTimeUtc: String? = null,
-    val appVersion: String = "1.0-research"
+    val appVersion: String = "1.0-research",
+    /**
+     * GPS altitude window of the trip, filled in when recording stops (accuracy-gated fixes
+     * only). Null = never captured, and the UI/JSON then say so instead of inventing 0 m.
+     * Carried in the session JSON so backup -> reinstall -> import keeps the elevation data.
+     */
+    val maxAltitudeM: Double? = null,
+    val minAltitudeM: Double? = null
 )

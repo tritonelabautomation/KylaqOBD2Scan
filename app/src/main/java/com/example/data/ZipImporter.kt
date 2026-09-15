@@ -169,6 +169,11 @@ object ZipImporter {
             var startTimeUtc: String = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).format(java.util.Date())
             var endTimeUtc: String? = null
             var appVersion: String = "1.0"
+            // GPS altitude window of the recorded trip. Null for backups written before
+            // 2026-09-15 and for trips that never had an altitude-bearing GPS fix; it is
+            // never defaulted to 0.0, which would read as "sea level" on the summary card.
+            var maxAltitudeM: Double? = null
+            var minAltitudeM: Double? = null
 
             var parsedTxCount = 0
             val txEntities = mutableListOf<TransactionRecord>()
@@ -187,6 +192,8 @@ object ZipImporter {
                         startTimeUtc = metaObj.optString("startTimeUtc", startTimeUtc)
                         endTimeUtc = metaObj.optString("endTimeUtc", null)
                         appVersion = metaObj.optString("appVersion", appVersion)
+                        maxAltitudeM = JsonExporter.nullableDouble(metaObj, "maxAltitudeM")
+                        minAltitudeM = JsonExporter.nullableDouble(metaObj, "minAltitudeM")
                     }
                     if (root.has("transactions")) {
                         val txArray = root.getJSONArray("transactions")
@@ -264,7 +271,10 @@ object ZipImporter {
                     protocol = protocol,
                     startTimeUtc = startTimeUtc,
                     endTimeUtc = endTimeUtc,
-                    appVersion = appVersion
+                    appVersion = appVersion,
+                    // A synthesized file must not drop what the imported one carried.
+                    maxAltitudeM = maxAltitudeM,
+                    minAltitudeM = minAltitudeM
                 )
                 JsonExporter.exportToJson(destJson, synthesizedMeta, txEntities)
             }
@@ -281,7 +291,9 @@ object ZipImporter {
                     protocol = protocol,
                     startTimeUtc = startTimeUtc,
                     endTimeUtc = endTimeUtc,
-                    appVersion = appVersion
+                    appVersion = appVersion,
+                    maxAltitudeM = maxAltitudeM,
+                    minAltitudeM = minAltitudeM
                 )
                 CsvExporter.exportTransactionsToCsv(destTxCsv, metaForCsv, txEntities)
             }
@@ -318,6 +330,12 @@ object ZipImporter {
             val avgVolt = if (voltList.isNotEmpty()) voltList.average() else 0.0
             val detectedEcus = txEntities.mapNotNull { it.canRxId.takeIf { id -> id.isNotBlank() } }.distinct().joinToString(", ").ifBlank { "7E8" }
 
+            // Keep the recorded time window instead of stamping every restored trip "now,
+            // 60 seconds long" - duration feeds average speed, idle share and L/h trends.
+            val startMillis = SessionTime.parseMillis(startTimeUtc)
+            val endMillis = SessionTime.parseMillis(endTimeUtc) ?: startMillis
+            val durationSec = SessionTime.durationSeconds(startTimeUtc, endTimeUtc)
+
             val tripEntity = TripEntity(
                 id = sessionId,
                 title = sessionName,
@@ -326,9 +344,9 @@ object ZipImporter {
                 protocolName = protocol,
                 startTimeUtc = startTimeUtc,
                 endTimeUtc = endTimeUtc ?: startTimeUtc,
-                startTimestamp = System.currentTimeMillis() - 60000,
-                endTimestamp = System.currentTimeMillis(),
-                durationSeconds = 60L,
+                startTimestamp = startMillis ?: (System.currentTimeMillis() - 60000),
+                endTimestamp = endMillis ?: System.currentTimeMillis(),
+                durationSeconds = durationSec ?: 60L,
                 status = "RESTORED",
                 sampleCount = if (parsedSampleCount > 0) parsedSampleCount else txEntities.size,
                 rawLogCount = txEntities.size,
@@ -337,7 +355,11 @@ object ZipImporter {
                 maxCoolantC = maxCoolant,
                 avgVoltageV = avgVolt,
                 detectedEcus = detectedEcus,
-                healthScore = 100
+                healthScore = 100,
+                // Elevation window travels with the trip log; null stays null so the summary
+                // shows the honest "-- m" instead of a made-up 0 m.
+                maxAltitudeM = maxAltitudeM,
+                minAltitudeM = minAltitudeM
             )
             tripRepository.insertTrip(tripEntity)
 

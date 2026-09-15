@@ -63,7 +63,10 @@ object CsvExporter {
     ) {
         FileWriter(file).use { writer ->
             // Header row
-            writer.append("timestamp_utc,RPM,speed_kmh,engine_load_pct,MAP_kPa,throttle_pct,accelerator_pct,coolant_C,IAT_C,ambient_C,fuel_rate_L_h,engine_torque_pct,voltage_V,fuel_pressure_raw,boost_pressure_raw\n")
+            // altitude_m appended last (owner 2026-09-15): existing column order stays stable
+            // for anything that already reads these files, and a blank cell means "no GPS
+            // altitude for this sample" rather than 0 m.
+            writer.append("timestamp_utc,RPM,speed_kmh,engine_load_pct,MAP_kPa,throttle_pct,accelerator_pct,coolant_C,IAT_C,ambient_C,fuel_rate_L_h,engine_torque_pct,voltage_V,fuel_pressure_raw,boost_pressure_raw,altitude_m\n")
 
             for (s in samples) {
                 val row = listOf(
@@ -81,7 +84,8 @@ object CsvExporter {
                     s.engineTorquePct?.let { String.format(Locale.US, "%.1f", it) } ?: "",
                     s.voltageV?.let { String.format(Locale.US, "%.3f", it) } ?: "",
                     escapeCsv(s.fuelPressureRaw ?: ""),
-                    escapeCsv(s.boostPressureRaw ?: "")
+                    escapeCsv(s.boostPressureRaw ?: ""),
+                    s.altitudeM?.let { String.format(Locale.US, "%.1f", it) } ?: ""
                 ).joinToString(",")
 
                 writer.append(row).append("\n")

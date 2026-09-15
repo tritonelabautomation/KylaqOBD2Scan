@@ -40,6 +40,21 @@ object AppContainer {
      */
     fun tripAltitudeStats(): com.example.analysis.AltitudeStats? =
         if (::gpsManager.isInitialized) gpsManager.tripAltitude else null
+
+    /**
+     * Altitude of the current GPS fix, for the per-sample trip-log column (owner 2026-09-15:
+     * "did you add altitude info from GPS into trip log?"). Null when GPS is off, no fix has
+     * passed the accuracy gate yet, or the fix reported no altitude - the meaningless 0.0
+     * default of [GpsData] is never handed out as a measurement.
+     */
+    fun currentAltitudeM(): Double? =
+        if (::gpsManager.isInitialized) {
+            gpsManager.gpsData.value
+                .takeIf { it.isAvailable && it.hasAltitude }
+                ?.altitudeMeters
+        } else {
+            null
+        }
     lateinit var bluetoothManager: BluetoothManager
     lateinit var obdScheduler: ObdScheduler
     lateinit var pidDiscoveryService: com.example.discovery.PidDiscoveryService

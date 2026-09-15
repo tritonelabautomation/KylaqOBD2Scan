@@ -14,6 +14,12 @@ import kotlinx.coroutines.flow.asStateFlow
 data class GpsData(
     val speedKmh: Float = 0f,
     val altitudeMeters: Double = 0.0,
+    /**
+     * False when the fix carried no altitude, in which case [altitudeMeters] is only the
+     * meaningless 0.0 default and must never be logged or displayed as a measurement
+     * (no-fake-values rule). Added 2026-09-15 with the per-sample trip-log altitude column.
+     */
+    val hasAltitude: Boolean = false,
     val latitude: Double = 0.0,
     val longitude: Double = 0.0,
     val accuracyMeters: Float = 0f,
@@ -103,7 +109,10 @@ class GpsManager(private val context: Context) : LocationListener {
 
         _gpsData.value = GpsData(
             speedKmh = location.speed * 3.6f,
-            altitudeMeters = location.altitude,
+            // Only publish an altitude the fix actually reported; otherwise the 0.0 default
+            // would look like a real "0 m" measurement downstream.
+            altitudeMeters = if (location.hasAltitude()) location.altitude else 0.0,
+            hasAltitude = location.hasAltitude(),
             latitude = location.latitude,
             longitude = location.longitude,
             accuracyMeters = location.accuracy,

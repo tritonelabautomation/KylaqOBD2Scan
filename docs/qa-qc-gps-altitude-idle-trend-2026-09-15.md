@@ -82,3 +82,38 @@ OBD log, so the trip summary shows its honest blank rather than inventing metres
 Tests: `RawLogRecoveryTest` (11 new) — session-id extraction, both body shapes, frame
 accept/reject matrix, 970 rpm decode parity with the reference trace, whole-file
 filtering and ordering, day anchoring, midnight wrap, empty/noise logs.
+
+## 2026-09-15 follow-up — altitude reached the database but not the trip log
+
+Owner question: *"did you add altitude info from GPS into trip log?"* Auditing the answer
+found a real gap, fixed in the same pass.
+
+**What was already true:** `GpsManager.tripAltitude` aggregates accuracy-gated fixes that
+report altitude, `RecordingManager.stopRecording()` persists them to `trips.maxAltitudeM` /
+`trips.minAltitudeM` (MIGRATION_9_10), and the trip summary shows **Max altitude** /
+**Altitude dif.** with an honest `-- m` blank when there was no fix.
+
+**What was missing:** the trip *log files* never carried it.
+
+| File | Before | Now |
+| --- | --- | --- |
+| `<id>.json` (`sessionMetadata`) | no altitude keys | `maxAltitudeM` / `minAltitudeM`, explicit JSON `null` when never captured |
+| `<id>_samples.csv` | no elevation column | `altitude_m` appended as the last column (blank = no fix), existing column order untouched |
+| imported trip row | altitude dropped; every restored trip stamped `now` and `durationSeconds = 60` | altitude restored from the JSON; `startTimestamp` / `endTimestamp` / `durationSeconds` parsed from the recorded `startTimeUtc` / `endTimeUtc` via new pure `data/SessionTime.kt` |
+| live dashboard `Altitude` row | printed the `0.0` default as `0 m` when a fix had no altitude | prints `-- m` unless `GpsData.hasAltitude` |
+
+Why it mattered now: the owner is about to do the one-time migration for in-app updates
+(backup → uninstall → install the stable-signed build → import). Altitude that was not in
+the backup would have been stripped from **every historical trip** by that import, and the
+hard-coded 60 s duration made all restored trips look like one-minute drives that had just
+ended — which also corrupts everything derived from duration (average speed, idle share,
+L/h trends).
+
+Honesty rules kept: no altitude is stored as `null` / an empty cell, never as `0.0`; a
+`0 m` reading and a missing reading stay distinguishable end to end; recovered trips
+(rebuilt from raw OBD logs) keep `NULL` because a raw log contains no GPS.
+
+Tests: `TripLogAltitudeTest` (10 new) — JSON round trip, explicit-null encoding, legacy
+files without the keys, CSV column position and blank cells, `GpsData` default honesty,
+timestamp parsing with and without milliseconds, garbage rejection, inverted/unknown
+windows, and metadata copies not back-filling a default.
