@@ -263,7 +263,7 @@ private fun TrendCard(snapshot: DriveAnalytics.DriveSnapshot) {
     }
 }
 
-@OptIn(androidx.compose.foundation.ExperimentalLayoutApi::class)
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun CoastCard(
     snapshot: DriveAnalytics.DriveSnapshot,
