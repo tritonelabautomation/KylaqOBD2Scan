@@ -1,7 +1,7 @@
 package com.example
 
 import com.example.analysis.AcVoltageDetector
-import com.example.analysis.SessionTime
+import com.example.data.SessionTime
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
