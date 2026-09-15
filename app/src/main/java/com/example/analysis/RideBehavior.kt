@@ -328,6 +328,23 @@ class RideBehaviorRecorder {
 /** Durable one-line encoding of a ride X-ray (settings "ride_log"). */
 object RideCodec {
 
+    /**
+     * Duplicate-write guard key (2026-09-15): auto-stop and a manual STOP tap could both
+     * fire for one drive and the ride log - unlike the tank log - had no dedup key, so the
+     * X-ray card showed the SAME ride twice ("shift-point trend (2 rides): 1622 -> 1622").
+     * Key = whole-second duration + 0.01 km distance + selector tag + per-state seconds;
+     * two genuinely different rides matching on all four is implausible.
+     */
+    fun dedupKey(s: RideBehaviorRecorder.RideSummary): String =
+        "${s.durationSec.toInt()}|${String.format(java.util.Locale.US, "%.2f", s.distanceKm)}|${s.modeTag}|" +
+            s.stateSeconds.entries.sortedBy { it.key }.joinToString(",") { "${it.key}=${it.value.toInt()}" }
+
+    /** Drops repeat entries from a decoded ride log (keeps first occurrence, order intact). */
+    fun deduped(rides: List<RideBehaviorRecorder.RideSummary>): List<RideBehaviorRecorder.RideSummary> {
+        val seen = mutableSetOf<String>()
+        return rides.filter { seen.add(dedupKey(it)) }
+    }
+
     /** "sec,km,fuelL" sub-field parser for the AC-state buckets. */
     private fun parts(s: String?): List<Double> {
         val v = s?.split(',')?.mapNotNull { it.toDoubleOrNull() } ?: emptyList()

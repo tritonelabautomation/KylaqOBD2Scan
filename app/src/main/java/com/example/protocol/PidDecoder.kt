@@ -412,11 +412,21 @@ object PidDecoder {
                 // IAT 30 C, lambda 1.000 => ~0.15-0.19 g/s) matches raw counts 8-14 ONLY at
                 // /50 (0.02 g/s per count, == 0.1 L/h). See docs/qa-qc-fuel-pids-dashboard F-6.
                 val value = ((a * 256.0) + b) / 50.0
+                // 2026-09-15 owner: "why g/s when all other units are litres?" - J1979 019D IS
+                // a mass flow (g/s) and the volume PID 015E is refused by this ECU, so every
+                // litre figure in the app is derived from this mass rate. Show the conversion
+                // inline (745 g/L petrol density) so the row reads in the same units as the
+                // rest of the dashboard instead of looking like a foreign/gallon unit.
+                val lh = value * 3600.0 / com.example.engine.PowertrainModel.FUEL_DENSITY_G_PER_L
                 DecodedResult(
                     parameterName = pidDef.name,
                     numericValue = value,
-                    displayValue = String.format(Locale.US, "%.2f", value),
-                    unit = "g/s",
+                    displayValue = String.format(Locale.US, "%.2f g/s ≈ %.2f L/h", value, lh),
+                    // Unit travels inside displayValue now (mass + litre-equivalent); the
+                    // store joins displayValue+unit, so an extra "g/s" here would read
+                    // "0.20 g/s ≈ 0.97 L/h g/s". The PID-definition sublabel still shows
+                    // the J1979 unit (g/s) under the row name.
+                    unit = "",
                     rawPayloadHex = rawHex,
                     dataBytes = dataBytes,
                     isKnown = true

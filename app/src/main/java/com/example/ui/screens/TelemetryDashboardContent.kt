@@ -55,7 +55,13 @@ fun TelemetryDashboardContent(
         m
     }
 
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        // 2026-09-15 owner screenshot: the quick-add FAB floated over the last telemetry
+        // rows (GPS value hidden behind it at end-of-scroll). Extra bottom padding lets
+        // every row clear the FAB.
+        modifier = Modifier.fillMaxWidth().padding(bottom = 96.dp)
+    ) {
 
         // 1. Driving State & Transmission (Škoda Kylaq 6-Speed AT - No DSG)
         TelemetrySectionCard(

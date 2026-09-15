@@ -1,4 +1,4 @@
-﻿package com.example.ui.viewmodel
+package com.example.ui.viewmodel
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
@@ -68,6 +68,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     var activeTransport: ElmTransport? = null
         private set
     private var recordingTimerJob: Job? = null
+
+    /** One-persist-per-recording guard for coast/ride/tank insight logs (dup-ride fix 2026-09-15). */
+    private var insightsPersistedForRecording = false
 
     val connectionState: StateFlow<ConnectionState> = bluetoothManager.connectionState
     val connectedDeviceName: StateFlow<String?> = bluetoothManager.connectedDeviceName
@@ -741,6 +744,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun startRecording() {
         // Fresh ride X-ray for this recording; the owner's mode tag (D/S/M) carries over.
         obdScheduler.rideRecorder.reset()
+        insightsPersistedForRecording = false
         val meta = recordingManager.startRecording(
             vehicleName = vehicleName.value,
             vehicleId = _activeVehicleId.value,  // FIX: Pass vehicleId for proper association
@@ -911,7 +915,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             recordingTimerJob?.cancel()
             gpsManager.stopTracking()
-            persistDriveInsights()
+            // 2026-09-15 duplicate-ride fix: auto-stop (car off / link drop) and a manual
+            // STOP tap can BOTH fire for one drive; persistDriveInsights() then appended
+            // the SAME ride X-ray twice (the ride log had no dedup key, unlike the tank
+            // log). One persist per recording session, ever.
+            if (!insightsPersistedForRecording) {
+                insightsPersistedForRecording = true
+                persistDriveInsights()
+            }
             recordingManager.stopRecording()
             // OAuth-free Drive backup: if a folder is linked, mirror the recordings there.
             if (settingsRepository.autoCloudBackup.value) {
@@ -1126,7 +1137,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun rideHistory(): List<com.example.analysis.RideBehaviorRecorder.RideSummary> =
-        settingsRepository.readRideLog().mapNotNull { com.example.analysis.RideCodec.decode(it) }.take(8)
+        // deduped(): repairs ride logs written before the one-persist-per-recording guard
+        // (an owner log from 2026-09-15 contained the same 70-min ride twice).
+        com.example.analysis.RideCodec.deduped(
+            settingsRepository.readRideLog().mapNotNull { com.example.analysis.RideCodec.decode(it) }
+        ).take(8)
 
     /** Owner tags the selector position so gear logs carry D/S/M evidence (J1979 has no range PID). */
     fun setRideMode(tag: String) {

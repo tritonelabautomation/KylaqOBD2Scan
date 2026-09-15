@@ -195,3 +195,25 @@ deep-link escape hatch. 24 unit tests (OwnerManualPortalTest): form switching, r
 on SecurityContext expiry, tree/bodyHtml/media parsing incl. 2026 absolute data-src format,
 hashed-filename cache roundtrips. Full contract + verification checklist:
 docs/owner-manual-integration.md.
+
+### Same-day sweep (8) — owner screenshot audit: fuel-rate unit + duplicate rides + layout gaps
+Owner sent 19 screenshots/cluster photos asking (a) "why gal/s whereas all other units are
+Liters?" and (b) "check there are a lot of gaps".
+(a) No gallon string exists anywhere in the app: the row is PID 019D = J1979 MASS fuel rate
+in g/s (volume PID 015E is refused by this ECU, so every litre figure derives from it). The
+misread came from the bare "g/s" suffix. Fix: decoder now renders "0.20 g/s ≈ 0.97 L/h"
+(745 g/L petrol density, PowertrainModel.FUEL_DENSITY_G_PER_L), unit suffix emptied so the
+store's displayValue+unit join cannot double-print; stale-suffix numeric fallback still
+parses the leading mass number for derived cards. Locked by FuelUnitAndRideDedupTest.
+(b) Gap audit verdicts: "(stale)" rows = engine-off honesty marker (by design); "NOT
+SUPPORTED BY ECU" = capability-bitmap refusals (015E/0110/010A/0123/015D/0152/0161 - by
+design); "—" instant economy while motor off = by design. REAL bugs found and fixed:
+ 1. Ride X-ray listed the same 70-min/30.5-km drive TWICE (auto-stop + manual stop both ran
+    persistDriveInsights; ride log had no dedup key unlike the tank log). Fix: one-persist-
+    per-recording guard in MainViewModel + RideCodec.dedupKey/deduped (also repairs the
+    owner's existing log at read time).
+ 2. Coast card: five Stats in an unbounded Row squeezed "SAVED vs IDLE 0.00 L" into a
+    one-character vertical strip on the phone. Fix: FlowRow wrap.
+ 3. Quick-add FAB covered the last telemetry rows at end-of-scroll: +96 dp bottom padding.
+Cross-check vs cluster photo: cockpit since-start 12.0 km/l (31 km, 1:11 h) vs app trip
+12.4 km/L (30.81 km) = +3.3% - inside tolerance, no action.

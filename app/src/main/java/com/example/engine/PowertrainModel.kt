@@ -42,6 +42,13 @@ object PowertrainModel {
     const val ROLLING_COEFF = 0.012
     const val AIR_DENSITY_KG_M3 = 1.184
 
+    /**
+     * Petrol density used to turn J1979 MASS fuel rate (PID 019D, g/s) into the litre
+     * figures every other card shows (0.745 kg/L; E20 is ~750 g/L, within display precision).
+     * L/h = g/s * 3600 / FUEL_DENSITY_G_PER_L.
+     */
+    const val FUEL_DENSITY_G_PER_L = 745.0
+
     /** Petrol energy per litre: 43.4 MJ/kg × 0.745 kg/L. */
     const val FUEL_ENERGY_MJ_PER_L = 32.3
 

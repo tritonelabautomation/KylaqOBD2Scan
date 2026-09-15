@@ -262,6 +262,7 @@ private fun TrendCard(snapshot: DriveAnalytics.DriveSnapshot) {
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalLayoutApi::class)
 @Composable
 private fun CoastCard(
     snapshot: DriveAnalytics.DriveSnapshot,
@@ -274,7 +275,13 @@ private fun CoastCard(
             "depressed. Fuel-cut coast (gear in, injectors shut) vs idle coast (drivetrain " +
             "disengaged, engine at idle)."
     ) {
-        Row {
+        // 2026-09-15 owner screenshot: a plain Row of five Stats overflowed the phone width
+        // and squeezed the last column ("SAVED vs IDLE 0.00 L") into a one-character-wide
+        // vertical strip. FlowRow wraps the stats onto a second line instead of crushing.
+        FlowRow(
+            modifier = androidx.compose.ui.Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(0.dp)
+        ) {
             Stat("COAST EVENTS", "${coast.eventCount}")
             Stat("NEUTRAL / CUT", "${coast.neutralEvents}/${coast.fuelCutEvents}", color = ElectricAmber)
             Stat("DISTANCE", String.format(java.util.Locale.US, "%.2f km", coast.totalKm))
