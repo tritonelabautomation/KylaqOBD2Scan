@@ -84,12 +84,19 @@ jobs:
           fi
 
       - name: Comment digest on the pull request
-        if: always() && github.event_name == 'pull_request'
+        # Push runs post too (PR-number fixed to 1): action logs/artifacts live on domains
+        # that are unreachable from the triage environment, and the pull_request merge-ref
+        # runs have been serving a stale tree since the repo recreation - the push-triggered
+        # digest on the true branch tip is the authoritative signal.
+        if: always() && (github.event_name == 'pull_request' || github.event_name == 'push')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ -s /tmp/test-report.md ]; then
-            gh pr comment "${{ github.event.pull_request.number }}" --body-file /tmp/test-report.md
+            PR="${{ github.event.pull_request.number }}"
+            if [ -z "$PR" ]; then PR=1; fi
+            { echo "**push run @ ${GITHUB_SHA:0:7}**"; cat /tmp/test-report.md; } > /tmp/test-report-push.md
+            gh pr comment "$PR" --body-file /tmp/test-report-push.md
           fi
 
       - name: Fail the job when tests failed
