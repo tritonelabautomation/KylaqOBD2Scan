@@ -151,7 +151,9 @@ object ZipImporter {
         recordingsDir: File,
         tripRepository: TripRepository
     ): ZipImportResult {
-        try {
+        // Explicit return: unlike the old `= withContext { ... }` expression body this is a
+        // block body, where a trailing try/catch is a statement, not a value.
+        return try {
             // Look for JSON metadata or CSV files
             val jsonFile = unzippedFiles.firstOrNull { it.name.endsWith(".json", ignoreCase = true) }
             val txCsv = unzippedFiles.firstOrNull { it.name.contains("transaction", ignoreCase = true) && it.name.endsWith(".csv", ignoreCase = true) }
