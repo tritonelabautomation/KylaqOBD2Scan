@@ -2,7 +2,20 @@ package com.example.ui.components
 
 import android.graphics.Paint
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -13,18 +26,19 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.nativeCanvas
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Text
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.analysis.ChartSampling
+import com.example.analysis.SeriesRole
+import com.example.analysis.roleOfSeries
+import com.example.analysis.yDomain
 import com.example.ui.theme.CyberCyan
 import com.example.ui.theme.TextSecondaryDark
 import java.text.SimpleDateFormat
@@ -33,36 +47,47 @@ import java.util.Locale
 import kotlin.math.abs
 
 /**
- * Single-series telemetry trend chart (owner 2026-09-16: "graphs are not good on the app
- * see how bad they're").
+ * One signal drawn on the trend chart. Owner 2026-09-16 pipeline task 1: "let me add
+ * multiple signals the same trend see the behaviour w.r.t other signal" - e.g. Voltage vs
+ * Engine Load to watch the AC compressor tug the electrical system, or Speed vs Throttle.
  *
- * What was wrong with the old canvas and what this fixes:
- *  - RAW 1 Hz samples were connected point-to-point, so a 70-minute city drive drew as
- *    spaghetti. Now the line is the per-time-slice MEAN (bucketized) and the raw min/max of
- *    each slice is drawn as a faint envelope - signal AND volatility, both readable.
- *  - Three floating numbers were the only scale. Now a proper left axis: five grid lines
- *    with labels, unit printed once on the top label, plus a dashed MEAN reference line.
- *  - No time scale at all. Now HH:mm ticks along the bottom (ends plus four inner ticks).
- *  - Fixed 220 dp box left half the screen empty. The chart now fills the height its
- *    parent gives it (the Trends tab weights it), so the plot uses the whole display.
- *  - No way to READ a value. Drag anywhere: a crosshair snaps to the nearest bucket and
- *    shows "HH:mm:ss - value unit" in a bubble; releasing clears it.
- *  - Extremes vanished into the noise. Raw min and max are marked with dots and labels.
+ * Selection order matters: the FIRST line owns the labelled left axis and the full
+ * treatment (volatility envelope, area fill, mean line, min/max markers); the SECOND gets
+ * a labelled right axis in its own unit; third and further lines are scaled to fit the
+ * plot height and are marked "fit" in the legend - their exact values come from the
+ * crosshair bubble, never implied to be axis-true.
+ */
+data class TrendLine(
+    val points: List<Pair<Long, Double>>,
+    val name: String,
+    val unit: String,
+    val color: Color
+)
+
+/**
+ * Multi-signal telemetry trend chart (owner 2026-09-16: "graphs are not good on the app";
+ * pipeline task 1: overlay several signals on one time axis).
  *
- * Every plotted number is derived from the real samples handed in (means of real buckets);
- * nothing is smoothed into existence and gaps are skipped, not interpolated.
+ * Readability rules inherited from the single-series redesign, kept deliberately:
+ *  - bucket-mean lines (not raw 1 Hz spaghetti) + min/max envelope for the primary;
+ *  - real axes with units (left = primary, right = secondary), HH:mm time ticks;
+ *  - drag anywhere for a crosshair; the bubble now lists EVERY overlaid signal's value
+ *    with its own unit at that instant - that is the actual "behaviour w.r.t. the other
+ *    signal" readout;
+ *  - everything drawn is derived from the real samples handed in; gaps are skipped, never
+ *    interpolated, and fitted (axis-less) series say so in the legend.
  */
 @Composable
 fun TrendChart(
-    points: List<Pair<Long, Double>>,
-    unit: String,
+    lines: List<TrendLine>,
     modifier: Modifier = Modifier,
-    color: Color = CyberCyan,
     bucketTarget: Int = 180
 ) {
-    if (points.size < 2) {
+    // Drop series too thin to draw; keep order (selection order = axis priority).
+    val drawable = remember(lines) { lines.filter { it.points.size >= 2 } }
+    if (drawable.isEmpty()) {
         Text(
-            "Not enough samples to draw a trend for this channel yet.",
+            "Not enough samples to draw a trend for the selected signal(s) yet.",
             color = TextSecondaryDark,
             fontSize = 12.sp,
             fontWeight = FontWeight.Medium,
@@ -71,8 +96,14 @@ fun TrendChart(
         return
     }
 
-    val buckets = remember(points, bucketTarget) { ChartSampling.bucketize(points, bucketTarget) }
-    if (buckets.size < 2) {
+    // Per-series bucketization, all on ONE shared time domain so overlaying is honest:
+    // same x for same moment, whatever the signal.
+    val bucketed = remember(drawable, bucketTarget) {
+        drawable.map { ChartSampling.bucketize(it.points, bucketTarget) }
+    }
+    val t0 = drawable.minOf { it.points.first().first }
+    val t1 = drawable.maxOf { it.points.last().first }
+    if (t1 <= t0) {
         Text(
             "All samples share one timestamp - nothing to plot over time.",
             color = TextSecondaryDark,
@@ -82,192 +113,286 @@ fun TrendChart(
         return
     }
 
-    val rawMin = points.minOf { it.second }
-    val rawMax = points.maxOf { it.second }
-    val rawMean = points.map { it.second }.average()
-    val minPoint = points.minBy { it.second }
-    val maxPoint = points.maxBy { it.second }
-    val t0 = points.first().first
-    val t1 = points.last().first
-
     var scrubTs by remember { mutableStateOf<Long?>(null) }
 
-    val tickFmt = remember { SimpleDateFormat("HH:mm", Locale.US) }
-    val bubbleFmt = remember { SimpleDateFormat("HH:mm:ss", Locale.US) }
-    val fmt = remember {
-        { v: Double ->
-            if (abs(v) >= 100.0) String.format(Locale.US, "%.0f", v)
-            else String.format(Locale.US, "%.1f", v)
+    Column(modifier = modifier) {
+        // Legend: colored dot + name (unit); fitted series are labelled "fit". Hidden for
+        // anonymous single-series callers so the old compact look survives.
+        if (drawable.any { it.name.isNotBlank() }) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(bottom = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                drawable.forEachIndexed { i, line ->
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Box(
+                            Modifier
+                                .size(8.dp)
+                                .background(line.color, CircleShape)
+                        )
+                        Text(
+                            " ${line.name} (${line.unit}" +
+                                (if (roleOfSeries(i) == SeriesRole.FITTED) ", fit)" else ")"),
+                            color = TextSecondaryDark,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+            }
         }
-    }
 
-    Canvas(
-        modifier = modifier.pointerInput(buckets) {
-            // Same geometry the draw scope uses, so the crosshair lands where the eye is.
+        val tickFmt = remember { SimpleDateFormat("HH:mm", Locale.US) }
+        val bubbleFmt = remember { SimpleDateFormat("HH:mm:ss", Locale.US) }
+
+        Canvas(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .pointerInput(bucketed, t0, t1) {
+                    val left = 46.dp.toPx()
+                    val right = if (drawable.size >= 2) 46.dp.toPx() else 10.dp.toPx()
+                    val plotW = (size.width - left - right).coerceAtLeast(1f)
+                    detectDragGestures(
+                        onDragEnd = { scrubTs = null },
+                        onDragCancel = { scrubTs = null }
+                    ) { change, _ ->
+                        change.consume()
+                        val frac = ((change.position.x - left) / plotW).coerceIn(0f, 1f)
+                        scrubTs = t0 + (frac * (t1 - t0)).toLong()
+                    }
+                }
+        ) {
             val left = 46.dp.toPx()
-            val right = 10.dp.toPx()
-            val plotW = (size.width - left - right).coerceAtLeast(1f)
-            detectDragGestures(
-                onDragEnd = { scrubTs = null },
-                onDragCancel = { scrubTs = null }
-            ) { change, _ ->
-                change.consume()
-                val frac = ((change.position.x - left) / plotW).coerceIn(0f, 1f)
-                scrubTs = t0 + (frac * (t1 - t0)).toLong()
+            val right = if (drawable.size >= 2) 46.dp.toPx() else 10.dp.toPx()
+            val top = 10.dp.toPx()
+            val bottom = 22.dp.toPx()
+            val w = size.width
+            val h = size.height
+            val plotW = (w - left - right).coerceAtLeast(1f)
+            val plotH = (h - top - bottom).coerceAtLeast(1f)
+
+            // One y-domain per series (own units, own scale).
+            val domains = drawable.map { line ->
+                yDomain(line.points.minOf { it.second }, line.points.maxOf { it.second })
             }
-        }
-    ) {
-        val left = 46.dp.toPx()
-        val right = 10.dp.toPx()
-        val top = 10.dp.toPx()
-        val bottom = 22.dp.toPx()
-        val w = size.width
-        val h = size.height
-        val plotW = (w - left - right).coerceAtLeast(1f)
-        val plotH = (h - top - bottom).coerceAtLeast(1f)
 
-        val spanRaw = rawMax - rawMin
-        val pad = if (spanRaw > 0.001) spanRaw * 0.08 else maxOf(abs(rawMax) * 0.05, 0.5)
-        val yMin = rawMin - pad
-        val ySpan = (spanRaw + 2 * pad).coerceAtLeast(1e-6)
+            fun xOf(ts: Long) = left + ((ts - t0).toDouble() / (t1 - t0)) * plotW
+            fun yOf(seriesIdx: Int, v: Double): Float {
+                val (yMin, ySpan) = domains[seriesIdx]
+                return (top + (1.0 - (v - yMin) / ySpan) * plotH).toFloat()
+            }
 
-        fun xOf(ts: Long) = left + ((ts - t0).toDouble() / (t1 - t0).coerceAtLeast(1L)) * plotW
-        fun yOf(v: Double) = top + (1.0 - (v - yMin) / ySpan) * plotH
+            val gridColor = Color(0xFF2A2D3A)
+            val labelColor = TextSecondaryDark
+            val textSize = 10.sp.toPx()
+            val textPaint = Paint().apply {
+                this.color = labelColor.toArgb()
+                this.textSize = textSize
+                isAntiAlias = true
+            }
+            fun paintIn(c: Color) = Paint().apply {
+                this.color = c.toArgb()
+                this.textSize = textSize
+                isAntiAlias = true
+            }
+            val fmt = { v: Double ->
+                if (abs(v) >= 100.0) String.format(Locale.US, "%.0f", v)
+                else String.format(Locale.US, "%.1f", v)
+            }
 
-        val gridColor = Color(0xFF2A2D3A)
-        val labelColor = TextSecondaryDark
-        val textSize = 10.sp.toPx()
-        val textPaint = Paint().apply {
-            // `this.color`: the composable also has a `color` parameter (the series
-            // colour) - without the qualifier Kotlin resolves the outer val.
-            this.color = labelColor.toArgb()
-            this.textSize = textSize
-            isAntiAlias = true
-        }
+            // ── grid + LEFT axis labels (primary series, unit on the top label) ──
+            val (pMin, pSpan) = domains[0]
+            for (i in 0..4) {
+                val v = pMin + pSpan * (4 - i) / 4.0
+                val y = top + plotH * i / 4f
+                drawLine(gridColor, Offset(left, y), Offset(left + plotW, y), strokeWidth = 1f)
+                val label = if (i == 0) "${fmt(v)} ${drawable[0].unit}" else fmt(v)
+                drawContext.canvas.nativeCanvas.drawText(label, 2f, y + textSize / 2f, textPaint)
+            }
 
-        // ── horizontal grid + y labels (unit printed once, on the top label) ──
-        for (i in 0..4) {
-            val v = yMin + ySpan * (4 - i) / 4.0
-            val y = (top + plotH * i / 4f).toFloat()
-            drawLine(gridColor, Offset(left, y), Offset(left + plotW, y), strokeWidth = 1f)
-            val label = if (i == 0) "${fmt(v)} $unit" else fmt(v)
-            drawContext.canvas.nativeCanvas.drawText(
-                label,
-                2f,
-                y + textSize / 2f,
-                textPaint
+            // ── RIGHT axis labels for the second series, tinted with its line colour ──
+            if (drawable.size >= 2) {
+                val (sMin, sSpan) = domains[1]
+                val rightPaint = paintIn(drawable[1].color)
+                for (i in 0..4) {
+                    val v = sMin + sSpan * (4 - i) / 4.0
+                    val y = top + plotH * i / 4f
+                    val label = if (i == 0) "${fmt(v)} ${drawable[1].unit}" else fmt(v)
+                    val lw = rightPaint.measureText(label)
+                    drawContext.canvas.nativeCanvas.drawText(
+                        label,
+                        w - lw - 2f,
+                        y + textSize / 2f,
+                        rightPaint
+                    )
+                }
+            }
+
+            // ── vertical time ticks ──
+            for (i in 0..5) {
+                val ts = t0 + ((t1 - t0) * i / 5.0).toLong()
+                val x = xOf(ts).toFloat()
+                drawLine(gridColor.copy(alpha = 0.6f), Offset(x, top), Offset(x, top + plotH), strokeWidth = 1f)
+                val label = tickFmt.format(Date(ts))
+                val labelW = textPaint.measureText(label)
+                val lx = when (i) {
+                    0 -> x
+                    5 -> x - labelW
+                    else -> x - labelW / 2f
+                }
+                drawContext.canvas.nativeCanvas.drawText(label, lx, h - 6f, textPaint)
+            }
+
+            // ── primary series: envelope, area, thick line ──
+            val pBuckets = bucketed[0]
+            val pColor = drawable[0].color
+            val envelope = Path()
+            pBuckets.forEachIndexed { i, b ->
+                val x = xOf(b.ts).toFloat()
+                val y = yOf(0, b.max)
+                if (i == 0) envelope.moveTo(x, y) else envelope.lineTo(x, y)
+            }
+            for (i in pBuckets.indices.reversed()) {
+                envelope.lineTo(xOf(pBuckets[i].ts).toFloat(), yOf(0, pBuckets[i].min))
+            }
+            envelope.close()
+            drawPath(envelope, pColor.copy(alpha = 0.10f))
+
+            fun linePath(buckets: List<ChartSampling.Bucket>, seriesIdx: Int): Path {
+                val path = Path()
+                buckets.forEachIndexed { i, b ->
+                    val x = xOf(b.ts).toFloat()
+                    val y = yOf(seriesIdx, b.avg)
+                    if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                }
+                return path
+            }
+
+            val primaryLine = linePath(pBuckets, 0)
+            val area = Path()
+            area.addPath(primaryLine)
+            area.lineTo(xOf(pBuckets.last().ts).toFloat(), top + plotH)
+            area.lineTo(xOf(pBuckets.first().ts).toFloat(), top + plotH)
+            area.close()
+            drawPath(
+                area,
+                Brush.verticalGradient(
+                    listOf(pColor.copy(alpha = 0.28f), pColor.copy(alpha = 0.02f)),
+                    startY = top,
+                    endY = top + plotH
+                )
             )
-        }
+            drawPath(primaryLine, pColor, style = Stroke(width = 2.2.dp.toPx(), cap = StrokeCap.Round))
 
-        // ── vertical time ticks: both ends plus four inner ticks ──
-        for (i in 0..5) {
-            val ts = t0 + ((t1 - t0) * i / 5.0).toLong()
-            val x = xOf(ts).toFloat()
+            // ── overlaid series: clean lines, no fill (keeps the chart readable) ──
+            for (i in 1 until drawable.size) {
+                drawPath(
+                    linePath(bucketed[i], i),
+                    drawable[i].color,
+                    style = Stroke(width = 1.8.dp.toPx(), cap = StrokeCap.Round)
+                )
+            }
+
+            // ── primary mean reference + raw extremes ──
+            val rawMean = drawable[0].points.map { it.second }.average()
             drawLine(
-                gridColor.copy(alpha = 0.6f),
-                Offset(x, top),
-                Offset(x, top + plotH),
-                strokeWidth = 1f
-            )
-            val label = tickFmt.format(Date(ts))
-            val labelW = textPaint.measureText(label)
-            val lx = when (i) {
-                0 -> x
-                5 -> x - labelW
-                else -> x - labelW / 2f
-            }
-            drawContext.canvas.nativeCanvas.drawText(label, lx, h - 6f, textPaint)
-        }
-
-        // ── volatility envelope: bucket max forward, bucket min back ──
-        val envelope = Path()
-        buckets.forEachIndexed { i, b ->
-            val x = xOf(b.ts).toFloat()
-            if (i == 0) envelope.moveTo(x, yOf(b.max).toFloat())
-            else envelope.lineTo(x, yOf(b.max).toFloat())
-        }
-        for (i in buckets.indices.reversed()) {
-            envelope.lineTo(xOf(buckets[i].ts).toFloat(), yOf(buckets[i].min).toFloat())
-        }
-        envelope.close()
-        drawPath(envelope, color.copy(alpha = 0.10f))
-
-        // ── signal line (bucket means) + gradient area under it ──
-        val line = Path()
-        buckets.forEachIndexed { i, b ->
-            val x = xOf(b.ts).toFloat()
-            val y = yOf(b.avg).toFloat()
-            if (i == 0) line.moveTo(x, y) else line.lineTo(x, y)
-        }
-        val area = Path()
-        area.addPath(line)
-        area.lineTo(xOf(buckets.last().ts).toFloat(), top + plotH)
-        area.lineTo(xOf(buckets.first().ts).toFloat(), top + plotH)
-        area.close()
-        drawPath(
-            area,
-            Brush.verticalGradient(
-                listOf(color.copy(alpha = 0.28f), color.copy(alpha = 0.02f)),
-                startY = top,
-                endY = top + plotH
-            )
-        )
-        drawPath(line, color, style = Stroke(width = 2.2.dp.toPx(), cap = StrokeCap.Round))
-
-        if (buckets.size <= 12) {
-            buckets.forEach { b ->
-                drawCircle(color, radius = 4.dp.toPx(), center = Offset(xOf(b.ts).toFloat(), yOf(b.avg).toFloat()))
-            }
-        }
-
-        // ── mean reference line ──
-        drawLine(
-            color = labelColor.copy(alpha = 0.55f),
-            start = Offset(left, yOf(rawMean).toFloat()),
-            end = Offset(left + plotW, yOf(rawMean).toFloat()),
-            strokeWidth = 1f,
-            pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 8f), 0f)
-        )
-
-        // ── raw extremes: dot + value label ──
-        listOf(minPoint to true, maxPoint to false).forEach { (pt, isMin) ->
-            val cx = xOf(pt.first).toFloat().coerceIn(left, left + plotW)
-            val cy = yOf(pt.second).toFloat().coerceIn(top, top + plotH)
-            drawCircle(color = color, radius = 3.5.dp.toPx(), center = Offset(cx, cy))
-            val label = fmt(pt.second)
-            val lx = (cx + 6f).coerceAtMost(left + plotW - textPaint.measureText(label) - 2f)
-            val ly = if (isMin) (cy + textSize + 2f).coerceAtMost(top + plotH) else (cy - 6f).coerceAtLeast(top + textSize)
-            drawContext.canvas.nativeCanvas.drawText(label, lx, ly, textPaint)
-        }
-
-        // ── scrub crosshair + value bubble ──
-        scrubTs?.let { ts ->
-            val bucket = buckets.minByOrNull { abs(it.ts - ts) } ?: return@let
-            val cx = xOf(bucket.ts).toFloat()
-            val cy = yOf(bucket.avg).toFloat()
-            drawLine(
-                color = labelColor.copy(alpha = 0.8f),
-                start = Offset(cx, top),
-                end = Offset(cx, top + plotH),
+                color = labelColor.copy(alpha = 0.55f),
+                start = Offset(left, yOf(0, rawMean)),
+                end = Offset(left + plotW, yOf(0, rawMean)),
                 strokeWidth = 1f,
-                pathEffect = PathEffect.dashPathEffect(floatArrayOf(4f, 6f), 0f)
+                pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 8f), 0f)
             )
-            drawCircle(color = Color.White, radius = 4.dp.toPx(), center = Offset(cx, cy))
-            drawCircle(color = color, radius = 2.5.dp.toPx(), center = Offset(cx, cy))
+            val minPoint = drawable[0].points.minBy { it.second }
+            val maxPoint = drawable[0].points.maxBy { it.second }
+            listOf(minPoint to true, maxPoint to false).forEach { (pt, isMin) ->
+                val cx = xOf(pt.first).toFloat().coerceIn(left, left + plotW)
+                val cy = yOf(0, pt.second).coerceIn(top, top + plotH)
+                drawCircle(color = pColor, radius = 3.5.dp.toPx(), center = Offset(cx, cy))
+                val label = fmt(pt.second)
+                val lx = (cx + 6f).coerceAtMost(left + plotW - textPaint.measureText(label) - 2f)
+                val ly = if (isMin) (cy + textSize + 2f).coerceAtMost(top + plotH) else (cy - 6f).coerceAtLeast(top + textSize)
+                drawContext.canvas.nativeCanvas.drawText(label, lx, ly, textPaint)
+            }
 
-            val bubbleText = "${bubbleFmt.format(Date(bucket.ts))}  ${fmt(bucket.avg)} $unit"
-            val tw = textPaint.measureText(bubbleText)
-            val bw = tw + 16f
-            val bh = textSize + 12f
-            val bx = (cx - bw / 2f).coerceIn(left, left + plotW - bw)
-            val by = (cy - bh - 12f).coerceAtLeast(top)
-            drawRoundRect(
-                color = Color(0xE616222F),
-                topLeft = Offset(bx, by),
-                size = androidx.compose.ui.geometry.Size(bw, bh),
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(6f, 6f)
-            )
-            drawContext.canvas.nativeCanvas.drawText(bubbleText, bx + 8f, by + bh - 8f, textPaint)
+            // ── scrub crosshair + MULTI-signal bubble ──
+            scrubTs?.let { ts ->
+                val anchor = pBuckets.minByOrNull { abs(it.ts - ts) } ?: return@let
+                val cx = xOf(anchor.ts).toFloat()
+                drawLine(
+                    color = labelColor.copy(alpha = 0.8f),
+                    start = Offset(cx, top),
+                    end = Offset(cx, top + plotH),
+                    strokeWidth = 1f,
+                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(4f, 6f), 0f)
+                )
+                // One row per series at its own nearest bucket.
+                val rows = drawable.mapIndexedNotNull { i, line ->
+                    val b = bucketed[i].minByOrNull { abs(it.ts - ts) } ?: return@mapIndexedNotNull null
+                    Triple(line, b, yOf(i, b.avg))
+                }
+                rows.forEach { (line, b, _) ->
+                    drawCircle(color = Color.White, radius = 3.5.dp.toPx(), center = Offset(cx, yOf(drawable.indexOf(line), b.avg)))
+                    drawCircle(color = line.color, radius = 2.dp.toPx(), center = Offset(cx, yOf(drawable.indexOf(line), b.avg)))
+                }
+
+                val rowH = textSize + 4f
+                val headerH = textSize + 8f
+                var bw = textPaint.measureText(bubbleFmt.format(Date(anchor.ts)))
+                rows.forEach { (line, b, _) ->
+                    val label = if (line.name.isBlank()) "${fmt(b.avg)} ${line.unit}"
+                    else "${line.name}  ${fmt(b.avg)} ${line.unit}"
+                    bw = maxOf(bw, textPaint.measureText(label) + 14f)
+                }
+                bw += 16f
+                val bh = headerH + rows.size * rowH + 8f
+                val anchorY = rows.firstOrNull()?.third ?: (top + plotH / 2f)
+                val bx = (cx - bw / 2f).coerceIn(left, left + plotW - bw)
+                val by = (anchorY - bh - 12f).coerceAtLeast(top)
+                drawRoundRect(
+                    color = Color(0xE616222F),
+                    topLeft = Offset(bx, by),
+                    size = androidx.compose.ui.geometry.Size(bw, bh),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(6f, 6f)
+                )
+                drawContext.canvas.nativeCanvas.drawText(
+                    bubbleFmt.format(Date(anchor.ts)),
+                    bx + 8f,
+                    by + headerH - 4f,
+                    textPaint
+                )
+                rows.forEachIndexed { ri, (line, b, _) ->
+                    val rowPaint = paintIn(line.color)
+                    val ry = by + headerH + ri * rowH + rowH - 6f
+                    drawRect(
+                        color = line.color,
+                        topLeft = Offset(bx + 8f, ry - textSize + 2f),
+                        size = androidx.compose.ui.geometry.Size(6f, 6f)
+                    )
+                    val label = if (line.name.isBlank()) "${fmt(b.avg)} ${line.unit}"
+                    else "${line.name}  ${fmt(b.avg)} ${line.unit}"
+                    drawContext.canvas.nativeCanvas.drawText(label, bx + 18f, ry, rowPaint)
+                }
+            }
         }
     }
+}
+
+/** Back-compat single-series entry (anonymous legend, old compact behaviour). */
+@Composable
+fun TrendChart(
+    points: List<Pair<Long, Double>>,
+    unit: String,
+    modifier: Modifier = Modifier,
+    color: Color = CyberCyan,
+    bucketTarget: Int = 180
+) {
+    TrendChart(
+        lines = listOf(TrendLine(points = points, name = "", unit = unit, color = color)),
+        modifier = modifier,
+        bucketTarget = bucketTarget
+    )
 }

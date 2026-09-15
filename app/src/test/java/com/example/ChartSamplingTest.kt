@@ -1,6 +1,9 @@
 package com.example
 
 import com.example.analysis.ChartSampling
+import com.example.analysis.SeriesRole
+import com.example.analysis.roleOfSeries
+import com.example.analysis.yDomain
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -127,5 +130,40 @@ class ChartSamplingTest {
         assertEquals(values.last(), sampled.last())
         // input shorter than the budget is returned untouched
         assertEquals(values.take(10), ChartSampling.downsample(values.take(10), 600))
+    }
+}
+
+/**
+ * Pure axis math for the multi-signal overlay (owner pipeline task 1, 2026-09-16):
+ * series role assignment and padded y-domain shared by every drawn series.
+ */
+class TrendAxisMathTest {
+    @Test
+    fun `selection order assigns left axis, right axis, then fitted`() {
+        assertEquals(SeriesRole.LEFT_AXIS, roleOfSeries(0))
+        assertEquals(SeriesRole.RIGHT_AXIS, roleOfSeries(1))
+        assertEquals(SeriesRole.FITTED, roleOfSeries(2))
+        assertEquals(SeriesRole.FITTED, roleOfSeries(7))
+    }
+
+    @Test
+    fun `yDomain pads real variation by 8 percent on both sides`() {
+        val (min, span) = yDomain(10.0, 20.0)
+        assertEquals(10.0 - 0.8, min, 1e-9)
+        assertEquals(10.0 + 1.6, span, 1e-9) // span + 2*pad
+    }
+
+    @Test
+    fun `flat signal still gets a usable span (no divide-by-zero)`() {
+        val (min, span) = yDomain(14.2, 14.2)
+        assertTrue(span >= 1e-6)
+        // Centred: the constant line lands mid-plot.
+        assertEquals(14.2, min + span / 2.0, 1e-6)
+    }
+
+    @Test
+    fun `flat zero signal falls back to the absolute floor`() {
+        val (_, span) = yDomain(0.0, 0.0)
+        assertEquals(1.0, span, 1e-9) // maxOf(|0|*0.05, 0.5)*2
     }
 }

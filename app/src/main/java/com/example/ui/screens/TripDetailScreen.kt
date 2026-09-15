@@ -30,6 +30,7 @@ import com.example.data.db.entities.RawLogEntity
 import com.example.data.db.entities.TelemetrySampleEntity
 import com.example.data.db.entities.TripEntity
 import com.example.ui.components.TrendChart
+import com.example.ui.components.TrendLine
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.MainViewModel
 import kotlinx.coroutines.launch
@@ -67,7 +68,9 @@ fun TripDetailScreen(
 
     var selectedTab by remember { mutableStateOf(TripDetailTab.OVERVIEW) }
     var rawFilter by remember { mutableStateOf("ALL") }
-    var selectedTrendPid by remember { mutableStateOf("010C") } // RPM default
+    // Pipeline task 1 (owner 2026-09-16): multi-signal overlay. TAP ORDER matters -
+    // first picked owns the left axis, second the right axis, 3rd/4th are scaled to fit.
+    var selectedTrendPids by remember { mutableStateOf(listOf("010C")) }
 
     // "Log fuel" for this trip: fuel rate integrated over the stored samples.
     val fuelSummary = remember(samples) {
@@ -186,8 +189,16 @@ fun TripDetailScreen(
                 TripDetailTab.TRENDS -> {
                     TripTrendsView(
                         samples = samples,
-                        selectedPid = selectedTrendPid,
-                        onSelectPid = { selectedTrendPid = it }
+                        selectedPids = selectedTrendPids,
+                        onTogglePid = { pid ->
+                            selectedTrendPids = when {
+                                pid in selectedTrendPids ->
+                                    if (selectedTrendPids.size > 1) selectedTrendPids - pid
+                                    else selectedTrendPids // keep at least one signal
+                                selectedTrendPids.size < 4 -> selectedTrendPids + pid
+                                else -> selectedTrendPids // 4-way overlay cap
+                            }
+                        }
                     )
                 }
                 TripDetailTab.AI_DOCTOR -> {
@@ -382,61 +393,69 @@ private fun DetailRow(label: String, value: String) {
     }
 }
 
+/** pid -> name -> unit -> series colour (chip fill + line + legend dot all match). */
+private data class TrendChannel(val pid: String, val name: String, val unit: String, val color: Color)
+
 @Composable
 private fun TripTrendsView(
     samples: List<TelemetrySampleEntity>,
-    selectedPid: String,
-    onSelectPid: (String) -> Unit
+    selectedPids: List<String>,
+    onTogglePid: (String) -> Unit
 ) {
-    // pid -> display name -> physical unit. Units were missing from every axis before
-    // (owner 2026-09-16: "graphs are not good"): a bare "81.2" could be percent, kPa or
-    // volts, and the stats row repeated the same unitless numbers.
-    val pids = listOf(
-        Triple("010C", "Engine RPM", "rpm"),
-        Triple("010D", "Speed", "km/h"),
-        Triple("0105", "Coolant", "°C"),
-        Triple("010B", "MAP / Boost", "kPa"),
-        Triple("0142", "Voltage", "V"),
-        Triple("0111", "Throttle", "%"),
-        Triple("0104", "Load", "%")
+    // Pipeline task 1 (owner 2026-09-16: "let me add multiple signals the same trend see
+    // the behaviour w.r.t other signal"): chips now TOGGLE (up to 4 at once) and every
+    // selected signal draws on the same time axis with its own colour. First picked keeps
+    // the labelled left axis + envelope/area treatment; second gets a labelled right axis;
+    // 3rd/4th are scaled to fit and flagged "fit" in the legend - exact values via the
+    // crosshair bubble, which lists every overlaid signal with its own unit.
+    val channels = listOf(
+        TrendChannel("010C", "Engine RPM", "rpm", CyberCyan),
+        TrendChannel("010D", "Speed", "km/h", NeonEmerald),
+        TrendChannel("0105", "Coolant", "\u00b0C", WarningRed),
+        TrendChannel("010B", "MAP / Boost", "kPa", ResearchPurple),
+        TrendChannel("0142", "Voltage", "V", ElectricAmber),
+        TrendChannel("0111", "Throttle", "%", Color(0xFFFF6EC7)),
+        TrendChannel("0104", "Load", "%", Color(0xFF64FFDA))
     )
-    val unit = pids.firstOrNull { it.first == selectedPid }?.third ?: ""
 
-    val targetSamples = samples.filter { it.pid.equals(selectedPid.removePrefix("01"), ignoreCase = true) || it.pid.equals(selectedPid, ignoreCase = true) }
-    // 2026-09-13 (owner: "Trends are not proper"): plot in TIME order, bounded to
-    // <= 600 evenly spaced points, and label the axes. A bare min-max polyline with
-    // no scale reads as noise; thousands of raw points made the canvas heavy.
-    val timedPoints = targetSamples
+    fun pointsFor(pid: String): List<Pair<Long, Double>> = samples
+        .filter { it.pid.equals(pid.removePrefix("01"), ignoreCase = true) || it.pid.equals(pid, ignoreCase = true) }
         .mapNotNull { smp -> smp.numericValue?.let { smp.timestamp to it } }
         .sortedBy { it.first }
-    val numericValues = timedPoints.map { it.second }
+
+    // Selection order = axis priority; thin channels drop out here (chart re-checks too).
+    val lines = selectedPids.mapNotNull { pid ->
+        val ch = channels.firstOrNull { it.pid == pid } ?: return@mapNotNull null
+        val pts = pointsFor(pid)
+        if (pts.size < 2) null else TrendLine(points = pts, name = ch.name, unit = ch.unit, color = ch.color)
+    }
+    val primary = lines.firstOrNull()
 
     Column(
         modifier = Modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // PID Selector Chips
-        // Channel chips: selected chip takes the app accent (the old m3 FilterChip drew
-        // its own green fill that fought the owner's red theme).
+        // Channel chips: selected chip fills with THAT series' colour so chip, legend dot
+        // and plotted line are unmistakably the same signal.
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            pids.forEach { (pid, name, _) ->
-                val isSelected = selectedPid == pid
+            channels.forEach { ch ->
+                val isSelected = ch.pid in selectedPids
                 Surface(
-                    modifier = Modifier.clickable { onSelectPid(pid) },
+                    modifier = Modifier.clickable { onTogglePid(ch.pid) },
                     shape = RoundedCornerShape(8.dp),
-                    color = if (isSelected) CyberCyan else DarkSurface,
+                    color = if (isSelected) ch.color else DarkSurface,
                     border = androidx.compose.foundation.BorderStroke(
                         1.dp,
-                        if (isSelected) CyberCyan else DarkBorder
+                        if (isSelected) ch.color else DarkBorder
                     )
                 ) {
                     Text(
-                        name,
+                        ch.name,
                         fontSize = 11.sp,
                         color = if (isSelected) Color.White else TextSecondaryDark,
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
@@ -445,11 +464,16 @@ private fun TripTrendsView(
                 }
             }
         }
+        Text(
+            "Tap to overlay up to 4 signals \u00b7 first picked = left axis \u00b7 second = right axis \u00b7 drag on chart to read values",
+            color = TextSecondaryDark,
+            fontSize = 10.sp
+        )
 
-        // Trend chart (owner 2026-09-16 redesign): fills the remaining screen height
-        // instead of a fixed 220 dp box that left half the display empty; the renderer
-        // bucket-smooths the line, draws the volatility envelope, real axes with units
-        // and time ticks, a mean reference, min/max markers and a drag-to-read crosshair.
+        // Trend chart (owner 2026-09-16 redesign + pipeline task 1 multi-signal overlay):
+        // fills the remaining screen height; bucket-mean lines, volatility envelope on the
+        // primary, real axes with units, HH:mm ticks, mean reference, min/max markers and
+        // a crosshair whose bubble lists every overlaid signal.
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
@@ -460,38 +484,39 @@ private fun TripTrendsView(
             border = androidx.compose.foundation.BorderStroke(1.dp, CyberCyan.copy(alpha = 0.2f))
         ) {
             TrendChart(
-                points = timedPoints,
-                unit = unit,
+                lines = lines,
                 modifier = Modifier.fillMaxSize().padding(10.dp)
             )
         }
 
-        // Time context: which window the trend line covers (was invisible before,
-        // so two trips of very different lengths looked identical).
-        if (timedPoints.size >= 2) {
+        // Time context for the PRIMARY signal (which window the trend covers).
+        if (primary != null && primary.points.size >= 2) {
             val timeFmt = remember { SimpleDateFormat("HH:mm:ss", Locale.US) }
-            val spanSec = (timedPoints.last().first - timedPoints.first().first) / 1000L
+            val pts = primary.points
+            val spanSec = (pts.last().first - pts.first().first) / 1000L
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
-                    timeFmt.format(Date(timedPoints.first().first)),
+                    timeFmt.format(Date(pts.first().first)),
                     color = TextSecondaryDark, fontSize = 10.sp, fontFamily = FontFamily.Monospace
                 )
                 Text(
-                    "${spanSec / 60}m ${spanSec % 60}s span \u00b7 ${timedPoints.size} samples",
+                    "${primary.name}: ${spanSec / 60}m ${spanSec % 60}s span \u00b7 ${pts.size} samples",
                     color = TextSecondaryDark, fontSize = 10.sp
                 )
                 Text(
-                    timeFmt.format(Date(timedPoints.last().first)),
+                    timeFmt.format(Date(pts.last().first)),
                     color = TextSecondaryDark, fontSize = 10.sp, fontFamily = FontFamily.Monospace
                 )
             }
         }
 
-        // Stats summary
-        if (numericValues.isNotEmpty()) {
+        // Stats summary for the PRIMARY signal (overlays keep the chart clean; their
+        // numbers live in the crosshair bubble).
+        if (primary != null) {
+            val numericValues = primary.points.map { it.second }
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
@@ -501,9 +526,9 @@ private fun TripTrendsView(
                     modifier = Modifier.padding(14.dp),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text("MIN: ${String.format(java.util.Locale.US, "%.1f", numericValues.minOrNull() ?: 0.0)} $unit", color = TextSecondaryDark, fontSize = 12.sp)
-                    Text("AVG: ${String.format(java.util.Locale.US, "%.1f", numericValues.average())} $unit", color = CyberCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    Text("MAX: ${String.format(java.util.Locale.US, "%.1f", numericValues.maxOrNull() ?: 0.0)} $unit", color = NeonEmerald, fontSize = 12.sp)
+                    Text("MIN: ${String.format(java.util.Locale.US, "%.1f", numericValues.minOrNull() ?: 0.0)} ${primary.unit}", color = TextSecondaryDark, fontSize = 12.sp)
+                    Text("AVG: ${String.format(java.util.Locale.US, "%.1f", numericValues.average())} ${primary.unit}", color = primary.color, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("MAX: ${String.format(java.util.Locale.US, "%.1f", numericValues.maxOrNull() ?: 0.0)} ${primary.unit}", color = NeonEmerald, fontSize = 12.sp)
                     Text("COUNT: ${numericValues.size}", color = TextSecondaryDark, fontSize = 12.sp)
                 }
             }

@@ -1,5 +1,7 @@
 package com.example.analysis
 
+import kotlin.math.abs
+
 /**
  * Even-stride downsampling for charts.
  *
@@ -99,4 +101,35 @@ object ChartSampling {
         }
         return true
     }
+}
+
+/**
+ * Which axis a series is drawn against in the multi-signal trend chart
+ * (owner 2026-09-16 pipeline task 1: "let me add multiple signals the same trend see the
+ * behaviour w.r.t other signal"):
+ *  - LEFT_AXIS: the first selected signal keeps the labelled left axis (full treatment:
+ *    envelope, area, mean line, min/max markers);
+ *  - RIGHT_AXIS: the second signal gets its own labelled right axis in its own unit;
+ *  - FITTED: third and further signals are scaled to the plot height WITHOUT an axis -
+ *    their true values are read via the crosshair bubble and the legend says "fit" so
+ *    the scaling is never silently implied to be axis-true.
+ */
+enum class SeriesRole { LEFT_AXIS, RIGHT_AXIS, FITTED }
+
+/** Axis assignment by selection order (first picked = primary). */
+fun roleOfSeries(index: Int): SeriesRole = when (index) {
+    0 -> SeriesRole.LEFT_AXIS
+    1 -> SeriesRole.RIGHT_AXIS
+    else -> SeriesRole.FITTED
+}
+
+/**
+ * Padded y-domain (min, span) for a series: 8% head/foot room on real variation, and a
+ * small absolute floor for flat signals so a constant line still draws mid-plot instead
+ * of dividing by zero. Pure so it is testable and shared by every series.
+ */
+fun yDomain(min: Double, max: Double): Pair<Double, Double> {
+    val spanRaw = max - min
+    val pad = if (spanRaw > 0.001) spanRaw * 0.08 else maxOf(abs(max) * 0.05, 0.5)
+    return (min - pad) to (spanRaw + 2 * pad).coerceAtLeast(1e-6)
 }
