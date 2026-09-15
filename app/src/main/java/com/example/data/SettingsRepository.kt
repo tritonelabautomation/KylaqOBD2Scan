@@ -425,6 +425,14 @@ class SettingsRepository(private val context: Context) {
 
     fun setLastCheckInNotifiedMs(ms: Long) = prefs.edit().putLong("last_checkin_notified", ms).apply()
 
+    /**
+     * Throttle stamp for the automatic in-app update check (2026-09-16). A manual
+     * "Check for updates" tap is never throttled - only the silent launch check is.
+     */
+    fun lastUpdateCheckMs(): Long = prefs.getLong("last_update_check", 0L)
+
+    fun setLastUpdateCheckMs(ms: Long) = prefs.edit().putLong("last_update_check", ms).apply()
+
     private val _appearanceMode = MutableStateFlow(prefs.getString("appearance_mode", "DARK") ?: "DARK")
     val appearanceMode: StateFlow<String> = _appearanceMode.asStateFlow()
 

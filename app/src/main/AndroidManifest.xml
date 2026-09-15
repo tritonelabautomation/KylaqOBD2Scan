@@ -3,6 +3,15 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!--
+      In-app updater (2026-09-16): lets the app hand a verified APK from the project's
+      GitHub Release to Android's package installer, so an update installs in place over
+      the current build - no uninstall, no lost logs, no re-granting of permissions.
+      Android 8+ still asks the owner to allow "Install unknown apps" once, and the
+      system installer always shows its own confirmation: a sideloaded app can never
+      self-install silently (only a system/store installer may).
+    -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Parked/surface car apps draw through a host-provided surface (sideload route). -->
     <uses-permission android:name="androidx.car.app.ACCESS_SURFACE" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />

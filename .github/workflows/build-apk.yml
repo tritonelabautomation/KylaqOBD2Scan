@@ -134,9 +134,12 @@ jobs:
     runs-on: ubuntu-latest
 
     # REQUIRED: Without this, GITHUB_TOKEN has zero permissions and the status
-    # API call silently fails (GitHub returns 403). We only need statuses: write.
+    # API call silently fails (GitHub returns 403). statuses: write is for the commit
+    # badge; contents: write lets the job publish the APK to the rolling GitHub Release
+    # that the in-app updater reads (owner request 2026-09-16).
     permissions:
       statuses: write
+      contents: write
 
     steps:
       - name: Checkout source
@@ -153,8 +156,36 @@ jobs:
         with:
           gradle-version: '9.3.1'
 
+      # ── Stable sideload signing (owner 2026-09-16) ────────────────────────────────
+      # Every build used to be signed with a fresh runner-local debug keystore, so each
+      # APK had a different signature and Android refused to install it over the previous
+      # one: updating meant uninstalling, which wiped the database, every recording and
+      # all permissions. All builds now share one stable key (keystore/sideload.p12), so
+      # the in-app updater installs in place. If the repo ever holds the key as secrets
+      # instead, SIDELOAD_KEYSTORE_BASE64 wins and the committed key is ignored.
+      - name: Resolve sideload signing key
+        env:
+          SIDELOAD_KEYSTORE_BASE64: ${{ secrets.SIDELOAD_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$SIDELOAD_KEYSTORE_BASE64" ]; then
+            mkdir -p /tmp/keys
+            printf '%s' "$SIDELOAD_KEYSTORE_BASE64" | base64 -d > /tmp/keys/sideload.p12
+            echo "SIDELOAD_KEYSTORE_PATH=/tmp/keys/sideload.p12" >> "$GITHUB_ENV"
+            echo "Signing with the secret-held keystore."
+          elif [ -f keystore/sideload.p12 ]; then
+            echo "Signing with the committed sideload keystore (keystore/sideload.p12)."
+          else
+            echo "::warning::No sideload keystore found - builds will fall back to a per-runner debug key and will NOT install over an existing install."
+          fi
+
       - name: Build debug APK
         shell: bash
+        env:
+          # Empty when the secrets are not set; Gradle treats blank as absent and falls
+          # back to the committed key's public credentials.
+          SIDELOAD_STORE_PASSWORD: ${{ secrets.SIDELOAD_STORE_PASSWORD }}
+          SIDELOAD_KEY_PASSWORD: ${{ secrets.SIDELOAD_KEY_PASSWORD }}
+          SIDELOAD_KEY_ALIAS: ${{ secrets.SIDELOAD_KEY_ALIAS }}
         run: |
           set -o pipefail
           gradle assembleDebug --stacktrace 2>&1 | tee /tmp/build.log
@@ -211,6 +242,92 @@ jobs:
           name: KylaqOBD2Scan-debug-apk
           path: app/build/outputs/apk/debug/*.apk
 
+      # ── In-app updater feed (owner request 2026-09-16) ───────────────────────────
+      # Publishes every successful build of a working branch to ONE rolling GitHub
+      # Release under two stable asset names, which the phone reads with no token
+      # (public repo):
+      #   .../releases/latest/download/latest.json      -> versionCode, sha256, apkUrl
+      #   .../releases/latest/download/KylaqOBD2Scan.apk
+      # Push events only: a pull_request run must never publish, since its code is
+      # unreviewed and its token cannot write releases anyway.
+      - name: Publish APK to the rolling release
+        if: github.event_name == 'push' && steps.apk-meta.outputs.version_code != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPUPDATE_VC: ${{ steps.apk-meta.outputs.version_code }}
+          APPUPDATE_VN: ${{ steps.apk-meta.outputs.version_name }}
+          APPUPDATE_SHA_SHORT: ${{ steps.apk-meta.outputs.sha_short }}
+          APPUPDATE_SUBJECT: ${{ github.event.head_commit.message }}
+        run: |
+          set -euo pipefail
+          APK="$(ls app/build/outputs/apk/debug/*.apk | head -1)"
+          SHA256="$(sha256sum "$APK" | cut -d' ' -f1)"
+          SIZE="$(stat -c%s "$APK")"
+          cp "$APK" /tmp/KylaqOBD2Scan.apk
+
+          # A commit subject can contain quotes and backslashes, so it travels through
+          # the environment and is JSON-encoded by python instead of being interpolated.
+          APPUPDATE_SHA256="$SHA256" APPUPDATE_SIZE="$SIZE" \
+          APPUPDATE_APK_URL="https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/KylaqOBD2Scan.apk" \
+          python3 - <<'PY' > /tmp/latest.json
+          import datetime
+          import json
+          import os
+          import sys
+
+          env = os.environ
+          subject = env.get("APPUPDATE_SUBJECT", "").strip().splitlines()
+          json.dump(
+              {
+                  "schema": 1,
+                  "versionCode": int(env["APPUPDATE_VC"]),
+                  "versionName": env["APPUPDATE_VN"],
+                  "apkUrl": env["APPUPDATE_APK_URL"],
+                  "assetName": "KylaqOBD2Scan.apk",
+                  "sha256": env["APPUPDATE_SHA256"],
+                  "sizeBytes": int(env["APPUPDATE_SIZE"]),
+                  "publishedAt": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                  "branch": env.get("GITHUB_REF_NAME", ""),
+                  "commitSha": env.get("GITHUB_SHA", "")[:8],
+                  "commitSubject": (subject[0][:200] if subject else ""),
+                  "notes": "Build %s (versionCode %s) from %s" % (
+                      env["APPUPDATE_VN"],
+                      env["APPUPDATE_VC"],
+                      env.get("GITHUB_REF_NAME", ""),
+                  ),
+              },
+              sys.stdout,
+              indent=2,
+          )
+          PY
+
+          {
+            echo "Build ${APPUPDATE_VN} (versionCode ${APPUPDATE_VC}) from \`${GITHUB_REF_NAME}\` @ ${APPUPDATE_SHA_SHORT}."
+            echo
+            echo "Install from inside the app: **Settings → App update → Download & install**, or accept the"
+            echo "update prompt that appears when a newer build is detected at launch."
+            echo
+            echo "The APK installs **in place** over the current build (stable sideload signing key), so trips,"
+            echo "raw logs, fuel records and granted permissions all survive - no uninstall, no ZIP extraction."
+            echo
+            echo "SHA-256: \`${SHA256}\`"
+          } > /tmp/release-notes.md
+
+          # The rolling release is created once, then updated in place forever, so
+          # .../releases/latest/... always resolves to the newest build.
+          gh release create latest \
+            --target "$GITHUB_SHA" \
+            --title "Latest build (${APPUPDATE_VN}, code ${APPUPDATE_VC})" \
+            --notes-file /tmp/release-notes.md \
+            || echo "Rolling release already exists - updating it in place."
+
+          gh release upload latest /tmp/KylaqOBD2Scan.apk /tmp/latest.json --clobber
+          gh release edit latest \
+            --target "$GITHUB_SHA" \
+            --title "Latest build (${APPUPDATE_VN}, code ${APPUPDATE_VC})" \
+            --notes-file /tmp/release-notes.md
+          echo "Published ${APPUPDATE_VN} (code ${APPUPDATE_VC}) to the rolling release."
+
       - name: Build summary
         run: |
           echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
@@ -220,6 +337,7 @@ jobs:
           echo "| Version Code | ${{ steps.apk-meta.outputs.version_code }} |" >> $GITHUB_STEP_SUMMARY
           echo "| CI Run | #${{ steps.apk-meta.outputs.run_number }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Commit | \`${{ steps.apk-meta.outputs.sha_short }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| In-app update feed | https://github.com/${{ github.repository }}/releases/latest |" >> $GITHUB_STEP_SUMMARY
 
       # Self-report build outcome to the commit so the commits page shows
       # a green/red badge. Without this step the Actions run passes/fails but

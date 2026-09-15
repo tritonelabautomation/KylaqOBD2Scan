@@ -27,6 +27,46 @@ val computedVersionCode = if (githubRunNumber > 0) {
     100 + gitCommitCount
 }
 
+// ── Stable sideload signing ─────────────────────────────────────────────────────
+// Owner pain (2026-09-16): every CI build was signed with a fresh runner-local *debug*
+// keystore, so each APK carried a different signature and Android refused to install it
+// over the previous one. Updating meant uninstalling first — which wiped the Room DB,
+// every recording and raw log, and all granted permissions (Bluetooth, location,
+// notifications). One stable key turns an update into an in-place install: data and
+// permissions survive, exactly like a store update.
+//
+// keystore/sideload.p12 is a DEDICATED sideload key, committed on purpose together with
+// its public password. This repo distributes its own APKs through GitHub Releases, so an
+// update's integrity comes from write access to the repo (plus the SHA-256 published next
+// to the APK), not from the secrecy of this key. It is deliberately separate from the Play
+// upload key (my-upload-key.jks), which stays out of the repo — publishing to Play later
+// is unaffected and this key can be rotated at any time.
+//
+// Precedence: if SIDELOAD_KEYSTORE_PATH / SIDELOAD_STORE_PASSWORD / SIDELOAD_KEY_PASSWORD
+// are set (e.g. decoded from GitHub Actions secrets), they win and the committed key is
+// never read — so the repo can move to secret-held signing without any code change.
+// Blank counts as absent: GitHub Actions sets an unset secret to the EMPTY STRING rather
+// than leaving it undefined, and an empty password would silently break signing instead
+// of falling back to the committed key.
+fun envOrFallback(key: String, fallback: String): String =
+    System.getenv(key)?.takeUnless { it.isBlank() } ?: fallback
+
+val sideloadStoreFile: File =
+    System.getenv("SIDELOAD_KEYSTORE_PATH")?.takeUnless { it.isBlank() }?.let { file(it) }
+        ?: file("${rootDir}/keystore/sideload.p12")
+val sideloadStorePassword: String = envOrFallback("SIDELOAD_STORE_PASSWORD", "kylaq.sideload.public")
+val sideloadKeyPassword: String = envOrFallback("SIDELOAD_KEY_PASSWORD", "kylaq.sideload.public")
+val sideloadKeyAlias: String = envOrFallback("SIDELOAD_KEY_ALIAS", "sideload")
+
+// Human-readable version: CI builds read "1.0.<run number>", local builds say so outright.
+val computedVersionName = if (githubRunNumber > 0) "1.0.$githubRunNumber" else "1.0.0-local"
+
+// In-app updater feed. The rolling GitHub Release always serves the newest build under
+// these two stable names, and the repo is public, so the phone needs no token to read them.
+val updateRepoSlug = System.getenv("GITHUB_REPOSITORY") ?: "tritonelabautomation/KylaqOBD2Scan"
+val updateFeedUrl = "https://github.com/$updateRepoSlug/releases/latest/download/latest.json"
+val updateApkUrl = "https://github.com/$updateRepoSlug/releases/latest/download/KylaqOBD2Scan.apk"
+
 plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.kotlin.compose)
@@ -73,14 +113,24 @@ android {
     minSdk = 24
     targetSdk = 36
     versionCode = computedVersionCode
-    versionName = "1.0.0"
+    versionName = computedVersionName
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     buildConfigField("String", "GIT_COMMIT", "\"${gitCommit}\"")
     buildConfigField("String", "GIT_COMMIT_COUNT", "\"${gitCommitCount}\"")
     buildConfigField("String", "GITHUB_RUN_NUMBER", "\"${githubRunNumber}\"")
+    // Where the in-app updater looks for the newest build (see update/AppUpdateFeed.kt).
+    buildConfigField("String", "UPDATE_FEED_URL", "\"${updateFeedUrl}\"")
+    buildConfigField("String", "UPDATE_APK_URL", "\"${updateApkUrl}\"")
   }
 
   signingConfigs {
+    // One stable key for every sideloaded build (see the note at the top of this file).
+    create("sideload") {
+      storeFile = sideloadStoreFile
+      storePassword = sideloadStorePassword
+      keyAlias = sideloadKeyAlias
+      keyPassword = sideloadKeyPassword
+    }
     create("release") {
       val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
       storeFile = file(keystorePath)
@@ -97,7 +147,15 @@ android {
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       signingConfig = signingConfigs.getByName("release")
     }
-    debug {}
+    debug {
+      // Stable signature: each new CI build installs in-place over the previous one, so
+      // updating never uninstalls the app and never costs the owner their data or
+      // permissions. Guarded so a checkout without the key material still builds, falling
+      // back to Gradle's per-machine debug keystore (updates then need a re-install).
+      if (sideloadStoreFile.exists()) {
+        signingConfig = signingConfigs.getByName("sideload")
+      }
+    }
   }
 
   compileOptions {

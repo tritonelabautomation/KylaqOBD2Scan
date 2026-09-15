@@ -334,6 +334,191 @@ fun SettingsScreen(
                 }
             }
 
+            // ── App update (owner 2026-09-16: "update available ... similar to playstore") ──
+            val updateState by viewModel.updateState.collectAsState()
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("card_app_update"),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Default.SystemUpdate,
+                            contentDescription = null,
+                            tint = ElectricAmber,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "App update",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Installed ${com.example.BuildConfig.VERSION_NAME} " +
+                                    "(build ${com.example.BuildConfig.VERSION_CODE})",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    if (updateState.downloading) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        LinearProgressIndicator(
+                            progress = { updateState.progress ?: 0f },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(6.dp)
+                                .testTag("update_progress"),
+                            color = ElectricAmber
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Downloading " +
+                                com.example.update.AppUpdateFeed.humanSize(updateState.downloadedBytes) +
+                                " of " +
+                                com.example.update.AppUpdateFeed.humanSize(updateState.totalBytes) +
+                                " - the SHA-256 published with the release is verified before Android " +
+                                "is asked to install anything",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    updateState.available?.let { info ->
+                        if (!updateState.downloading) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text(
+                                text = "New build available: " + info.buildLabel() +
+                                    if (info.sizeBytes > 0L) {
+                                        " (${com.example.update.AppUpdateFeed.humanSize(info.sizeBytes)})"
+                                    } else "",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = NeonEmerald
+                            )
+                            if (info.commitSubject.isNotBlank()) {
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = info.commitSubject,
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            val provenance = listOf(
+                                info.branch,
+                                info.publishedAt.take(16).replace('T', ' ')
+                            ).filter { it.isNotBlank() }.joinToString(" · ")
+                            if (provenance.isNotBlank()) {
+                                Text(text = provenance, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Button(
+                                onClick = { viewModel.downloadUpdate() },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(40.dp)
+                                    .testTag("btn_update_download"),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = NeonEmerald)
+                            ) {
+                                Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color.Black)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Download & install", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            }
+                        }
+                    }
+
+                    if (updateState.stagedFile != null && !updateState.downloading) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        if (updateState.signatureMismatch) {
+                            Text(
+                                text = "This update is signed with a different key than the copy installed " +
+                                    "on this phone, so Android will refuse to install it over the top. " +
+                                    "Builds made before 16 Sep 2026 were each signed with a throwaway CI " +
+                                    "key - that is why updating used to mean uninstalling. This is a " +
+                                    "one-time migration: export a backup (Drive folder or ZIP), uninstall " +
+                                    "once, then install the new APK. Every update after that installs in " +
+                                    "place and keeps your data and permissions.",
+                                fontSize = 11.sp,
+                                color = WarningRed
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedButton(
+                                onClick = { viewModel.installUpdate() },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("btn_update_install_anyway"),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Text("Try installing anyway", fontSize = 12.sp)
+                            }
+                        } else {
+                            Button(
+                                onClick = { viewModel.installUpdate() },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(40.dp)
+                                    .testTag("btn_update_install"),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = ElectricAmber)
+                            ) {
+                                Text("Install now", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            }
+                        }
+                    }
+
+                    if (updateState.upToDate && updateState.available == null && !updateState.downloading) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        val checkedAt = if (updateState.lastCheckedAtMs > 0L) {
+                            " (checked " + SimpleDateFormat("HH:mm", Locale.US).format(Date(updateState.lastCheckedAtMs)) + ")"
+                        } else ""
+                        Text(
+                            text = "You are on the newest build$checkedAt",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    updateState.error?.let { message ->
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(text = message, fontSize = 11.sp, color = WarningRed)
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+                    OutlinedButton(
+                        onClick = { viewModel.checkForUpdate(auto = false) },
+                        enabled = !updateState.checking && !updateState.downloading,
+                        modifier = Modifier.testTag("btn_check_update"),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        if (updateState.checking) {
+                            CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Checking…", fontSize = 12.sp)
+                        } else {
+                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(15.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Check for updates", fontSize = 12.sp)
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Updates come from this project's public GitHub Release and are checked " +
+                            "automatically about every 6 hours. Android always shows its own install " +
+                            "confirmation - a sideloaded app cannot silently replace itself, only the " +
+                            "Play Store can do that.",
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
             Card(
                 modifier = Modifier
                     .fillMaxWidth()

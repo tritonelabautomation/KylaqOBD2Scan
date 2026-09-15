@@ -26,6 +26,10 @@ import com.example.protocol.SafetyValidator
 import com.example.protocol.ValidationResult
 import com.example.scheduler.ObdQuickConnect
 import com.example.scheduler.ObdScheduler
+import com.example.update.AppUpdateFeed
+import com.example.update.AppUpdateInfo
+import com.example.update.UpdateManager
+import com.example.update.UpdateUiState
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -977,6 +981,133 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 refreshUnsavedRawLogs()
             }
         }
+    }
+
+    // ── In-app updater (owner 2026-09-16: "update available I click it will automatically
+    // fetch latest update from GitHub ... similar to playstore") ────────────────────────
+    private val updateManager: UpdateManager by lazy { UpdateManager(getApplication()) }
+
+    private val _updateState = MutableStateFlow(UpdateUiState())
+    val updateState: StateFlow<UpdateUiState> = _updateState.asStateFlow()
+
+    /**
+     * Checks the rolling GitHub Release for a newer build.
+     * @param auto silent launch check - throttled to AppUpdateFeed.AUTO_CHECK_INTERVAL_MS.
+     *             A manual tap is never throttled and always reports its outcome, so
+     *             "up to date" and "could not reach GitHub" stay distinguishable.
+     */
+    fun checkForUpdate(auto: Boolean = false) {
+        val current = _updateState.value
+        if (current.checking || current.downloading) return
+        val now = System.currentTimeMillis()
+        if (auto && !AppUpdateFeed.shouldAutoCheck(settingsRepository.lastUpdateCheckMs(), now)) return
+        settingsRepository.setLastUpdateCheckMs(now)
+        _updateState.value = current.copy(checking = true, error = null, upToDate = false, dismissed = false)
+        viewModelScope.launch {
+            val installed = updateManager.installedVersionCode()
+            val feed = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { updateManager.fetchFeed() }.getOrNull()
+            }
+            val newer = AppUpdateFeed.isNewerThan(feed, installed)
+            _updateState.value = _updateState.value.copy(
+                checking = false,
+                lastCheckedAtMs = System.currentTimeMillis(),
+                available = if (newer) feed else null,
+                upToDate = feed != null && !newer,
+                error = if (feed == null) {
+                    "Could not reach the GitHub release feed - check the connection and try again."
+                } else {
+                    null
+                }
+            )
+        }
+    }
+
+    /** Fetches the new APK in the background, then verifies its published SHA-256. */
+    fun downloadUpdate() {
+        val info: AppUpdateInfo = _updateState.value.available ?: return
+        if (_updateState.value.downloading) return
+        _updateState.value = _updateState.value.copy(
+            downloading = true,
+            error = null,
+            progress = null,
+            downloadedBytes = 0L,
+            totalBytes = info.sizeBytes,
+            stagedFile = null
+        )
+        viewModelScope.launch {
+            var lastPercent = -1
+            val outcome = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching {
+                    updateManager.download(info) { received, total ->
+                        // Throttled to whole percent steps so progress does not recompose
+                        // the screen hundreds of times per megabyte.
+                        val percent = if (total > 0L) ((received * 100L) / total).toInt() else -1
+                        if (percent != lastPercent) {
+                            lastPercent = percent
+                            _updateState.value = _updateState.value.copy(
+                                downloadedBytes = received,
+                                totalBytes = total,
+                                progress = AppUpdateFeed.progressFraction(received, total)
+                            )
+                        }
+                    }
+                }
+            }
+            outcome.onSuccess { apk ->
+                val signaturesMatch = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    updateManager.installedSignatureMatchesApk(apk)
+                }
+                _updateState.value = _updateState.value.copy(
+                    downloading = false,
+                    progress = 1f,
+                    stagedFile = apk,
+                    signatureMismatch = signaturesMatch == false,
+                    error = null
+                )
+                // A different signing key means the installer would fail with a cryptic
+                // "App not installed", so stop and let the UI explain the one-time
+                // reinstall instead of firing a dialog that cannot succeed.
+                if (signaturesMatch != false) installUpdate()
+            }.onFailure { e ->
+                _updateState.value = _updateState.value.copy(
+                    downloading = false,
+                    progress = null,
+                    stagedFile = null,
+                    error = e.message ?: "Download failed"
+                )
+            }
+        }
+    }
+
+    /** Hands the verified APK to Android's package installer (one system confirmation). */
+    fun installUpdate() {
+        val apk = _updateState.value.stagedFile ?: return
+        if (!updateManager.canRequestPackageInstalls()) {
+            _updateState.value = _updateState.value.copy(
+                error = "Android blocks installs from this app until you allow " +
+                    "\"Install unknown apps\" - opening that screen now."
+            )
+            updateManager.openInstallPermissionSettings()
+            return
+        }
+        try {
+            updateManager.install(apk)
+        } catch (e: Exception) {
+            _updateState.value = _updateState.value.copy(
+                error = "Could not open the installer: ${e.message ?: e.javaClass.simpleName}"
+            )
+        }
+    }
+
+    /** Owner dismissed the launch prompt for this app session; Settings still offers it. */
+    fun dismissUpdatePrompt() {
+        _updateState.value = _updateState.value.copy(dismissed = true)
+    }
+
+    /** Clears a reported failure so the update card returns to its idle state. */
+    fun clearUpdateError() {
+        _updateState.value = _updateState.value.copy(error = null)
     }
 
     /**

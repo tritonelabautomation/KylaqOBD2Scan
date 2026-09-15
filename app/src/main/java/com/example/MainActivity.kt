@@ -152,6 +152,10 @@ fun MainApp(viewModel: MainViewModel) {
     LaunchedEffect(Unit) {
         viewModel.startSessionAutomation()
         viewModel.refreshDueNotifications()
+        // Silent, throttled update check (2026-09-16): the owner asked for a store-style
+        // "update available" instead of downloading and reinstalling by hand. Manual
+        // checks stay available in Settings and are never throttled.
+        viewModel.checkForUpdate(auto = true)
         val basePermissions = arrayOf(
             Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.ACCESS_COARSE_LOCATION
@@ -208,6 +212,45 @@ fun MainApp(viewModel: MainViewModel) {
         }
         keepAliveLifecycleOwner.lifecycle.addObserver(observer)
         onDispose { keepAliveLifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    // ── In-app updater prompt (owner 2026-09-16) ────────────────────────────────────
+    val updateState by viewModel.updateState.collectAsState()
+
+    if (updateState.shouldPrompt) {
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissUpdatePrompt() },
+            modifier = Modifier.testTag("dialog_app_update"),
+            icon = { Icon(Icons.Default.SystemUpdate, contentDescription = null) },
+            title = { Text("Update available") },
+            text = {
+                Column {
+                    Text(
+                        "Build ${updateState.available?.buildLabel() ?: ""} is published on GitHub (" +
+                            com.example.update.AppUpdateFeed.humanSize(updateState.available?.sizeBytes ?: 0L) + ")."
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        "It installs straight over this one — your trips, raw logs, fuel records " +
+                            "and permissions all stay. No uninstall, no ZIP extraction.",
+                        fontSize = 12.sp
+                    )
+                    val newestChange = updateState.available?.commitSubject?.takeIf { it.isNotBlank() }
+                    if (newestChange != null) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text("Newest change: $newestChange", fontSize = 11.sp, color = Color(0xFF8E8E93))
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { viewModel.downloadUpdate() }, modifier = Modifier.testTag("btn_update_download")) {
+                    Text("Download & install")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.dismissUpdatePrompt() }) { Text("Later") }
+            }
+        )
     }
 
     val bottomNavItems = listOf(
