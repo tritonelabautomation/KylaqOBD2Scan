@@ -8,10 +8,9 @@ on:
   push:
     branches:
       - main
-      # 2026-09-15: the pull_request merge-ref runs started executing a stale tree (test
-      # names/assertions that do not exist on the branch - platform repo-recreation
-      # fallout), while push runs execute the TRUE branch tip. Keep a push-triggered run
-      # on the working branch so the real tree always has an authoritative verdict.
+      # 2026-09-15: push runs on the working branch post the digest too - action logs and
+      # artifacts sit on domains the triage environment cannot reach, and the PR comment
+      # list is long enough that page 1 no longer shows fresh digests.
       - "arena/*"
 
 jobs:
@@ -85,9 +84,8 @@ jobs:
 
       - name: Comment digest on the pull request
         # Push runs post too (PR-number fixed to 1): action logs/artifacts live on domains
-        # that are unreachable from the triage environment, and the pull_request merge-ref
-        # runs have been serving a stale tree since the repo recreation - the push-triggered
-        # digest on the true branch tip is the authoritative signal.
+        # the triage environment cannot reach, so the PR comment thread is the only
+        # reachable carrier of the unit-test digest.
         if: always() && (github.event_name == 'pull_request' || github.event_name == 'push')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
