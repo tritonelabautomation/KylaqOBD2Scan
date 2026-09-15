@@ -45,7 +45,13 @@ object TripFuelSummary {
          */
         val engineOffSeconds: Double = 0.0,
         /** Idle start-stop accounting: stalls, restart enrichment spikes, estimated fuel saved. */
-        val startStop: StartStopAnalyzer.Summary = StartStopAnalyzer.Summary()
+        val startStop: StartStopAnalyzer.Summary = StartStopAnalyzer.Summary(),
+        /**
+         * Measured AC state from battery-voltage fluctuation (owner 2026-09-16): the first
+         * OBSERVED compressor signal on this car - J1979 has no compressor PID, so before
+         * this the app could only price AC from owner tags.
+         */
+        val ac: AcVoltageDetector.Result = AcVoltageDetector.Result()
     ) {
         val litersPer100Km: Double?
             get() = if (distanceKm > 0.05) fuelLiters / distanceKm * 100.0 else null
@@ -71,6 +77,9 @@ object TripFuelSummary {
             .mapNotNull { p -> p.value?.let { p.timestampMs to it } }
             .sortedBy { it.first }
         val rpmSeries = (byPid["010C"] ?: emptyList())
+            .mapNotNull { p -> p.value?.let { p.timestampMs to it } }
+            .sortedBy { it.first }
+        val voltageSeries = (byPid["0142"] ?: emptyList())
             .mapNotNull { p -> p.value?.let { p.timestampMs to it } }
             .sortedBy { it.first }
         val fuelSeries = buildFuelSeries(byPid).sortedBy { it.first }
@@ -137,6 +146,14 @@ object TripFuelSummary {
             }
         )
 
+        // AC state from the voltage signature: engine-running samples only, self-calibrated
+        // against this trip's own quietest windows (see AcVoltageDetector).
+        val ac = AcVoltageDetector.detect(
+            voltageSeries.map { (ts, v) ->
+                AcVoltageDetector.Sample(tsMs = ts, voltageV = v, rpm = valueAt(rpmSeries, ts))
+            }
+        )
+
         val firstTs = samples.minOf { it.timestampMs }
         val lastTs = samples.maxOf { it.timestampMs }
         val duration = (lastTs - firstTs).coerceAtLeast(0L) / 1000L
@@ -159,7 +176,8 @@ object TripFuelSummary {
             hasSpeedSeries = speedSeries.isNotEmpty(),
             hasFuelSeries = fuelSeries.isNotEmpty(),
             engineOffSeconds = engineOffSeconds,
-            startStop = startStop
+            startStop = startStop,
+            ac = ac
         )
     }
 

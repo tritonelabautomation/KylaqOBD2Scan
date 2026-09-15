@@ -140,6 +140,31 @@ class TripFuelSummaryTest {
     }
 
     @Test
+    fun `ac state is measured from voltage ripple in stored samples`() {
+        // Owner 2026-09-16: voltage fluctuation reveals compressor clutch cycling.
+        // 10 min quiet alternator band, then 10 min of clutch/blower ripple.
+        val samples = mutableListOf<TripFuelSummary.SamplePoint>()
+        var ts = 0L
+        repeat(120) {
+            samples.add(point("0142", ts, 14.4 + 0.04 * (((it % 5) - 2) / 2.0)))
+            samples.add(point("010C", ts, 1500.0))
+            ts += 5_000
+        }
+        repeat(120) {
+            samples.add(point("0142", ts, 13.3 + 0.45 * (((it % 12) - 6) / 6.0)))
+            samples.add(point("010C", ts, 1500.0))
+            ts += 5_000
+        }
+
+        val summary = TripFuelSummary.summarize(samples)
+
+        assertTrue(summary.ac.hasEvidence)
+        assertTrue("ac-on seconds ${summary.ac.acOnSeconds}", summary.ac.acOnSeconds > 300.0)
+        assertTrue("an ON switch is reported", summary.ac.switchEvents.any { it.second })
+        assertTrue("ripple MAD ${summary.ac.onMadV}", (summary.ac.onMadV ?: 0.0) > 0.1)
+    }
+
+    @Test
     fun `trips without rpm evidence keep the legacy idle attribution`() {
         // No 010C samples at all (legacy trip / ECU silent on rpm): standstill stays
         // "idling" - the split must never invent engine-off time without evidence.

@@ -935,6 +935,28 @@ private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summar
                     fontSize = 11.sp
                 )
             }
+            val ac = summary.ac
+            if (ac.hasEvidence && ac.segments.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                // Measured AC state (owner 2026-09-16 voltage-ripple insight): the first
+                // OBSERVED compressor signal on this car - J1979 has no compressor PID.
+                val firstSwitch = ac.switchEvents.firstOrNull()
+                val switchNote = firstSwitch?.let { (ts, on) ->
+                    " • first flip ${if (on) "ON" else "OFF"} at " +
+                        java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
+                            .format(java.util.Date(ts))
+                } ?: ""
+                Text(
+                    "AC (measured from voltage ripple): ON " +
+                        "${String.format(java.util.Locale.US, "%.0f", ac.acOnSeconds / 60.0)} min of " +
+                        "${String.format(java.util.Locale.US, "%.0f", summary.durationSeconds / 60.0)} min" +
+                        switchNote +
+                        " • quiet baseline ±${String.format(java.util.Locale.US, "%.2f", ac.quietMadV ?: 0.0)} V" +
+                        (if (ac.confidence < 1.8) " • weak separation - treat as a hint" else ""),
+                    color = ResearchPurple,
+                    fontSize = 11.sp
+                )
+            }
             if (summary.sampleCount == 0) {
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
