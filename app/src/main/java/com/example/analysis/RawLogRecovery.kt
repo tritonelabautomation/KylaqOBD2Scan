@@ -37,7 +37,16 @@ object RawLogRecovery {
         val pidHex2: String,        // "0C", "9D" - the same 2-hex form the live recorder stores
         val payloadBytes: List<Int>,// data bytes A, B, ... after `41 <pid>`
         val responseHex: String     // compact payload hex starting at "41", e.g. "410C0F28"
-    )
+    ) {
+        /**
+         * What `PidDecoder.decode` must be handed: the payload *including* the positive
+         * service ack and the pid byte. The decoder deliberately refuses anything else
+         * (FIX P0-2 - a permissive "raw data bytes" fallback used to let malformed frames
+         * decode as telemetry), so passing [payloadBytes] alone yields INVALID_RESPONSE.
+         */
+        val decodeBytes: List<Int>
+            get() = listOf(0x41, pidHex2.toInt(16)) + payloadBytes
+    }
 
     private val LINE = Regex("""^(\d{2}):(\d{2}):(\d{2})\.(\d{3})\s+(TX >|RX <)\s+(.+?)\s*$""")
     private val CAN_ID = Regex("""^7[A-F0-9]{2}$""")

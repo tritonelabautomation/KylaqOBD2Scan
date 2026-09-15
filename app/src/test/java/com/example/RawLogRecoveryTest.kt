@@ -90,8 +90,23 @@ class RawLogRecoveryTest {
     fun `recovered payload decodes to the same value the live dashboard showed`() {
         // The reference trace documents 7E8 04 410C0F28 as 970 rpm.
         val t = RawLogRecovery.telemetryFromFrame(0L, "7E8", "04410C0F28")!!
-        val decoded = PidDecoder.decode(StandardPidCatalog.lookup(t.pidHex2), t.payloadBytes)
-        assertEquals(970.0, decoded.numericValue!!, 0.001)
+        assertEquals(listOf(0x41, 0x0C, 0x0F, 0x28), t.decodeBytes)
+        val decoded = PidDecoder.decode(StandardPidCatalog.lookup(t.pidHex2), t.decodeBytes)
+        assertEquals(970.0, decoded.numericValue ?: -1.0, 0.001)
+    }
+
+    /**
+     * Regression pin for the contract that broke the first cut of this feature:
+     * PidDecoder deliberately refuses a payload that lacks its "41 <pid>" header
+     * (FIX P0-2, so malformed frames cannot decode as telemetry). Recovery must
+     * therefore hand it [Telemetry.decodeBytes], never the bare data bytes.
+     */
+    @Test
+    fun `bare data bytes without the service header are refused by the decoder`() {
+        val t = RawLogRecovery.telemetryFromFrame(0L, "7E8", "04410C0F28")!!
+        val refused = PidDecoder.decode(StandardPidCatalog.lookup(t.pidHex2), t.payloadBytes)
+        assertNull("data-only payload must not decode", refused.numericValue)
+        assertEquals("INVALID_RESPONSE", refused.displayValue)
     }
 
     @Test
@@ -100,11 +115,13 @@ class RawLogRecoveryTest {
         val t = RawLogRecovery.telemetryFromFrame(0L, "7E8", "04419D0091")!!
         assertEquals("9D", t.pidHex2)
         assertEquals(listOf(0x00, 0x91), t.payloadBytes)
+        assertEquals(listOf(0x41, 0x9D, 0x00, 0x91), t.decodeBytes)
         // 010D (speed): 7E8 03 41 0D 3C -> 60 km/h.
         val v = RawLogRecovery.telemetryFromFrame(0L, "7E8", "03410D3C")!!
         assertEquals("0D", v.pidHex2)
         assertEquals(listOf(0x3C), v.payloadBytes)
-        assertEquals(60.0, PidDecoder.decode(StandardPidCatalog.lookup("0D"), v.payloadBytes).numericValue!!, 0.001)
+        val speed = PidDecoder.decode(StandardPidCatalog.lookup("0D"), v.decodeBytes)
+        assertEquals(60.0, speed.numericValue ?: -1.0, 0.001)
     }
 
     // ── whole-file parsing + day anchoring ────────────────────────────────────────

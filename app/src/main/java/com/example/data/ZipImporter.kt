@@ -50,6 +50,108 @@ object ZipImporter {
                 )
             }
 
+            val notes = mutableListOf<String>()
+
+            // 1) Whole-app data snapshot: fuel ledger, ride/coast/tank insight logs,
+            //    expenses, documents, reminders, trip plans, maintenance and settings.
+            //    Backups made before 2026-09-16 simply do not contain it.
+            val snapshotFile = unzippedFiles.firstOrNull {
+                com.example.backup.BackupLayout.kindOf(it.name) == com.example.backup.BackupLayout.Kind.DATA_SNAPSHOT
+            }
+            var restoredValues = 0
+            if (snapshotFile != null) {
+                val snapshot = com.example.backup.AppDataSnapshot.parse(
+                    runCatching { snapshotFile.readText() }.getOrNull()
+                )
+                if (snapshot == null) {
+                    notes += "its data snapshot could not be read and was skipped"
+                } else {
+                    restoredValues = com.example.backup.PrefsSnapshotter.apply(context, snapshot)
+                    notes += "$restoredValues settings/ledger value(s) restored - restart the app to see them on every screen"
+                }
+            }
+
+            // 2) Raw logs of drives that were never finalized. Restored into files/raw_logs,
+            //    where the recovery banner in Trips & Recordings can rebuild them into trips.
+            val rawLogsDir = File(context.filesDir, "raw_logs").apply { mkdirs() }
+            var restoredLogs = 0
+            unzippedFiles
+                .filter { com.example.backup.BackupLayout.kindOf(it.name) == com.example.backup.BackupLayout.Kind.UNSAVED_RAW_LOG }
+                .forEach { log ->
+                    val dest = File(rawLogsDir, log.name)
+                    if (!dest.exists()) {
+                        runCatching { log.copyTo(dest, overwrite = false) }.onSuccess { restoredLogs++ }
+                    }
+                }
+            if (restoredLogs > 0) {
+                notes += "$restoredLogs unsaved raw log(s) restored - open Trips & Recordings to rebuild them into trips"
+            }
+
+            // 3) Trip sessions. A Drive backup is ONE flat ZIP holding every session side by
+            //    side, and this importer used to take the first file of each type - so it
+            //    restored one trip out of many and could even mix session A's JSON with
+            //    session B's CSV. Group by session id and import each group on its own.
+            val tripFiles = unzippedFiles.filter {
+                val kind = com.example.backup.BackupLayout.kindOf(it.name)
+                kind != com.example.backup.BackupLayout.Kind.DATA_SNAPSHOT &&
+                    kind != com.example.backup.BackupLayout.Kind.UNSAVED_RAW_LOG
+            }
+            val sessionGroups = com.example.backup.BackupLayout
+                .groupBySession(tripFiles.map { it.name })
+                .filterKeys { it.isNotBlank() }
+
+            val results: List<ZipImportResult> = when {
+                tripFiles.isEmpty() -> emptyList()
+                sessionGroups.size > 1 -> sessionGroups.map { (sessionId, groupNames) ->
+                    val groupDir = File(tempDir, "group_$sessionId").apply { mkdirs() }
+                    val groupFiles = groupNames.mapNotNull { name ->
+                        tripFiles.firstOrNull { it.name == name }?.also { source ->
+                            runCatching { source.copyTo(File(groupDir, source.name), overwrite = true) }
+                        }
+                        File(groupDir, name).takeIf { it.exists() }
+                    }
+                    importSingleSession(groupFiles, recordingsDir, tripRepository)
+                }
+                // Exactly one session, or a legacy ZIP whose files carry no session id.
+                else -> listOf(importSingleSession(tripFiles, recordingsDir, tripRepository))
+            }
+
+            val succeeded = results.count { it.success }
+            val failed = results.size - succeeded
+            val headline = results.firstOrNull { it.success } ?: results.firstOrNull()
+            ZipImportResult(
+                success = succeeded > 0 || (results.isEmpty() && (restoredValues > 0 || restoredLogs > 0)),
+                sessionId = headline?.sessionId ?: "",
+                sessionName = headline?.sessionName ?: "",
+                transactionCount = results.sumOf { it.transactionCount },
+                sampleCount = results.sumOf { it.sampleCount },
+                message = buildString {
+                    append("Imported $succeeded of ${results.size} trip(s)")
+                    if (failed > 0) append(", $failed failed")
+                    append(".")
+                    notes.forEach { append(' ').append(it).append('.') }
+                }
+            )
+        } catch (e: Exception) {
+            ZipImportResult(
+                success = false,
+                message = "Import failed: ${e.localizedMessage ?: e.message}"
+            )
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    /**
+     * Imports ONE trip session from its already-unzipped files. This is the original
+     * single-trip behaviour, unchanged; [importTripZip] now calls it once per session.
+     */
+    private suspend fun importSingleSession(
+        unzippedFiles: List<File>,
+        recordingsDir: File,
+        tripRepository: TripRepository
+    ): ZipImportResult {
+        try {
             // Look for JSON metadata or CSV files
             val jsonFile = unzippedFiles.firstOrNull { it.name.endsWith(".json", ignoreCase = true) }
             val txCsv = unzippedFiles.firstOrNull { it.name.contains("transaction", ignoreCase = true) && it.name.endsWith(".csv", ignoreCase = true) }
@@ -271,8 +373,6 @@ object ZipImporter {
                 success = false,
                 message = "Import failed: ${e.localizedMessage ?: e.message}"
             )
-        } finally {
-            tempDir.deleteRecursively()
         }
     }
 

@@ -125,7 +125,8 @@ and Android will refuse an in-place update from it. `UpdateManager` detects exac
 cryptically. One last manual install is required:
 
 1. **Back up first**: current build → Settings → Drive backup (or export ZIP). This
-   preserves the recorded trips.
+   preserves the recorded trips — and only those, because the old build's backup does not
+   yet include the fuel ledger, insight logs or unsaved raw logs (see below).
 2. Uninstall the old build once.
 3. Install the new build straight from the phone's browser — no ZIP, no extraction:
    `https://github.com/tritonelabautomation/KylaqOBD2Scan/releases/latest/download/KylaqOBD2Scan.apk`
@@ -133,11 +134,25 @@ cryptically. One last manual install is required:
 5. From then on: **Settings → App update → Download & install**, or accept the launch
    prompt. Every later update keeps data and permissions.
 
-Known cost of that single uninstall, stated plainly: the fuel ledger and ride logs live in
-SharedPreferences, and unsaved drives live in `files/raw_logs/`; the Drive backup of the
-*old* build covers `files/recordings/` only. Those three are therefore lost in this one
-migration. Newer builds must make a reinstall lossless — see
-`docs/known-gaps-and-honest-blanks.md`.
+Known cost of that single uninstall, stated plainly: the **old** build's Drive backup zips
+`files/recordings/` only. The fuel ledger, ride/coast/tank logs, expenses, documents,
+reminders, trip plans and settings all live in SharedPreferences, and drives killed before
+STOP live in `files/raw_logs/` — so those are lost in this one migration. Nothing can
+retro-fit them into a backup the old build already made.
+
+Builds from 2026-09-16 onward make a reinstall lossless, so this is a one-time cost:
+
+| What | Before | Now |
+| --- | --- | --- |
+| Recorded trips | backed up ✓ | backed up ✓ |
+| **All** trips in one backup ZIP | import restored **only the first** (`firstOrNull` per file type — and could mix session A's JSON with session B's CSV) | `BackupLayout.groupBySession` groups the flat ZIP by session id and imports **every** session (`ZipImporter.importSingleSession`, called once per group; legacy unnamed ZIPs still take the old single-trip path) |
+| Drives killed before STOP (`files/raw_logs/`) | not backed up | backed up; on restore they land back in `files/raw_logs/`, where the recovery banner in Trips & Recordings rebuilds them into full trips |
+| Fuel ledger, insight logs, expenses, documents, reminders, trip plans, maintenance, settings | not backed up | `app_data_snapshot.json` (all 7 SharedPreferences stores, typed per key) written into the same ZIP by `PrefsSnapshotter`, re-applied on import |
+| Permissions | re-asked | re-asked — only Android can grant those, no backup format can carry them |
+
+Restore is honest about its one limitation: repositories cache values in StateFlows read at
+construction, so the import result says *"restart the app to see them on every screen"*
+rather than implying the UI already changed underneath.
 
 ---
 

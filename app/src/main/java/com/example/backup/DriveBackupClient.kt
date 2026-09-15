@@ -35,7 +35,18 @@ object DriveBackupClient {
             ?.sortedByDescending { it.modifiedMs }
             ?: emptyList()
 
-    /** Zips every recording and writes it into the chosen Drive folder. Returns the file name. */
+    /**
+     * Zips every recording plus the two things that used to be lost on a reinstall and
+     * writes it into the chosen Drive folder. Returns the file name.
+     *
+     * Added 2026-09-16 so that migrating to a stably-signed build (one final uninstall)
+     * and any future phone move are lossless:
+     *  - `raw_logs/raw_log_*.txt` — drives killed before STOP, the only copy of those
+     *    trips; after a restore the recovery banner rebuilds them.
+     *  - `app_data_snapshot.json` — fuel ledger, ride/coast/tank insight logs, expenses,
+     *    documents, reminders, trip plans, maintenance and settings (all of which live in
+     *    SharedPreferences, not in `files/recordings/`).
+     */
     suspend fun sendBackup(context: Context, treeUri: Uri, recordingManager: RecordingManager): String =
         withContext(Dispatchers.IO) {
             val tree = DocumentFile.fromTreeUri(context, treeUri)
@@ -43,8 +54,22 @@ object DriveBackupClient {
             val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
             val name = "kylaq-obd-backup-$stamp.zip"
             val cacheZip = File(context.cacheDir, name)
-            val files = recordingManager.recordingsDir.walkTopDown().filter { it.isFile }.toList()
+            val snapshotFile = File(context.cacheDir, AppDataSnapshot.FILE_NAME)
+            val files = recordingManager.recordingsDir.walkTopDown().filter { it.isFile }.toMutableList()
+
+            val rawLogsDir = File(context.filesDir, "raw_logs")
+            if (rawLogsDir.isDirectory) {
+                files += rawLogsDir.listFiles()?.filter { it.isFile && it.name.startsWith("raw_log_") }
+                    ?: emptyList()
+            }
+
+            // Best-effort: a snapshot failure must not cost the owner their recordings.
+            runCatching { PrefsSnapshotter.writeToFile(context, snapshotFile) }
+                .onSuccess { files += it }
+
             ZipExporter.createTripZip(cacheZip, files)
+            snapshotFile.delete()
+
             val doc = tree.createFile("application/zip", name)
                 ?: error("Drive refused to create $name")
             context.contentResolver.openOutputStream(doc.uri)?.use { out ->
@@ -54,7 +79,7 @@ object DriveBackupClient {
             name
         }
 
-    /** Imports a backup ZIP from Drive back into the app (trips + telemetry). */
+    /** Imports a backup ZIP from Drive: every trip session, unsaved raw logs and the data snapshot. */
     suspend fun restoreBackup(context: Context, uri: Uri, recordingManager: RecordingManager): String =
         withContext(Dispatchers.IO) {
             val result = ZipImporter.importTripZip(

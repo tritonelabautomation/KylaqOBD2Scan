@@ -372,7 +372,9 @@ class RecordingManager(
 
             val txList = telemetry.map { t ->
                 val pidDef = com.example.model.StandardPidCatalog.lookup(t.pidHex2)
-                val decoded = com.example.protocol.PidDecoder.decode(pidDef, t.payloadBytes)
+                // decode() needs the payload WITH its "41 <pid>" header - handing it the
+                // bare data bytes returns INVALID_RESPONSE (strict malformed-frame rule).
+                val decoded = com.example.protocol.PidDecoder.decode(pidDef, t.decodeBytes)
                 TransactionRecord(
                     timestampUtc = isoUtc(t.epochMillis),
                     timestampMonotonic = t.epochMillis,
