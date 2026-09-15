@@ -117,9 +117,15 @@ class ChartSamplingTest {
     fun `downsample still bounds raw point counts exactly`() {
         val values = (0 until 5000).toList()
 
-        assertEquals(600, ChartSampling.downsample(values, 600).size)
-        assertEquals(values, ChartSampling.downsample(values, 600).distinct())
-        assertEquals(values.first(), ChartSampling.downsample(values, 600).first())
-        assertEquals(values.last(), ChartSampling.downsample(values, 600).last())
+        val sampled = ChartSampling.downsample(values, 600)
+
+        assertEquals(600, sampled.size)
+        // strided subsequence: strictly increasing, no duplicates, ends preserved
+        assertEquals(sampled.size, sampled.distinct().size)
+        assertTrue(sampled.zipWithNext().all { (a, b) -> a < b })
+        assertEquals(values.first(), sampled.first())
+        assertEquals(values.last(), sampled.last())
+        // input shorter than the budget is returned untouched
+        assertEquals(values.take(10), ChartSampling.downsample(values.take(10), 600))
     }
 }
