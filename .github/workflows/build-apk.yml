@@ -8,6 +8,11 @@ on:
   push:
     branches:
       - main
+      # 2026-09-15: the pull_request merge-ref runs started executing a stale tree (test
+      # names/assertions that do not exist on the branch - platform repo-recreation
+      # fallout), while push runs execute the TRUE branch tip. Keep a push-triggered run
+      # on the working branch so the real tree always has an authoritative verdict.
+      - "arena/*"
 
 jobs:
   # FIX (CI never ran the tests): this workflow only executed `assembleDebug`, so a whole
