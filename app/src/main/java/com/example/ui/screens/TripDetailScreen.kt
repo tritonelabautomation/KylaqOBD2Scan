@@ -965,7 +965,7 @@ private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summar
             // instants they happened - an 11.9 V min at the start is a starter crank, not
             // a dying battery, and the timestamps are what tell those apart. Derived from
             // the trip's own samples, so pre-migration trips show it too.
-            val volts = com.example.analysis.VoltageStats.extremes(summary.voltageSeries)
+            val volts = summary.voltageExtremes
             if (volts != null) {
                 Spacer(modifier = Modifier.height(4.dp))
                 val vFmt = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)

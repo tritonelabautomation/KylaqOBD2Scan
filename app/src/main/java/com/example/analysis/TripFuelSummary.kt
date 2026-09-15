@@ -51,7 +51,13 @@ object TripFuelSummary {
          * OBSERVED compressor signal on this car - J1979 has no compressor PID, so before
          * this the app could only price AC from owner tags.
          */
-        val ac: AcVoltageDetector.Result = AcVoltageDetector.Result()
+        val ac: AcVoltageDetector.Result = AcVoltageDetector.Result(),
+        /**
+         * Battery voltage extremes of this trip WITH their instants (owner pipeline task 3,
+         * 2026-09-16: "Voltage min max recording"), reduced from the stored 0142 samples so
+         * even pre-migration trips report them. Null = the trip has no voltage samples.
+         */
+        val voltageExtremes: VoltageExtremes? = null
     ) {
         val litersPer100Km: Double?
             get() = if (distanceKm > 0.05) fuelLiters / distanceKm * 100.0 else null
@@ -83,6 +89,7 @@ object TripFuelSummary {
             .mapNotNull { p -> p.value?.let { p.timestampMs to it } }
             .sortedBy { it.first }
         val fuelSeries = buildFuelSeries(byPid).sortedBy { it.first }
+        val voltageExtremes = VoltageStats.extremes(voltageSeries)
 
         var fuelLiters = 0.0
         var coastSeconds = 0.0
@@ -177,7 +184,8 @@ object TripFuelSummary {
             hasFuelSeries = fuelSeries.isNotEmpty(),
             engineOffSeconds = engineOffSeconds,
             startStop = startStop,
-            ac = ac
+            ac = ac,
+            voltageExtremes = voltageExtremes
         )
     }
 
