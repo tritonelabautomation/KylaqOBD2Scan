@@ -13,6 +13,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -135,8 +137,10 @@ fun TrendChart(
         val gridColor = Color(0xFF2A2D3A)
         val labelColor = TextSecondaryDark
         val textSize = 10.sp.toPx()
-        val paint = Paint().apply {
-            color = labelColor.toArgb()
+        val textPaint = Paint().apply {
+            // `this.color`: the composable also has a `color` parameter (the series
+            // colour) - without the qualifier Kotlin resolves the outer val.
+            this.color = labelColor.toArgb()
             this.textSize = textSize
             isAntiAlias = true
         }
@@ -166,13 +170,13 @@ fun TrendChart(
                 strokeWidth = 1f
             )
             val label = tickFmt.format(Date(ts))
-            val labelW = paint.measureText(label)
+            val labelW = textPaint.measureText(label)
             val lx = when (i) {
                 0 -> x
                 5 -> x - labelW
                 else -> x - labelW / 2f
             }
-            drawContext.canvas.nativeCanvas.drawText(label, lx, h - 6f, paint)
+            drawContext.canvas.nativeCanvas.drawText(label, lx, h - 6f, textPaint)
         }
 
         // ── volatility envelope: bucket max forward, bucket min back ──
@@ -231,9 +235,9 @@ fun TrendChart(
             val cy = yOf(pt.second).toFloat().coerceIn(top, top + plotH)
             drawCircle(color = color, radius = 3.5.dp.toPx(), center = Offset(cx, cy))
             val label = fmt(pt.second)
-            val lx = (cx + 6f).coerceAtMost(left + plotW - paint.measureText(label) - 2f)
+            val lx = (cx + 6f).coerceAtMost(left + plotW - textPaint.measureText(label) - 2f)
             val ly = if (isMin) (cy + textSize + 2f).coerceAtMost(top + plotH) else (cy - 6f).coerceAtLeast(top + textSize)
-            drawContext.canvas.nativeCanvas.drawText(label, lx, ly, paint)
+            drawContext.canvas.nativeCanvas.drawText(label, lx, ly, textPaint)
         }
 
         // ── scrub crosshair + value bubble ──
@@ -252,7 +256,7 @@ fun TrendChart(
             drawCircle(color = color, radius = 2.5.dp.toPx(), center = Offset(cx, cy))
 
             val bubbleText = "${bubbleFmt.format(Date(bucket.ts))}  ${fmt(bucket.avg)} $unit"
-            val tw = paint.measureText(bubbleText)
+            val tw = textPaint.measureText(bubbleText)
             val bw = tw + 16f
             val bh = textSize + 12f
             val bx = (cx - bw / 2f).coerceIn(left, left + plotW - bw)
@@ -263,7 +267,7 @@ fun TrendChart(
                 size = androidx.compose.ui.geometry.Size(bw, bh),
                 cornerRadius = androidx.compose.ui.geometry.CornerRadius(6f, 6f)
             )
-            drawContext.canvas.nativeCanvas.drawText(bubbleText, bx + 8f, by + bh - 8f, paint)
+            drawContext.canvas.nativeCanvas.drawText(bubbleText, bx + 8f, by + bh - 8f, textPaint)
         }
     }
 }
