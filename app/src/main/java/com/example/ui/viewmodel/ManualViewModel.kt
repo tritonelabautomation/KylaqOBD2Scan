@@ -137,7 +137,8 @@ class ManualViewModel(app: Application) : AndroidViewModel(app) {
                 openHtml = null,
                 searchHits = emptyList(),
                 statusLine = if (offline) "Loaded from private offline cache" else "Live session - ${allFlat.size} topic rows",
-                offlineInfo = info.ifBlank { _ -> it.offlineInfo },
+                // ifBlank takes a Function0 - no inner `it`, so this reads the STATE's offlineInfo.
+                offlineInfo = info.ifBlank { it.offlineInfo },
                 cacheAvailable = true,
                 errorMessage = null
             )
