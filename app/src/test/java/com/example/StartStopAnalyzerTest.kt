@@ -145,7 +145,7 @@ class StartStopAnalyzerTest {
     fun `fuel-cut coasting is not mistaken for a stall`() {
         val timeline =
             driving(0, 9) +
-                (10..40).map { obs(it, 1500.0, 80.0 - (it - 10), 0.0) } +  // DFCO: fuel 0, moving
+                (10L..40L).map { obs(it, 1500.0, 80.0 - (it - 10), 0.0) } +  // DFCO: fuel 0, moving
                 driving(41, 60)
 
         val s = StartStopAnalyzer.analyze(timeline)
@@ -205,7 +205,7 @@ class StartStopAnalyzerTest {
     @Test
     fun `rpm null everywhere never fabricates stalls`() {
         // Legacy trips / ECU that never answered 010C: no rpm evidence -> no claims.
-        val timeline = (0..60).map { obs(it, null, 0.0, 0.0) }
+        val timeline = (0L..60L).map { obs(it, null, 0.0, 0.0) }
 
         val s = StartStopAnalyzer.analyze(timeline)
 
