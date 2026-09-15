@@ -101,7 +101,11 @@ class DecoderRealWorldVerificationTest {
         val r = PidDecoder.decode(pid("019D", DecoderType.FUEL_RATE_MASS_50),
             listOf(0x41, 0x9D, 0x00, 0x22, 0x00, 0x22))
         assertEquals(0.68, r.numericValue!!, 0.01)
-        assertEquals("g/s", r.unit)
+        // 2026-09-15: the row now carries its litre equivalent inline (owner: "why g/s
+        // whereas all other units are Liters?"); the decoded unit suffix is empty because
+        // LiveTelemetryStore joins displayValue+unit.
+        assertEquals("0.68 g/s ≈ 3.29 L/h", r.displayValue)
+        assertEquals("", r.unit)
     }
 
     @Test fun fuelRateMass_ownerIdleFrame_419D0008_isPhysical() {

@@ -80,7 +80,8 @@ class FuelPidLineageTest {
         // $9D engine fuel rate (mass): raw 34 -> 34/50 = 0.68 g/s (F-6 real-car calibration)
         val mass = decode("019D", listOf(0x41, 0x9D, 0x00, 0x22, 0x00, 0x22))
         assertEquals(0.68, mass.numericValue!!, 0.001)
-        assertEquals("g/s", mass.unit)
+        assertEquals("0.68 g/s ≈ 3.29 L/h", mass.displayValue) // litre equivalent inline
+        assertEquals("", mass.unit)
         // $0A fuel pressure: A=100 -> 300 kPa
         assertEquals(300.0, decode("010A", listOf(0x41, 0x0A, 0x64)).numericValue!!, 0.001)
         // $23 fuel rail gauge pressure: raw 10 -> 100 kPa
