@@ -1,13 +1,13 @@
 package com.example.ui.screens
 
 import android.content.Context
-import android.graphics.Paint
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -18,12 +18,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.nativeCanvas
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -34,6 +29,7 @@ import com.example.data.db.entities.AiAnalysisEntity
 import com.example.data.db.entities.RawLogEntity
 import com.example.data.db.entities.TelemetrySampleEntity
 import com.example.data.db.entities.TripEntity
+import com.example.ui.components.TrendChart
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.MainViewModel
 import kotlinx.coroutines.launch
@@ -392,15 +388,19 @@ private fun TripTrendsView(
     selectedPid: String,
     onSelectPid: (String) -> Unit
 ) {
+    // pid -> display name -> physical unit. Units were missing from every axis before
+    // (owner 2026-09-16: "graphs are not good"): a bare "81.2" could be percent, kPa or
+    // volts, and the stats row repeated the same unitless numbers.
     val pids = listOf(
-        "010C" to "Engine RPM",
-        "010D" to "Speed",
-        "0105" to "Coolant",
-        "010B" to "MAP / Boost",
-        "0142" to "Voltage",
-        "0111" to "Throttle",
-        "0104" to "Load"
+        Triple("010C", "Engine RPM", "rpm"),
+        Triple("010D", "Speed", "km/h"),
+        Triple("0105", "Coolant", "°C"),
+        Triple("010B", "MAP / Boost", "kPa"),
+        Triple("0142", "Voltage", "V"),
+        Triple("0111", "Throttle", "%"),
+        Triple("0104", "Load", "%")
     )
+    val unit = pids.firstOrNull { it.first == selectedPid }?.third ?: ""
 
     val targetSamples = samples.filter { it.pid.equals(selectedPid.removePrefix("01"), ignoreCase = true) || it.pid.equals(selectedPid, ignoreCase = true) }
     // 2026-09-13 (owner: "Trends are not proper"): plot in TIME order, bounded to
@@ -416,95 +416,54 @@ private fun TripTrendsView(
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         // PID Selector Chips
-        ScrollableTabRow(
-            selectedTabIndex = pids.indexOfFirst { it.first == selectedPid }.coerceAtLeast(0),
-            containerColor = Color.Transparent,
-            contentColor = CyberCyan,
-            edgePadding = 0.dp,
-            divider = {}
+        // Channel chips: selected chip takes the app accent (the old m3 FilterChip drew
+        // its own green fill that fought the owner's red theme).
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            pids.forEach { (pid, name) ->
+            pids.forEach { (pid, name, _) ->
                 val isSelected = selectedPid == pid
-                FilterChip(
-                    selected = isSelected,
-                    onClick = { onSelectPid(pid) },
-                    label = { Text(name, fontSize = 11.sp) },
-                    modifier = Modifier.padding(end = 6.dp)
-                )
+                Surface(
+                    modifier = Modifier.clickable { onSelectPid(pid) },
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (isSelected) CyberCyan else DarkSurface,
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.dp,
+                        if (isSelected) CyberCyan else DarkBorder
+                    )
+                ) {
+                    Text(
+                        name,
+                        fontSize = 11.sp,
+                        color = if (isSelected) Color.White else TextSecondaryDark,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                    )
+                }
             }
         }
 
-        // Trend Canvas Chart
+        // Trend chart (owner 2026-09-16 redesign): fills the remaining screen height
+        // instead of a fixed 220 dp box that left half the display empty; the renderer
+        // bucket-smooths the line, draws the volatility envelope, real axes with units
+        // and time ticks, a mean reference, min/max markers and a drag-to-read crosshair.
         Surface(
-            modifier = Modifier.fillMaxWidth().height(220.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .heightIn(min = 260.dp),
             shape = RoundedCornerShape(14.dp),
             color = DarkSurface,
             border = androidx.compose.foundation.BorderStroke(1.dp, CyberCyan.copy(alpha = 0.2f))
         ) {
-            if (numericValues.size < 2) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("Insufficient sample points to render trend", color = TextSecondaryDark, fontSize = 12.sp)
-                }
-            } else {
-                val plot = com.example.analysis.ChartSampling.downsample(timedPoints, 600)
-                val minVal = numericValues.minOrNull() ?: 0.0
-                val maxVal = numericValues.maxOrNull() ?: 1.0
-                val rawRange = maxVal - minVal
-                // 6 % head/foot padding: the curve must not touch the box edges and a
-                // near-flat series must not be amplified into full-height swings.
-                val pad = if (rawRange > 0.001) rawRange * 0.06 else maxOf(abs(maxVal) * 0.05, 0.5)
-                val plotMin = minVal - pad
-                val plotRange = rawRange + 2 * pad
-
-                Canvas(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-                    val h = size.height
-                    val labelGutter = 46.dp.toPx()
-                    val plotW = (size.width - labelGutter).coerceAtLeast(1f)
-
-                    // Grid lines across the plot area only (gutter stays clean for labels)
-                    drawLine(Color(0xFF2A2D3A), Offset(0f, 0f), Offset(plotW, 0f), strokeWidth = 1f)
-                    drawLine(Color(0xFF2A2D3A), Offset(0f, h / 2f), Offset(plotW, h / 2f), strokeWidth = 1f)
-                    drawLine(Color(0xFF2A2D3A), Offset(0f, h), Offset(plotW, h), strokeWidth = 1f)
-
-                    val stepX = plotW / (plot.size - 1)
-                    val yOf = { v: Double -> h - (((v - plotMin) / plotRange) * h).toFloat() }
-
-                    val path = Path()
-                    plot.forEachIndexed { i, (_, v) ->
-                        val x = i * stepX
-                        val y = yOf(v)
-                        if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
-                    }
-                    drawPath(
-                        path = path,
-                        color = CyberCyan,
-                        style = Stroke(width = 2.5.dp.toPx())
-                    )
-                    // sparse series (few samples in this trip) show every point
-                    if (plot.size <= 12) {
-                        plot.forEachIndexed { i, (_, v) ->
-                            drawCircle(color = CyberCyan, radius = 4.dp.toPx(), center = Offset(i * stepX, yOf(v)))
-                        }
-                    }
-
-                    // y-axis labels: max / mid / min in the right gutter
-                    val textSize = 10.sp.toPx()
-                    val paint = Paint().apply {
-                        color = TextSecondaryDark.toArgb()
-                        this.textSize = textSize
-                        isAntiAlias = true
-                    }
-                    val fmt = { v: Double ->
-                        if (abs(v) >= 100.0) String.format(Locale.US, "%.0f", v)
-                        else String.format(Locale.US, "%.1f", v)
-                    }
-                    drawContext.canvas.nativeCanvas.apply {
-                        drawText(fmt(maxVal), plotW + 6f, textSize, paint)
-                        drawText(fmt(plotMin + plotRange / 2.0), plotW + 6f, h / 2f + textSize / 2f, paint)
-                        drawText(fmt(minVal), plotW + 6f, h, paint)
-                    }
-                }
-            }
+            TrendChart(
+                points = timedPoints,
+                unit = unit,
+                modifier = Modifier.fillMaxSize().padding(10.dp)
+            )
         }
 
         // Time context: which window the trend line covers (was invisible before,
@@ -542,9 +501,9 @@ private fun TripTrendsView(
                     modifier = Modifier.padding(14.dp),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text("MIN: ${String.format(java.util.Locale.US, "%.1f", numericValues.minOrNull() ?: 0.0)}", color = TextSecondaryDark, fontSize = 12.sp)
-                    Text("AVG: ${String.format(java.util.Locale.US, "%.1f", numericValues.average())}", color = CyberCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    Text("MAX: ${String.format(java.util.Locale.US, "%.1f", numericValues.maxOrNull() ?: 0.0)}", color = NeonEmerald, fontSize = 12.sp)
+                    Text("MIN: ${String.format(java.util.Locale.US, "%.1f", numericValues.minOrNull() ?: 0.0)} $unit", color = TextSecondaryDark, fontSize = 12.sp)
+                    Text("AVG: ${String.format(java.util.Locale.US, "%.1f", numericValues.average())} $unit", color = CyberCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("MAX: ${String.format(java.util.Locale.US, "%.1f", numericValues.maxOrNull() ?: 0.0)} $unit", color = NeonEmerald, fontSize = 12.sp)
                     Text("COUNT: ${numericValues.size}", color = TextSecondaryDark, fontSize = 12.sp)
                 }
             }
