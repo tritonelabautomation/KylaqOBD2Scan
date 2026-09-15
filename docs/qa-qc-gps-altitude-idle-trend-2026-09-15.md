@@ -53,3 +53,32 @@ fitted from measurement only, never estimated. New recordings show real metres.
   single-fix zero range, glitch rejection, per-trip reset.
 - `TripTrendAnalyzerTest` (+2): projection carries both hex forms for every pid;
   idle window aggregates real L/h from normalized 2-hex mass-flow samples.
+
+---
+
+## Finding 3 — "I logs my logs it didn't save" (unsaved recordings are recoverable)
+
+A recording accumulates in RAM (`RecordingManager.activeTransactionList`) and is
+finalized only when STOP fires — the manual tap or the auto-record engine-off timer.
+If Android kills the process mid-drive (swipe-away, battery optimization, crash), the
+trip never reaches Room and never appears in Trips & Recordings.
+
+**But the drive is still on the phone.** `RawLogManager` flushes every TX/RX line to
+`files/raw_logs/raw_log_<sessionId>.txt` as it happens (`FileWriter.write` + `flush`
+per entry), independent of the RAM buffer.
+
+### Fix — rebuild the trip from the raw log, on-device
+
+| Layer | Change |
+| --- | --- |
+| `analysis/RawLogRecovery.kt` (new) | Pure-JVM parser: session id from file name; both stored line shapes (`RX < 7E804410C0F28` and `RX < 7E8 04410C0F28`); time-of-day re-anchored to the file's last-modified day with a midnight-wrap rule; keeps RX Mode-01 single frames only (TX requests, `7F` negatives, multi-frame/flow-control PCI, and ELM noise lines such as `SEARCHING...` are skipped). |
+| `data/RecordingManager.kt` | `findUnsavedRawLogs()` (raw logs with no saved session) and `recoverFromRawLog()` — re-decodes every frame through `StandardPidCatalog` + `PidDecoder` and reproduces exactly what `stopRecording()` writes: session dir, transactions/samples CSV, JSON, ZIP bundle, Room trip + samples, AI Doctor analysis. |
+| `ui/viewmodel/MainViewModel.kt` | `unsavedRawLogs` / `isRecovering` state, `refreshUnsavedRawLogs()` (off-main), `recoverRawLog()`; refreshed after every stop. |
+| `ui/screens/RecordingsScreen.kt` | Amber recovery banner in Trips & Recordings listing each unsaved session (id, date, size) with a **Recover** button. |
+
+Recovered trips keep `maxAltitudeM`/`minAltitudeM` NULL — GPS altitude is not in a raw
+OBD log, so the trip summary shows its honest blank rather than inventing metres.
+
+Tests: `RawLogRecoveryTest` (11 new) — session-id extraction, both body shapes, frame
+accept/reject matrix, 970 rpm decode parity with the reference trace, whole-file
+filtering and ordering, day anchoring, midnight wrap, empty/noise logs.

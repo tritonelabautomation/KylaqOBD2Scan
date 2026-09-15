@@ -5,7 +5,9 @@ import com.example.data.db.TripRepository
 import com.example.data.db.entities.RawLogEntity
 import com.example.data.db.entities.TelemetrySampleEntity
 import com.example.data.db.entities.TripEntity
+import com.example.model.Direction
 import com.example.model.RecordingMetadata
+import com.example.model.ResponseStatus
 import com.example.model.SynchronizedSample
 import com.example.model.TransactionRecord
 import kotlinx.coroutines.CoroutineScope
@@ -334,6 +336,156 @@ class RecordingManager(
 
         _savedRecordings.value = result.sortedByDescending { it.metadata.startTimeUtc }
     }
+
+    // ── Unsaved raw-log recovery (owner 2026-09-15) ────────────────────────────────
+    // A recording lives in RAM until STOP finalizes it; a process kill mid-drive
+    // (swipe-away / battery optimization / crash) loses the trip — but the raw log was
+    // flushed to disk after every line, so the drive survives and can be rebuilt here.
+
+    private val rawLogsDir: File get() = File(context.filesDir, "raw_logs")
+
+    /** Raw-log sessions on disk that were never finalized into a saved trip, newest first. */
+    fun findUnsavedRawLogs(): List<File> {
+        val saved = _savedRecordings.value.map { it.metadata.sessionId }.toSet()
+        return rawLogsDir.listFiles()?.filter { f ->
+            val id = com.example.analysis.RawLogRecovery.sessionIdOf(f.name)
+            id != null && id !in saved && f.length() > 64L
+        }?.sortedByDescending { it.lastModified() } ?: emptyList()
+    }
+
+    /**
+     * Rebuilds and persists a killed recording from its raw log, producing the same
+     * artifacts as stopRecording() (session dir, CSV/JSON/ZIP bundle, Room trip +
+     * samples, AI analysis). Returns null when nothing is recoverable. GPS altitude
+     * stays null for recovered trips — honest blank, never invented.
+     */
+    suspend fun recoverFromRawLog(file: File): SavedRecording? = withContext(Dispatchers.IO) {
+        try {
+            val sessionId = com.example.analysis.RawLogRecovery.sessionIdOf(file.name)
+                ?: return@withContext null
+            if (File(recordingsDir, "session_$sessionId").exists()) return@withContext null
+
+            val telemetry = com.example.analysis.RawLogRecovery.extractTelemetry(
+                file.readText(), file.lastModified()
+            )
+            if (telemetry.size < 10) return@withContext null // stub log - nothing worth saving
+
+            val txList = telemetry.map { t ->
+                val pidDef = com.example.model.StandardPidCatalog.lookup(t.pidHex2)
+                val decoded = com.example.protocol.PidDecoder.decode(pidDef, t.payloadBytes)
+                TransactionRecord(
+                    timestampUtc = isoUtc(t.epochMillis),
+                    timestampMonotonic = t.epochMillis,
+                    direction = Direction.RX,
+                    canRxId = t.canId,
+                    requestHex = "01${t.pidHex2}",
+                    responseHex = t.responseHex,
+                    service = "01",
+                    pid = pidDef.pid,
+                    rawPayload = t.payloadBytes.joinToString("") { "%02X".format(it) },
+                    decodedParameter = decoded.parameterName,
+                    decodedValue = decoded.numericValue,
+                    decodedValueDisplay = decoded.displayValue,
+                    unit = decoded.unit,
+                    responseStatus = ResponseStatus.OK
+                )
+            }
+            val startMs = telemetry.first().epochMillis
+            val endMs = telemetry.last().epochMillis
+            val metadata = RecordingMetadata(
+                sessionId = sessionId,
+                sessionName = "Recovered Run " +
+                    SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date(startMs)),
+                startTimeUtc = isoUtc(startMs),
+                adapter = "ELM327 Bluetooth (recovered from raw log)"
+            )
+            metadata.endTimeUtc = isoUtc(endMs)
+
+            val sessionDir = File(recordingsDir, "session_$sessionId").apply { mkdirs() }
+            val txCsvFile = File(sessionDir, "${sessionId}_transactions.csv")
+            val sampleCsvFile = File(sessionDir, "${sessionId}_samples.csv")
+            val jsonFile = File(sessionDir, "$sessionId.json")
+            CsvExporter.exportTransactionsToCsv(txCsvFile, metadata, txList)
+            CsvExporter.exportSynchronizedSamplesToCsv(sampleCsvFile, emptyList())
+            JsonExporter.exportToJson(jsonFile, metadata, txList)
+            val destRawLog = File(sessionDir, "${sessionId}_raw.txt")
+            file.copyTo(destRawLog, overwrite = true)
+            val zipFile = File(sessionDir, "${sessionId}_bundle.zip")
+            ZipExporter.createTripZip(zipFile, listOf(txCsvFile, sampleCsvFile, jsonFile, destRawLog))
+
+            // Room summary metrics - the same reductions stopRecording() computes.
+            val maxRpm = txList.filter { it.pid.equals("0C", true) }.mapNotNull { it.decodedValue }.maxOrNull() ?: 0.0
+            val maxSpeed = txList.filter { it.pid.equals("0D", true) }.mapNotNull { it.decodedValue }.maxOrNull() ?: 0.0
+            val maxCoolant = txList.filter { it.pid.equals("05", true) }.mapNotNull { it.decodedValue }.maxOrNull() ?: 0.0
+            val voltList = txList.filter { it.pid.equals("42", true) }.mapNotNull { it.decodedValue }
+            val avgVolt = if (voltList.isNotEmpty()) voltList.average() else 0.0
+            val detectedEcus = txList.map { it.canRxId }.filter { it.isNotBlank() }.distinct()
+                .joinToString(", ").ifBlank { "7E8" }
+            val durationSec = maxOf(1L, (endMs - startMs) / 1000)
+
+            tripRepository.insertTrip(
+                TripEntity(
+                    id = sessionId,
+                    title = metadata.sessionName,
+                    vehicleName = metadata.vehicle,
+                    adapterName = metadata.adapter,
+                    protocolName = metadata.protocol,
+                    startTimeUtc = metadata.startTimeUtc,
+                    endTimeUtc = metadata.endTimeUtc,
+                    startTimestamp = startMs,
+                    endTimestamp = endMs,
+                    durationSeconds = durationSec,
+                    status = "COMPLETED",
+                    sampleCount = txList.size,
+                    rawLogCount = txList.size,
+                    maxRpm = maxRpm,
+                    maxSpeedKmh = maxSpeed,
+                    maxCoolantC = maxCoolant,
+                    avgVoltageV = avgVolt,
+                    detectedEcus = detectedEcus,
+                    healthScore = 100
+                )
+            )
+            tripRepository.insertSamples(
+                txList.mapIndexed { idx, tx ->
+                    TelemetrySampleEntity(
+                        tripId = sessionId,
+                        timestamp = tx.timestampMonotonic,
+                        timestampUtc = tx.timestampUtc,
+                        ecuCanId = tx.canRxId.ifBlank { "7E8" },
+                        pid = tx.pid,
+                        parameterName = tx.decodedParameter.ifBlank { "PID ${tx.pid}" },
+                        rawHex = tx.responseHex,
+                        numericValue = tx.decodedValue,
+                        displayValue = tx.decodedValueDisplay,
+                        unit = tx.unit,
+                        quality = "VALID",
+                        sequence = idx.toLong()
+                    )
+                }
+            )
+            try { tripRepository.runAiCarDoctorAnalysis(sessionId) } catch (_: Exception) {}
+
+            loadSavedRecordings()
+            SavedRecording(
+                metadata = metadata,
+                transactionCount = txList.size,
+                transactionCsvFile = txCsvFile,
+                samplesCsvFile = sampleCsvFile,
+                jsonFile = jsonFile,
+                rawLogFile = destRawLog,
+                zipFile = zipFile
+            )
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
+    private fun isoUtc(millis: Long): String =
+        SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
+            timeZone = TimeZone.getTimeZone("UTC")
+        }.format(Date(millis))
 
     fun renameRecording(sessionId: String, newName: String) {
         val sessionDir = File(recordingsDir, "session_$sessionId")

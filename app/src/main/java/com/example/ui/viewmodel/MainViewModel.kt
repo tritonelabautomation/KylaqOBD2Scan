@@ -939,6 +939,43 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             // Auto-backup to cloud if enabled
             cloudBackupManager.performAutoBackupIfNeeded()
+            // A finished stop can reveal older orphaned raw logs (or fail partially) -
+            // keep the recovery banner in Trips & Recordings up to date.
+            refreshUnsavedRawLogs()
+        }
+    }
+
+    // ── Unsaved raw-log recovery (owner 2026-09-15: "I logs my logs it didn't save
+    // how to recover from mobile?") — the raw OBD log is flushed to disk every line, so
+    // drives killed before STOP can be rebuilt from the phone itself, no PC needed. ──
+    private val _unsavedRawLogs = MutableStateFlow<List<java.io.File>>(emptyList())
+    val unsavedRawLogs: StateFlow<List<java.io.File>> = _unsavedRawLogs.asStateFlow()
+
+    private val _isRecovering = MutableStateFlow(false)
+    val isRecovering: StateFlow<Boolean> = _isRecovering.asStateFlow()
+
+    /** Re-scans files/raw_logs for sessions that were never finalized (disk IO, off-main). */
+    suspend fun refreshUnsavedRawLogs() {
+        _unsavedRawLogs.value = try {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                recordingManager.findUnsavedRawLogs()
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    fun recoverRawLog(file: java.io.File) {
+        if (_isRecovering.value) return
+        viewModelScope.launch {
+            _isRecovering.value = true
+            try {
+                recordingManager.recoverFromRawLog(file)
+            } catch (_: Exception) {
+            } finally {
+                _isRecovering.value = false
+                refreshUnsavedRawLogs()
+            }
         }
     }
 

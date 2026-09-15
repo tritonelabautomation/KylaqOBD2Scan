@@ -48,6 +48,13 @@ fun RecordingsScreen(
     val importStatusMessage by viewModel.importStatusMessage.collectAsState()
     val tripRepo = viewModel.recordingManager.tripRepository
 
+    // Unsaved raw-log recovery (owner 2026-09-15): drives killed before STOP could
+    // finalize them never reached Room, but their raw OBD log was flushed to disk line
+    // by line, so they can still be rebuilt here — no PC, no adb, no re-recording.
+    val unsavedRawLogs by viewModel.unsavedRawLogs.collectAsState()
+    val isRecovering by viewModel.isRecovering.collectAsState()
+    LaunchedEffect(Unit) { viewModel.refreshUnsavedRawLogs() }
+
     var renamingRecording by remember { mutableStateOf<SavedRecording?>(null) }
     var deletingRecording by remember { mutableStateOf<SavedRecording?>(null) }
     var storageStats by remember { mutableStateOf<StorageStats?>(null) }
@@ -168,6 +175,85 @@ fun RecordingsScreen(
                         Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(15.dp), tint = Color.White)
                         Spacer(modifier = Modifier.width(4.dp))
                         Text("Import ZIP", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                }
+            }
+        }
+
+        // ── Recovery banner: unsaved raw-log sessions still on this phone ──────────
+        if (unsavedRawLogs.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(10.dp))
+            Surface(
+                modifier = Modifier.fillMaxWidth().testTag("recovery_banner"),
+                shape = RoundedCornerShape(12.dp),
+                color = ElectricAmber.copy(alpha = 0.14f)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Default.SettingsBackupRestore,
+                            contentDescription = null,
+                            tint = ElectricAmber,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "${unsavedRawLogs.size} unsaved log session(s) found on this phone",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "These drives ended before STOP could save them (app killed, battery " +
+                            "optimisation, or a crash), but every OBD line stayed on disk. Recover " +
+                            "rebuilds the full trip — fuel, trends and X-ray — from that raw log.",
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    unsavedRawLogs.forEach { logFile ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "session " +
+                                        (com.example.analysis.RawLogRecovery.sessionIdOf(logFile.name) ?: logFile.name),
+                                    fontSize = 11.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US)
+                                        .format(java.util.Date(logFile.lastModified())) +
+                                        " · ${logFile.length() / 1024} KB raw log",
+                                    fontSize = 9.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Button(
+                                onClick = { viewModel.recoverRawLog(logFile) },
+                                enabled = !isRecovering,
+                                modifier = Modifier.height(30.dp).testTag("btn_recover_raw_log"),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = ElectricAmber),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)
+                            ) {
+                                if (isRecovering) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(14.dp),
+                                        color = Color.Black,
+                                        strokeWidth = 2.dp
+                                    )
+                                } else {
+                                    Text("Recover", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                                }
+                            }
+                        }
                     }
                 }
             }
