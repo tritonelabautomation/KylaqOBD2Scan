@@ -729,10 +729,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             startRecording()
                         }
                     } else if (recording) {
+                        // START-STOP FIX (owner 2026-09-15, P0): the Kylaq has Idle Start-Stop,
+                        // so at a traffic light the ECU keeps answering with rpm = 0 while the
+                        // engine is off. This watchdog used one 60 s rule for every engine-off
+                        // second, so any signal longer than a minute silently STOPPED the
+                        // recording mid-drive and the restart began a second trip - one city
+                        // drive shredded into fragments. A FRESH rpm reading <= 200 means the
+                        // link is alive and the car is awake: that is a start-stop stall and
+                        // gets a 5-minute grace. rpm == null means the stale entry was dropped
+                        // (ignition off / Bluetooth gone - liveNumericMap only serves fresh
+                        // values): that keeps the old 60 s rule.
+                        val graceMs = if (rpm != null) 300_000L else 60_000L
                         val now = android.os.SystemClock.elapsedRealtime()
                         if (engineOffSinceMs == 0L) {
                             engineOffSinceMs = now
-                        } else if (now - engineOffSinceMs > 60_000L) {
+                        } else if (now - engineOffSinceMs > graceMs) {
                             stopRecording()
                             engineOffSinceMs = 0L
                         }

@@ -92,4 +92,69 @@ class TripFuelSummaryTest {
         assertEquals(0.0, summary.fuelLiters, 0.0001)
         assertEquals(0, summary.sampleCount)
     }
+
+    @Test
+    fun `start-stop stall is engine-off time, not idle, and the saving is estimated`() {
+        // Owner 2026-09-15: the Kylaq's Idle Start-Stop stalls the engine at lights while
+        // the ECU keeps answering. Before the split, those seconds landed in idleSeconds
+        // and coaching billed 1.05 L/h of imaginary fuel for time the engine was OFF.
+        val samples = mutableListOf<TripFuelSummary.SamplePoint>()
+        var ts = 0L
+        // 60 s warm idle: rpm 800, standing still, 0.9 L/h
+        repeat(6) {
+            samples.add(point("010C", ts, 800.0))
+            samples.add(point("010D", ts, 0.0))
+            samples.add(point("015E", ts, 0.9))
+            ts += 10_000
+        }
+        // 60 s start-stop stall: rpm 0, standing still, 0 L/h
+        repeat(6) {
+            samples.add(point("010C", ts, 0.0))
+            samples.add(point("010D", ts, 0.0))
+            samples.add(point("015E", ts, 0.0))
+            ts += 10_000
+        }
+        // restart and drive away
+        repeat(4) {
+            samples.add(point("010C", ts, 2000.0))
+            samples.add(point("010D", ts, 40.0))
+            samples.add(point("015E", ts, 5.0))
+            ts += 10_000
+        }
+
+        val summary = TripFuelSummary.summarize(samples)
+
+        assertTrue("idle seconds ${summary.idleSeconds}", summary.idleSeconds in 50.0..60.0)
+        assertTrue("engine-off seconds ${summary.engineOffSeconds}", summary.engineOffSeconds in 50.0..60.0)
+        assertEquals(1, summary.startStop.stopEvents)
+        assertEquals(1, summary.startStop.restartCount)
+        assertEquals(
+            com.example.analysis.StartStopAnalyzer.Baseline.MEASURED,
+            summary.startStop.baselineSource
+        )
+        assertTrue("idle baseline ${summary.startStop.warmIdleLh}", abs((summary.startStop.warmIdleLh ?: 0.0) - 0.9) < 0.05)
+        // ~60 s x 0.9 L/h = ~0.015 L saved
+        assertTrue("saved ${summary.startStop.estimatedFuelSavedL}", summary.startStop.estimatedFuelSavedL in 0.010..0.018)
+        // The stall itself burned nothing measurable.
+        assertTrue(summary.startStop.fuelBurnedWhileStoppedL < 0.001)
+    }
+
+    @Test
+    fun `trips without rpm evidence keep the legacy idle attribution`() {
+        // No 010C samples at all (legacy trip / ECU silent on rpm): standstill stays
+        // "idling" - the split must never invent engine-off time without evidence.
+        val samples = mutableListOf<TripFuelSummary.SamplePoint>()
+        var ts = 0L
+        repeat(8) {
+            samples.add(point("010D", ts, 0.0))
+            samples.add(point("015E", ts, 0.8))
+            ts += 10_000
+        }
+
+        val summary = TripFuelSummary.summarize(samples)
+
+        assertTrue("idle ${summary.idleSeconds}", summary.idleSeconds > 60.0)
+        assertEquals(0.0, summary.engineOffSeconds, 1e-9)
+        assertEquals(0, summary.startStop.stopEvents)
+    }
 }

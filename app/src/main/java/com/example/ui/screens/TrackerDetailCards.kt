@@ -57,7 +57,7 @@ fun TrackerSummaryCards(
     minAltitudeM: Double? = null
 ) {
     val analysis = remember(summary, speedPoints) {
-        TripDriveAnalysis.analyse(speedPoints, summary.idleSeconds, summary.speedHistogram)
+        TripDriveAnalysis.analyse(speedPoints, summary.idleSeconds + summary.engineOffSeconds, summary.speedHistogram)
     }
     val score = remember(summary) { WeeklyTripOverview.scoreOf(summary) }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {

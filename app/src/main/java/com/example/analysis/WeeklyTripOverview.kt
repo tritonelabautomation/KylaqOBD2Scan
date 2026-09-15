@@ -57,7 +57,12 @@ object WeeklyTripOverview {
         val prev: WeekTotals?
     )
 
-    /** Seconds per band: idle = STOPPED; histogram bins <20 CONGESTED, 20-49 SLOW, 50+ NORMAL. */
+    /**
+     * Seconds per band: standstill = STOPPED (engine-running idle PLUS idle start-stop
+     * stalls - the band means "not moving", and splitting the engine-off seconds out of
+     * it would under-report city standstill); histogram bins <20 CONGESTED, 20-49 SLOW,
+     * 50+ NORMAL.
+     */
     fun bandSeconds(s: TripFuelSummary.Summary): Map<DriveBand, Double> {
         var congested = 0.0
         var slow = 0.0
@@ -73,7 +78,7 @@ object WeeklyTripOverview {
             DriveBand.NORMAL to normal,
             DriveBand.SLOW to slow,
             DriveBand.CONGESTED to congested,
-            DriveBand.STOPPED to s.idleSeconds
+            DriveBand.STOPPED to (s.idleSeconds + s.engineOffSeconds)
         )
     }
 
@@ -88,7 +93,7 @@ object WeeklyTripOverview {
      */
     fun scoreOf(s: TripFuelSummary.Summary): Int {
         val dur = s.durationSeconds.toDouble().coerceAtLeast(1.0)
-        val calm = (1.0 - s.idleSeconds / dur).coerceIn(0.0, 1.0)
+        val calm = (1.0 - (s.idleSeconds + s.engineOffSeconds) / dur).coerceIn(0.0, 1.0)
         val flow = if (s.hasSpeedSeries) (s.movingAverageSpeedKmh / 45.0).coerceIn(0.0, 1.0) else 0.5
         val eff = s.kmPerLiter?.let { (it / ARAI_KML).coerceIn(0.0, 1.0) } ?: 0.6
         val coast = (s.coastSeconds / maxOf(30.0, dur * 0.10)).coerceIn(0.0, 1.0)

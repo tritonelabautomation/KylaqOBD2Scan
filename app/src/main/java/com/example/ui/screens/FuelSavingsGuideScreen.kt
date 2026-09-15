@@ -210,7 +210,7 @@ fun FuelSavingsGuideScreen(
             item {
                 FaqItem(
                     "Does start-stop really save fuel?",
-                    "Yes in stop-and-go traffic — it deletes the ~0.8 L/h idle burn at lights. The battery and starter are designed for it. If it irritates you on a smooth highway run it barely matters there anyway."
+                    "Yes in stop-and-go traffic — it deletes the warm-idle burn at lights (~0.8-1.1 L/h on the 1.0 TSI), and the battery and starter are designed for it. Your Kylaq has it, and the app now MEASURES it: the trip fuel card counts the stalls and engine-off seconds, estimates the fuel saved against your own trip's measured idle rate, and reports the cranking-enrichment spike at each restart separately. On a smooth highway run it barely matters anyway."
                 )
             }
             item {

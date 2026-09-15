@@ -36,7 +36,16 @@ object TripFuelSummary {
         /** Loud-failure flags (2026-09-12): the card must SAY "ECU never answered",
          *  not silently show 0.00 L / 0.0 km. */
         val hasSpeedSeries: Boolean = false,
-        val hasFuelSeries: Boolean = false
+        val hasFuelSeries: Boolean = false,
+        /**
+         * Standstill seconds with the engine OFF (idle start-stop stalls), split out of
+         * [idleSeconds] on 2026-09-15 so no coaching or overview ever charges an idle burn
+         * for time the engine was not running. Appended last with defaults so every
+         * existing positional construction keeps compiling.
+         */
+        val engineOffSeconds: Double = 0.0,
+        /** Idle start-stop accounting: stalls, restart enrichment spikes, estimated fuel saved. */
+        val startStop: StartStopAnalyzer.Summary = StartStopAnalyzer.Summary()
     ) {
         val litersPer100Km: Double?
             get() = if (distanceKm > 0.05) fuelLiters / distanceKm * 100.0 else null
@@ -61,6 +70,9 @@ object TripFuelSummary {
         val speedSeries = (byPid["010D"] ?: emptyList())
             .mapNotNull { p -> p.value?.let { p.timestampMs to it } }
             .sortedBy { it.first }
+        val rpmSeries = (byPid["010C"] ?: emptyList())
+            .mapNotNull { p -> p.value?.let { p.timestampMs to it } }
+            .sortedBy { it.first }
         val fuelSeries = buildFuelSeries(byPid).sortedBy { it.first }
 
         var fuelLiters = 0.0
@@ -70,7 +82,7 @@ object TripFuelSummary {
             val (t1, _) = fuelSeries[i]
             val dt = (t1 - t0).coerceIn(0L, MAX_GAP_MS) / 1000.0
             fuelLiters += rate * dt / 3600.0
-            val speedAt = speedAt(speedSeries, t0)
+            val speedAt = valueAt(speedSeries, t0)
             if (rate <= COAST_FUEL_LH && speedAt != null && speedAt > COAST_SPEED_KMH) {
                 coastSeconds += dt
             }
@@ -79,6 +91,7 @@ object TripFuelSummary {
         var distanceKm = 0.0
         var movingSeconds = 0.0
         var idleSeconds = 0.0
+        var engineOffSeconds = 0.0
         var maxSpeed = 0.0
         var speedTimeIntegral = 0.0
         val histogram = LinkedHashMap<Int, Double>()
@@ -94,9 +107,35 @@ object TripFuelSummary {
                 val bin = (v0.toInt() / 10) * 10
                 histogram[bin] = (histogram[bin] ?: 0.0) + dt
             } else {
-                idleSeconds += dt
+                // Idle start-stop split (owner 2026-09-15): standing still with the engine
+                // OFF is not idling - the old bucket charged every stall to "idle", and
+                // coaching then billed 1.05 L/h of imaginary fuel for time the engine was
+                // not running. Trips with no rpm evidence at all keep the old attribution.
+                val rpmAtT0 = valueAt(rpmSeries, t0)
+                if (rpmAtT0 == null || rpmAtT0 > StartStopAnalyzer.ENGINE_RUNNING_RPM) {
+                    idleSeconds += dt
+                } else {
+                    engineOffSeconds += dt
+                }
             }
         }
+
+        // Idle start-stop accounting over the same stored samples: stall detection,
+        // restart enrichment spikes and the saved-fuel estimate (measured baseline first).
+        val rpmByTs = rpmSeries.associate { it }
+        val speedByTs = speedSeries.associate { it }
+        val fuelByTs = fuelSeries.associate { it }
+        val timeline = (rpmByTs.keys + speedByTs.keys + fuelByTs.keys).distinct().sorted()
+        val startStop = StartStopAnalyzer.analyze(
+            timeline.map { ts ->
+                StartStopAnalyzer.Observation(
+                    tsMs = ts,
+                    rpm = rpmByTs[ts],
+                    speedKmh = speedByTs[ts],
+                    fuelLh = fuelByTs[ts]
+                )
+            }
+        )
 
         val firstTs = samples.minOf { it.timestampMs }
         val lastTs = samples.maxOf { it.timestampMs }
@@ -118,7 +157,9 @@ object TripFuelSummary {
             speedHistogram = histogram.entries.map { it.key to it.value }.sortedBy { it.first },
             sampleCount = samples.size,
             hasSpeedSeries = speedSeries.isNotEmpty(),
-            hasFuelSeries = fuelSeries.isNotEmpty()
+            hasFuelSeries = fuelSeries.isNotEmpty(),
+            engineOffSeconds = engineOffSeconds,
+            startStop = startStop
         )
     }
 
@@ -142,7 +183,7 @@ object TripFuelSummary {
         return mass.mapNotNull { p -> p.value?.let { p.timestampMs to it * 3600.0 / (FUEL_DENSITY_KG_L * 1000.0) } }
     }
 
-    private fun speedAt(series: List<Pair<Long, Double>>, ts: Long): Double? {
+    private fun valueAt(series: List<Pair<Long, Double>>, ts: Long): Double? {
         if (series.isEmpty()) return null
         // samples are ordered; nearest preceding point is good enough for a flag
         var candidate: Double? = null

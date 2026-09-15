@@ -935,10 +935,47 @@ private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summar
                     "${String.format(java.util.Locale.US, "%.0f", summary.movingAverageSpeedKmh)}), max " +
                     "${String.format(java.util.Locale.US, "%.0f", summary.maxSpeedKmh)} km/h • coasting " +
                     "${String.format(java.util.Locale.US, "%.0f", summary.coastSeconds)} s • idling " +
-                    "${String.format(java.util.Locale.US, "%.0f", summary.idleSeconds)} s",
+                    "${String.format(java.util.Locale.US, "%.0f", summary.idleSeconds)} s" +
+                    // Idle start-stop stalls are standstill-with-engine-OFF: shown separately,
+                    // never folded into "idling" (2026-09-15).
+                    if (summary.engineOffSeconds > 0.0) {
+                        " • engine off ${String.format(java.util.Locale.US, "%.0f", summary.engineOffSeconds)} s"
+                    } else "",
                 color = TextSecondaryDark,
                 fontSize = 11.sp
             )
+            val startStop = summary.startStop
+            if (startStop.stopEvents > 0) {
+                Spacer(modifier = Modifier.height(6.dp))
+                // The saving is an estimate against REAL recorded data: this trip's own
+                // measured warm-idle rate when there is enough evidence, otherwise the
+                // 1.05 L/h model - and the card always says which one it used.
+                val baselineNote = when (startStop.baselineSource) {
+                    com.example.analysis.StartStopAnalyzer.Baseline.MEASURED ->
+                        "baseline ${String.format(java.util.Locale.US, "%.2f", startStop.baselineIdleLh ?: 0.0)} L/h idle measured on this trip"
+                    com.example.analysis.StartStopAnalyzer.Baseline.MODEL ->
+                        "baseline ${String.format(java.util.Locale.US, "%.2f", com.example.analysis.StartStopAnalyzer.MODEL_IDLE_LH)} L/h warm-idle model"
+                    com.example.analysis.StartStopAnalyzer.Baseline.NONE -> "no baseline"
+                }
+                Text(
+                    "Start-stop: ${startStop.stopEvents} stall(s), engine off " +
+                        "${String.format(java.util.Locale.US, "%.0f", startStop.engineOffSeconds)} s • fuel saved ≈ " +
+                        "${String.format(java.util.Locale.US, "%.2f", startStop.estimatedFuelSavedL)} L (estimate, $baselineNote)",
+                    color = NeonEmerald,
+                    fontSize = 11.sp
+                )
+            }
+            if (startStop.restartCount > 0 && startStop.restartPeakFuelLh != null) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    "Restart fuel spike: peak " +
+                        "${String.format(java.util.Locale.US, "%.1f", startStop.restartPeakFuelLh)} L/h across " +
+                        "${startStop.restartCount} restart(s) — cranking enrichment; real fuel, already inside the " +
+                        "trip total and kept out of the idle averages.",
+                    color = ElectricAmber,
+                    fontSize = 11.sp
+                )
+            }
             if (summary.sampleCount == 0) {
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
