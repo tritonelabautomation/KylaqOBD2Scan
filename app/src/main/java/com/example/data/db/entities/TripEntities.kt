@@ -39,7 +39,10 @@ data class TripEntity(
     val notes: String = "",
     /** GPS altitude extremes for this trip (accuracy-gated fixes only). Null = never captured (pre-v10 trips or no GPS fix) → UI shows an honest blank. Added 2026-09-15 (MIGRATION_9_10). */
     val maxAltitudeM: Double? = null,
-    val minAltitudeM: Double? = null
+    val minAltitudeM: Double? = null,
+    /** Battery voltage extremes measured from stored 0142 samples at trip end. Null = never captured (pre-v11 trips or no voltage samples) -> UI derives from samples or stays blank. Added 2026-09-16 (MIGRATION_10_11, owner pipeline task 3). */
+    val minVoltageV: Double? = null,
+    val maxVoltageV: Double? = null
 )
 
 /**

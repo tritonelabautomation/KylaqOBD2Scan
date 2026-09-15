@@ -194,9 +194,17 @@ class RecordingManager(
         // The trip log files must carry the same altitude window as the database row, or a
         // backup -> reinstall -> import round trip silently strips elevation from every past
         // trip and the restored summary degrades back to "-- m".
+        // Battery voltage extremes of this trip (owner pipeline task 3, 2026-09-16):
+        // reduced from the real 0142 samples exactly like the altitude window - null when
+        // the trip never carried voltage samples, so nothing invented reaches the exports.
+        val voltStats = com.example.analysis.VoltageStats.extremes(
+            activeSampleList.mapNotNull { smp -> smp.voltageV?.let { smp.timestampMonotonic to it } }
+        )
         val metadataWithAltitude = metadata.copy(
             maxAltitudeM = altStats?.maxAltitudeM,
-            minAltitudeM = altStats?.minAltitudeM
+            minAltitudeM = altStats?.minAltitudeM,
+            minVoltageV = voltStats?.minV,
+            maxVoltageV = voltStats?.maxV
         )
 
         // Generate files
@@ -253,7 +261,9 @@ class RecordingManager(
             detectedEcus = detectedEcus,
             healthScore = 100,
             maxAltitudeM = altStats?.maxAltitudeM,
-            minAltitudeM = altStats?.minAltitudeM
+            minAltitudeM = altStats?.minAltitudeM,
+            minVoltageV = voltStats?.minV,
+            maxVoltageV = voltStats?.maxV
         )
         tripRepository.insertTrip(tripEntity)
 

@@ -128,5 +128,13 @@ data class RecordingMetadata(
      * Carried in the session JSON so backup -> reinstall -> import keeps the elevation data.
      */
     val maxAltitudeM: Double? = null,
-    val minAltitudeM: Double? = null
+    val minAltitudeM: Double? = null,
+    /**
+     * Battery voltage extremes of the trip, measured from the real 0142 samples when
+     * recording stops (owner pipeline task 3, 2026-09-16: "Voltage min max recording").
+     * Null = the trip had no voltage samples; extremes are recorded, never invented.
+     * Carried in the session JSON so backup -> reinstall -> import keeps them.
+     */
+    val minVoltageV: Double? = null,
+    val maxVoltageV: Double? = null
 )

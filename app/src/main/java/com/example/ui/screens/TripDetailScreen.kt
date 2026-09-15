@@ -960,6 +960,25 @@ private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summar
                     fontSize = 11.sp
                 )
             }
+            // Battery extremes RECORDED for this trip (owner pipeline task 3, 2026-09-16:
+            // "Voltage min max recording"): min/max of the stored 0142 samples WITH the
+            // instants they happened - an 11.9 V min at the start is a starter crank, not
+            // a dying battery, and the timestamps are what tell those apart. Derived from
+            // the trip's own samples, so pre-migration trips show it too.
+            val volts = com.example.analysis.VoltageStats.extremes(summary.voltageSeries)
+            if (volts != null) {
+                Spacer(modifier = Modifier.height(4.dp))
+                val vFmt = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
+                Text(
+                    "Battery extremes: " +
+                        "${String.format(java.util.Locale.US, "%.1f", volts.minV)} V min at ${vFmt.format(java.util.Date(volts.minTs))}" +
+                        " \u2192 " +
+                        "${String.format(java.util.Locale.US, "%.1f", volts.maxV)} V max at ${vFmt.format(java.util.Date(volts.maxTs))}",
+                    color = ElectricAmber,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
             val ac = summary.ac
             if (ac.hasEvidence && ac.segments.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(4.dp))

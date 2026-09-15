@@ -35,6 +35,10 @@ object JsonExporter {
             // apart from "0 m above sea level".
             put("maxAltitudeM", metadata.maxAltitudeM ?: JSONObject.NULL)
             put("minAltitudeM", metadata.minAltitudeM ?: JSONObject.NULL)
+            // Battery voltage extremes (owner pipeline task 3): explicit JSON null when the
+            // trip had no voltage samples - an import must tell "never measured" from 0 V.
+            put("minVoltageV", metadata.minVoltageV ?: JSONObject.NULL)
+            put("maxVoltageV", metadata.maxVoltageV ?: JSONObject.NULL)
         }
         root.put("sessionMetadata", metaObj)
 

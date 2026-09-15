@@ -174,6 +174,10 @@ object ZipImporter {
             // never defaulted to 0.0, which would read as "sea level" on the summary card.
             var maxAltitudeM: Double? = null
             var minAltitudeM: Double? = null
+            // Battery voltage extremes of the recorded trip (owner pipeline task 3). Null
+            // for backups written before 2026-09-16; never defaulted to 0.0.
+            var minVoltageV: Double? = null
+            var maxVoltageV: Double? = null
 
             var parsedTxCount = 0
             val txEntities = mutableListOf<TransactionRecord>()
@@ -194,6 +198,8 @@ object ZipImporter {
                         appVersion = metaObj.optString("appVersion", appVersion)
                         maxAltitudeM = JsonExporter.nullableDouble(metaObj, "maxAltitudeM")
                         minAltitudeM = JsonExporter.nullableDouble(metaObj, "minAltitudeM")
+                        minVoltageV = JsonExporter.nullableDouble(metaObj, "minVoltageV")
+                        maxVoltageV = JsonExporter.nullableDouble(metaObj, "maxVoltageV")
                     }
                     if (root.has("transactions")) {
                         val txArray = root.getJSONArray("transactions")
@@ -274,7 +280,9 @@ object ZipImporter {
                     appVersion = appVersion,
                     // A synthesized file must not drop what the imported one carried.
                     maxAltitudeM = maxAltitudeM,
-                    minAltitudeM = minAltitudeM
+                    minAltitudeM = minAltitudeM,
+                    minVoltageV = minVoltageV,
+                    maxVoltageV = maxVoltageV
                 )
                 JsonExporter.exportToJson(destJson, synthesizedMeta, txEntities)
             }
@@ -293,7 +301,9 @@ object ZipImporter {
                     endTimeUtc = endTimeUtc,
                     appVersion = appVersion,
                     maxAltitudeM = maxAltitudeM,
-                    minAltitudeM = minAltitudeM
+                    minAltitudeM = minAltitudeM,
+                    minVoltageV = minVoltageV,
+                    maxVoltageV = maxVoltageV
                 )
                 CsvExporter.exportTransactionsToCsv(destTxCsv, metaForCsv, txEntities)
             }
@@ -359,7 +369,9 @@ object ZipImporter {
                 // Elevation window travels with the trip log; null stays null so the summary
                 // shows the honest "-- m" instead of a made-up 0 m.
                 maxAltitudeM = maxAltitudeM,
-                minAltitudeM = minAltitudeM
+                minAltitudeM = minAltitudeM,
+                minVoltageV = minVoltageV,
+                maxVoltageV = maxVoltageV
             )
             tripRepository.insertTrip(tripEntity)
 

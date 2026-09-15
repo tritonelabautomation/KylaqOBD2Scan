@@ -233,3 +233,16 @@ val MIGRATION_9_10 = object : Migration(9, 10) {
         db.execSQL("ALTER TABLE `trips` ADD COLUMN `minAltitudeM` REAL DEFAULT NULL")
     }
 }
+
+/**
+ * v11: battery voltage extremes per trip (owner pipeline task 3, 2026-09-16:
+ * "Voltage min max recording"). Nullable columns following the altitude precedent:
+ * trips recorded before this migration keep NULL and the UI derives the extremes from
+ * stored samples or shows an honest blank - voltage records are measured, never invented.
+ */
+val MIGRATION_10_11 = object : Migration(10, 11) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `trips` ADD COLUMN `minVoltageV` REAL DEFAULT NULL")
+        db.execSQL("ALTER TABLE `trips` ADD COLUMN `maxVoltageV` REAL DEFAULT NULL")
+    }
+}
