@@ -49,7 +49,11 @@ is low. Computed from stored samples, so historical trips get analysed too.
   1. on-device: the detector runs over `2df90142`'s stored 0142 samples in the next build;
      the owner compares the reported first-flip time with the remembered 90-100 s halt at
      ~10 km and reports back;
-  2. re-attached CSV once the mount works, for an offline regression fixture.
+  2. re-attached CSV once the mount works, for an offline regression fixture;
+  3. `AcVoltageFixtureTest` is the standing harness for (2): drop the trip's
+     `<id>_samples.csv` at `app/src/test/resources/2df90142_samples.csv` (or set
+     `AC_FIXTURE_CSV`) and it activates in CI, printing flip minutes and confidence;
+     until the owner confirms the flip time it asserts invariants only.
   Thresholds are documented assumptions until one of these confirms them; the confidence
   flag keeps unvalidated splits visibly labelled.
 
