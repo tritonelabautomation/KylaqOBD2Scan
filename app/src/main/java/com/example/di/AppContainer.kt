@@ -33,6 +33,13 @@ object AppContainer {
     lateinit var gpsManager: GpsManager
     lateinit var settingsRepository: SettingsRepository
     lateinit var recordingManager: RecordingManager
+
+    /**
+     * Altitude range captured for the CURRENT recording (owner 2026-09-15 trip-summary
+     * fix). Null only before container init; RecordingManager persists min/max at stop.
+     */
+    fun tripAltitudeStats(): com.example.analysis.AltitudeStats? =
+        if (::gpsManager.isInitialized) gpsManager.tripAltitude else null
     lateinit var bluetoothManager: BluetoothManager
     lateinit var obdScheduler: ObdScheduler
     lateinit var pidDiscoveryService: com.example.discovery.PidDiscoveryService

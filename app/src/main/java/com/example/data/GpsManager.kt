@@ -6,6 +6,7 @@ import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Bundle
+import com.example.analysis.AltitudeStats
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -30,6 +31,13 @@ class GpsManager(private val context: Context) : LocationListener {
     private var totalDistance = 0f
 
     /**
+     * Per-trip GPS altitude range (owner 2026-09-15). Fed only fixes that pass the
+     * accuracy gate below AND report altitude; reset at every startTracking() so each
+     * recording gets its own min/max; persisted by RecordingManager at stop.
+     */
+    val tripAltitude = AltitudeStats()
+
+    /**
      * Starts GPS tracking.
      * @return true if GPS tracking was successfully started; false if GPS is unavailable or
      *         disabled. When false is returned, callers should surface a user-visible warning.
@@ -41,6 +49,10 @@ class GpsManager(private val context: Context) : LocationListener {
         try {
             val hasGps = locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
             if (hasGps) {
+                // New trip, new altitude window (owner 2026-09-15 trip-summary fix).
+                tripAltitude.reset()
+                totalDistance = 0f
+                lastLocation = null
                 // FIX TD-2 / MED: Use 5m min distance instead of 0f to avoid continuous GPS
                 // callbacks that drain battery. 5m is fine-grained enough for OBD correlation.
                 locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 5f, this)
@@ -86,6 +98,8 @@ class GpsManager(private val context: Context) : LocationListener {
         // QA fix: !! on a mutable property is a race-prone crash class; ?.let is equivalent and safe.
         lastLocation?.let { totalDistance += it.distanceTo(location) }
         lastLocation = location
+        // Trip altitude window: only accuracy-gated fixes that actually report altitude.
+        if (location.hasAltitude()) tripAltitude.record(location.altitude)
 
         _gpsData.value = GpsData(
             speedKmh = location.speed * 3.6f,

@@ -36,7 +36,10 @@ data class TripEntity(
     val avgVoltageV: Double = 0.0,
     val detectedEcus: String = "7E8", // Comma-separated CAN IDs e.g. "7E8, 7E9"
     val healthScore: Int = 100, // 0-100 score
-    val notes: String = ""
+    val notes: String = "",
+    /** GPS altitude extremes for this trip (accuracy-gated fixes only). Null = never captured (pre-v10 trips or no GPS fix) → UI shows an honest blank. Added 2026-09-15 (MIGRATION_9_10). */
+    val maxAltitudeM: Double? = null,
+    val minAltitudeM: Double? = null
 )
 
 /**

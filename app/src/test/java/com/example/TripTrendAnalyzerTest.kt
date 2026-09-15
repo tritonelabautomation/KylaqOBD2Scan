@@ -102,4 +102,43 @@ class TripTrendAnalyzerTest {
         assertEquals(com.example.engine.PowertrainModel.IDLE_FUEL_LH,
             TripTrendAnalyzer.MODEL_IDLE_LH, 1e-12)
     }
+
+    /**
+     * Owner 2026-09-15: the idle-burn trend read "0.00 L/h · -100% vs model" on real
+     * trips because the Room projection only carried "0C"/"0D" 2-hex fallbacks — the
+     * recorder stores 2-hex pids, so fuel rows ("9D"/"5E") never reached the analyzer.
+     * Every analyzed pid must appear in BOTH stored forms.
+     */
+    @Test
+    fun `trend projection carries both 4-hex and 2-hex forms of every analyzed pid`() {
+        val proj = TripTrendAnalyzer.TREND_PROJECTION_PIDS
+        listOf(
+            TripTrendAnalyzer.PID_RPM,
+            TripTrendAnalyzer.PID_SPEED,
+            TripTrendAnalyzer.PID_LOAD,
+            TripTrendAnalyzer.PID_TORQUE_PCT,
+            TripTrendAnalyzer.PID_FUEL_VOL,
+            TripTrendAnalyzer.PID_FUEL_MASS
+        ).forEach { p4 ->
+            assertTrue("4-hex $p4 missing from projection", p4 in proj)
+            assertTrue("2-hex ${p4.takeLast(2)} missing from projection", p4.takeLast(2) in proj)
+        }
+    }
+
+    /** Caller-side normalization (MainViewModel.computeTripTrends): "9D" -> "019D" feeds idle fuel. */
+    @Test
+    fun `idle window aggregates fuel from normalized 2-hex mass-flow samples`() {
+        // 60 s parked, rpm ~900, speed 0, fuel ~0.7 L/h via 019D = 0.1446 g/s.
+        val samples = mutableListOf<TripTrendAnalyzer.Sample>()
+        for (k in 0..60) {
+            val ts = k * 1000L
+            samples += s("t1", "010C", ts, 900.0)
+            samples += s("t1", "010D", ts, 0.0)
+            samples += s("t1", "019D", ts, 0.1446)
+        }
+        val pt = TripTrendAnalyzer.analyze(samples).single()
+        assertTrue("idle seconds should accumulate", pt.idleSec > 30.0)
+        val lh = pt.idleActualLh
+        assertTrue("idle L/h must be real, not 0.00", lh != null && lh > 0.5 && lh < 0.9)
+    }
 }

@@ -84,7 +84,8 @@ class TripRepository(context: Context) {
         } else {
             sampleDao.getSamplesForTrips(
                 tripIds,
-                listOf("010C", "010D", "0104", "0162", "015E", "019D", "0C", "0D")
+                // Both stored pid forms (4-hex + 2-hex) - see TripTrendAnalyzer.TREND_PROJECTION_PIDS.
+                com.example.analysis.TripTrendAnalyzer.TREND_PROJECTION_PIDS
             )
         }
     }

@@ -210,6 +210,11 @@ class RecordingManager(
         val detectedEcus = txList.mapNotNull { it.canRxId.takeIf { id -> id.isNotBlank() } }.distinct().joinToString(", ").ifBlank { "7E8" }
         val durationSec = maxOf(1L, (endTimestamp - sessionStartTimestamp) / 1000)
 
+        // GPS altitude window for this trip (owner 2026-09-15 fix: altitude was captured
+        // live but never persisted — the trip summary showed an honest "-- m" blank).
+        // Null only when the recording never had an accuracy-gated GPS fix with altitude.
+        val altStats = com.example.di.AppContainer.tripAltitudeStats()
+
         // Save complete entities into Room Database
         val tripEntity = TripEntity(
             id = metadata.sessionId,
@@ -230,7 +235,9 @@ class RecordingManager(
             maxCoolantC = maxCoolant,
             avgVoltageV = avgVolt,
             detectedEcus = detectedEcus,
-            healthScore = 100
+            healthScore = 100,
+            maxAltitudeM = altStats?.maxAltitudeM,
+            minAltitudeM = altStats?.minAltitudeM
         )
         tripRepository.insertTrip(tripEntity)
 

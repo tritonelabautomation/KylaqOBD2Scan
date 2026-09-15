@@ -219,3 +219,17 @@ val MIGRATION_7_8 = object : Migration(7, 8) {
         )
     }
 }
+
+/**
+ * v9 -> v10 (2026-09-15): persist per-trip GPS altitude extremes so the trip
+ * summary can show real "Max altitude" / "Altitude dif." instead of the honest
+ * "-- m" blank (owner question 2026-09-15). Nullable columns: trips recorded
+ * before this migration (or without a GPS fix) keep NULL and the UI keeps its
+ * honest blank — altitude is never invented, only measured.
+ */
+val MIGRATION_9_10 = object : Migration(9, 10) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `trips` ADD COLUMN `maxAltitudeM` REAL DEFAULT NULL")
+        db.execSQL("ALTER TABLE `trips` ADD COLUMN `minAltitudeM` REAL DEFAULT NULL")
+    }
+}

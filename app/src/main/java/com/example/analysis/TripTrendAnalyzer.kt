@@ -41,6 +41,18 @@ object TripTrendAnalyzer {
     const val PID_FUEL_VOL = "015E"
     const val PID_FUEL_MASS = "019D"
 
+    /**
+     * Room projection pid list for the cross-trip trend charts: every pid in BOTH its
+     * 4-hex form ("019D") and the 2-hex form the recorder actually stores ("9D").
+     * Owner 2026-09-15: the projection only carried "0C"/"0D" fallbacks, so fuel rows
+     * never reached the analyzer and the idle-burn trend read a flat 0.00 L/h
+     * ("-100% vs model") even on trips that burned real idle fuel.
+     */
+    val TREND_PROJECTION_PIDS = listOf(
+        PID_RPM, PID_SPEED, PID_LOAD, PID_TORQUE_PCT, PID_FUEL_VOL, PID_FUEL_MASS,
+        "0C", "0D", "04", "62", "5E", "9D"
+    )
+
     /** Matches PowertrainModel.IDLE_FUEL_LH - kept local so the analyzer stays dependency-free. */
     const val MODEL_IDLE_LH = 1.05
 

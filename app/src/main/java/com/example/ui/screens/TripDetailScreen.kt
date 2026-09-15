@@ -256,7 +256,13 @@ private fun TripOverviewView(
     ) {
         item {
             // Replicated OBDeleven trip-detail cards (owner reference screen 2, 2026-09-13)
-            TrackerSummaryCards(summary = summary, pricePerL = pricePerL, speedPoints = speedPoints)
+            TrackerSummaryCards(
+                summary = summary,
+                pricePerL = pricePerL,
+                speedPoints = speedPoints,
+                maxAltitudeM = trip.maxAltitudeM,
+                minAltitudeM = trip.minAltitudeM
+            )
         }
         item {
             // Health Badge Card

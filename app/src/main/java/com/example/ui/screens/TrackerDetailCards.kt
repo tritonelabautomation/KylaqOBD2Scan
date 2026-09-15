@@ -30,8 +30,10 @@ import com.example.analysis.WeeklyTripOverview
  * (tri-colour ring + Good chip + Hard braking / Rapid acceleration / Speed variability
  * gradient sliders with Abrupt→Controlled / Uneven→Steady captions).
  *
- * Honesty rule kept: altitude is not persisted by our OBD recorder, so those two cells say
- * "not recorded" instead of inventing metres (Batch-17 doctrine).
+ * Altitude (owner 2026-09-15): GPS fixes carry altitude and GpsManager now aggregates a
+ * per-trip min/max which RecordingManager persists (trips.maxAltitudeM / minAltitudeM,
+ * DB v10). Trips WITH accuracy-gated GPS fixes show real metres; older trips (or recordings
+ * without a GPS fix) keep the honest "-- m" blank instead of inventing metres (Batch-17 doctrine).
  */
 
 private val TkCard = Color(0xFF1C1C1E)
@@ -49,7 +51,10 @@ private val TkRed = Color(0xFFFF453A)
 fun TrackerSummaryCards(
     summary: TripFuelSummary.Summary,
     pricePerL: Double,
-    speedPoints: List<Pair<Long, Double>>
+    speedPoints: List<Pair<Long, Double>>,
+    /** GPS altitude extremes persisted per trip (owner 2026-09-15 fix). Null = no accuracy-gated GPS fix with altitude was recorded for this trip → honest blank. */
+    maxAltitudeM: Double? = null,
+    minAltitudeM: Double? = null
 ) {
     val analysis = remember(summary, speedPoints) {
         TripDriveAnalysis.analyse(speedPoints, summary.idleSeconds, summary.speedHistogram)
@@ -70,12 +75,30 @@ fun TrackerSummaryCards(
                 TkStat(Icons.Default.RocketLaunch, "%.0f km/h".format(summary.maxSpeedKmh), "Max speed")
             }
             TkDivider()
+            val altDiff = if (maxAltitudeM != null && minAltitudeM != null) maxAltitudeM - minAltitudeM else null
             TkRow {
-                TkStat(Icons.Default.Terrain, "-- m", "Max altitude *", withDivider = true)
-                TkStat(Icons.Default.TrendingUp, "-- m", "Altitude dif. *")
+                TkStat(
+                    Icons.Default.Terrain,
+                    maxAltitudeM?.let { "%.0f m".format(it) } ?: "-- m",
+                    if (maxAltitudeM != null) "Max altitude (GPS)" else "Max altitude *",
+                    withDivider = true
+                )
+                TkStat(
+                    Icons.Default.TrendingUp,
+                    altDiff?.let { "%.0f m".format(it) } ?: "-- m",
+                    if (altDiff != null) "Altitude dif. (GPS)" else "Altitude dif. *"
+                )
             }
             Spacer(Modifier.height(6.dp))
-            Text("* altitude is not persisted by the OBD recorder - honest blank, never invented", color = TkDim, fontSize = 9.sp)
+            Text(
+                if (maxAltitudeM != null) {
+                    "altitude from accuracy-gated GPS fixes (≤ 40 m) - persisted since 2026-09-15"
+                } else {
+                    "* no GPS altitude was persisted for this trip (recorded before 2026-09-15, or no accuracy-gated GPS fix) - honest blank, never invented"
+                },
+                color = TkDim,
+                fontSize = 9.sp
+            )
         }
 
         // ── Fuel usage ─────────────────────────────────────────────────────
