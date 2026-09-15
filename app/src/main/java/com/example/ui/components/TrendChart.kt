@@ -3,7 +3,12 @@ package com.example.ui.components
 import android.graphics.Paint
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroid
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,6 +25,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -38,8 +44,12 @@ import androidx.compose.ui.unit.sp
 import com.example.analysis.ChartSampling
 import com.example.analysis.SeriesRole
 import com.example.analysis.roleOfSeries
+import com.example.analysis.ZoomWindow
 import com.example.analysis.yDomain
+import com.example.analysis.zoomWindow
 import com.example.ui.theme.CyberCyan
+import com.example.ui.theme.DarkBorder
+import com.example.ui.theme.DarkSurfaceElevated
 import com.example.ui.theme.TextSecondaryDark
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -96,11 +106,6 @@ fun TrendChart(
         return
     }
 
-    // Per-series bucketization, all on ONE shared time domain so overlaying is honest:
-    // same x for same moment, whatever the signal.
-    val bucketed = remember(drawable, bucketTarget) {
-        drawable.map { ChartSampling.bucketize(it.points, bucketTarget) }
-    }
     val t0 = drawable.minOf { it.points.first().first }
     val t1 = drawable.maxOf { it.points.last().first }
     if (t1 <= t0) {
@@ -115,10 +120,26 @@ fun TrendChart(
 
     var scrubTs by remember { mutableStateOf<Long?>(null) }
 
+    // Pinch-zoom window (owner pipeline task 2), as fractions of the full trip domain.
+    // Reset whenever the underlying domain changes (different trip / signal set).
+    var view by remember(t0, t1) { mutableStateOf(ZoomWindow.FULL) }
+    val fullSpan = (t1 - t0).coerceAtLeast(1L)
+    val viewT0 = t0 + (view.startFrac * fullSpan).toLong()
+    val viewT1 = (t0 + (view.endFrac * fullSpan).toLong()).coerceAtLeast(viewT0 + 1L)
+
+    // Bucketize the VISIBLE slice only, so zooming in actually reveals detail instead of
+    // magnifying coarse full-trip means. Same x = same moment for every series.
+    val bucketed = remember(drawable, bucketTarget, viewT0, viewT1) {
+        drawable.map { line ->
+            val visible = line.points.filter { it.first in viewT0..viewT1 }
+            ChartSampling.bucketize(if (visible.size >= 2) visible else line.points, bucketTarget)
+        }
+    }
+
     Column(modifier = modifier) {
         // Legend: colored dot + name (unit); fitted series are labelled "fit". Hidden for
         // anonymous single-series callers so the old compact look survives.
-        if (drawable.any { it.name.isNotBlank() }) {
+        if (drawable.any { it.name.isNotBlank() } || view.span < 0.999) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -126,6 +147,24 @@ fun TrendChart(
                     .padding(bottom = 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                if (view.span < 0.999) {
+                    val spanMs = viewT1 - viewT0
+                    val spanLabel = if (spanMs >= 60_000L) "${spanMs / 60_000L} min" else "${spanMs / 1000L} s"
+                    Surface(
+                        modifier = Modifier.clickable { view = ZoomWindow.FULL },
+                        shape = CircleShape,
+                        color = DarkSurfaceElevated,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder)
+                    ) {
+                        Text(
+                            "\u27f2 full span (viewing $spanLabel)",
+                            color = CyberCyan,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                        )
+                    }
+                }
                 drawable.forEachIndexed { i, line ->
                     Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                         Box(
@@ -145,24 +184,52 @@ fun TrendChart(
             }
         }
 
-        val tickFmt = remember { SimpleDateFormat("HH:mm", Locale.US) }
+        // Adaptive time ticks: HH:mm:ss once the visible window is under 10 minutes.
+        val tickFmt = remember(viewT0, viewT1) {
+            SimpleDateFormat(if (viewT1 - viewT0 < 600_000L) "HH:mm:ss" else "HH:mm", Locale.US)
+        }
         val bubbleFmt = remember { SimpleDateFormat("HH:mm:ss", Locale.US) }
+        val viewState = rememberUpdatedState(Pair(viewT0, viewT1))
 
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
-                .pointerInput(bucketed, t0, t1) {
+                // Keys must NOT include the zoom state itself (restarting the gesture
+                // mid-pinch would stutter), so the handler reads the live window through
+                // rememberUpdatedState and writes back to the snapshot-state var.
+                .pointerInput(t0, t1, drawable.size) {
                     val left = 46.dp.toPx()
                     val right = if (drawable.size >= 2) 46.dp.toPx() else 10.dp.toPx()
                     val plotW = (size.width - left - right).coerceAtLeast(1f)
-                    detectDragGestures(
-                        onDragEnd = { scrubTs = null },
-                        onDragCancel = { scrubTs = null }
-                    ) { change, _ ->
-                        change.consume()
-                        val frac = ((change.position.x - left) / plotW).coerceIn(0f, 1f)
-                        scrubTs = t0 + (frac * (t1 - t0)).toLong()
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed = false)
+                        var transforming = false
+                        var event = awaitPointerEvent()
+                        while (event.changes.any { it.pressed }) {
+                            val pressed = event.changes.count { it.pressed }
+                            if (pressed >= 2) {
+                                // Two fingers: pinch = zoom around the centroid, drag = pan.
+                                transforming = true
+                                scrubTs = null
+                                val zoom = event.calculateZoom().toDouble()
+                                val pan = event.calculatePan()
+                                val centroid = event.calculateCentroid()
+                                val centroidFrac = ((centroid.x - left) / plotW).toDouble().coerceIn(0.0, 1.0)
+                                val panFrac = (pan.x / plotW).toDouble()
+                                view = zoomWindow(view, centroidFrac, zoom, panFrac)
+                                event.changes.forEach { it.consume() }
+                            } else if (pressed == 1 && !transforming) {
+                                // One finger: scrub crosshair within the VISIBLE window.
+                                val change = event.changes.first()
+                                val frac = ((change.position.x - left) / plotW).coerceIn(0f, 1f)
+                                val (vt0, vt1) = viewState.value
+                                scrubTs = vt0 + (frac * (vt1 - vt0)).toLong()
+                                change.consume()
+                            }
+                            event = awaitPointerEvent()
+                        }
+                        scrubTs = null
                     }
                 }
         ) {
@@ -180,7 +247,7 @@ fun TrendChart(
                 yDomain(line.points.minOf { it.second }, line.points.maxOf { it.second })
             }
 
-            fun xOf(ts: Long) = left + ((ts - t0).toDouble() / (t1 - t0)) * plotW
+            fun xOf(ts: Long) = left + ((ts - viewT0).toDouble() / (viewT1 - viewT0)) * plotW
             fun yOf(seriesIdx: Int, v: Double): Float {
                 val (yMin, ySpan) = domains[seriesIdx]
                 return (top + (1.0 - (v - yMin) / ySpan) * plotH).toFloat()
@@ -234,7 +301,7 @@ fun TrendChart(
 
             // ── vertical time ticks ──
             for (i in 0..5) {
-                val ts = t0 + ((t1 - t0) * i / 5.0).toLong()
+                val ts = viewT0 + ((viewT1 - viewT0) * i / 5.0).toLong()
                 val x = xOf(ts).toFloat()
                 drawLine(gridColor.copy(alpha = 0.6f), Offset(x, top), Offset(x, top + plotH), strokeWidth = 1f)
                 val label = tickFmt.format(Date(ts))

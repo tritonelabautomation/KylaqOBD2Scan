@@ -465,7 +465,7 @@ private fun TripTrendsView(
             }
         }
         Text(
-            "Tap to overlay up to 4 signals \u00b7 first picked = left axis \u00b7 second = right axis \u00b7 drag on chart to read values",
+            "Tap to overlay up to 4 signals \u00b7 first picked = left axis \u00b7 second = right axis \u00b7 pinch to zoom \u00b7 drag to read values",
             color = TextSecondaryDark,
             fontSize = 10.sp
         )
