@@ -15,10 +15,13 @@ on:
 
 jobs:
   # FIX (CI never ran the tests): this workflow only executed `assembleDebug`, so a whole
-  # batch of failing and self-contradictory unit tests shipped unnoticed. Unit tests now run
-  # as their own job with their own commit status context (`ci/unit-tests`) so results are
-  # visible on every push and pull request without blocking APK artifacts. Once the suite is
-  # confirmed green, add `needs: unit-tests` to the `build` job to make it a hard gate.
+  # batch of failing and self-contradictory unit tests shipped unnoticed. Unit tests run as
+  # their own job with their own commit status context (`ci/unit-tests`) so results are
+  # visible on every push and pull request.
+  # 2026-09-15: the "add needs: unit-tests once the suite is green" TODO is now in force -
+  # see the gate on the `build` job. Leaving the two jobs parallel meant a red suite still
+  # produced a signed APK and still published it to the rolling release that phones install
+  # from (build 10192 shipped with broken raw-log recovery this way).
   unit-tests:
     runs-on: ubuntu-latest
 
@@ -131,6 +134,11 @@ jobs:
             -f context="ci/unit-tests" || echo "Status report failed (non-fatal)"
 
   build:
+    # HARD GATE (2026-09-15): do not sign, publish or offer a build whose tests failed.
+    # A red suite leaves the rolling release untouched, so phones keep the last known-good
+    # build instead of being prompted to install a broken one. The failure is still reported
+    # on the commit (`ci/unit-tests`) and as a pull-request digest comment.
+    needs: unit-tests
     runs-on: ubuntu-latest
 
     # REQUIRED: Without this, GITHUB_TOKEN has zero permissions and the status

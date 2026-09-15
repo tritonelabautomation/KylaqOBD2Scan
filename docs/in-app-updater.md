@@ -73,9 +73,13 @@ password would silently break signing instead of falling back
 push to main or arena/*
       │
       ▼
- GitHub Actions  ── gradle assembleDebug (signed with the stable sideload key)
+ GitHub Actions  ── unit tests first, then gradle assembleDebug (stable sideload key)
       │             versionCode = 10000 + GITHUB_RUN_NUMBER   (always increases)
       │             versionName = 1.0.<run number>
+      │             The build job `needs: unit-tests`, so a build whose tests failed is
+      │             never signed and never published — the rolling release keeps serving
+      │             the last known-good APK instead of offering a broken one.
+      │             (Build 10192 was published while red, before this gate existed.)
       ▼
  rolling Release "latest"   (push events only — a pull_request run must never publish
       │                      unreviewed code, and its token cannot write releases)
