@@ -67,6 +67,32 @@ class FuelioImporterTest {
     }
 
     @Test
+    fun semicolonEuDialectWithDecimalCommasAndTotalPrice() {
+        val csv = """
+            ## Log;;;;;;;;;;
+            Data;Odo (km);Fuel (litres);Full;Total price;mpg (optional);latitude (optional);longitude (optional);City (optional);Notes (optional);Missed
+            2026-08-01;12000;40,5;full;4252,50;;;;;IOCL;;0
+        """.trimIndent()
+        val e = FuelioImporter.parse(csv, 0L).entries.single()
+        assertEquals(40.5, e.liters, 1e-9)
+        assertEquals(4252.50 / 40.5, e.pricePerL, 1e-6)   // total / litres
+        assertEquals(false, e.partial)                    // "full" word flag
+        assertEquals("IOCL", e.station)
+    }
+
+    @Test
+    fun aliasHeadersOdometerQuantityFillupType() {
+        val csv = """
+            Date,Odometer,Quantity,Fillup type,Price per litre,Station,Notes
+            2026-08-01,12000,40.5,partial,105.5,HP,top-up
+        """.trimIndent()
+        val e = FuelioImporter.parse(csv, 0L).entries.single()
+        assertEquals(40.5, e.liters, 1e-9)
+        assertEquals(true, e.partial)
+        assertEquals("HP", e.station)
+    }
+
+    @Test
     fun garbageFileYieldsNothingNotACrash() {
         assertEquals(0, FuelioImporter.parse("hello,world\n1,2,3", 0L).entries.size)
     }

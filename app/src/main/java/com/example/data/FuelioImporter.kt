@@ -36,6 +36,9 @@ object FuelioImporter {
             .filter { it.isNotBlank() }
             .toList()
         if (lines.isEmpty()) return Parsed(emptyList(), 0)
+        // EU Fuelio builds export semicolon-separated with decimal commas.
+        val probe = lines.first { it.contains(',') || it.contains(';') }
+        val delim = if (probe.count { it == ';' } > probe.count { it == ',' }) ';' else ','
 
         val dateFormat = vehicleDateFormat(lines)
         var headerIdx = -1
@@ -45,22 +48,25 @@ object FuelioImporter {
         } else {
             // Flat-export fallback: first line that looks like a fill-up header.
             headerIdx = lines.indexOfFirst { l ->
-                val c = split(l).map { it.lowercase() }
+                val c = split(l, delim).map { it.lowercase() }
                 (c.any { it.startsWith("date") || it == "data" }) &&
                     (c.any { it.startsWith("odo") }) &&
                     (c.any { it.startsWith("fuel") })
             }
         }
         if (headerIdx < 0) return Parsed(emptyList(), 0)
-        val header = split(lines[headerIdx])
+        val header = split(lines[headerIdx], delim)
         val cols = header.map { it.lowercase() }
         val iDate = cols.indexOfFirst { it == "data" || it.startsWith("date") }
         val iOdo = cols.indexOfFirst { it.startsWith("odo") }
-        val iFuel = cols.indexOfFirst { it.startsWith("fuel") }
-        val iFull = cols.indexOfFirst { it == "full" }
-        val iPrice = cols.indexOfFirst { it.startsWith("price") }
+        val iFuel = cols.indexOfFirst {
+            it.startsWith("fuel") || it.startsWith("quantity") || it == "litres" || it == "liters"
+        }
+        val iFull = cols.indexOfFirst { it == "full" || it.startsWith("fillup") || it == "type" }
+        val iPrice = cols.indexOfFirst { it.startsWith("price") && !it.contains("total") }
+        val iTotal = cols.indexOfFirst { it.contains("total") && (it.contains("price") || it.contains("cost")) }
         val iCity = cols.indexOfFirst { it.startsWith("city") || it.startsWith("station") }
-        val iNotes = cols.indexOfFirst { it.startsWith("notes") }
+        val iNotes = cols.indexOfFirst { it.startsWith("notes") || it.startsWith("comment") }
         val iMissed = cols.indexOfFirst { it.startsWith("missed") }
         if (iDate < 0 || iFuel < 0) return Parsed(emptyList(), 0)
 
@@ -79,19 +85,24 @@ object FuelioImporter {
         for (idx in headerIdx + 1..lines.lastIndex) {
             val line = lines[idx]
             if (line.startsWith("##")) continue
-            val c = split(line)
+            val c = split(line, delim)
             if (c.size <= iDate || c.size <= iFuel) continue
             val dateMs = parseDate(c[iDate], dateFormat) ?: continue
-            val fuelUnits = c[iFuel].toDoubleOrNull() ?: continue
+            val fuelUnits = num(c[iFuel], delim) ?: continue
             val liters = fuelUnits * unitToL
             if (liters <= 0.0) continue
-            val odoKm = if (iOdo >= 0 && c.size > iOdo) c[iOdo].toDoubleOrNull()?.let { it * odoToKm } else null
-            val pricePerUnit = if (iPrice >= 0 && c.size > iPrice) c[iPrice].toDoubleOrNull() else null
-            val full = if (iFull >= 0 && c.size > iFull) c[iFull].toIntOrNull() else null
+            val odoKm = if (iOdo >= 0 && c.size > iOdo) num(c[iOdo], delim)?.let { it * odoToKm } else null
+            val pricePerUnit = if (iPrice >= 0 && c.size > iPrice) num(c[iPrice], delim) else null
+            val totalCost = if (iTotal >= 0 && c.size > iTotal) num(c[iTotal], delim) else null
+            val full = if (iFull >= 0 && c.size > iFull) fullFlag(c[iFull]) else null
             val missed = if (iMissed >= 0 && c.size > iMissed) c[iMissed].toIntOrNull() else null
             val station = if (iCity >= 0 && c.size > iCity) c[iCity].trim() else ""
             val notes = if (iNotes >= 0 && c.size > iNotes) c[iNotes].trim() else ""
-            val pricePerL = (pricePerUnit ?: 0.0).let { if (it > 0.0) it / unitToL else 0.0 }
+            val pricePerL = when {
+                (pricePerUnit ?: 0.0) > 0.0 -> pricePerUnit!! / unitToL
+                (totalCost ?: 0.0) > 0.0 -> totalCost!! / liters
+                else -> 0.0
+            }
             val note = buildString {
                 append(notes)
                 if (pricePerL <= 0.0) append(" (imported from Fuelio - export carried no price)")
@@ -130,7 +141,7 @@ object FuelioImporter {
     private fun vehicleDateFormat(lines: List<String>): String? {
         val mark = lines.indexOfFirst { it.startsWith("## Vehicle", ignoreCase = true) }
         if (mark < 0 || mark + 2 > lines.lastIndex) return null
-        val valueRow = split(lines[mark + 2])
+        val valueRow = split(lines[mark + 2], if (lines[mark + 2].count { it == ';' } > lines[mark + 2].count { it == ',' }) ';' else ',')
         return valueRow.getOrNull(5)?.takeIf { it.isNotBlank() && it.contains('y', true) }
     }
 
@@ -154,8 +165,20 @@ object FuelioImporter {
             .apply { timeZone = TimeZone.getTimeZone("UTC") }
             .format(java.util.Date(millis))
 
-    /** Quote-aware CSV split (Fuelio quotes fields containing commas). */
-    internal fun split(line: String): List<String> {
+    private fun num(raw: String, delim: Char): Double? {
+        val v = raw.trim().replace(" ", "")
+        return v.toDoubleOrNull() ?: if (delim == ';') v.replace(',', '.').toDoubleOrNull() else null
+    }
+
+    private fun fullFlag(raw: String): Int? =
+        raw.trim().toIntOrNull() ?: when (raw.trim().lowercase()) {
+            "full", "yes", "true" -> 1
+            "partial", "part", "no", "false" -> 0
+            else -> null
+        }
+
+    /** Quote-aware CSV split (Fuelio quotes fields containing the delimiter). */
+    internal fun split(line: String, delim: Char = ','): List<String> {
         val out = mutableListOf<String>()
         val cur = StringBuilder()
         var inQuotes = false
@@ -165,7 +188,7 @@ object FuelioImporter {
             when {
                 inQuotes && ch == '"' && i + 1 < line.length && line[i + 1] == '"' -> { cur.append('"'); i++ }
                 ch == '"' -> inQuotes = !inQuotes
-                ch == ',' && !inQuotes -> { out.add(cur.toString().trim()); cur.setLength(0) }
+                ch == delim && !inQuotes -> { out.add(cur.toString().trim()); cur.setLength(0) }
                 else -> cur.append(ch)
             }
             i++
