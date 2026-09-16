@@ -15,6 +15,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -130,7 +131,7 @@ class RecordingManager(
         lastRxAtMs = System.currentTimeMillis()
         watchdogJob?.cancel()
         watchdogJob = CoroutineScope(Dispatchers.IO).launch {
-            while (kotlinx.coroutines.isActive) {
+            while (isActive) {
                 kotlinx.coroutines.delay(20_000L)
                 if (_isRecording.value && shouldAutoStop(lastRxAtMs, System.currentTimeMillis())) {
                     _autoStopNotice.value =
