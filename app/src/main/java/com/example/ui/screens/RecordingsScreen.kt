@@ -48,6 +48,13 @@ fun RecordingsScreen(
     val importStatusMessage by viewModel.importStatusMessage.collectAsState()
     val tripRepo = viewModel.recordingManager.tripRepository
 
+    // Unsaved raw-log recovery (owner 2026-09-15): drives killed before STOP could
+    // finalize them never reached Room, but their raw OBD log was flushed to disk line
+    // by line, so they can still be rebuilt here — no PC, no adb, no re-recording.
+    val unsavedRawLogs by viewModel.unsavedRawLogs.collectAsState()
+    val isRecovering by viewModel.isRecovering.collectAsState()
+    LaunchedEffect(Unit) { viewModel.refreshUnsavedRawLogs() }
+
     var renamingRecording by remember { mutableStateOf<SavedRecording?>(null) }
     var deletingRecording by remember { mutableStateOf<SavedRecording?>(null) }
     var storageStats by remember { mutableStateOf<StorageStats?>(null) }
@@ -64,6 +71,13 @@ fun RecordingsScreen(
 
     LaunchedEffect(savedRecordings) {
         storageStats = tripRepo.getStorageStats()
+    }
+
+    // Cross-trip trends (rpm / speed / load / torque / idle-vs-model) computed from the
+    // stored Room telemetry samples of the newest recorded trips.
+    var trends by remember { mutableStateOf<List<com.example.analysis.TripTrendPoint>>(emptyList()) }
+    LaunchedEffect(savedRecordings.size) {
+        trends = runCatching { viewModel.computeTripTrends() }.getOrDefault(emptyList())
     }
 
     LaunchedEffect(importStatusMessage) {
@@ -166,6 +180,85 @@ fun RecordingsScreen(
             }
         }
 
+        // ── Recovery banner: unsaved raw-log sessions still on this phone ──────────
+        if (unsavedRawLogs.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(10.dp))
+            Surface(
+                modifier = Modifier.fillMaxWidth().testTag("recovery_banner"),
+                shape = RoundedCornerShape(12.dp),
+                color = ElectricAmber.copy(alpha = 0.14f)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Default.SettingsBackupRestore,
+                            contentDescription = null,
+                            tint = ElectricAmber,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "${unsavedRawLogs.size} unsaved log session(s) found on this phone",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "These drives ended before STOP could save them (app killed, battery " +
+                            "optimisation, or a crash), but every OBD line stayed on disk. Recover " +
+                            "rebuilds the full trip — fuel, trends and X-ray — from that raw log.",
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    unsavedRawLogs.forEach { logFile ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "session " +
+                                        (com.example.analysis.RawLogRecovery.sessionIdOf(logFile.name) ?: logFile.name),
+                                    fontSize = 11.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US)
+                                        .format(java.util.Date(logFile.lastModified())) +
+                                        " · ${logFile.length() / 1024} KB raw log",
+                                    fontSize = 9.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Button(
+                                onClick = { viewModel.recoverRawLog(logFile) },
+                                enabled = !isRecovering,
+                                modifier = Modifier.height(30.dp).testTag("btn_recover_raw_log"),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = ElectricAmber),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)
+                            ) {
+                                if (isRecovering) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(14.dp),
+                                        color = Color.Black,
+                                        strokeWidth = 2.dp
+                                    )
+                                } else {
+                                    Text("Recover", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         Spacer(modifier = Modifier.height(12.dp))
 
         if (savedRecordings.isEmpty()) {
@@ -198,9 +291,57 @@ fun RecordingsScreen(
                 }
             }
         } else {
+            // ---- Vehicle trends across recorded trips (owner-requested) ----
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        "VEHICLE TRENDS - your last ${trends.size} recorded trip(s)",
+                        color = CyberCyan, fontWeight = FontWeight.Bold, fontSize = 12.sp
+                    )
+                    if (trends.size >= 2) {
+                        TrendRow("avg engine rpm", trends.mapNotNull { it.avgRpm }, "%.0f", NeonEmerald)
+                        TrendRow("avg speed (km/h)", trends.mapNotNull { it.avgSpeedKmh }, "%.1f", CyberCyan)
+                        TrendRow("avg engine load (%)", trends.mapNotNull { it.avgLoadPct }, "%.1f", ElectricAmber)
+                        TrendRow("avg torque (Nm, from PID 0162)", trends.mapNotNull { it.avgTorqueNm }, "%.1f", NeonEmerald)
+                        val idlePts = trends.filter { it.idleActualLh != null }
+                        if (idlePts.size >= 2) {
+                            Text(
+                                "idle burn vs math model (model = %.2f L/h):".format(java.util.Locale.US, com.example.analysis.TripTrendAnalyzer.MODEL_IDLE_LH),
+                                color = TextSecondaryDark, fontSize = 10.sp
+                            )
+                            SimpleLineChart(
+                                idlePts.mapNotNull { it.idleActualLh }.map { it.toFloat() },
+                                Modifier.fillMaxWidth().height(56.dp),
+                                ElectricAmber
+                            )
+                            val f = idlePts.first()
+                            val l = idlePts.last()
+                            Text(
+                                "idle ${String.format(java.util.Locale.US, "%.2f", f.idleActualLh!!)} → ${String.format("%.2f", l.idleActualLh!!)} L/h " +
+                                    "(model %.2f)".format(java.util.Locale.US, com.example.analysis.TripTrendAnalyzer.MODEL_IDLE_LH) +
+                                    (l.idleExcessPct?.let { " · latest ${if (it >= 0) "+" else ""}${String.format(java.util.Locale.US, "%.0f", it)}% vs model" } ?: ""),
+                                color = if ((l.idleExcessPct ?: 0.0) > 25.0) WarningRed else TextSecondaryDark,
+                                fontSize = 10.sp
+                            )
+                        }
+                    } else {
+                        Text(
+                            "Record at least 2 trips with OBD logging and the rpm / speed / load / torque " +
+                                "and idle-vs-model trend charts appear here.",
+                            color = TextSecondaryDark, fontSize = 10.sp
+                        )
+                    }
+                }
+            }
+
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                contentPadding = PaddingValues(bottom = 96.dp)
             ) {
                 items(savedRecordings, key = { it.metadata.sessionId }) { rec ->
                     RecordingItemCard(
@@ -455,5 +596,32 @@ private fun shareFile(context: Context, file: File, mimeType: String) {
         context.startActivity(chooser)
     } catch (e: Exception) {
         Toast.makeText(context, "Share error: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+    }
+}
+
+/** One labelled sparkline with first → last and drift % (needs >= 2 points to draw). */
+@Composable
+private fun TrendRow(label: String, values: List<Double>, fmt: String, color: Color) {
+    if (values.size < 2) return
+    val first = values.first()
+    val last = values.last()
+    val drift = if (first != 0.0) (last - first) / kotlin.math.abs(first) * 100.0 else 0.0
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(label, color = TextSecondaryDark, fontSize = 10.sp)
+            Text(
+                "${String.format(fmt, first)} → ${String.format(fmt, last)} " +
+                    "(${if (drift >= 0) "+" else ""}${String.format(java.util.Locale.US, "%.0f", drift)}%)",
+                color = color, fontSize = 10.sp, fontWeight = FontWeight.SemiBold
+            )
+        }
+        SimpleLineChart(
+            values.map { it.toFloat() },
+            Modifier.fillMaxWidth().height(48.dp),
+            color
+        )
     }
 }

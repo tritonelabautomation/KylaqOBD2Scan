@@ -4,9 +4,10 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -17,10 +18,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -31,11 +29,17 @@ import com.example.data.db.entities.AiAnalysisEntity
 import com.example.data.db.entities.RawLogEntity
 import com.example.data.db.entities.TelemetrySampleEntity
 import com.example.data.db.entities.TripEntity
+import com.example.ui.components.TrendChart
+import com.example.ui.components.TrendLine
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.MainViewModel
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import kotlin.math.abs
 
 enum class TripDetailTab {
     OVERVIEW,
@@ -64,7 +68,16 @@ fun TripDetailScreen(
 
     var selectedTab by remember { mutableStateOf(TripDetailTab.OVERVIEW) }
     var rawFilter by remember { mutableStateOf("ALL") }
-    var selectedTrendPid by remember { mutableStateOf("010C") } // RPM default
+    // Pipeline task 1 (owner 2026-09-16): multi-signal overlay. TAP ORDER matters -
+    // first picked owns the left axis, second the right axis, 3rd/4th are scaled to fit.
+    var selectedTrendPids by remember { mutableStateOf(listOf("010C")) }
+
+    // "Log fuel" for this trip: fuel rate integrated over the stored samples.
+    val fuelSummary = remember(samples) {
+        com.example.analysis.TripFuelSummary.summarize(
+            samples.map { com.example.analysis.TripFuelSummary.SamplePoint(it.pid, it.timestamp, it.numericValue) }
+        )
+    }
 
     LaunchedEffect(tripId) {
         trip = tripRepo.getTripById(tripId)
@@ -162,13 +175,30 @@ fun TripDetailScreen(
 
             when (selectedTab) {
                 TripDetailTab.OVERVIEW -> {
-                    TripOverviewView(trip = trip, sampleCount = samples.size, rawCount = rawLogs.size, analysis = aiAnalysis)
+                    Column {
+                        TripFuelLogCard(fuelSummary)
+                        TripOverviewView(
+                            trip = trip, sampleCount = samples.size, rawCount = rawLogs.size, analysis = aiAnalysis,
+                            summary = fuelSummary,
+                            pricePerL = viewModel.fuelLogRepository.entries().maxByOrNull { it.idMs }?.pricePerL ?: 0.0,
+                            speedPoints = samples.filter { it.pid.takeLast(2) == "0D" }
+                                .map { it.timestamp to (it.numericValue ?: 0.0) }
+                        )
+                    }
                 }
                 TripDetailTab.TRENDS -> {
                     TripTrendsView(
                         samples = samples,
-                        selectedPid = selectedTrendPid,
-                        onSelectPid = { selectedTrendPid = it }
+                        selectedPids = selectedTrendPids,
+                        onTogglePid = { pid ->
+                            selectedTrendPids = when {
+                                pid in selectedTrendPids ->
+                                    if (selectedTrendPids.size > 1) selectedTrendPids - pid
+                                    else selectedTrendPids // keep at least one signal
+                                selectedTrendPids.size < 4 -> selectedTrendPids + pid
+                                else -> selectedTrendPids // 4-way overlay cap
+                            }
+                        }
                     )
                 }
                 TripDetailTab.AI_DOCTOR -> {
@@ -202,7 +232,8 @@ fun TripDetailScreen(
                     TripExportView(
                         tripId = tripId,
                         trip = trip,
-                        context = context
+                        context = context,
+                        summary = fuelSummary
                     )
                 }
             }
@@ -215,7 +246,10 @@ private fun TripOverviewView(
     trip: TripEntity?,
     sampleCount: Int,
     rawCount: Int,
-    analysis: AiAnalysisEntity?
+    analysis: AiAnalysisEntity?,
+    summary: com.example.analysis.TripFuelSummary.Summary,
+    pricePerL: Double,
+    speedPoints: List<Pair<Long, Double>>
 ) {
     if (trip == null) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -228,6 +262,16 @@ private fun TripOverviewView(
         modifier = Modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        item {
+            // Replicated OBDeleven trip-detail cards (owner reference screen 2, 2026-09-13)
+            TrackerSummaryCards(
+                summary = summary,
+                pricePerL = pricePerL,
+                speedPoints = speedPoints,
+                maxAltitudeM = trip.maxAltitudeM,
+                minAltitudeM = trip.minAltitudeM
+            )
+        }
         item {
             // Health Badge Card
             Surface(
@@ -350,94 +394,154 @@ private fun DetailRow(label: String, value: String) {
     }
 }
 
+/**
+ * pid -> name -> unit -> series colour (chip fill + line + legend dot all match).
+ * [transform] converts stored raw values for derived channels: Torque plots PID 0162
+ * (percent-of-reference) as Nm via the ECU's own 0164 reference or the factory plateau.
+ */
+private data class TrendChannel(
+    val pid: String,
+    val name: String,
+    val unit: String,
+    val color: Color,
+    val transform: ((Double) -> Double)? = null
+)
+
 @Composable
 private fun TripTrendsView(
     samples: List<TelemetrySampleEntity>,
-    selectedPid: String,
-    onSelectPid: (String) -> Unit
+    selectedPids: List<String>,
+    onTogglePid: (String) -> Unit
 ) {
-    val pids = listOf(
-        "010C" to "Engine RPM",
-        "010D" to "Speed",
-        "0105" to "Coolant",
-        "010B" to "MAP / Boost",
-        "0142" to "Voltage",
-        "0111" to "Throttle",
-        "0104" to "Load"
+    // Pipeline task 1 (owner 2026-09-16: "let me add multiple signals the same trend see
+    // the behaviour w.r.t other signal"): chips now TOGGLE (up to 4 at once) and every
+    // selected signal draws on the same time axis with its own colour. First picked keeps
+    // the labelled left axis + envelope/area treatment; second gets a labelled right axis;
+    // 3rd/4th are scaled to fit and flagged "fit" in the legend - exact values via the
+    // crosshair bubble, which lists every overlaid signal with its own unit.
+    // Reference torque for the derived Nm channel: the ECU's own 0164 when it answered,
+    // else the factory 178 Nm plateau (owner pipeline task 6: "Engine torque calculations").
+    val torqueRefNm = samples
+        .firstOrNull { it.pid.equals("0164", ignoreCase = true) || it.pid.equals("64", ignoreCase = true) }
+        ?.numericValue
+        ?: com.example.engine.PowertrainModel.PEAK_TORQUE_NM
+    val channels = listOf(
+        TrendChannel("010C", "Engine RPM", "rpm", CyberCyan),
+        TrendChannel("010D", "Speed", "km/h", NeonEmerald),
+        // Bright cyan, NOT WarningRed: the owner's red accent theme paints Engine RPM in
+        // red, and two reds on one chart defeat the whole point of per-signal colours
+        // (owner question 2026-09-16: "does it show some variation of colour for each
+        // signal so I can see difference easily?").
+        TrendChannel("0105", "Coolant", "\u00b0C", Color(0xFF00E5FF)),
+        TrendChannel("010B", "MAP / Boost", "kPa", ResearchPurple),
+        TrendChannel("0142", "Voltage", "V", ElectricAmber),
+        TrendChannel("0111", "Throttle", "%", Color(0xFFFF6EC7)),
+        TrendChannel("0104", "Load", "%", Color(0xFF64FFDA)),
+        TrendChannel(
+            "0162", "Torque", "Nm", Color(0xFF64B5F6),
+            transform = { pct -> com.example.engine.PowertrainModel.torqueNmFromPercent(pct, torqueRefNm) }
+        )
     )
 
-    val targetSamples = samples.filter { it.pid.equals(selectedPid.removePrefix("01"), ignoreCase = true) || it.pid.equals(selectedPid, ignoreCase = true) }
-    val numericValues = targetSamples.mapNotNull { it.numericValue }
+    fun pointsFor(ch: TrendChannel): List<Pair<Long, Double>> = samples
+        .filter { it.pid.equals(ch.pid.removePrefix("01"), ignoreCase = true) || it.pid.equals(ch.pid, ignoreCase = true) }
+        .mapNotNull { smp -> smp.numericValue?.let { smp.timestamp to (ch.transform?.invoke(it) ?: it) } }
+        .sortedBy { it.first }
+
+    // Selection order = axis priority; thin channels drop out here (chart re-checks too).
+    val lines = selectedPids.mapNotNull { pid ->
+        val ch = channels.firstOrNull { it.pid == pid } ?: return@mapNotNull null
+        val pts = pointsFor(ch)
+        if (pts.size < 2) null else TrendLine(points = pts, name = ch.name, unit = ch.unit, color = ch.color)
+    }
+    val primary = lines.firstOrNull()
 
     Column(
         modifier = Modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // PID Selector Chips
-        ScrollableTabRow(
-            selectedTabIndex = pids.indexOfFirst { it.first == selectedPid }.coerceAtLeast(0),
-            containerColor = Color.Transparent,
-            contentColor = CyberCyan,
-            edgePadding = 0.dp,
-            divider = {}
+        // Channel chips: selected chip fills with THAT series' colour so chip, legend dot
+        // and plotted line are unmistakably the same signal.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            pids.forEach { (pid, name) ->
-                val isSelected = selectedPid == pid
-                FilterChip(
-                    selected = isSelected,
-                    onClick = { onSelectPid(pid) },
-                    label = { Text(name, fontSize = 11.sp) },
-                    modifier = Modifier.padding(end = 6.dp)
-                )
-            }
-        }
-
-        // Trend Canvas Chart
-        Surface(
-            modifier = Modifier.fillMaxWidth().height(220.dp),
-            shape = RoundedCornerShape(14.dp),
-            color = DarkSurface,
-            border = androidx.compose.foundation.BorderStroke(1.dp, CyberCyan.copy(alpha = 0.2f))
-        ) {
-            if (numericValues.size < 2) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("Insufficient sample points to render trend", color = TextSecondaryDark, fontSize = 12.sp)
-                }
-            } else {
-                val minVal = numericValues.minOrNull() ?: 0.0
-                val maxVal = numericValues.maxOrNull() ?: 1.0
-                val range = if (maxVal - minVal > 0.001) maxVal - minVal else 1.0
-
-                Canvas(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-                    val w = size.width
-                    val h = size.height
-
-                    // Grid lines
-                    drawLine(Color(0xFF2A2D3A), Offset(0f, 0f), Offset(w, 0f), strokeWidth = 1f)
-                    drawLine(Color(0xFF2A2D3A), Offset(0f, h / 2f), Offset(w, h / 2f), strokeWidth = 1f)
-                    drawLine(Color(0xFF2A2D3A), Offset(0f, h), Offset(w, h), strokeWidth = 1f)
-
-                    val path = Path()
-                    val stepX = w / (numericValues.size - 1)
-
-                    numericValues.forEachIndexed { i, v ->
-                        val normY = ((v - minVal) / range).toFloat()
-                        val y = h - (normY * h)
-                        val x = i * stepX
-                        if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
-                    }
-
-                    drawPath(
-                        path = path,
-                        color = CyberCyan,
-                        style = Stroke(width = 3.dp.toPx())
+            channels.forEach { ch ->
+                val isSelected = ch.pid in selectedPids
+                Surface(
+                    modifier = Modifier.clickable { onTogglePid(ch.pid) },
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (isSelected) ch.color else DarkSurface,
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.dp,
+                        if (isSelected) ch.color else DarkBorder
+                    )
+                ) {
+                    Text(
+                        ch.name,
+                        fontSize = 11.sp,
+                        color = if (isSelected) Color.White else TextSecondaryDark,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
                     )
                 }
             }
         }
+        Text(
+            "Tap to overlay up to 4 signals \u00b7 first picked = left axis \u00b7 second = right axis \u00b7 pinch to zoom \u00b7 drag to read values",
+            color = TextSecondaryDark,
+            fontSize = 10.sp
+        )
 
-        // Stats summary
-        if (numericValues.isNotEmpty()) {
+        // Trend chart (owner 2026-09-16 redesign + pipeline task 1 multi-signal overlay):
+        // fills the remaining screen height; bucket-mean lines, volatility envelope on the
+        // primary, real axes with units, HH:mm ticks, mean reference, min/max markers and
+        // a crosshair whose bubble lists every overlaid signal.
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .heightIn(min = 260.dp),
+            shape = RoundedCornerShape(14.dp),
+            color = DarkSurface,
+            border = androidx.compose.foundation.BorderStroke(1.dp, CyberCyan.copy(alpha = 0.2f))
+        ) {
+            TrendChart(
+                lines = lines,
+                modifier = Modifier.fillMaxSize().padding(10.dp)
+            )
+        }
+
+        // Time context for the PRIMARY signal (which window the trend covers).
+        if (primary != null && primary.points.size >= 2) {
+            val timeFmt = remember { SimpleDateFormat("HH:mm:ss", Locale.US) }
+            val pts = primary.points
+            val spanSec = (pts.last().first - pts.first().first) / 1000L
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    timeFmt.format(Date(pts.first().first)),
+                    color = TextSecondaryDark, fontSize = 10.sp, fontFamily = FontFamily.Monospace
+                )
+                Text(
+                    "${primary.name}: ${spanSec / 60}m ${spanSec % 60}s span \u00b7 ${pts.size} samples",
+                    color = TextSecondaryDark, fontSize = 10.sp
+                )
+                Text(
+                    timeFmt.format(Date(pts.last().first)),
+                    color = TextSecondaryDark, fontSize = 10.sp, fontFamily = FontFamily.Monospace
+                )
+            }
+        }
+
+        // Stats summary for the PRIMARY signal (overlays keep the chart clean; their
+        // numbers live in the crosshair bubble).
+        if (primary != null) {
+            val numericValues = primary.points.map { it.second }
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
@@ -447,9 +551,9 @@ private fun TripTrendsView(
                     modifier = Modifier.padding(14.dp),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text("MIN: ${String.format(java.util.Locale.US, "%.1f", numericValues.minOrNull() ?: 0.0)}", color = TextSecondaryDark, fontSize = 12.sp)
-                    Text("AVG: ${String.format(java.util.Locale.US, "%.1f", numericValues.average())}", color = CyberCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    Text("MAX: ${String.format(java.util.Locale.US, "%.1f", numericValues.maxOrNull() ?: 0.0)}", color = NeonEmerald, fontSize = 12.sp)
+                    Text("MIN: ${String.format(java.util.Locale.US, "%.1f", numericValues.minOrNull() ?: 0.0)} ${primary.unit}", color = TextSecondaryDark, fontSize = 12.sp)
+                    Text("AVG: ${String.format(java.util.Locale.US, "%.1f", numericValues.average())} ${primary.unit}", color = primary.color, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("MAX: ${String.format(java.util.Locale.US, "%.1f", numericValues.maxOrNull() ?: 0.0)} ${primary.unit}", color = NeonEmerald, fontSize = 12.sp)
                     Text("COUNT: ${numericValues.size}", color = TextSecondaryDark, fontSize = 12.sp)
                 }
             }
@@ -642,7 +746,8 @@ private fun TripRawLogsView(
 private fun TripExportView(
     tripId: String,
     trip: TripEntity?,
-    context: Context
+    context: Context,
+    summary: com.example.analysis.TripFuelSummary.Summary
 ) {
     val sessionDir = File(context.filesDir, "recordings/session_$tripId")
     val txCsv = File(sessionDir, "${tripId}_transactions.csv")
@@ -666,7 +771,7 @@ private fun TripExportView(
 
         ExportActionCard(
             title = "Export Complete ZIP Bundle",
-            desc = "Contains CSVs, JSON metadata, raw logs, and diagnostic analysis.",
+            desc = "Contains CSVs, JSON metadata, raw logs, and a measured analysis report (AC with/without load, stall battery, torque).",
             file = zipFile,
             mimeType = "application/zip",
             context = context,
@@ -676,7 +781,23 @@ private fun TripExportView(
                 isZipping = true
                 coroutineScope.launch {
                     try {
-                        val filesToZip = listOf(txCsv, sampleCsv, jsonFile, rawFile).filter { it.exists() }
+                        // Analysis report inside the shared bundle (owner pipeline task 7,
+                        // 2026-09-16: "Even with trends shared you didn't show me with &
+                        // without AC load analysis etc"): measured AC state, load WITH vs
+                        // WITHOUT AC, stall battery picture, torque, extremes - every
+                        // section evidence-gated, regenerated fresh from stored samples.
+                        val reportFile = File(sessionDir, "${tripId}_analysis.md")
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            runCatching {
+                                reportFile.writeText(
+                                    com.example.analysis.TripAnalysisReport.build(
+                                        trip?.title ?: tripId,
+                                        summary
+                                    )
+                                )
+                            }
+                        }
+                        val filesToZip = listOf(txCsv, sampleCsv, jsonFile, rawFile, reportFile).filter { it.exists() }
                         if (filesToZip.isEmpty()) {
                             Toast.makeText(context, "No trip data available to zip", Toast.LENGTH_SHORT).show()
                             return@launch
@@ -798,5 +919,228 @@ private fun shareFileSafely(context: Context, file: File, mimeType: String) {
         context.startActivity(chooser)
     } catch (e: Exception) {
         Toast.makeText(context, "Share error: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+    }
+}
+
+@Composable
+private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summary) {
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(12.dp),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = DarkSurface)
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Text(
+                "Log fuel (integrated from PID 015E/019D)",
+                color = CyberCyan,
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Row {
+                Column(modifier = Modifier.padding(end = 18.dp)) {
+                    Text(String.format(java.util.Locale.US, "%.2f L", summary.fuelLiters), color = NeonEmerald, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text("FUEL BURNED", color = TextSecondaryDark, fontSize = 10.sp)
+                }
+                Column(modifier = Modifier.padding(end = 18.dp)) {
+                    Text(String.format(java.util.Locale.US, "%.1f km", summary.distanceKm), color = NeonEmerald, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text("DISTANCE", color = TextSecondaryDark, fontSize = 10.sp)
+                }
+                Column(modifier = Modifier.padding(end = 18.dp)) {
+                    Text(summary.kmPerLiter?.let { String.format(java.util.Locale.US, "%.1f", it) } ?: "--", color = ElectricAmber, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text("KM/L", color = TextSecondaryDark, fontSize = 10.sp)
+                }
+                Column {
+                    Text(summary.litersPer100Km?.let { String.format(java.util.Locale.US, "%.1f", it) } ?: "--", color = ElectricAmber, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text("L/100KM", color = TextSecondaryDark, fontSize = 10.sp)
+                }
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                "Avg ${String.format(java.util.Locale.US, "%.0f", summary.averageSpeedKmh)} km/h (moving " +
+                    "${String.format(java.util.Locale.US, "%.0f", summary.movingAverageSpeedKmh)}), max " +
+                    "${String.format(java.util.Locale.US, "%.0f", summary.maxSpeedKmh)} km/h • coasting " +
+                    "${String.format(java.util.Locale.US, "%.0f", summary.coastSeconds)} s • idling " +
+                    "${String.format(java.util.Locale.US, "%.0f", summary.idleSeconds)} s" +
+                    // Idle start-stop stalls are standstill-with-engine-OFF: shown separately,
+                    // never folded into "idling" (2026-09-15).
+                    if (summary.engineOffSeconds > 0.0) {
+                        " • engine off ${String.format(java.util.Locale.US, "%.0f", summary.engineOffSeconds)} s"
+                    } else "",
+                color = TextSecondaryDark,
+                fontSize = 11.sp
+            )
+            val startStop = summary.startStop
+            if (startStop.stopEvents > 0) {
+                Spacer(modifier = Modifier.height(6.dp))
+                // The saving is an estimate against REAL recorded data: this trip's own
+                // measured warm-idle rate when there is enough evidence, otherwise the
+                // 1.05 L/h model - and the card always says which one it used.
+                val baselineNote = when (startStop.baselineSource) {
+                    com.example.analysis.StartStopAnalyzer.Baseline.MEASURED ->
+                        "baseline ${String.format(java.util.Locale.US, "%.2f", startStop.baselineIdleLh ?: 0.0)} L/h idle measured on this trip"
+                    com.example.analysis.StartStopAnalyzer.Baseline.MODEL ->
+                        "baseline ${String.format(java.util.Locale.US, "%.2f", com.example.analysis.StartStopAnalyzer.MODEL_IDLE_LH)} L/h warm-idle model"
+                    com.example.analysis.StartStopAnalyzer.Baseline.NONE -> "no baseline"
+                }
+                Text(
+                    "Start-stop: ${startStop.stopEvents} stall(s), engine off " +
+                        "${String.format(java.util.Locale.US, "%.0f", startStop.engineOffSeconds)} s • fuel saved ≈ " +
+                        "${String.format(java.util.Locale.US, "%.2f", startStop.estimatedFuelSavedL)} L (estimate, $baselineNote)",
+                    color = NeonEmerald,
+                    fontSize = 11.sp
+                )
+            }
+            if (startStop.restartCount > 0 && startStop.restartPeakFuelLh != null) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    "Restart fuel spike: peak " +
+                        "${String.format(java.util.Locale.US, "%.1f", startStop.restartPeakFuelLh)} L/h across " +
+                        "${startStop.restartCount} restart(s) — cranking enrichment; real fuel, already inside the " +
+                        "trip total and kept out of the idle averages.",
+                    color = ElectricAmber,
+                    fontSize = 11.sp
+                )
+            }
+            // Owner pipeline task 5 (2026-09-16): "When engine start stop stopped car
+            // sometime AC will be still running during that time does it consuming
+            // battery" - measured answer from the stall windows themselves.
+            val sb = summary.stopBattery
+            if (sb.hasEvidence) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    "Battery during ${sb.stopsWithVoltage} stall(s): mean " +
+                        "${String.format(java.util.Locale.US, "%.1f", sb.meanVInStops ?: 0.0)} V (min " +
+                        "${String.format(java.util.Locale.US, "%.1f", sb.minVInStops ?: 0.0)} V) vs " +
+                        "${String.format(java.util.Locale.US, "%.1f", sb.meanVRunning ?: 0.0)} V charging" +
+                        (sb.depressionV?.let {
+                            " • ${String.format(java.util.Locale.US, "%.1f", it)} V sag under stall loads"
+                        } ?: "") +
+                        (if (sb.acOnStops > 0) " • ${sb.acOnStops}/${sb.acOnStopsTotal} stall(s) during measured AC-on: blower/fans ran off the battery - the belt-driven compressor cannot spin, so cooling pauses until restart" else ""),
+                    color = ElectricAmber,
+                    fontSize = 11.sp
+                )
+            }
+            // Battery extremes RECORDED for this trip (owner pipeline task 3, 2026-09-16:
+            // "Voltage min max recording"): min/max of the stored 0142 samples WITH the
+            // instants they happened - an 11.9 V min at the start is a starter crank, not
+            // a dying battery, and the timestamps are what tell those apart. Derived from
+            // the trip's own samples, so pre-migration trips show it too.
+            val volts = summary.voltageExtremes
+            if (volts != null) {
+                Spacer(modifier = Modifier.height(4.dp))
+                val vFmt = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
+                Text(
+                    "Battery extremes: " +
+                        "${String.format(java.util.Locale.US, "%.1f", volts.minV)} V min at ${vFmt.format(java.util.Date(volts.minTs))}" +
+                        " \u2192 " +
+                        "${String.format(java.util.Locale.US, "%.1f", volts.maxV)} V max at ${vFmt.format(java.util.Date(volts.maxTs))}",
+                    color = ElectricAmber,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+            // Engine torque measured on this trip (owner pipeline task 6, 2026-09-16):
+            // PID 0162 percent-of-reference converted with the ECU's own 0164 reference
+            // or the factory 178 Nm plateau. Independent of AC evidence - shown whenever
+            // 0162 actually answered; when it never did, nothing is fabricated.
+            val tMean = summary.meanTorqueNm
+            val tPeak = summary.peakTorqueNm
+            if (tMean != null && tPeak != null) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    "Engine torque (measured, PID 0162): mean " +
+                        "${String.format(java.util.Locale.US, "%.0f", tMean)} Nm • peak " +
+                        "${String.format(java.util.Locale.US, "%.0f", tPeak)} Nm while running • reference " +
+                        "${String.format(java.util.Locale.US, "%.0f", summary.torqueReferenceNm ?: 178.0)} Nm",
+                    color = Color(0xFF64B5F6),
+                    fontSize = 11.sp
+                )
+            }
+            val ac = summary.ac
+            if (ac.hasEvidence && ac.segments.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                // Measured AC state (owner 2026-09-16 voltage-ripple insight): the first
+                // OBSERVED compressor signal on this car - J1979 has no compressor PID.
+                val firstSwitch = ac.switchEvents.firstOrNull()
+                val switchNote = firstSwitch?.let { (ts, on) ->
+                    " • first flip ${if (on) "ON" else "OFF"} at " +
+                        java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
+                            .format(java.util.Date(ts))
+                } ?: ""
+                Text(
+                    "AC (measured from voltage ripple): ON " +
+                        "${String.format(java.util.Locale.US, "%.0f", ac.acOnSeconds / 60.0)} min of " +
+                        "${String.format(java.util.Locale.US, "%.0f", summary.durationSeconds / 60.0)} min" +
+                        switchNote +
+                        " • quiet baseline ±${String.format(java.util.Locale.US, "%.2f", ac.quietMadV ?: 0.0)} V" +
+                        (if (ac.confidence < 1.8) " • weak separation - treat as a hint" else ""),
+                    color = ResearchPurple,
+                    fontSize = 11.sp
+                )
+                // What the measured AC state COSTS on this trip (owner pipeline task 4,
+                // 2026-09-16: "Engine load based on AC on off"): mean engine load (and
+                // rpm / fuel when the ECU answers) attributed to the measured regimes,
+                // engine-running samples only. Shown only when BOTH regimes carry enough
+                // samples - a thin regime stays invisible instead of fabricating a delta.
+                val cmp = summary.acLoad
+                val d = cmp.loadDeltaPct
+                if (cmp.isMeaningful && d != null) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        "AC load impact: ${String.format(java.util.Locale.US, "%+.1f", d)} pts mean load with AC " +
+                            "(${String.format(java.util.Locale.US, "%.1f", cmp.acOn.meanLoadPct ?: 0.0)}% on vs " +
+                            "${String.format(java.util.Locale.US, "%.1f", cmp.acOff.meanLoadPct ?: 0.0)}% off)" +
+                            (cmp.fuelDeltaLh?.let {
+                                " • ${String.format(java.util.Locale.US, "%+.2f", it)} L/h fuel"
+                            } ?: "") +
+                            (cmp.rpmDelta?.let {
+                                " • ${String.format(java.util.Locale.US, "%+.0f", it)} rpm"
+                            } ?: ""),
+                        color = ResearchPurple,
+                        fontSize = 11.sp
+                    )
+                }
+            }
+            if (summary.sampleCount == 0) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    "No stored telemetry samples for this trip - nothing to integrate.",
+                    color = WarningRed, fontSize = 11.sp
+                )
+            } else if (!summary.hasFuelSeries) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    "FUEL RATE UNAVAILABLE: PIDs 015E/019D never answered on this ECU " +
+                        "(common on some petrol ECUs). Fuel figures stay honest at zero - " +
+                        "use refuel-log km/L in Fuel Costs instead.",
+                    color = ElectricAmber, fontSize = 10.sp
+                )
+            } else if (!summary.hasSpeedSeries) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    "SPEED UNAVAILABLE: PID 010D never answered - distance cannot be integrated.",
+                    color = ElectricAmber, fontSize = 10.sp
+                )
+            }
+            if (summary.speedHistogram.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    "Time by speed band: " + summary.speedHistogram.joinToString("  ") {
+                        "${it.first}-${it.first + 10}: ${String.format(java.util.Locale.US, "%.0f", it.second / 60.0)}m"
+                    },
+                    color = TextSecondaryDark,
+                    fontSize = 11.sp
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                "Compare this card across trips on your daily route: same distance, different " +
+                    "technique, different fuel. Coasting seconds and idle minutes are the two " +
+                    "biggest levers.",
+                color = TextSecondaryDark,
+                fontSize = 10.sp
+            )
+        }
     }
 }

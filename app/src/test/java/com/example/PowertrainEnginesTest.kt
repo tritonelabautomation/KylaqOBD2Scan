@@ -135,10 +135,10 @@ class PowertrainEnginesTest {
 
         // PID 019D: Mass fuel rate ((A * 256) + B) / 10.0 (g/s)
         val pid9D = allPids.first { it.id == "019D" }
-        // 12.5 g/s -> raw = 125 -> A=0, B=125 (0x7D)
+        // F-6 (2026-09-13, owner live car): 0.02 g/s per count -> raw = 125 -> A=0, B=125 (0x7D) = 2.5 g/s
         val dec9D = PidDecoder.decode(pid9D, listOf(0x41, 0x9D, 0x00, 0x7D))
-        assertEquals(12.5, dec9D.numericValue ?: 0.0, 0.05)
-        assertEquals("12.50", dec9D.displayValue)
+        assertEquals(2.5, dec9D.numericValue ?: 0.0, 0.05)
+        assertEquals("2.50 g/s ≈ 12.08 L/h", dec9D.displayValue)
 
         // PID 0110: MAF ((A * 256) + B) / 100.0 (g/s)
         val pid10 = allPids.first { it.id == "0110" }
@@ -173,10 +173,12 @@ class PowertrainEnginesTest {
         val hasNext = manager.parseCapabilityBitmap(0x00, listOf(0x80, 0x10, 0x08, 0x01))
 
         assertTrue(hasNext)
-        assertEquals(CapabilityStatus.SUPPORTED, manager.getStatus("0101"))
-        assertEquals(CapabilityStatus.SUPPORTED, manager.getStatus("010C"))
-        assertEquals(CapabilityStatus.SUPPORTED, manager.getStatus("0115"))
-        assertEquals(CapabilityStatus.SUPPORTED, manager.getStatus("0120"))
+        // Bitmap evidence is never treated as direct validation (Rule 5: only DIRECT_VALIDATED
+        // or LIVE_ELIGIBLE PIDs enter the live poller).
+        assertEquals(CapabilityStatus.BITMAP_SUPPORTED, manager.getStatus("0101"))
+        assertEquals(CapabilityStatus.BITMAP_SUPPORTED, manager.getStatus("010C"))
+        assertEquals(CapabilityStatus.BITMAP_SUPPORTED, manager.getStatus("0115"))
+        assertEquals(CapabilityStatus.BITMAP_SUPPORTED, manager.getStatus("0120"))
         assertEquals(CapabilityStatus.NOT_SUPPORTED, manager.getStatus("0102"))
         assertEquals(CapabilityStatus.NOT_SUPPORTED, manager.getStatus("010D"))
     }

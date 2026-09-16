@@ -29,7 +29,11 @@ fun VehicleProfileScreen(
     catalogRepository: CatalogRepository,
     onBack: () -> Unit,
     onNavigateToDtc: () -> Unit,
-    onNavigateToPidScanner: () -> Unit = {}
+    onNavigateToPidScanner: () -> Unit = {},
+    /** Computed by the caller from the fleet repositories: label to value pairs. */
+    ownership: List<Pair<String, String>> = emptyList(),
+    upcoming: List<String> = emptyList(),
+    recent: List<String> = emptyList()
 ) {
     Scaffold(
         topBar = {
@@ -166,8 +170,42 @@ fun VehicleProfileScreen(
                     }
                     Divider(color = DarkBorder, modifier = Modifier.padding(bottom = 8.dp))
                     
-                    ProfileDetailRow("Avg Fuel Economy", "Not enough data")
-                    ProfileDetailRow("Next Maintenance", "Not set")
+                    if (ownership.isEmpty()) {
+                        ProfileDetailRow("Avg Fuel Economy", "Not enough data")
+                        ProfileDetailRow("Next Maintenance", "Not set")
+                    } else {
+                        ownership.forEach { (label, value) -> ProfileDetailRow(label, value) }
+                    }
+                }
+            }
+
+            // VehIQ vehicle-detail sections: what needs attention this month, and the latest logs.
+            if (upcoming.isNotEmpty()) {
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                    colors = CardDefaults.cardColors(containerColor = DarkSurface)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(" Upcoming (30 days)", color = TextPrimaryDark, style = MaterialTheme.typography.titleMedium)
+                        Divider(color = DarkBorder, modifier = Modifier.padding(vertical = 8.dp))
+                        upcoming.forEach { line ->
+                            Text("\u2022 $line", color = TextSecondaryDark, fontSize = 12.sp, modifier = Modifier.padding(vertical = 2.dp))
+                        }
+                    }
+                }
+            }
+            if (recent.isNotEmpty()) {
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                    colors = CardDefaults.cardColors(containerColor = DarkSurface)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(" Recent activity", color = TextPrimaryDark, style = MaterialTheme.typography.titleMedium)
+                        Divider(color = DarkBorder, modifier = Modifier.padding(vertical = 8.dp))
+                        recent.forEach { line ->
+                            Text("\u2022 $line", color = TextSecondaryDark, fontSize = 12.sp, modifier = Modifier.padding(vertical = 2.dp))
+                        }
+                    }
                 }
             }
         }

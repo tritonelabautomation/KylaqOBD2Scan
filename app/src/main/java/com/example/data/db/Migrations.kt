@@ -149,6 +149,12 @@ val MIGRATION_6_7 = object : Migration(6, 7) {
     }
 }
 
+val MIGRATION_8_9 = object : Migration(8, 9) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `vehicles` ADD COLUMN `sortOrder` INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
 val MIGRATION_7_8 = object : Migration(7, 8) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL(
@@ -211,5 +217,32 @@ val MIGRATION_7_8 = object : Migration(7, 8) {
             )
             """.trimIndent()
         )
+    }
+}
+
+/**
+ * v9 -> v10 (2026-09-15): persist per-trip GPS altitude extremes so the trip
+ * summary can show real "Max altitude" / "Altitude dif." instead of the honest
+ * "-- m" blank (owner question 2026-09-15). Nullable columns: trips recorded
+ * before this migration (or without a GPS fix) keep NULL and the UI keeps its
+ * honest blank — altitude is never invented, only measured.
+ */
+val MIGRATION_9_10 = object : Migration(9, 10) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `trips` ADD COLUMN `maxAltitudeM` REAL DEFAULT NULL")
+        db.execSQL("ALTER TABLE `trips` ADD COLUMN `minAltitudeM` REAL DEFAULT NULL")
+    }
+}
+
+/**
+ * v11: battery voltage extremes per trip (owner pipeline task 3, 2026-09-16:
+ * "Voltage min max recording"). Nullable columns following the altitude precedent:
+ * trips recorded before this migration keep NULL and the UI derives the extremes from
+ * stored samples or shows an honest blank - voltage records are measured, never invented.
+ */
+val MIGRATION_10_11 = object : Migration(10, 11) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `trips` ADD COLUMN `minVoltageV` REAL DEFAULT NULL")
+        db.execSQL("ALTER TABLE `trips` ADD COLUMN `maxVoltageV` REAL DEFAULT NULL")
     }
 }

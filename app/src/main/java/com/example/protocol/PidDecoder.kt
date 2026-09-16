@@ -42,6 +42,22 @@ object PidDecoder {
             )
         }
 
+        // FIX: a negative response (7F <service> <NRC>) is never telemetry — not even for
+        // research PIDs. The permissive research path below used to accept it and render
+        // "7F 01 11" as if it were a live raw value, which the dashboard then displayed
+        // as data. Reject it before any decoding strategy runs.
+        if ((payloadBytes[0] and 0xFF) == 0x7F) {
+            return DecodedResult(
+                parameterName = pidDef.name,
+                numericValue = null,
+                displayValue = "INVALID_RESPONSE",
+                unit = pidDef.unit,
+                rawPayloadHex = rawHex,
+                dataBytes = emptyList(),
+                isKnown = false
+            )
+        }
+
         // Standard OBD response check: First byte is (service + 0x40), second byte is PID
         val expectedServiceAck = (pidDef.service.toIntOrNull(16) ?: 1) + 0x40
         val expectedPid = pidDef.pid.toIntOrNull(16) ?: 0
@@ -128,11 +144,15 @@ object PidDecoder {
             }
 
             DecoderType.TEMP_MINUS_40 -> {
-                val value = (a - 40).toDouble()
+                // Plausibility gate (2026-09-13, owner screenshot showed -37 C coolant-2):
+                // an uninitialised ECU raw must surface as NO DATA, never as a fake number.
+                val computed = (a - 40).toDouble()
+                val plausible = computed in -30.0..210.0
+                val value = if (plausible) computed else null
                 DecodedResult(
                     parameterName = pidDef.name,
                     numericValue = value,
-                    displayValue = String.format(Locale.US, "%.0f", value),
+                    displayValue = if (plausible) String.format(Locale.US, "%.0f", computed) else "implausible raw - no data",
                     unit = "°C",
                     rawPayloadHex = rawHex,
                     dataBytes = dataBytes,
@@ -245,11 +265,16 @@ object PidDecoder {
             }
 
             DecoderType.EQUIVALENCE_RATIO -> {
-                val value = ((a * 256.0) + b) / 32768.0
+                // J1979 error indicator: 0xFFFF on ratio PIDs means NOT AVAILABLE.
+                // Unguarded it decodes to a plausible-looking lambda 2.000 - a fake
+                // reading (2026-09-14 sweep: "issues you forgot to test").
+                val raw = (a * 256) + b
+                val available = raw != 0xFFFF
+                val value = if (available) raw / 32768.0 else null
                 DecodedResult(
                     parameterName = pidDef.name,
                     numericValue = value,
-                    displayValue = String.format(Locale.US, "%.3f", value),
+                    displayValue = if (available) String.format(Locale.US, "%.3f", raw / 32768.0) else "no data (J1979 0xFFFF)",
                     unit = "λ",
                     rawPayloadHex = rawHex,
                     dataBytes = dataBytes,
@@ -258,11 +283,13 @@ object PidDecoder {
             }
 
             DecoderType.CATALYST_TEMP -> {
-                val value = (((a * 256.0) + b) / 10.0) - 40.0
+                val computed = (((a * 256.0) + b) / 10.0) - 40.0
+                val plausible = computed in -30.0..1200.0
+                val value = if (plausible) computed else null
                 DecodedResult(
                     parameterName = pidDef.name,
                     numericValue = value,
-                    displayValue = String.format(Locale.US, "%.1f", value),
+                    displayValue = if (plausible) String.format(Locale.US, "%.1f", computed) else "implausible raw - no data",
                     unit = "°C",
                     rawPayloadHex = rawHex,
                     dataBytes = dataBytes,
@@ -378,13 +405,28 @@ object PidDecoder {
                 )
             }
 
-            DecoderType.FUEL_RATE_MASS_10 -> {
-                val value = ((a * 256.0) + b) / 10.0
+            DecoderType.FUEL_RATE_MASS_50 -> {
+                // REAL-CAR CALIBRATION 2026-09-13 (owner live telemetry, Kylaq EA211): secondary
+                // spec mirrors said /10 g/s, but that yields 3.9-6.8 L/h at warm idle - physically
+                // impossible. Stoichiometric speed-density cross-check (MAP 37 kPa, 978 rpm,
+                // IAT 30 C, lambda 1.000 => ~0.15-0.19 g/s) matches raw counts 8-14 ONLY at
+                // /50 (0.02 g/s per count, == 0.1 L/h). See docs/qa-qc-fuel-pids-dashboard F-6.
+                val value = ((a * 256.0) + b) / 50.0
+                // 2026-09-15 owner: "why g/s when all other units are litres?" - J1979 019D IS
+                // a mass flow (g/s) and the volume PID 015E is refused by this ECU, so every
+                // litre figure in the app is derived from this mass rate. Show the conversion
+                // inline (745 g/L petrol density) so the row reads in the same units as the
+                // rest of the dashboard instead of looking like a foreign/gallon unit.
+                val lh = value * 3600.0 / com.example.engine.PowertrainModel.FUEL_DENSITY_G_PER_L
                 DecodedResult(
                     parameterName = pidDef.name,
                     numericValue = value,
-                    displayValue = String.format(Locale.US, "%.2f", value),
-                    unit = "g/s",
+                    displayValue = String.format(Locale.US, "%.2f g/s ≈ %.2f L/h", value, lh),
+                    // Unit travels inside displayValue now (mass + litre-equivalent); the
+                    // store joins displayValue+unit, so an extra "g/s" here would read
+                    // "0.20 g/s ≈ 0.97 L/h g/s". The PID-definition sublabel still shows
+                    // the J1979 unit (g/s) under the row name.
+                    unit = "",
                     rawPayloadHex = rawHex,
                     dataBytes = dataBytes,
                     isKnown = true

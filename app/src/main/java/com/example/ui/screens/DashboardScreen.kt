@@ -15,6 +15,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import com.example.ui.components.AcClimateCard
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -45,6 +46,7 @@ fun DashboardScreen(
     onNavigateToTrips: () -> Unit,
     onNavigateToHud: () -> Unit,
     onNavigateToSettings: () -> Unit = {},
+    onOpenDrawer: () -> Unit = {},
     onNavigateToPidScanner: () -> Unit = {},
     onOpenConnectDialog: () -> Unit
 ) {
@@ -55,6 +57,8 @@ fun DashboardScreen(
     val canResponseCount by viewModel.canResponseCount.collectAsState()
     val errorCount by viewModel.errorCount.collectAsState()
     val liveDecodedMap by viewModel.liveDecodedMap.collectAsState()
+    val liveNumericMap by viewModel.liveNumericMap.collectAsState()
+    val pidCapabilities by viewModel.pidCapabilities.collectAsState()
     val pidRawHistory by viewModel.pidRawHistory.collectAsState()
     val isRecording by viewModel.isRecording.collectAsState()
     val recordingDurationSeconds by viewModel.recordingDurationSeconds.collectAsState()
@@ -69,6 +73,19 @@ fun DashboardScreen(
     val gpsData by viewModel.gpsData.collectAsState()
 
     val realtimeEconomy by viewModel.realtimeEconomy.collectAsState()
+    val acSetTempC by viewModel.acSetTempC.collectAsState()
+    val acAutoMode by viewModel.acAutoMode.collectAsState()
+    var acTagUi by remember { mutableStateOf(viewModel.rideAc) }
+    val acLearning = remember(viewModel, connectionState, acTagUi) { viewModel.acLearning() }
+    // 2026-09-13 inconsistency fix: decoded strings carry units ("12 km/h"), so
+    // toDoubleOrNull() on them was ALWAYS null -> acSpeed stuck at 0.0 and the AC
+    // ON-vs-OFF learning gate (speed > 5 km/h) could never open. Use the numeric view.
+    val acSpeed = liveNumericMap["010D"] ?: 0.0
+    val acBaselineLh = remember(realtimeEconomy, acSpeed) {
+        val kmL = realtimeEconomy?.smoothedKmL
+        if (acSpeed > 5.0 && kmL != null && kmL > 0.5) acSpeed / kmL
+        else realtimeEconomy?.idleConsumptionLh
+    }
     val tripEconomy by viewModel.tripEconomy.collectAsState()
     val drivingState by viewModel.drivingState.collectAsState()
     val transmissionState by viewModel.transmissionState.collectAsState()
@@ -97,6 +114,12 @@ fun DashboardScreen(
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(
+                    onClick = onOpenDrawer,
+                    modifier = Modifier.testTag("btn_dashboard_menu")
+                ) {
+                    Icon(Icons.Default.Menu, contentDescription = "Menu", tint = CyberCyan)
+                }
+                IconButton(
                     onClick = onNavigateToSettings,
                     modifier = Modifier.testTag("btn_dashboard_settings")
                 ) {
@@ -105,6 +128,27 @@ fun DashboardScreen(
             }
         }
         
+        // AC & CLIMATE BEHAVIOUR (additive 2026-09-09): tag, AUTO flag, setpoint vs
+        // PID 0146 ambient delta, modelled compressor fuel price, learned ON-vs-OFF economy.
+        AcClimateCard(
+            acTag = acTagUi,
+            onCycleAc = {
+                val next = when (acTagUi) { "OFF" -> "AC"; "AC" -> "BLOWER"; else -> "OFF" }
+                viewModel.setRideAc(next)
+                acTagUi = next
+            },
+            autoMode = acAutoMode,
+            onToggleAuto = { viewModel.setAcAutoMode(!acAutoMode) },
+            setTempC = acSetTempC,
+            onSetTemp = { viewModel.setAcSetTempC(it) },
+            ambientC = numericWithStaleFallback(liveNumericMap["0146"], liveDecodedMap["0146"]),
+            baselineLh = acBaselineLh,
+            onKmL = acLearning?.onKmL,
+            offKmL = acLearning?.offKmL,
+            learnedRides = acLearning?.rides ?: 0,
+            connected = isConnected
+        )
+
         // Vehicle & Connection Status Banner
         VehicleStatusHeader(
             vehicleName = vehicleName,
@@ -331,6 +375,7 @@ fun DashboardScreen(
         }
 
         TelemetryDashboardContent(
+            capabilityStatuses = pidCapabilities,
             gpsData = gpsData,
             liveMap = liveDecodedMap,
             realtimeEconomy = realtimeEconomy,
@@ -340,7 +385,7 @@ fun DashboardScreen(
             onPidClick = { pidId -> onNavigateToPidDetail(pidId) }
         )
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(96.dp)) // FAB clearance (QA/QC 2026-09-13)
     }
 }
 
@@ -449,7 +494,7 @@ fun RecordingControlBar(
     val durationFormatted = remember(recordingDurationSeconds) {
         val min = recordingDurationSeconds / 60
         val sec = recordingDurationSeconds % 60
-        String.format("%02d:%02d", min, sec)
+        String.format(java.util.Locale.US, "%02d:%02d", min, sec)
     }
 
     Card(
@@ -862,7 +907,8 @@ fun ProtocolVerificationControl(
                     Text(statusText, color = statusColor, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                 }
                 
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // 2026-09-13 owner screenshot: FAB covered "Test Profile" - keep the row clear.
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(end = 64.dp)) {
                     OutlinedButton(
                         onClick = onShowBatchTest,
                         enabled = isConnected,

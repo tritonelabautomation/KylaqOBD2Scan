@@ -69,6 +69,12 @@ class BluetoothElmTransport(
     @Volatile
     private var connected: Boolean = false
 
+    /** Reason the most recent connect() attempt failed - lets BluetoothManager
+     *  classify BUSY (another app holds the single RFCOMM channel) vs TIMEOUT. */
+    @Volatile
+    var lastConnectError: String? = null
+        private set
+
     /** Captures the Bluetooth device MAC address at construction time so it can be
      *  stored in scan session records — fixing the regression where all sessions had
      *  adapterAddress = "00:00:00:00:00:00". */
@@ -82,6 +88,7 @@ class BluetoothElmTransport(
     }
 
     override suspend fun connect(): Boolean = withContext(Dispatchers.IO) {
+        lastConnectError = null
         try {
             if (!socket.isConnected) {
                 // FIX P0-1: Bound RFCOMM connect() with a 15s timeout.
@@ -102,12 +109,14 @@ class BluetoothElmTransport(
             true
         } catch (e: TimeoutCancellationException) {
             connected = false
+            lastConnectError = "Connection timeout after ${CONNECT_TIMEOUT_MS}ms (peer may be unreachable)"
             logRaw(isTx = false, canId = null, text = "Connection timeout after ${CONNECT_TIMEOUT_MS}ms (peer may be unreachable)", status = "TIMEOUT")
             // Best-effort cleanup of the stuck socket so the next attempt starts fresh
             try { socket.close() } catch (_: Exception) {}
             false
         } catch (e: Exception) {
             connected = false
+            lastConnectError = e.localizedMessage ?: e.javaClass.simpleName
             logRaw(isTx = false, canId = null, text = "Connection failed: ${e.localizedMessage}", status = "ERROR")
             false
         }

@@ -6,6 +6,7 @@ import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Bundle
+import com.example.analysis.AltitudeStats
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -13,6 +14,12 @@ import kotlinx.coroutines.flow.asStateFlow
 data class GpsData(
     val speedKmh: Float = 0f,
     val altitudeMeters: Double = 0.0,
+    /**
+     * False when the fix carried no altitude, in which case [altitudeMeters] is only the
+     * meaningless 0.0 default and must never be logged or displayed as a measurement
+     * (no-fake-values rule). Added 2026-09-15 with the per-sample trip-log altitude column.
+     */
+    val hasAltitude: Boolean = false,
     val latitude: Double = 0.0,
     val longitude: Double = 0.0,
     val accuracyMeters: Float = 0f,
@@ -30,6 +37,13 @@ class GpsManager(private val context: Context) : LocationListener {
     private var totalDistance = 0f
 
     /**
+     * Per-trip GPS altitude range (owner 2026-09-15). Fed only fixes that pass the
+     * accuracy gate below AND report altitude; reset at every startTracking() so each
+     * recording gets its own min/max; persisted by RecordingManager at stop.
+     */
+    val tripAltitude = AltitudeStats()
+
+    /**
      * Starts GPS tracking.
      * @return true if GPS tracking was successfully started; false if GPS is unavailable or
      *         disabled. When false is returned, callers should surface a user-visible warning.
@@ -41,6 +55,10 @@ class GpsManager(private val context: Context) : LocationListener {
         try {
             val hasGps = locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
             if (hasGps) {
+                // New trip, new altitude window (owner 2026-09-15 trip-summary fix).
+                tripAltitude.reset()
+                totalDistance = 0f
+                lastLocation = null
                 // FIX TD-2 / MED: Use 5m min distance instead of 0f to avoid continuous GPS
                 // callbacks that drain battery. 5m is fine-grained enough for OBD correlation.
                 locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 5f, this)
@@ -71,15 +89,30 @@ class GpsManager(private val context: Context) : LocationListener {
         }
     }
 
+    /**
+     * Horizontal accuracy gate (2026-09-14 cross-validation: Car Scanner's VAG default
+     * thresholds are 40 m horizontal / 50 m vertical / 2 m/s speed). Fixes worse than
+     * this are dropped instead of poisoning trip distance, coast detection and the
+     * speed series; the last good fix stays published.
+     */
+    val MAX_HORIZONTAL_ACCURACY_M = 40f
+
     override fun onLocationChanged(location: Location) {
-        if (lastLocation != null) {
-            totalDistance += lastLocation!!.distanceTo(location)
+        if (location.hasAccuracy() && location.accuracy > MAX_HORIZONTAL_ACCURACY_M) {
+            return // multipath/canyon fix - keep the last good one
         }
+        // QA fix: !! on a mutable property is a race-prone crash class; ?.let is equivalent and safe.
+        lastLocation?.let { totalDistance += it.distanceTo(location) }
         lastLocation = location
+        // Trip altitude window: only accuracy-gated fixes that actually report altitude.
+        if (location.hasAltitude()) tripAltitude.record(location.altitude)
 
         _gpsData.value = GpsData(
             speedKmh = location.speed * 3.6f,
-            altitudeMeters = location.altitude,
+            // Only publish an altitude the fix actually reported; otherwise the 0.0 default
+            // would look like a real "0 m" measurement downstream.
+            altitudeMeters = if (location.hasAltitude()) location.altitude else 0.0,
+            hasAltitude = location.hasAltitude(),
             latitude = location.latitude,
             longitude = location.longitude,
             accuracyMeters = location.accuracy,

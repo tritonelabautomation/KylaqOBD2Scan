@@ -1,4 +1,4 @@
-﻿package com.example.ui.viewmodel
+package com.example.ui.viewmodel
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
@@ -10,6 +10,7 @@ import com.example.bluetooth.ElmResponse
 import com.example.bluetooth.ElmTransport
 import com.example.bluetooth.SimulationTransport
 import kotlinx.coroutines.flow.firstOrNull
+import com.example.analysis.DriveInsightsStore
 import com.example.data.PollingSpeedMode
 import com.example.data.RawLogEntry
 import com.example.data.RawLogManager
@@ -23,9 +24,15 @@ import com.example.model.TransactionRecord
 import com.example.protocol.PidDecoder
 import com.example.protocol.SafetyValidator
 import com.example.protocol.ValidationResult
+import com.example.scheduler.ObdQuickConnect
 import com.example.scheduler.ObdScheduler
+import com.example.update.AppUpdateFeed
+import com.example.update.AppUpdateInfo
+import com.example.update.UpdateManager
+import com.example.update.UpdateUiState
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.firstOrNull
@@ -45,11 +52,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     
     val rawLogManager = AppContainer.rawLogManager
     val gpsManager = AppContainer.gpsManager
+
     val gpsData = gpsManager.gpsData
     val settingsRepository = AppContainer.settingsRepository
     val recordingManager = AppContainer.recordingManager
     val bluetoothManager = AppContainer.bluetoothManager
     val obdScheduler = AppContainer.obdScheduler
+
+    init {
+        // Elevation logging for the ride X-ray: GPS altitude when available, silent otherwise.
+        obdScheduler.altitudeSource = {
+            val g = gpsManager.gpsData.value
+            if (g.isAvailable) g.altitudeMeters else null
+        }
+    }
     val cloudBackupManager = AppContainer.cloudBackupManager
     val catalogRepository = AppContainer.catalogRepository
 
@@ -57,9 +73,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         private set
     private var recordingTimerJob: Job? = null
 
+    /** One-persist-per-recording guard for coast/ride/tank insight logs (dup-ride fix 2026-09-15). */
+    private var insightsPersistedForRecording = false
+
     val connectionState: StateFlow<ConnectionState> = bluetoothManager.connectionState
     val connectedDeviceName: StateFlow<String?> = bluetoothManager.connectedDeviceName
     val connectionStatusMessage: StateFlow<String> = bluetoothManager.statusMessage
+
+    /** Human-readable notes from the auto-connect/auto-record supervisors. */
+    private val _automationMessage = MutableStateFlow<String?>(null)
+    val automationMessage: StateFlow<String?> = _automationMessage.asStateFlow()
 
     val isPolling: StateFlow<Boolean> = obdScheduler.isPolling
 
@@ -153,6 +176,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // Powertrain Intelligence & Trust Model Streams
     val liveTelemetryMap = obdScheduler.liveTelemetryMap
+    /** Per-PID capability verdicts so dashboard tiles can say WHY a value is missing. */
+    val pidCapabilities = obdScheduler.capabilityManager.capabilitiesFlow
     val realtimeEconomy = obdScheduler.realtimeEconomy
     val tripEconomy = obdScheduler.tripEconomy
     val drivingState = obdScheduler.drivingState
@@ -336,7 +361,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         transport.sendCommand(proto.atCommand, 1500L)
         kotlinx.coroutines.delay(200)
 
-        val pidsToTest = listOf("0100", "010C", "010D", "0105", "010B", "0111", "010F", "0142")
+        // 015E/019D added 2026-09-12: fuel-rate PIDs were never validated, so the
+        // capability gate skipped them forever and every trip logged 0.00 L.
+        val pidsToTest = listOf("0100", "010C", "010D", "0105", "010B", "0111", "010F", "0142", "015E", "019D")
         var success = 0
         var timeout = 0
         var invalid = 0
@@ -584,7 +611,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun performDashboardBootstrap(transport: ElmTransport) {
-        val pidsToTest = listOf("010C", "010D", "0105", "010B", "0111", "010F", "0142")
+        val pidsToTest = listOf("010C", "010D", "0105", "010B", "0111", "010F", "0142", "015E", "019D")
         for (pid in pidsToTest) {
             val resp = transport.sendCommand(pid, 1000L)
             val expectedService = "41"
@@ -663,7 +690,76 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Keeps a logging session alive without the user touching the phone:
+     *
+     *  * every 10 s, if auto-connect is enabled and nothing is polling, ask [ObdQuickConnect]
+     *    to (re)open the starred / recognised adapter - this is what makes recording resume
+     *    after the adapter drops or the ignition cycle restarts;
+     *  * every 2 s, if auto-record is enabled, start a recording as soon as the engine is
+     *    running (rpm > 200) and save it once the engine has been off for a minute.
+     *
+     * Both loops live in viewModelScope, so they stop with the app UI; Android Auto runs its
+     * own supervisor while the car screen is visible.
+     */
+    fun startSessionAutomation() {
+        viewModelScope.launch {
+            while (isActive) {
+                if (settingsRepository.autoConnect.value && !obdScheduler.isPolling.value) {
+                    try {
+                        ObdQuickConnect.connectPairedAdapterAndPoll(viewModelScope) { message ->
+                            _automationMessage.value = message
+                        }
+                    } catch (t: Exception) {
+                        _automationMessage.value = t.message ?: "Auto-connect failed"
+                    }
+                }
+                delay(10_000)
+            }
+        }
+        viewModelScope.launch {
+            var engineOffSinceMs = 0L
+            while (isActive) {
+                val rpm = obdScheduler.liveNumericMap.value["010C"]
+                val recording = recordingManager.isRecording.value
+                if (settingsRepository.autoRecord.value) {
+                    if (rpm != null && rpm > 200.0) {
+                        engineOffSinceMs = 0L
+                        if (!recording && obdScheduler.isPolling.value) {
+                            startRecording()
+                        }
+                    } else if (recording) {
+                        // START-STOP FIX (owner 2026-09-15, P0): the Kylaq has Idle Start-Stop,
+                        // so at a traffic light the ECU keeps answering with rpm = 0 while the
+                        // engine is off. This watchdog used one 60 s rule for every engine-off
+                        // second, so any signal longer than a minute silently STOPPED the
+                        // recording mid-drive and the restart began a second trip - one city
+                        // drive shredded into fragments. A FRESH rpm reading <= 200 means the
+                        // link is alive and the car is awake: that is a start-stop stall and
+                        // gets a 5-minute grace. rpm == null means the stale entry was dropped
+                        // (ignition off / Bluetooth gone - liveNumericMap only serves fresh
+                        // values): that keeps the old 60 s rule.
+                        val graceMs = if (rpm != null) 300_000L else 60_000L
+                        val now = android.os.SystemClock.elapsedRealtime()
+                        if (engineOffSinceMs == 0L) {
+                            engineOffSinceMs = now
+                        } else if (now - engineOffSinceMs > graceMs) {
+                            stopRecording()
+                            engineOffSinceMs = 0L
+                        }
+                    }
+                } else if (recording) {
+                    engineOffSinceMs = 0L
+                }
+                delay(2_000)
+            }
+        }
+    }
+
     fun startRecording() {
+        // Fresh ride X-ray for this recording; the owner's mode tag (D/S/M) carries over.
+        obdScheduler.rideRecorder.reset()
+        insightsPersistedForRecording = false
         val meta = recordingManager.startRecording(
             vehicleName = vehicleName.value,
             vehicleId = _activeVehicleId.value,  // FIX: Pass vehicleId for proper association
@@ -697,6 +793,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (!transport.isConnected) return
         
         viewModelScope.launch {
+            // VW TP 2.0 (2026-09-14 cross-validation: Car Scanner's "Send Open session
+            // request before DTC operations", enabled by default for VAG cars): open a
+            // UDS extended diagnostic session first. Refusal (0x7F / NO DATA) is
+            // tolerated - default-session reads still work on many ECUs.
+            val sessResp = transport.sendCommand("10 03", 2000L)
+            android.util.Log.i("OBDLogger/DTC", "UDS 10 03 open session -> ${sessResp.rawText.trim()}")
             val resp = transport.sendCommand("03", 5000L)
             val isoTp = com.example.protocol.IsoTpParser.reassembleLines(resp.lines)
             val allDtcs = mutableListOf<String>()
@@ -743,7 +845,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun saveDtcs(dtcs: List<String>, status: String) {
-        // FIX P0-6: Use the explicitly known vehicle (current session â†’ active selection).
+        // FIX P0-6: Use the explicitly known vehicle (current session -> active selection).
         // Do NOT silently fall back to "first vehicle in the database" - that previously caused
         // DTCs read from one vehicle to be associated with another vehicle in a multi-vehicle garage.
         val currentSession = recordingManager.currentSessionMetadata.value
@@ -828,11 +930,422 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             recordingTimerJob?.cancel()
             gpsManager.stopTracking()
+            // 2026-09-15 duplicate-ride fix: auto-stop (car off / link drop) and a manual
+            // STOP tap can BOTH fire for one drive; persistDriveInsights() then appended
+            // the SAME ride X-ray twice (the ride log had no dedup key, unlike the tank
+            // log). One persist per recording session, ever.
+            if (!insightsPersistedForRecording) {
+                insightsPersistedForRecording = true
+                persistDriveInsights()
+            }
             recordingManager.stopRecording()
+            // OAuth-free Drive backup: if a folder is linked, mirror the recordings there.
+            if (settingsRepository.autoCloudBackup.value) {
+                settingsRepository.driveTreeUri()?.let { tree ->
+                    try {
+                        com.example.backup.DriveBackupClient.sendBackup(
+                            getApplication(), android.net.Uri.parse(tree), recordingManager
+                        )
+                        settingsRepository.setLastBackupTimestamp(System.currentTimeMillis())
+                    } catch (e: Exception) {
+                        // Backup is best-effort; never block the stop path.
+                    }
+                }
+            }
             // Auto-backup to cloud if enabled
             cloudBackupManager.performAutoBackupIfNeeded()
+            // A finished stop can reveal older orphaned raw logs (or fail partially) -
+            // keep the recovery banner in Trips & Recordings up to date.
+            refreshUnsavedRawLogs()
         }
     }
+
+    // ── Unsaved raw-log recovery (owner 2026-09-15: "I logs my logs it didn't save
+    // how to recover from mobile?") — the raw OBD log is flushed to disk every line, so
+    // drives killed before STOP can be rebuilt from the phone itself, no PC needed. ──
+    private val _unsavedRawLogs = MutableStateFlow<List<java.io.File>>(emptyList())
+    val unsavedRawLogs: StateFlow<List<java.io.File>> = _unsavedRawLogs.asStateFlow()
+
+    private val _isRecovering = MutableStateFlow(false)
+    val isRecovering: StateFlow<Boolean> = _isRecovering.asStateFlow()
+
+    /** Re-scans files/raw_logs for sessions that were never finalized (disk IO, off-main). */
+    suspend fun refreshUnsavedRawLogs() {
+        _unsavedRawLogs.value = try {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                recordingManager.findUnsavedRawLogs()
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    fun recoverRawLog(file: java.io.File) {
+        if (_isRecovering.value) return
+        viewModelScope.launch {
+            _isRecovering.value = true
+            try {
+                recordingManager.recoverFromRawLog(file)
+            } catch (_: Exception) {
+            } finally {
+                _isRecovering.value = false
+                refreshUnsavedRawLogs()
+            }
+        }
+    }
+
+    // ── In-app updater (owner 2026-09-16: "update available I click it will automatically
+    // fetch latest update from GitHub ... similar to playstore") ────────────────────────
+    private val updateManager: UpdateManager by lazy { UpdateManager(getApplication()) }
+
+    private val _updateState = MutableStateFlow(UpdateUiState())
+    val updateState: StateFlow<UpdateUiState> = _updateState.asStateFlow()
+
+    /**
+     * Checks the rolling GitHub Release for a newer build.
+     * @param auto silent launch check - throttled to AppUpdateFeed.AUTO_CHECK_INTERVAL_MS.
+     *             A manual tap is never throttled and always reports its outcome, so
+     *             "up to date" and "could not reach GitHub" stay distinguishable.
+     */
+    fun checkForUpdate(auto: Boolean = false) {
+        val current = _updateState.value
+        if (current.checking || current.downloading) return
+        val now = System.currentTimeMillis()
+        if (auto && !AppUpdateFeed.shouldAutoCheck(settingsRepository.lastUpdateCheckMs(), now)) return
+        settingsRepository.setLastUpdateCheckMs(now)
+        _updateState.value = current.copy(checking = true, error = null, upToDate = false, dismissed = false)
+        viewModelScope.launch {
+            val installed = updateManager.installedVersionCode()
+            val feed = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { updateManager.fetchFeed() }.getOrNull()
+            }
+            val newer = AppUpdateFeed.isNewerThan(feed, installed)
+            _updateState.value = _updateState.value.copy(
+                checking = false,
+                lastCheckedAtMs = System.currentTimeMillis(),
+                available = if (newer) feed else null,
+                upToDate = feed != null && !newer,
+                error = if (feed == null) {
+                    "Could not reach the GitHub release feed - check the connection and try again."
+                } else {
+                    null
+                }
+            )
+        }
+    }
+
+    /** Fetches the new APK in the background, then verifies its published SHA-256. */
+    fun downloadUpdate() {
+        val info: AppUpdateInfo = _updateState.value.available ?: return
+        if (_updateState.value.downloading) return
+        _updateState.value = _updateState.value.copy(
+            downloading = true,
+            error = null,
+            progress = null,
+            downloadedBytes = 0L,
+            totalBytes = info.sizeBytes,
+            stagedFile = null
+        )
+        viewModelScope.launch {
+            var lastPercent = -1
+            val outcome = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching {
+                    updateManager.download(info) { received, total ->
+                        // Throttled to whole percent steps so progress does not recompose
+                        // the screen hundreds of times per megabyte.
+                        val percent = if (total > 0L) ((received * 100L) / total).toInt() else -1
+                        if (percent != lastPercent) {
+                            lastPercent = percent
+                            _updateState.value = _updateState.value.copy(
+                                downloadedBytes = received,
+                                totalBytes = total,
+                                progress = AppUpdateFeed.progressFraction(received, total)
+                            )
+                        }
+                    }
+                }
+            }
+            outcome.onSuccess { apk ->
+                val signaturesMatch = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    updateManager.installedSignatureMatchesApk(apk)
+                }
+                _updateState.value = _updateState.value.copy(
+                    downloading = false,
+                    progress = 1f,
+                    stagedFile = apk,
+                    signatureMismatch = signaturesMatch == false,
+                    error = null
+                )
+                // A different signing key means the installer would fail with a cryptic
+                // "App not installed", so stop and let the UI explain the one-time
+                // reinstall instead of firing a dialog that cannot succeed.
+                if (signaturesMatch != false) installUpdate()
+            }.onFailure { e ->
+                _updateState.value = _updateState.value.copy(
+                    downloading = false,
+                    progress = null,
+                    stagedFile = null,
+                    error = e.message ?: "Download failed"
+                )
+            }
+        }
+    }
+
+    /** Hands the verified APK to Android's package installer (one system confirmation). */
+    fun installUpdate() {
+        val apk = _updateState.value.stagedFile ?: return
+        if (!updateManager.canRequestPackageInstalls()) {
+            _updateState.value = _updateState.value.copy(
+                error = "Android blocks installs from this app until you allow " +
+                    "\"Install unknown apps\" - opening that screen now."
+            )
+            updateManager.openInstallPermissionSettings()
+            return
+        }
+        try {
+            updateManager.install(apk)
+        } catch (e: Exception) {
+            _updateState.value = _updateState.value.copy(
+                error = "Could not open the installer: ${e.message ?: e.javaClass.simpleName}"
+            )
+        }
+    }
+
+    /** Owner dismissed the launch prompt for this app session; Settings still offers it. */
+    fun dismissUpdatePrompt() {
+        _updateState.value = _updateState.value.copy(dismissed = true)
+    }
+
+    /** Clears a reported failure so the update card returns to its idle state. */
+    fun clearUpdateError() {
+        _updateState.value = _updateState.value.copy(error = null)
+    }
+
+    /**
+     * Manual requirement: coasting behaviour + mileage are SAVED and X95-vs-regular evidence
+     * spans refuels/restarts. DriveAnalytics is memory-only, so at the end of every recording
+     * the completed coast session and any closed tank segments are appended to the durable
+     * insight logs. Never allowed to break the stop path.
+     */
+    private fun persistDriveInsights() {
+        try {
+            val snap = obdScheduler.driveAnalytics.snapshot.value
+            val nowUtc = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US)
+                .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
+                .format(java.util.Date())
+            if (snap.coast.totalSeconds >= 30.0 || snap.coast.totalDistanceM >= 200.0) {
+                settingsRepository.appendCoastLog(DriveInsightsStore.encodeCoast(nowUtc, snap.coast))
+            }
+            val ride = obdScheduler.rideRecorder.summary(nowUtc)
+            if (ride.durationSec >= 60.0 && ride.distanceKm >= 0.5) {
+                settingsRepository.appendRideLog(com.example.analysis.RideCodec.encode(ride))
+            }
+            val persistedStarts = settingsRepository.readTankLog()
+                .mapNotNull { DriveInsightsStore.decodeTank(it)?.dedupKey }
+                .toSet()
+            snap.tanks.filter { it.endMonotonicMs != null }.forEach { tank ->
+                if (tank.startMonotonicMs.toString() !in persistedStarts) {
+                    settingsRepository.appendTankLog(DriveInsightsStore.encodeTank(nowUtc, tank))
+                }
+            }
+        } catch (e: Exception) {
+            // Insight persistence is best-effort; stopping the recording always wins.
+        }
+    }
+
+    val fuelLogRepository = AppContainer.fuelLogRepository
+    val maintenanceRepository = AppContainer.maintenanceRepository
+    val expenseRepository = AppContainer.expenseRepository
+    val documentRepository = AppContainer.documentRepository
+    val reminderRepository = AppContainer.reminderRepository
+    val tripPlanRepository = AppContainer.tripPlanRepository
+
+    private val _quickAdd = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+
+    /** Quick-Add FAB target consumed once by the destination screen to auto-open its dialog. */
+    fun setQuickAdd(tag: String) { _quickAdd.value = tag }
+
+    fun takeQuickAdd(tag: String): Boolean {
+        if (_quickAdd.value == tag) { _quickAdd.value = null; return true }
+        return false
+    }
+
+    /** Due-item summary notification (services, documents, reminders) at app start. */
+    fun refreshDueNotifications() {
+        if (!settingsRepository.remindersEnabled.value) return
+        val now = System.currentTimeMillis()
+        val day = 24L * 60 * 60 * 1000L
+        val lines = mutableListOf<String>()
+        maintenanceRepository.dueStates(now)
+            .filter { it.status == com.example.data.MaintenanceCatalog.DueStatus.OVERDUE }
+            .forEach { lines.add("Overdue: ${it.item.label}") }
+        documentRepository.expiringWithin(30, now)
+            .forEach { (doc, ms) -> lines.add(if (ms < 0) "Expired: ${doc.type}" else "Expiring in ${ms / day} d: ${doc.type}") }
+        reminderRepository.due(now).forEach { lines.add("Reminder due: ${it.title}") }
+        if (lines.isNotEmpty()) com.example.data.NoticeManager.postSummary(getApplication(), lines)
+
+        // Weekly check-in: if nothing was logged for 7+ days (and we have not nagged this week),
+        // post a low-priority nudge - VehIQ's inactivity reminder, opt-out in the Reminders hub.
+        if (settingsRepository.weeklyCheckInEnabled.value) {
+            val week = 7L * 24 * 60 * 60 * 1000
+            val lastActivity = maxOf(
+                fuelLogRepository.entries().maxOfOrNull { it.idMs } ?: 0L,
+                maintenanceRepository.logs().maxOfOrNull { it.dateMs } ?: 0L,
+                expenseRepository.entries().maxOfOrNull { it.idMs } ?: 0L
+            )
+            val sinceLastNag = now - settingsRepository.lastCheckInNotifiedMs()
+            if (lastActivity > 0L && now - lastActivity > week && sinceLastNag > week) {
+                val inactiveDays = ((now - lastActivity) / day).toInt()
+                com.example.data.NoticeManager.postCheckIn(getApplication(), inactiveDays)
+                settingsRepository.setLastCheckInNotifiedMs(now)
+            }
+        }
+    }
+
+    /** Owner logged a refuel grade: stamp the next OBD tank segment with ground truth. */
+    fun tagFuelGrade(grade: String) {
+        obdScheduler.driveAnalytics.fuelQuality.pendingGrade = grade
+    }
+
+    /** Saved coasting sessions, newest first (Insights screen history rows). */
+    fun coastHistory(): List<DriveInsightsStore.CoastLogEntry> =
+        settingsRepository.readCoastLog().mapNotNull { DriveInsightsStore.decodeCoast(it) }.take(8)
+
+    /**
+     * Cross-trip trend points (avg rpm/speed/load/torque + idle model-vs-actual) for the
+     * Trips tab charts. Computed from stored Room telemetry samples of the newest trips.
+     */
+    suspend fun computeTripTrends(limit: Int = 8): List<com.example.analysis.TripTrendPoint> {
+        val repo = recordingManager.tripRepository
+        val trips = repo.recentTrips(limit)
+        if (trips.isEmpty()) return emptyList()
+        val rows = repo.trendSamples(trips.map { it.id })
+        return com.example.analysis.TripTrendAnalyzer.analyze(
+            rows.map {
+                val pid = it.pid.uppercase()
+                com.example.analysis.TripTrendAnalyzer.Sample(
+                    tripId = it.tripId,
+                    pid = if (pid.length == 2) "01$pid" else pid,
+                    ts = it.timestamp,
+                    value = it.numericValue
+                )
+            }
+        ).sortedByDescending { it.startTs }
+    }
+
+    /** Saved ride X-rays, newest first (behaviour + gears + elevation per ride). */
+    // ---- AC & climate behaviour (additive 2026-09-09) ----
+    val acSetTempC: StateFlow<Double> = settingsRepository.acSetTempC
+    val acAutoMode: StateFlow<Boolean> = settingsRepository.acAutoMode
+
+    fun setAcSetTempC(value: Double) = settingsRepository.setAcSetTempC(value)
+    fun setAcAutoMode(enabled: Boolean) = settingsRepository.setAcAutoMode(enabled)
+
+    /** Cross-ride learned AC-on vs AC-off economy from tagged ride summaries. */
+    data class AcLearning(val onKmL: Double, val offKmL: Double, val rides: Int)
+
+    data class CodingLabResult(val raw: String, val payloadHex: String?, val ascii: String?, val nrc: String?)
+
+    /** Read-only UDS 0x22 explorer (SafetyValidator blocks every write service). */
+    suspend fun codingLabRead(header: String, did: String): CodingLabResult {
+        val transport = bluetoothManager.currentTransport()
+            ?: return CodingLabResult("NOT CONNECTED - connect the adapter first.", null, null, null)
+        val request = com.example.protocol.CodingLabCodec.readRequest(did)
+        val validation = com.example.protocol.SafetyValidator.validateCommand(request)
+        if (validation is com.example.protocol.ValidationResult.Rejected) {
+            return CodingLabResult("SAFETY: ${validation.reason}", null, null, null)
+        }
+        transport.sendCommand("ATSH $header", 1200L)
+        val resp = transport.sendCommand(request, 2500L)
+        transport.sendCommand("ATSH 7E0", 1200L)
+        val raw = resp.rawText.ifBlank { resp.lines.joinToString(" | ") }
+        val nrc = com.example.protocol.CodingLabCodec.negativeNrc(raw)
+        val payload = if (nrc == null) {
+            com.example.protocol.CodingLabCodec.decodePositive(resp.lines, did)
+                .ifBlank { com.example.protocol.CodingLabCodec.decodePositive(listOf(raw), did).ifBlank { null } }
+        } else null
+        return CodingLabResult(
+            raw = raw.ifBlank { "[no response]" },
+            payloadHex = payload,
+            ascii = payload?.let { com.example.protocol.CodingLabCodec.hexToAscii(it) },
+            nrc = nrc?.let { com.example.protocol.CodingLabCodec.nrcName(it) }
+        )
+    }
+
+    data class SweepHit(val header: String, val kind: String, val detail: String)
+
+    /** Passive 0x22 F190 sweep across the conventional UDS headers - discovers which modules answer. */
+    suspend fun codingLabSweep(): List<SweepHit> {
+        val transport = bluetoothManager.currentTransport()
+            ?: return listOf(SweepHit("--", "NO_ADAPTER", "Connect the ELM327 adapter first."))
+        val out = mutableListOf<SweepHit>()
+        for (h in com.example.protocol.CodingLabCodec.SWEEP_HEADERS) {
+            transport.sendCommand("ATSH $h", 900L)
+            val r = transport.sendCommand("22F190", 2000L)
+            val raw = r.rawText.ifBlank { r.lines.joinToString(" ") }
+            when (val kind = com.example.protocol.CodingLabCodec.classifyResponse(raw, "F190")) {
+                "POSITIVE" -> {
+                    val payload = com.example.protocol.CodingLabCodec.decodePositive(r.lines, "F190")
+                        .ifBlank { com.example.protocol.CodingLabCodec.decodePositive(listOf(raw), "F190") }
+                    out.add(SweepHit(h, kind, com.example.protocol.CodingLabCodec.hexToAscii(payload)))
+                }
+                else -> if (kind.startsWith("NRC")) {
+                    out.add(SweepHit(h, kind, com.example.protocol.CodingLabCodec.nrcName(kind.removePrefix("NRC:"))))
+                }
+            }
+        }
+        transport.sendCommand("ATSH 7E0", 900L)
+        if (out.isEmpty()) out.add(SweepHit("--", "SILENT", "No module answered on any header (adapter asleep or car off)."))
+        return out
+    }
+
+    /** Fuelio parity: auto-backup hook fired after every refuel save. */
+    fun triggerCloudBackupIfEnabled() {
+        viewModelScope.launch { cloudBackupManager.performAutoBackupIfNeeded() }
+    }
+
+    fun acLearning(): AcLearning? {
+        var onKm = 0.0; var onL = 0.0; var offKm = 0.0; var offL = 0.0; var n = 0
+        for (r in rideHistory()) {
+            if (r.acOnKm > 0.05 && r.acOnFuelL > 0.005 && r.acOffKm > 0.05 && r.acOffFuelL > 0.005) {
+                onKm += r.acOnKm; onL += r.acOnFuelL; offKm += r.acOffKm; offL += r.acOffFuelL; n++
+            }
+        }
+        if (n == 0) return null
+        return AcLearning(onKm / onL, offKm / offL, n)
+    }
+
+    fun rideHistory(): List<com.example.analysis.RideBehaviorRecorder.RideSummary> =
+        // deduped(): repairs ride logs written before the one-persist-per-recording guard
+        // (an owner log from 2026-09-15 contained the same 70-min ride twice).
+        com.example.analysis.RideCodec.deduped(
+            settingsRepository.readRideLog().mapNotNull { com.example.analysis.RideCodec.decode(it) }
+        ).take(8)
+
+    /** Owner tags the selector position so gear logs carry D/S/M evidence (J1979 has no range PID). */
+    fun setRideMode(tag: String) {
+        obdScheduler.rideRecorder.modeTag =
+            com.example.analysis.RideBehaviorRecorder.ModeTag.values()
+                .firstOrNull { it.name == tag } ?: com.example.analysis.RideBehaviorRecorder.ModeTag.D
+    }
+
+    val rideMode: String get() = obdScheduler.rideRecorder.modeTag.name
+
+    /**
+     * Owner tags the climate state (J1979 exposes no AC-clutch/compressor PID on this ECU).
+     * Per-ride economy is then split into AC-on / blower-only / AC-off buckets.
+     */
+    fun setRideAc(tag: String) {
+        obdScheduler.rideRecorder.acTag =
+            com.example.analysis.RideBehaviorRecorder.AcTag.values()
+                .firstOrNull { it.name == tag } ?: com.example.analysis.RideBehaviorRecorder.AcTag.OFF
+    }
+
+    val rideAc: String get() = obdScheduler.rideRecorder.acTag.name
+
+    /** Saved closed tank segments, newest first (X95-vs-regular history). */
+    fun tankHistory(): List<DriveInsightsStore.TankLogEntry> =
+        settingsRepository.readTankLog().mapNotNull { DriveInsightsStore.decodeTank(it) }.take(10)
 
     fun renameRecording(sessionId: String, newName: String) {
         recordingManager.renameRecording(sessionId, newName)
@@ -964,9 +1477,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val aiChatHistory: StateFlow<List<com.example.model.ChatMessage>> = _aiChatHistory.asStateFlow()
 
     // FIX P0-3 + AI-not-configured UX: Resilient provider chain.
-    //  1) Try FirebaseAiDoctorProvider (Gemini API) â€” works when GEMINI_API_KEY is set
+    //  1) Try FirebaseAiDoctorProvider (Gemini API) - works when GEMINI_API_KEY is set
     //     in BuildConfig and the user has configured a valid key.
-    //  2) Fall back to RuleBasedChatProvider â€” uses the on-device RuleBasedAnalysisEngine
+    //  2) Fall back to RuleBasedChatProvider - uses the on-device RuleBasedAnalysisEngine
     //     over the user's recorded trip data. Works for ALL users out of the box, no
     //     API key required, no internet required. Provides full conversational vehicle
     //     diagnostics by mapping free-form queries to subsystem analyses.

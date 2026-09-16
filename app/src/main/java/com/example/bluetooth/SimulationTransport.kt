@@ -256,7 +256,7 @@ class SimulationElmTransport(
                     0.65 + (engineRpm / 1000.0) * (loadPct / 100.0) * 1.5
                 }
                 val rateMassGs = (rateLh * 745.0) / 3600.0
-                val rawVal = (rateMassGs * 10.0).toInt().coerceIn(0, 65535)
+                val rawVal = (rateMassGs * 50.0).toInt().coerceIn(0, 65535) // 0.02 g/s per count (F-6 calibration)
                 val a = (rawVal ushr 8) and 0xFF
                 val b = rawVal and 0xFF
                 lines.add("7E8 04 41 9D %02X %02X".format(a, b))
