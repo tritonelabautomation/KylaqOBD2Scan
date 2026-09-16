@@ -458,7 +458,9 @@ class RecordingManager(
                 // A crashed earlier attempt can leave an EMPTY stub dir that made every
                 // later Recover tap return null forever. Complete session = already in
                 // Trips; incomplete stub = delete it and recover properly this time.
-                val complete = File(sessionDirCheck, "${sessionId}_transactions.csv").exists()
+                // Same criterion as loadSavedRecordings(): the session JSON is what makes
+                // a session dir a real saved recording. CSV-only dirs are crashed stubs.
+                val complete = File(sessionDirCheck, "$sessionId.json").exists()
                 if (complete) return@withContext RecoveryOutcome.AlreadyRecovered
                 sessionDirCheck.deleteRecursively()
             }

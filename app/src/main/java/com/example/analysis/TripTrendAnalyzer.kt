@@ -23,7 +23,17 @@ data class TripTrendPoint(
     val idleSec: Double,
     val idleActualL: Double,
     val idleModelL: Double,
-    val idleActualLh: Double?
+    val idleActualLh: Double?,
+    /**
+     * Owner 2026-09-16: "There is no calculated power in trends based 2piNt mechanical
+     * power formula based on speed torque". Mean mechanical power over timestamp-paired
+     * (rpm, torque) samples: P = 2*pi*N*T / 60000 kW.
+     */
+    val avgPowerKw: Double? = null,
+    /** Owner 2026-09-16: "gears are not displayed in trend" - most-used gear while moving. */
+    val modeGear: Int? = null,
+    val gearMin: Int? = null,
+    val gearMax: Int? = null
 ) {
     /** Measured idle burn vs the model's 0.8 L/h, % excess. */
     val idleExcessPct: Double?
@@ -56,6 +66,9 @@ object TripTrendAnalyzer {
     /** Matches PowertrainModel.IDLE_FUEL_LH - kept local so the analyzer stays dependency-free. */
     const val MODEL_IDLE_LH = 1.05
 
+    /** rpm/torque/speed samples closer than this are the same engine moment. */
+    const val PAIR_MS = 2500L
+
     /** 178 Nm reference: J1979 torque percent -> Nm. */
     const val NM_PER_PERCENT = 1.78
 
@@ -78,6 +91,14 @@ object TripTrendAnalyzer {
         var lastRpm: Double? = null
         var lastSpeed: Double? = null
         var lastFuelLh: Double? = null
+        // Power (2*pi*N*T/60000 kW) and gear (rpm-per-km/h vs GearModel) pairing state:
+        // rpm is the common axis, torque/speed pair with it inside PAIR_MS.
+        var lastRpmTs = -1L; var lastRpmV = 0.0
+        var lastTqTs = -1L; var lastTqNm = 0.0
+        var lastSpdTs = -1L; var lastSpdV = 0.0
+        var powSum = 0.0; var powN = 0
+        val gearCounts = HashMap<Int, Int>()
+        val gearModel = com.example.engine.Aq250GearModel()
         for (x in s) {
             startTs = minOf(startTs, x.ts)
             val v = x.value ?: continue
@@ -88,10 +109,31 @@ object TripTrendAnalyzer {
             val prevSpeed = lastSpeed
             val prevFuel = lastFuelLh
             when (x.pid) {
-                PID_RPM -> { rpmSum += v; rpmN++; lastRpm = v }
-                PID_SPEED -> { spdSum += v; spdN++; lastSpeed = v }
+                PID_RPM -> {
+                    rpmSum += v; rpmN++; lastRpm = v
+                    lastRpmTs = x.ts; lastRpmV = v
+                    if (lastTqTs >= 0 && kotlin.math.abs(x.ts - lastTqTs) <= PAIR_MS) {
+                        powSum += kotlin.math.PI * 2.0 * v * lastTqNm / 60000.0; powN++
+                    }
+                    if (lastSpdTs >= 0 && kotlin.math.abs(x.ts - lastSpdTs) <= PAIR_MS && lastSpdV >= 10.0) {
+                        val ratio = v / lastSpdV
+                        val g = gearModel.estimate(ratio)?.first
+                            ?: gearModel.nearestGear(ratio)?.first
+                        if (g != null) gearCounts[g] = (gearCounts[g] ?: 0) + 1
+                    }
+                }
+                PID_SPEED -> {
+                    spdSum += v; spdN++; lastSpeed = v
+                    lastSpdTs = x.ts; lastSpdV = v
+                }
                 PID_LOAD -> { loadSum += v; loadN++ }
-                PID_TORQUE_PCT -> { tqSum += v; tqN++ }
+                PID_TORQUE_PCT -> {
+                    tqSum += v; tqN++
+                    lastTqTs = x.ts; lastTqNm = v * NM_PER_PERCENT
+                    if (lastRpmTs >= 0 && kotlin.math.abs(x.ts - lastRpmTs) <= PAIR_MS) {
+                        powSum += kotlin.math.PI * 2.0 * lastRpmV * lastTqNm / 60000.0; powN++
+                    }
+                }
                 PID_FUEL_VOL -> lastFuelLh = v
                 PID_FUEL_MASS -> lastFuelLh = v * 3600.0 / 745.0
             }
@@ -112,7 +154,11 @@ object TripTrendAnalyzer {
             idleSec = idleSec,
             idleActualL = idleFuelL,
             idleModelL = MODEL_IDLE_LH * idleSec / 3600.0,
-            idleActualLh = idleActualLh
+            idleActualLh = idleActualLh,
+            avgPowerKw = if (powN > 0) powSum / powN else null,
+            modeGear = gearCounts.maxByOrNull { it.value }?.key,
+            gearMin = gearCounts.keys.minOrNull(),
+            gearMax = gearCounts.keys.maxOrNull()
         )
     }
 

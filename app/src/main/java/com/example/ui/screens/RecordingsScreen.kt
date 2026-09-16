@@ -338,6 +338,14 @@ fun RecordingsScreen(
                             TrendRow("avg speed (km/h)", trends.mapNotNull { it.avgSpeedKmh }, "%.1f", CyberCyan)
                             TrendRow("avg engine load (%)", trends.mapNotNull { it.avgLoadPct }, "%.1f", ElectricAmber)
                             TrendRow("avg torque (Nm, from PID 0162)", trends.mapNotNull { it.avgTorqueNm }, "%.1f", NeonEmerald)
+                            TrendRow("est. mech power (kW, 2π·N·T/60)", trends.mapNotNull { it.avgPowerKw }, "%.1f", ResearchPurple)
+                            TrendRow("est. gear (most-used while moving)", trends.mapNotNull { it.modeGear?.toDouble() }, "%.0f", NeonEmerald)
+                            trends.lastOrNull()?.takeIf { it.modeGear != null }?.let { t ->
+                                Text(
+                                    "latest trip: gears ${t.gearMin}–${t.gearMax}, mostly gear ${t.modeGear} (est. from rpm/speed ratio)",
+                                    color = TextSecondaryDark, fontSize = 12.sp
+                                )
+                            }
                             val idlePts = trends.filter { it.idleActualLh != null }
                             if (idlePts.size >= 2) {
                                 Text(
