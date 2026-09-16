@@ -26,9 +26,11 @@ class StartStopWindowsTest {
         assertEquals(1, s.stopEvents)
         assertEquals(1, s.stopWindows.size)
         val (start, end) = s.stopWindows[0]
-        // Window opens at the observation that carried the engine-off state into the
-        // interval and closes at the last proven-stopped observation, not the restart.
-        assertEquals(4_000L, start)
+        // Interval attribution: the [4,6) interval still belongs to obs(4), which carried
+        // rpm 850 - the window therefore opens at obs(6), the FIRST observation that
+        // carried the engine-off state, and closes at the last proven-stopped observation
+        // (obs(14)), never at the restart instant.
+        assertEquals(6_000L, start)
         assertEquals(14_000L, end)
         assertTrue(end - start >= 8_000L)
     }

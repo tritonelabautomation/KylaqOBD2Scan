@@ -111,7 +111,7 @@ class TripAnalysisReportTest {
         assertTrue(report.contains("## Idle start-stop"))
         assertTrue(report.contains("Stalls: 6"))
         assertTrue(report.contains("Battery during 5 stall(s): mean 12.6 V"))
-        assertTrue(report.contains("1.6 V sag")) // 14.2 - 12.6
+        assertTrue(report.contains("Sag under stall loads: 1.6 V")) // 14.2 - 12.6
         assertTrue(report.contains("2/6 stall(s) overlapped measured AC-on"))
         assertTrue(report.contains("## Engine torque (measured, PID 0162)"))
         assertTrue(report.contains("Mean: 71 Nm"))
