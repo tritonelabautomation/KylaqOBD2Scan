@@ -30,4 +30,18 @@ object Fmt {
             if (metric) String.format(Locale.US, "%.1f km/L", it)
             else String.format(Locale.US, "%.1f mpg", it * 2.352145) // km/L -> US mpg
         } ?: "--"
+
+    /**
+     * Honest drift label (owner screenshot 2026-09-16: "0.0 → 26.2 (+0%)" - a division
+     * by zero dressed up as "no change"). From zero to something is not 0 %: it is a
+     * new signal; zero to zero is a flat ±0 %.
+     */
+    fun driftLabel(first: Double, last: Double): String = when {
+        first == 0.0 && last == 0.0 -> "±0%"
+        first == 0.0 -> "new"
+        else -> {
+            val d = (last - first) / kotlin.math.abs(first) * 100.0
+            "${if (d >= 0) "+" else ""}${String.format(java.util.Locale.US, "%.0f", d)}%"
+        }
+    }
 }

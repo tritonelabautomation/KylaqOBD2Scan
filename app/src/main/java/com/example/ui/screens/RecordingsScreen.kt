@@ -235,9 +235,11 @@ fun RecordingsScreen(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
+                            // Never a dead grey disabled button (owner 2026-09-16: the
+                            // greyed spinner read as "UI stuck"). Stays amber and says
+                            // what it is doing; re-entry is guarded in the ViewModel.
                             Button(
                                 onClick = { viewModel.recoverRawLog(logFile) },
-                                enabled = !isRecovering,
                                 modifier = Modifier.height(30.dp).testTag("btn_recover_raw_log"),
                                 shape = RoundedCornerShape(8.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = ElectricAmber),
@@ -249,6 +251,8 @@ fun RecordingsScreen(
                                         color = Color.Black,
                                         strokeWidth = 2.dp
                                     )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Recovering…", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Black)
                                 } else {
                                     Text("Recover", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Black)
                                 }
@@ -605,7 +609,7 @@ private fun TrendRow(label: String, values: List<Double>, fmt: String, color: Co
     if (values.size < 2) return
     val first = values.first()
     val last = values.last()
-    val drift = if (first != 0.0) (last - first) / kotlin.math.abs(first) * 100.0 else 0.0
+    val driftLabel = com.example.data.Fmt.driftLabel(first, last)
     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -613,8 +617,7 @@ private fun TrendRow(label: String, values: List<Double>, fmt: String, color: Co
         ) {
             Text(label, color = TextSecondaryDark, fontSize = 10.sp)
             Text(
-                "${String.format(fmt, first)} → ${String.format(fmt, last)} " +
-                    "(${if (drift >= 0) "+" else ""}${String.format(java.util.Locale.US, "%.0f", drift)}%)",
+                "${String.format(fmt, first)} → ${String.format(fmt, last)} ($driftLabel)",
                 color = color, fontSize = 10.sp, fontWeight = FontWeight.SemiBold
             )
         }

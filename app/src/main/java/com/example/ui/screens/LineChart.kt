@@ -55,16 +55,35 @@ fun SimpleLineChart(
 
         val width = size.width
         val height = size.height
-        val stepX = if (data.size > 1) width / (data.size - 1) else 0f
 
-        val xAt = { i: Int -> if (data.size > 1) i * stepX else width / 2f }
+        // OWNER READABILITY FIX (2026-09-16 screenshots: end labels printed ON the line
+        // and clipped at the right edge): reserve a right gutter sized to the widest
+        // value label, plot inside it, and print labels IN the gutter - the line, its
+        // dots and the fill can then never collide with their own numbers.
+        val textSize = 9.sp.toPx()
+        val measurePaint = Paint().apply {
+            this.textSize = textSize
+            isAntiAlias = true
+        }
+        val gutter = if (showLabels && width > 60f) {
+            val widest = maxOf(
+                measurePaint.measureText(valueFormatter(maxVal)),
+                measurePaint.measureText(valueFormatter(minVal))
+            )
+            minOf(widest + 10f, width * 0.35f)
+        } else 0f
+        val plotWidth = width - gutter
+
+        val stepX = if (data.size > 1) plotWidth / (data.size - 1) else 0f
+
+        val xAt = { i: Int -> if (data.size > 1) i * stepX else plotWidth / 2f }
         val yAt = { v: Float -> height - ((v - plotMin) / plotRange * height) }
 
         // dashed mid baseline: gives the eye an amplitude reference
         drawLine(
             color = lineColor.copy(alpha = 0.18f),
             start = Offset(0f, height / 2f),
-            end = Offset(width, height / 2f),
+            end = Offset(plotWidth, height / 2f),
             strokeWidth = 1f,
             pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 8f), 0f)
         )
@@ -99,16 +118,24 @@ fun SimpleLineChart(
         }
 
         if (showLabels && height > 24f && width > 60f) {
-            val textSize = 9.sp.toPx()
             val paint = Paint().apply {
                 color = lineColor.copy(alpha = 0.9f).toArgb()
                 this.textSize = textSize
                 isAntiAlias = true
-                textAlign = Paint.Align.RIGHT
+                textAlign = Paint.Align.LEFT
+            }
+            // Each label sits at its own value's height inside the gutter; when the
+            // two values are too close to stack, pin max top / min bottom instead of
+            // overprinting one number on the other.
+            var yMax = yAt(maxVal).coerceIn(textSize + 2f, height - 4f)
+            var yMin = yAt(minVal).coerceIn(textSize + 2f, height - 4f)
+            if (kotlin.math.abs(yMax - yMin) < textSize + 4f) {
+                yMax = textSize + 2f
+                yMin = height - 4f
             }
             drawContext.canvas.nativeCanvas.apply {
-                drawText(valueFormatter(maxVal), width - 2f, textSize + 2f, paint)
-                drawText(valueFormatter(minVal), width - 2f, height - 4f, paint)
+                drawText(valueFormatter(maxVal), plotWidth + 6f, yMax, paint)
+                drawText(valueFormatter(minVal), plotWidth + 6f, yMin, paint)
             }
         }
     }
