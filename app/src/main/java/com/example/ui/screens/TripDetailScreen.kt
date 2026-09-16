@@ -83,11 +83,18 @@ fun TripDetailScreen(
         )
     }
 
+    // OWNER FIX (2026-09-16 screenshots): opening a trip flashed the definitive
+    // "No stored telemetry samples - nothing to integrate" zero-card for the whole
+    // DB-load window, then swapped to real data. Until the load finishes the screen
+    // now says LOADING, so an empty state always means a genuinely empty trip.
+    var samplesLoaded by remember(tripId) { mutableStateOf(false) }
     LaunchedEffect(tripId) {
+        samplesLoaded = false
         trip = tripRepo.getTripById(tripId)
         samples = tripRepo.getSamplesForTrip(tripId)
         rawLogs = tripRepo.getRawLogsForTrip(tripId)
         aiAnalysis = tripRepo.getAnalysisForTrip(tripId)
+        samplesLoaded = true
     }
 
     Scaffold(
@@ -179,6 +186,20 @@ fun TripDetailScreen(
 
             when (selectedTab) {
                 TripDetailTab.OVERVIEW -> {
+                    if (!samplesLoaded) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            CircularProgressIndicator(strokeWidth = 2.dp)
+                            Spacer(Modifier.height(10.dp))
+                            Text(
+                                "Loading trip data…",
+                                color = TextSecondaryDark,
+                                fontSize = 13.sp
+                            )
+                        }
+                    }
                     Column {
                         TripFuelLogCard(fuelSummary)
                         TripOverviewView(
@@ -958,7 +979,13 @@ private fun shareFileSafely(context: Context, file: File, mimeType: String) {
  */
 @Composable
 private fun InsightBlock(accent: Color, title: String, body: String) {
-    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 7.dp)) {
+    // height(IntrinsicSize.Min) is what makes the accent bar's fillMaxHeight() match
+    // the TEXT block: inside a LazyColumn item the incoming height is unbounded, and
+    // without the intrinsic recipe the bar stretched to ~1000px of empty colour
+    // (owner 2026-09-16: "why unnecessary empty space FIX ASAP").
+    Row(
+        modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min).padding(vertical = 7.dp)
+    ) {
         Box(
             modifier = Modifier.width(3.dp).fillMaxHeight()
                 .background(accent, RoundedCornerShape(2.dp))
