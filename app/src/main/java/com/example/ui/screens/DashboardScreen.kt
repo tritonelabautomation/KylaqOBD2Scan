@@ -53,6 +53,7 @@ fun DashboardScreen(
     val connectionState by viewModel.connectionState.collectAsState()
     val connectedDeviceName by viewModel.connectedDeviceName.collectAsState()
     val isPolling by viewModel.isPolling.collectAsState()
+    val autoStopNotice by viewModel.autoStopNotice.collectAsState()
     val transactionCount by viewModel.transactionCount.collectAsState()
     val canResponseCount by viewModel.canResponseCount.collectAsState()
     val errorCount by viewModel.errorCount.collectAsState()
@@ -229,6 +230,7 @@ fun DashboardScreen(
             transactionCount = transactionCount,
             canResponseCount = canResponseCount,
             errorCount = errorCount,
+            autoStopNotice = autoStopNotice,
             onStartRecording = { viewModel.startRecording() },
             onStopRecording = { viewModel.stopRecording() },
             onTogglePolling = { viewModel.togglePolling() }
@@ -487,6 +489,7 @@ fun RecordingControlBar(
     transactionCount: Long,
     canResponseCount: Long,
     errorCount: Long,
+    autoStopNotice: String? = null,
     onStartRecording: () -> Unit,
     onStopRecording: () -> Unit,
     onTogglePolling: () -> Unit
@@ -582,9 +585,15 @@ fun RecordingControlBar(
                 MetricCounter(label = "Errors", value = "$errorCount", isError = errorCount > 0)
                 MetricCounter(
                     label = "Rec Status",
-                    value = if (isRecording) "ACTIVE ($durationFormatted)" else "IDLE",
-                    isSuccess = isRecording
+                    // OWNER BUG 2026-09-16: button said "Resume" (polling paused) while
+                    // Rec Status still claimed ACTIVE. Paused polling = paused claim.
+                    value = if (!isRecording) "IDLE" else if (isPolling) "ACTIVE ($durationFormatted)" else "PAUSED ($durationFormatted)",
+                    isSuccess = isRecording && isPolling
                 )
+            }
+            autoStopNotice?.let {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(it, color = WarningRed, fontSize = 12.sp, lineHeight = 17.sp)
             }
         }
     }

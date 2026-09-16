@@ -50,7 +50,7 @@ fun SimpleLineChart(
         // Pad the range so a near-flat series is not amplified into a full-height
         // swing and the polyline never touches the box edges.
         val pad = if (rawRange > 1e-4f) rawRange * 0.12f else maxOf(abs(maxVal) * 0.05f, 1f)
-        val plotMin = minVal - pad
+        val plotMin = if (minVal >= 0f) (minVal - pad).coerceAtLeast(0f) else minVal - pad
         val plotRange = rawRange + 2f * pad
 
         val width = size.width

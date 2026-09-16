@@ -58,6 +58,15 @@ class RecordingManager(
     val currentTransactions: StateFlow<List<TransactionRecord>> = _currentTransactions.asStateFlow()
 
     private val _savedRecordings = MutableStateFlow<List<SavedRecording>>(emptyList())
+
+    // OWNER BUG 2026-09-16: a recording ran 99 minutes against a SILENT link (ignition
+    // off / adapter hung) and then died as another "unsaved session" corpse. Watchdog:
+    // while recording, if no ECU line arrives for SILENT_LIMIT_MS, auto-stop AND SAVE,
+    // so a dead link can never again eat a trip or burn an hour of nothing.
+    @Volatile private var lastRxAtMs: Long = 0L
+    private var watchdogJob: kotlinx.coroutines.Job? = null
+    private val _autoStopNotice = MutableStateFlow<String?>(null)
+    val autoStopNotice: StateFlow<String?> = _autoStopNotice.asStateFlow()
     val savedRecordings: StateFlow<List<SavedRecording>> = _savedRecordings.asStateFlow()
 
     private val activeTransactionList = mutableListOf<TransactionRecord>()
@@ -71,6 +80,14 @@ class RecordingManager(
 
     init {
         loadSavedRecordings()
+    }
+
+    companion object {
+        const val SILENT_LIMIT_MS: Long = 5 * 60_000L
+
+        /** Pure so the watchdog rule is testable: silent only counts once a first RX existed. */
+        fun shouldAutoStop(lastRxMs: Long, nowMs: Long, silentLimitMs: Long = SILENT_LIMIT_MS): Boolean =
+            lastRxMs > 0L && nowMs - lastRxMs > silentLimitMs
     }
 
     fun startRecording(
@@ -109,6 +126,21 @@ class RecordingManager(
         _currentSessionMetadata.value = metadata
         _currentTransactions.value = emptyList()
         _isRecording.value = true
+        _autoStopNotice.value = null
+        lastRxAtMs = System.currentTimeMillis()
+        watchdogJob?.cancel()
+        watchdogJob = CoroutineScope(Dispatchers.IO).launch {
+            while (kotlinx.coroutines.isActive) {
+                kotlinx.coroutines.delay(20_000L)
+                if (_isRecording.value && shouldAutoStop(lastRxAtMs, System.currentTimeMillis())) {
+                    _autoStopNotice.value =
+                        "Link silent for 5 min (no ECU responses) - recording auto-stopped and " +
+                        "saved, so a dead link can never leave an unsaved corpse session."
+                    runCatching { stopRecording() }
+                    break
+                }
+            }
+        }
 
         rawLogManager.startFileLogging(sessionId)
 
@@ -143,6 +175,7 @@ class RecordingManager(
             // carries the elevation of its own moment; null when no accuracy-gated
             // fix exists at that instant - gaps stay gaps.
             val stamped = tx.copy(altitudeM = com.example.di.AppContainer.currentAltitudeM())
+            lastRxAtMs = System.currentTimeMillis()
             activeTransactionList.add(stamped)
             _currentTransactions.value = activeTransactionList.toList()
 
@@ -176,6 +209,7 @@ class RecordingManager(
     }
 
     suspend fun stopRecording(): SavedRecording? = withContext(Dispatchers.IO) {
+        watchdogJob?.cancel()
         val metadata = _currentSessionMetadata.value ?: return@withContext null
         val endTimestamp = System.currentTimeMillis()
         val nowUtc = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {

@@ -279,6 +279,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     val isRecording: StateFlow<Boolean> = recordingManager.isRecording
+    val autoStopNotice: StateFlow<String?> = recordingManager.autoStopNotice
 
     /** Non-suspending snapshot for lifecycle hooks (battery-exemption prompt). */
     fun isSessionActiveNow(): Boolean =

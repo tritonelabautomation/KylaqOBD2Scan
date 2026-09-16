@@ -102,7 +102,9 @@ fun TrendChart(
             color = TextSecondaryDark,
             fontSize = 12.sp,
             fontWeight = FontWeight.Medium,
-            modifier = modifier.padding(16.dp)
+            // OWNER BUG 2026-09-16: the empty state inherited the caller's tall chart
+            // modifier and rendered a ~1200px void box. Wrap content instead.
+            modifier = Modifier.fillMaxWidth().padding(16.dp)
         )
         return
     }
@@ -114,7 +116,7 @@ fun TrendChart(
             "All samples share one timestamp - nothing to plot over time.",
             color = TextSecondaryDark,
             fontSize = 12.sp,
-            modifier = modifier.padding(16.dp)
+            modifier = Modifier.fillMaxWidth().padding(16.dp)
         )
         return
     }

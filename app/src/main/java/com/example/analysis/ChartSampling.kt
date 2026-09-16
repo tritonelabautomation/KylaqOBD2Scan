@@ -131,5 +131,12 @@ fun roleOfSeries(index: Int): SeriesRole = when (index) {
 fun yDomain(min: Double, max: Double): Pair<Double, Double> {
     val spanRaw = max - min
     val pad = if (spanRaw > 0.001) spanRaw * 0.08 else maxOf(abs(max) * 0.05, 0.5)
-    return (min - pad) to (spanRaw + 2 * pad).coerceAtLeast(1e-6)
+    // OWNER BUG 2026-09-16 (parked-session screenshots): an all-zero speed series drew a
+    // -0.5…+0.5 km/h axis and a gradient slab under the zero line. Physically
+    // non-negative signals must never acquire a negative axis: when the data itself
+    // never dips below zero, the padded domain is floored at zero (real negatives,
+    // e.g. sub-zero coolant, keep theirs).
+    val lo = if (min >= 0.0) (min - pad).coerceAtLeast(0.0) else min - pad
+    val hi = max + pad
+    return lo to (hi - lo).coerceAtLeast(1e-6)
 }
