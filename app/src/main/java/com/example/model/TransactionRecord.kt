@@ -81,9 +81,6 @@ data class SynchronizedSample(
     val ambientC: Double? = null,
     val fuelRateLh: Double? = null,
     val engineTorquePct: Double? = null,
-    // GPS altitude at reception time (owner 2026-09-16): null when no
-    // accuracy-gated fix exists - never 0.0, never invented.
-    val altitudeM: Double? = null,
     val voltageV: Double? = null,
     val fuelPressureRaw: String? = null,
     val boostPressureRaw: String? = null,
