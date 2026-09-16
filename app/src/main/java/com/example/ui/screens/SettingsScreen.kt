@@ -116,6 +116,7 @@ fun SettingsScreen(
                 .verticalScroll(scrollState),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            SettingsSectionHeader("YOUR GARAGE")
             SimpleNavCard(
                 icon = Icons.Default.LocalGasStation,
                 title = "Fuel & Costs",
@@ -140,6 +141,172 @@ fun SettingsScreen(
                 subtitle = "YTD spend, trends, budget, trip estimator & splitter",
                 onClick = onOpenReports
             )
+            SimpleNavCard(
+                icon = Icons.Default.Notifications,
+                title = "Reminders Hub",
+                subtitle = "Due services, expiring documents & custom reminders",
+                onClick = onOpenReminders
+            )
+            SimpleNavCard(
+                icon = Icons.Default.Description,
+                title = "Documents",
+                subtitle = "Insurance, RC, licence, PUC with expiry alerts",
+                onClick = onOpenDocuments
+            )
+            SettingsSectionHeader("CONNECTION & VEHICLE")
+            // Vehicle & Hardware Profile (Connection & vehicle section)
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.DirectionsCar, contentDescription = null, tint = NeonEmerald, modifier = Modifier.size(24.dp))
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text("Vehicle & Adapter Profile", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    }
+
+                    Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+
+                    OutlinedTextField(
+                        value = tempVehicleName,
+                        onValueChange = {
+                            tempVehicleName = it
+                            settingsRepo.setVehicleName(it)
+                        },
+                        label = { Text("Vehicle Descriptor") },
+                        modifier = Modifier.fillMaxWidth().testTag("input_vehicle_name"),
+                        singleLine = true
+                    )
+
+                    OutlinedTextField(
+                        value = tempCanHeader,
+                        onValueChange = {
+                            tempCanHeader = it
+                            settingsRepo.setCanHeader(it)
+                        },
+                        label = { Text("Broadcast CAN Header (e.g. 7DF / 7E0)") },
+                        modifier = Modifier.fillMaxWidth().testTag("input_can_header"),
+                        singleLine = true
+                    )
+
+                    OutlinedTextField(
+                        value = tempSppUuid,
+                        onValueChange = {
+                            tempSppUuid = it
+                            settingsRepo.setSppUuid(it)
+                        },
+                        label = { Text("Bluetooth Classic SPP UUID") },
+                        modifier = Modifier.fillMaxWidth().testTag("input_spp_uuid"),
+                        singleLine = true
+                    )
+                }
+            }
+
+            // Section 3: Safe Storage & Retention Policy
+            // PID management was an orphaned route (registered in MainActivity but never
+            // navigated to) - the navigation audit wired it here so every screen is reachable.
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onOpenPidConfig() }
+                    .testTag("card_pid_config"),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.Settings,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Manage PIDs",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            "Enable, edit or reset the tracked OBD-II parameters",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
+            // ── App update (owner 2026-09-16: "update available ... similar to playstore") ──
+                        // Android Auto discovery status + the one real restriction (Google policy).
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Default.DirectionsCar,
+                            contentDescription = null,
+                            tint = CyberCyan,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "Android Auto dashboard",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Live OBD dash on your head unit - discovery status below",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+                    val context = LocalContext.current
+                    val discovered = remember {
+                        runCatching {
+                            val intent = android.content.Intent("androidx.car.app.CarAppService")
+                                .setPackage(context.packageName)
+                            @Suppress("DEPRECATION")
+                            context.packageManager.queryIntentServices(intent, 0).isNotEmpty()
+                        }.getOrDefault(false)
+                    }
+                    Text(
+                        text = if (discovered) {
+                            "CarAppService declared & discoverable on this device. If your head unit still " +
+                                "does not list the app, the cause is Google's distribution rule, not this app:"
+                        } else {
+                            "CarAppService NOT discoverable - reinstall the latest APK."
+                        },
+                        color = if (discovered) NeonEmerald else WarningRed,
+                        fontSize = 11.sp
+                    )
+                    Text(
+                        text = "Two routes exist. (1) TEMPLATE route (CarAppService): Google requires a " +
+                            "Play-trusted install on real head units - sideloaded template apps stay hidden. " +
+                            "(2) PARKED/SURFACE route (this build ships it too - same recipe as the sideloaded " +
+                            "AABrowser project): a distraction-optimised activity with CAR_LAUNCHER + " +
+                            "ACCESS_SURFACE that AA's unknown-sources toggle DOES unlock (media/messaging/" +
+                            "parked classes). Sideload this APK, enable AA developer mode + unknown sources, " +
+                            "reconnect - the head-unit launcher should list it. Some hosts grant the car " +
+                            "surface only while parked (host safety policy). Details: " +
+                            "docs/reference/android-auto-install-guide.md.",
+                        color = TextSecondaryDark,
+                        fontSize = 10.sp
+                    )
+                }
+            }
+
+            SettingsSectionHeader("APPEARANCE & UNITS")
             val unitsMetric by viewModel.settingsRepository.unitsMetric.collectAsState()
             val currencySymbol by viewModel.settingsRepository.currencySymbol.collectAsState()
             val appearanceMode by viewModel.settingsRepository.appearanceMode.collectAsState()
@@ -209,6 +376,7 @@ fun SettingsScreen(
                     )
                 }
             }
+            SettingsSectionHeader("DATA & BACKUP")
             var exportStatus by remember { mutableStateOf<String?>(null) }
             Card(
                 modifier = Modifier
@@ -286,274 +454,7 @@ fun SettingsScreen(
                     }
                 }
             }
-            SimpleNavCard(
-                icon = Icons.Default.Notifications,
-                title = "Reminders Hub",
-                subtitle = "Due services, expiring documents & custom reminders",
-                onClick = onOpenReminders
-            )
-            SimpleNavCard(
-                icon = Icons.Default.Description,
-                title = "Documents",
-                subtitle = "Insurance, RC, licence, PUC with expiry alerts",
-                onClick = onOpenDocuments
-            )
-            // PID management was an orphaned route (registered in MainActivity but never
-            // navigated to) - the navigation audit wired it here so every screen is reachable.
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onOpenPidConfig() }
-                    .testTag("card_pid_config"),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-            ) {
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        Icons.Default.Settings,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            "Manage PIDs",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            "Enable, edit or reset the tracked OBD-II parameters",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            }
-
-            // ── App update (owner 2026-09-16: "update available ... similar to playstore") ──
-            val updateState by viewModel.updateState.collectAsState()
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("card_app_update"),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            Icons.Default.SystemUpdate,
-                            contentDescription = null,
-                            tint = ElectricAmber,
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "App update",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = "Installed ${com.example.BuildConfig.VERSION_NAME} " +
-                                    "(build ${com.example.BuildConfig.VERSION_CODE})",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    if (updateState.downloading) {
-                        Spacer(modifier = Modifier.height(10.dp))
-                        LinearProgressIndicator(
-                            progress = { updateState.progress ?: 0f },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(6.dp)
-                                .testTag("update_progress"),
-                            color = ElectricAmber
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = "Downloading " +
-                                com.example.update.AppUpdateFeed.humanSize(updateState.downloadedBytes) +
-                                " of " +
-                                com.example.update.AppUpdateFeed.humanSize(updateState.totalBytes) +
-                                " - the SHA-256 published with the release is verified before Android " +
-                                "is asked to install anything",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-
-                    updateState.available?.let { info ->
-                        if (!updateState.downloading) {
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Text(
-                                text = "New build available: " + info.buildLabel() +
-                                    if (info.sizeBytes > 0L) {
-                                        " (${com.example.update.AppUpdateFeed.humanSize(info.sizeBytes)})"
-                                    } else "",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = NeonEmerald
-                            )
-                            if (info.commitSubject.isNotBlank()) {
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = info.commitSubject,
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            val provenance = listOf(
-                                info.branch,
-                                info.publishedAt.take(16).replace('T', ' ')
-                            ).filter { it.isNotBlank() }.joinToString(" · ")
-                            if (provenance.isNotBlank()) {
-                                Text(text = provenance, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Button(
-                                onClick = { viewModel.downloadUpdate() },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(40.dp)
-                                    .testTag("btn_update_download"),
-                                shape = RoundedCornerShape(10.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = NeonEmerald)
-                            ) {
-                                Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color.Black)
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Download & install", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                            }
-                        }
-                    }
-
-                    if (updateState.stagedFile != null && !updateState.downloading) {
-                        Spacer(modifier = Modifier.height(10.dp))
-                        if (updateState.signatureMismatch) {
-                            Text(
-                                text = "This update is signed with a different key than the copy installed " +
-                                    "on this phone, so Android will refuse to install it over the top. " +
-                                    "Builds made before 16 Sep 2026 were each signed with a throwaway CI " +
-                                    "key - that is why updating used to mean uninstalling. This is a " +
-                                    "one-time migration: export a backup (Drive folder or ZIP), uninstall " +
-                                    "once, then install the new APK. Every update after that installs in " +
-                                    "place and keeps your data and permissions.",
-                                fontSize = 11.sp,
-                                color = WarningRed
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            OutlinedButton(
-                                onClick = { viewModel.installUpdate() },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("btn_update_install_anyway"),
-                                shape = RoundedCornerShape(10.dp)
-                            ) {
-                                Text("Try installing anyway", fontSize = 12.sp)
-                            }
-                        } else {
-                            Button(
-                                onClick = { viewModel.installUpdate() },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(40.dp)
-                                    .testTag("btn_update_install"),
-                                shape = RoundedCornerShape(10.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = ElectricAmber)
-                            ) {
-                                Text("Install now", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                            }
-                        }
-                    }
-
-                    if (updateState.upToDate && updateState.available == null && !updateState.downloading) {
-                        Spacer(modifier = Modifier.height(10.dp))
-                        val checkedAt = if (updateState.lastCheckedAtMs > 0L) {
-                            " (checked " + SimpleDateFormat("HH:mm", Locale.US).format(Date(updateState.lastCheckedAtMs)) + ")"
-                        } else ""
-                        Text(
-                            text = "You are on the newest build$checkedAt",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-
-                    updateState.error?.let { message ->
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(text = message, fontSize = 11.sp, color = WarningRed)
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-                    OutlinedButton(
-                        onClick = { viewModel.checkForUpdate(auto = false) },
-                        enabled = !updateState.checking && !updateState.downloading,
-                        modifier = Modifier.testTag("btn_check_update"),
-                        shape = RoundedCornerShape(10.dp)
-                    ) {
-                        if (updateState.checking) {
-                            CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Checking…", fontSize = 12.sp)
-                        } else {
-                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(15.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Check for updates", fontSize = 12.sp)
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = "Updates come from this project's public GitHub Release and are checked " +
-                            "automatically about every 6 hours. Android always shows its own install " +
-                            "confirmation - a sideloaded app cannot silently replace itself, only the " +
-                            "Play Store can do that.",
-                        fontSize = 10.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onOpenAbout() }
-                    .testTag("card_about"),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-            ) {
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        Icons.Default.Info,
-                        contentDescription = null,
-                        tint = ElectricAmber,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Column {
-                        Text(
-                            text = "About & Fuel Guide",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "Version, what \u201Clog fuel\u201D means, and MID vs recorded fuel comparison",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            }
-
-            // Section 1: Google Drive & Cloud Backup
+            // Google Drive Backup & Sign-In (Data & backup section)
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -775,121 +676,6 @@ fun SettingsScreen(
                 }
             }
 
-                        // Android Auto discovery status + the one real restriction (Google policy).
-            Card(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-            ) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            Icons.Default.DirectionsCar,
-                            contentDescription = null,
-                            tint = CyberCyan,
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column {
-                            Text(
-                                text = "Android Auto dashboard",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = "Live OBD dash on your head unit - discovery status below",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontSize = 11.sp
-                            )
-                        }
-                    }
-                    val context = LocalContext.current
-                    val discovered = remember {
-                        runCatching {
-                            val intent = android.content.Intent("androidx.car.app.CarAppService")
-                                .setPackage(context.packageName)
-                            @Suppress("DEPRECATION")
-                            context.packageManager.queryIntentServices(intent, 0).isNotEmpty()
-                        }.getOrDefault(false)
-                    }
-                    Text(
-                        text = if (discovered) {
-                            "CarAppService declared & discoverable on this device. If your head unit still " +
-                                "does not list the app, the cause is Google's distribution rule, not this app:"
-                        } else {
-                            "CarAppService NOT discoverable - reinstall the latest APK."
-                        },
-                        color = if (discovered) NeonEmerald else WarningRed,
-                        fontSize = 11.sp
-                    )
-                    Text(
-                        text = "Two routes exist. (1) TEMPLATE route (CarAppService): Google requires a " +
-                            "Play-trusted install on real head units - sideloaded template apps stay hidden. " +
-                            "(2) PARKED/SURFACE route (this build ships it too - same recipe as the sideloaded " +
-                            "AABrowser project): a distraction-optimised activity with CAR_LAUNCHER + " +
-                            "ACCESS_SURFACE that AA's unknown-sources toggle DOES unlock (media/messaging/" +
-                            "parked classes). Sideload this APK, enable AA developer mode + unknown sources, " +
-                            "reconnect - the head-unit launcher should list it. Some hosts grant the car " +
-                            "surface only while parked (host safety policy). Details: " +
-                            "docs/reference/android-auto-install-guide.md.",
-                        color = TextSecondaryDark,
-                        fontSize = 10.sp
-                    )
-                }
-            }
-
-// Section 2: Vehicle & Hardware Profile
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-            ) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.DirectionsCar, contentDescription = null, tint = NeonEmerald, modifier = Modifier.size(24.dp))
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text("Vehicle & Adapter Profile", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    }
-
-                    Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
-
-                    OutlinedTextField(
-                        value = tempVehicleName,
-                        onValueChange = {
-                            tempVehicleName = it
-                            settingsRepo.setVehicleName(it)
-                        },
-                        label = { Text("Vehicle Descriptor") },
-                        modifier = Modifier.fillMaxWidth().testTag("input_vehicle_name"),
-                        singleLine = true
-                    )
-
-                    OutlinedTextField(
-                        value = tempCanHeader,
-                        onValueChange = {
-                            tempCanHeader = it
-                            settingsRepo.setCanHeader(it)
-                        },
-                        label = { Text("Broadcast CAN Header (e.g. 7DF / 7E0)") },
-                        modifier = Modifier.fillMaxWidth().testTag("input_can_header"),
-                        singleLine = true
-                    )
-
-                    OutlinedTextField(
-                        value = tempSppUuid,
-                        onValueChange = {
-                            tempSppUuid = it
-                            settingsRepo.setSppUuid(it)
-                        },
-                        label = { Text("Bluetooth Classic SPP UUID") },
-                        modifier = Modifier.fillMaxWidth().testTag("input_spp_uuid"),
-                        singleLine = true
-                    )
-                }
-            }
-
-            // Section 3: Safe Storage & Retention Policy
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
@@ -912,12 +698,255 @@ fun SettingsScreen(
                     )
                 }
             }
+            SettingsSectionHeader("ABOUT & UPDATES")
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onOpenAbout() }
+                    .testTag("card_about"),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.Info,
+                        contentDescription = null,
+                        tint = ElectricAmber,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = "About & Fuel Guide",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Version, what \u201Clog fuel\u201D means, and MID vs recorded fuel comparison",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
+            val updateState by viewModel.updateState.collectAsState()
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("card_app_update"),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Default.SystemUpdate,
+                            contentDescription = null,
+                            tint = ElectricAmber,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "App update",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Installed ${com.example.BuildConfig.VERSION_NAME} " +
+                                    "(build ${com.example.BuildConfig.VERSION_CODE})",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    if (updateState.downloading) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        LinearProgressIndicator(
+                            progress = { updateState.progress ?: 0f },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(6.dp)
+                                .testTag("update_progress"),
+                            color = ElectricAmber
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Downloading " +
+                                com.example.update.AppUpdateFeed.humanSize(updateState.downloadedBytes) +
+                                " of " +
+                                com.example.update.AppUpdateFeed.humanSize(updateState.totalBytes) +
+                                " - the SHA-256 published with the release is verified before Android " +
+                                "is asked to install anything",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    updateState.available?.let { info ->
+                        if (!updateState.downloading) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text(
+                                text = "New build available: " + info.buildLabel() +
+                                    if (info.sizeBytes > 0L) {
+                                        " (${com.example.update.AppUpdateFeed.humanSize(info.sizeBytes)})"
+                                    } else "",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = NeonEmerald
+                            )
+                            if (info.commitSubject.isNotBlank()) {
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = info.commitSubject,
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            val provenance = listOf(
+                                info.branch,
+                                info.publishedAt.take(16).replace('T', ' ')
+                            ).filter { it.isNotBlank() }.joinToString(" · ")
+                            if (provenance.isNotBlank()) {
+                                Text(text = provenance, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Button(
+                                onClick = { viewModel.downloadUpdate() },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(40.dp)
+                                    .testTag("btn_update_download"),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = NeonEmerald)
+                            ) {
+                                Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color.Black)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Download & install", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            }
+                        }
+                    }
+
+                    if (updateState.stagedFile != null && !updateState.downloading) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        if (updateState.signatureMismatch) {
+                            Text(
+                                text = "This update is signed with a different key than the copy installed " +
+                                    "on this phone, so Android will refuse to install it over the top. " +
+                                    "Builds made before 16 Sep 2026 were each signed with a throwaway CI " +
+                                    "key - that is why updating used to mean uninstalling. This is a " +
+                                    "one-time migration: export a backup (Drive folder or ZIP), uninstall " +
+                                    "once, then install the new APK. Every update after that installs in " +
+                                    "place and keeps your data and permissions.",
+                                fontSize = 11.sp,
+                                color = WarningRed
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedButton(
+                                onClick = { viewModel.installUpdate() },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("btn_update_install_anyway"),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Text("Try installing anyway", fontSize = 12.sp)
+                            }
+                        } else {
+                            Button(
+                                onClick = { viewModel.installUpdate() },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(40.dp)
+                                    .testTag("btn_update_install"),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = ElectricAmber)
+                            ) {
+                                Text("Install now", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            }
+                        }
+                    }
+
+                    if (updateState.upToDate && updateState.available == null && !updateState.downloading) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        val checkedAt = if (updateState.lastCheckedAtMs > 0L) {
+                            " (checked " + SimpleDateFormat("HH:mm", Locale.US).format(Date(updateState.lastCheckedAtMs)) + ")"
+                        } else ""
+                        Text(
+                            text = "You are on the newest build$checkedAt",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    updateState.error?.let { message ->
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(text = message, fontSize = 11.sp, color = WarningRed)
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+                    OutlinedButton(
+                        onClick = { viewModel.checkForUpdate(auto = false) },
+                        enabled = !updateState.checking && !updateState.downloading,
+                        modifier = Modifier.testTag("btn_check_update"),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        if (updateState.checking) {
+                            CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Checking…", fontSize = 12.sp)
+                        } else {
+                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(15.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Check for updates", fontSize = 12.sp)
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Updates come from this project's public GitHub Release and are checked " +
+                            "automatically about every 6 hours. Android always shows its own install " +
+                            "confirmation - a sideloaded app cannot silently replace itself, only the " +
+                            "Play Store can do that.",
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
 
             Spacer(modifier = Modifier.height(24.dp))
         }
     }
 }
 
+
+/**
+ * Android-style section header (owner pipeline task 8, 2026-09-16: settings entries sat
+ * "at random locations, hard to find"): small accent-coloured label + hairline divider,
+ * grouping the cards below it the way the platform Settings app groups its pages.
+ */
+@Composable
+private fun SettingsSectionHeader(title: String) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 6.dp)
+    ) {
+        Text(
+            title,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            color = CyberCyan,
+            letterSpacing = 1.6.sp
+        )
+        Spacer(Modifier.height(4.dp))
+        Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+    }
+}
 
 /**
  * One-time Google Sign-In configuration.
