@@ -62,6 +62,10 @@ fun SettingsScreen(
     val scrollState = rememberScrollState()
 
     val vehicleName by viewModel.vehicleName.collectAsState()
+    val welcomeEnabled by settingsRepo.welcomeEnabled.collectAsState()
+    val welcomeMessage by settingsRepo.welcomeMessage.collectAsState()
+    val welcomeVolumeEnabled by settingsRepo.welcomeVolumeEnabled.collectAsState()
+    val welcomeVolumePct by settingsRepo.welcomeVolumePct.collectAsState()
     val canHeader by viewModel.canHeader.collectAsState()
     val sppUuid by viewModel.sppUuid.collectAsState()
     val pollingMode by viewModel.pollingMode.collectAsState()
@@ -698,6 +702,90 @@ fun SettingsScreen(
                     )
                 }
             }
+            // ── Car Welcome voice (owner 2026-09-16: MacroDroid-style greeting, native) ──
+            SettingsSectionHeader("CAR WELCOME")
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Default.RecordVoiceOver,
+                            contentDescription = null,
+                            tint = NeonEmerald,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Car welcome voice",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Speaks your greeting the moment the OBD link connects - no MacroDroid needed",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(checked = welcomeEnabled, onCheckedChange = { settingsRepo.setWelcomeEnabled(it) })
+                    }
+                    OutlinedTextField(
+                        value = welcomeMessage,
+                        onValueChange = { settingsRepo.setWelcomeMessage(it) },
+                        label = { Text("Greeting message") },
+                        minLines = 2,
+                        maxLines = 3,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Text(
+                        text = "Tip: write {car} anywhere to say the vehicle name (\"$vehicleName\").",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Set media volume first",
+                                fontSize = 14.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Parks the media stream at $welcomeVolumePct% before speaking",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = welcomeVolumeEnabled,
+                            onCheckedChange = { settingsRepo.setWelcomeVolumeEnabled(it) }
+                        )
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("$welcomeVolumePct%", fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface)
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Slider(
+                            value = welcomeVolumePct.toFloat(),
+                            onValueChange = { settingsRepo.setWelcomeVolumePct(it.toInt()) },
+                            valueRange = 0f..100f,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Button(
+                        onClick = { viewModel.testWelcomeVoice() },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Test voice now")
+                    }
+                }
+            }
+
             SettingsSectionHeader("ABOUT & UPDATES")
             Card(
                 modifier = Modifier

@@ -761,6 +761,46 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // ── Car Welcome voice (owner 2026-09-16): greet on OBD link connect, MacroDroid-style ──
+    @Volatile private var lastWelcomeAtMs = 0L
+
+    init {
+        viewModelScope.launch {
+            var prev = bluetoothManager.connectionState.value
+            bluetoothManager.connectionState.collect { st ->
+                val connectEdge = st == com.example.bluetooth.ConnectionState.CONNECTED &&
+                    prev != com.example.bluetooth.ConnectionState.CONNECTED
+                prev = st
+                if (connectEdge) maybeSpeakWelcome()
+            }
+        }
+    }
+
+    private fun maybeSpeakWelcome() {
+        val repo = settingsRepository
+        if (!repo.welcomeEnabled.value) return
+        val now = System.currentTimeMillis()
+        // Re-spam guard: mid-drive link drops that auto-reconnect must not re-greet.
+        if (!com.example.data.WelcomeSpeaker.shouldSpeak(lastWelcomeAtMs, now)) return
+        lastWelcomeAtMs = now
+        speakWelcomeNow()
+    }
+
+    /** Settings "Test voice" button: speaks immediately, ignoring the interval guard. */
+    fun testWelcomeVoice() {
+        speakWelcomeNow()
+    }
+
+    private fun speakWelcomeNow() {
+        val repo = settingsRepository
+        if (repo.welcomeVolumeEnabled.value) {
+            com.example.di.AppContainer.welcomeSpeaker.setMediaVolumePercent(repo.welcomeVolumePct.value)
+        }
+        com.example.di.AppContainer.welcomeSpeaker.speak(
+            com.example.data.WelcomeSpeaker.resolveMessage(repo.welcomeMessage.value, vehicleName.value)
+        )
+    }
+
     fun startRecording() {
         // Fresh ride X-ray for this recording; the owner's mode tag (D/S/M) carries over.
         obdScheduler.rideRecorder.reset()

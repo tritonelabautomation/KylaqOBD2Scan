@@ -33,6 +33,7 @@ object AppContainer {
     lateinit var gpsManager: GpsManager
     lateinit var settingsRepository: SettingsRepository
     lateinit var recordingManager: RecordingManager
+    lateinit var welcomeSpeaker: com.example.data.WelcomeSpeaker
 
     /**
      * Altitude range captured for the CURRENT recording (owner 2026-09-15 trip-summary
@@ -86,6 +87,7 @@ object AppContainer {
             gpsManager = GpsManager(appContext)
             settingsRepository = SettingsRepository(appContext)
             recordingManager = RecordingManager(appContext, rawLogManager)
+            welcomeSpeaker = com.example.data.WelcomeSpeaker(appContext)
             bluetoothManager = BluetoothManager(appContext)
             val capabilityStore = com.example.discovery.SharedPrefsCapabilityStore(
                 appContext.getSharedPreferences("pid_capability_snapshot", android.content.Context.MODE_PRIVATE)

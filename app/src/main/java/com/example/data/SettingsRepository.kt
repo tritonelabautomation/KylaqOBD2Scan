@@ -128,6 +128,37 @@ class SettingsRepository(private val context: Context) {
         _autoRecord.value = enabled
     }
 
+    // ── Car Welcome voice (owner 2026-09-16: the MacroDroid "Car Welcome" recipe, native) ──
+    private val _welcomeEnabled = MutableStateFlow(prefs.getBoolean("welcome_enabled", true))
+    val welcomeEnabled: StateFlow<Boolean> = _welcomeEnabled.asStateFlow()
+    fun setWelcomeEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean("welcome_enabled", enabled).apply()
+        _welcomeEnabled.value = enabled
+    }
+
+    private val _welcomeMessage = MutableStateFlow(
+        prefs.getString("welcome_message", null) ?: WelcomeSpeaker.DEFAULT_MESSAGE
+    )
+    val welcomeMessage: StateFlow<String> = _welcomeMessage.asStateFlow()
+    fun setWelcomeMessage(message: String) {
+        prefs.edit().putString("welcome_message", message).apply()
+        _welcomeMessage.value = message
+    }
+
+    private val _welcomeVolumeEnabled = MutableStateFlow(prefs.getBoolean("welcome_volume_enabled", true))
+    val welcomeVolumeEnabled: StateFlow<Boolean> = _welcomeVolumeEnabled.asStateFlow()
+    fun setWelcomeVolumeEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean("welcome_volume_enabled", enabled).apply()
+        _welcomeVolumeEnabled.value = enabled
+    }
+
+    private val _welcomeVolumePct = MutableStateFlow(prefs.getInt("welcome_volume_pct", 70))
+    val welcomeVolumePct: StateFlow<Int> = _welcomeVolumePct.asStateFlow()
+    fun setWelcomeVolumePct(pct: Int) {
+        prefs.edit().putInt("welcome_volume_pct", pct.coerceIn(0, 100)).apply()
+        _welcomeVolumePct.value = pct.coerceIn(0, 100)
+    }
+
     private val _midDisplayKmL = MutableStateFlow(
         if (prefs.contains("mid_display_km_l")) prefs.getFloat("mid_display_km_l", 0f).toDouble() else null
     )
