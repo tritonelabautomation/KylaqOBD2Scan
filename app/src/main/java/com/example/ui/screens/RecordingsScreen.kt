@@ -115,7 +115,7 @@ fun RecordingsScreen(
                         text = "Persistent Room Database & Diagnostic Files",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 11.sp
+                        fontSize = 13.sp
                     )
                 }
             }
@@ -152,7 +152,7 @@ fun RecordingsScreen(
                     Icon(Icons.Default.Security, contentDescription = null, tint = NeonEmerald, modifier = Modifier.size(18.dp))
                     Text(
                         text = "Policy: Persist Until User Deletes",
-                        fontSize = 11.sp,
+                        fontSize = 13.sp,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                 }
@@ -170,11 +170,11 @@ fun RecordingsScreen(
                     if (isImporting) {
                         CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Importing...", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Text("Importing...", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     } else {
                         Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(15.dp), tint = Color.White)
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Import ZIP", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Text("Import ZIP", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     }
                 }
             }
@@ -199,7 +199,7 @@ fun RecordingsScreen(
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = "${unsavedRawLogs.size} unsaved log session(s) found on this phone",
-                            fontSize = 12.sp,
+                            fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurface
                         )
@@ -209,7 +209,7 @@ fun RecordingsScreen(
                         text = "These drives ended before STOP could save them (app killed, battery " +
                             "optimisation, or a crash), but every OBD line stayed on disk. Recover " +
                             "rebuilds the full trip — fuel, trends and X-ray — from that raw log.",
-                        fontSize = 10.sp,
+                        fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(modifier = Modifier.height(8.dp))
@@ -223,7 +223,7 @@ fun RecordingsScreen(
                                 Text(
                                     text = "session " +
                                         (com.example.analysis.RawLogRecovery.sessionIdOf(logFile.name) ?: logFile.name),
-                                    fontSize = 11.sp,
+                                    fontSize = 13.sp,
                                     fontFamily = FontFamily.Monospace,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
@@ -231,7 +231,7 @@ fun RecordingsScreen(
                                     text = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US)
                                         .format(java.util.Date(logFile.lastModified())) +
                                         " · ${logFile.length() / 1024} KB raw log",
-                                    fontSize = 9.sp,
+                                    fontSize = 11.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
@@ -252,9 +252,9 @@ fun RecordingsScreen(
                                         strokeWidth = 2.dp
                                     )
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Recovering…", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                                    Text("Recovering…", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.Black)
                                 } else {
-                                    Text("Recover", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                                    Text("Recover", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.Black)
                                 }
                             }
                         }
@@ -304,7 +304,7 @@ fun RecordingsScreen(
                 Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
                         "VEHICLE TRENDS - your last ${trends.size} recorded trip(s)",
-                        color = CyberCyan, fontWeight = FontWeight.Bold, fontSize = 12.sp
+                        color = CyberCyan, fontWeight = FontWeight.Bold, fontSize = 14.sp
                     )
                     if (trends.size >= 2) {
                         TrendRow("avg engine rpm", trends.mapNotNull { it.avgRpm }, "%.0f", NeonEmerald)
@@ -315,7 +315,7 @@ fun RecordingsScreen(
                         if (idlePts.size >= 2) {
                             Text(
                                 "idle burn vs math model (model = %.2f L/h):".format(java.util.Locale.US, com.example.analysis.TripTrendAnalyzer.MODEL_IDLE_LH),
-                                color = TextSecondaryDark, fontSize = 10.sp
+                                color = TextSecondaryDark, fontSize = 12.sp
                             )
                             SimpleLineChart(
                                 idlePts.mapNotNull { it.idleActualLh }.map { it.toFloat() },
@@ -329,14 +329,14 @@ fun RecordingsScreen(
                                     "(model %.2f)".format(java.util.Locale.US, com.example.analysis.TripTrendAnalyzer.MODEL_IDLE_LH) +
                                     (l.idleExcessPct?.let { " · latest ${if (it >= 0) "+" else ""}${String.format(java.util.Locale.US, "%.0f", it)}% vs model" } ?: ""),
                                 color = if ((l.idleExcessPct ?: 0.0) > 25.0) WarningRed else TextSecondaryDark,
-                                fontSize = 10.sp
+                                fontSize = 12.sp
                             )
                         }
                     } else {
                         Text(
                             "Record at least 2 trips with OBD logging and the rpm / speed / load / torque " +
                                 "and idle-vs-model trend charts appear here.",
-                            color = TextSecondaryDark, fontSize = 10.sp
+                            color = TextSecondaryDark, fontSize = 12.sp
                         )
                     }
                 }
@@ -367,11 +367,11 @@ fun RecordingsScreen(
             title = { Text("Diagnostic Storage & Retention") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("• Saved Trips: ${storageStats?.tripCount ?: 0}", fontSize = 13.sp)
-                    Text("• Telemetry Samples: ${storageStats?.sampleCount ?: 0}", fontSize = 13.sp)
-                    Text("• Raw Communication Frames: ${storageStats?.rawLogCount ?: 0}", fontSize = 13.sp)
-                    Text("• Storage Engine: Room Database (Indexed) + Local Files", fontSize = 13.sp)
-                    Text("• Auto-Pruning: Disabled (All diagnostic history is preserved permanently).", fontSize = 12.sp, color = NeonEmerald)
+                    Text("• Saved Trips: ${storageStats?.tripCount ?: 0}", fontSize = 14.sp)
+                    Text("• Telemetry Samples: ${storageStats?.sampleCount ?: 0}", fontSize = 14.sp)
+                    Text("• Raw Communication Frames: ${storageStats?.rawLogCount ?: 0}", fontSize = 14.sp)
+                    Text("• Storage Engine: Room Database (Indexed) + Local Files", fontSize = 14.sp)
+                    Text("• Auto-Pruning: Disabled (All diagnostic history is preserved permanently).", fontSize = 14.sp, color = NeonEmerald)
                 }
             },
             confirmButton = {
@@ -488,7 +488,7 @@ fun RecordingItemCard(
                         text = "ID: ${meta.sessionId} • ${meta.vehicle}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 11.sp,
+                        fontSize = 13.sp,
                         fontFamily = FontFamily.Monospace
                     )
                 }
@@ -515,14 +515,14 @@ fun RecordingItemCard(
                     color = NeonEmerald,
                     fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Monospace,
-                    fontSize = 11.sp
+                    fontSize = 13.sp
                 )
                 Text(
                     text = meta.startTimeUtc.take(19).replace("T", " "),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontFamily = FontFamily.Monospace,
-                    fontSize = 11.sp
+                    fontSize = 13.sp
                 )
             }
 
@@ -542,7 +542,7 @@ fun RecordingItemCard(
                         shape = RoundedCornerShape(8.dp),
                         contentPadding = PaddingValues(horizontal = 4.dp)
                     ) {
-                        Text("ZIP BUNDLE", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = CyberCyan)
+                        Text("ZIP BUNDLE", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CyberCyan)
                     }
                 }
 
@@ -552,7 +552,7 @@ fun RecordingItemCard(
                     shape = RoundedCornerShape(8.dp),
                     contentPadding = PaddingValues(horizontal = 4.dp)
                 ) {
-                    Text("TX CSV", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text("TX CSV", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
 
                 OutlinedButton(
@@ -561,7 +561,7 @@ fun RecordingItemCard(
                     shape = RoundedCornerShape(8.dp),
                     contentPadding = PaddingValues(horizontal = 4.dp)
                 ) {
-                    Text("SAMPLES", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text("SAMPLES", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
 
                 OutlinedButton(
@@ -570,7 +570,7 @@ fun RecordingItemCard(
                     shape = RoundedCornerShape(8.dp),
                     contentPadding = PaddingValues(horizontal = 4.dp)
                 ) {
-                    Text("JSON", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text("JSON", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -615,10 +615,10 @@ private fun TrendRow(label: String, values: List<Double>, fmt: String, color: Co
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text(label, color = TextSecondaryDark, fontSize = 10.sp)
+            Text(label, color = TextSecondaryDark, fontSize = 12.sp)
             Text(
                 "${String.format(fmt, first)} → ${String.format(fmt, last)} ($driftLabel)",
-                color = color, fontSize = 10.sp, fontWeight = FontWeight.SemiBold
+                color = color, fontSize = 12.sp, fontWeight = FontWeight.SemiBold
             )
         }
         SimpleLineChart(

@@ -10,6 +10,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.navigationBarsPadding
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -95,7 +96,7 @@ fun TripDetailScreen(
                         Text(
                             text = "Session: $tripId • ${trip?.vehicleName ?: ""}",
                             color = TextSecondaryDark,
-                            fontSize = 11.sp
+                            fontSize = 13.sp
                         )
                     }
                 },
@@ -259,7 +260,10 @@ private fun TripOverviewView(
     }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
+        // OWNER READABILITY FIX (2026-09-16): edge-to-edge draws under the system
+        // navigation bar, so the last card scrolled out of reach behind it. Reserve
+        // the nav-bar insets so every card can be scrolled fully into view.
+        modifier = Modifier.fillMaxSize().navigationBarsPadding().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
@@ -286,7 +290,7 @@ private fun TripOverviewView(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Column {
-                        Text("TELEMETRY HEALTH SCORE", color = TextSecondaryDark, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("TELEMETRY HEALTH SCORE", color = TextSecondaryDark, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                         Text(
                             text = "${trip.healthScore} / 100",
                             color = if (trip.healthScore >= 80) NeonEmerald else ElectricAmber,
@@ -294,7 +298,7 @@ private fun TripOverviewView(
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Black
                         )
-                        Text("Status: ${analysis?.overallHealth ?: "NORMAL"}", color = CyberCyan, fontSize = 12.sp)
+                        Text("Status: ${analysis?.overallHealth ?: "NORMAL"}", color = CyberCyan, fontSize = 14.sp)
                     }
 
                     Surface(
@@ -305,7 +309,7 @@ private fun TripOverviewView(
                             text = trip.status,
                             color = if (trip.healthScore >= 80) NeonEmerald else ElectricAmber,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp,
+                            fontSize = 14.sp,
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                         )
                     }
@@ -342,7 +346,7 @@ private fun TripOverviewView(
                 color = DarkSurface
             ) {
                 Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("SESSION PARAMETERS", color = TextSecondaryDark, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text("SESSION PARAMETERS", color = TextSecondaryDark, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     DetailRow("Vehicle Profile", trip.vehicleName)
                     DetailRow("Adapter Used", trip.adapterName)
                     DetailRow("Protocol", trip.protocolName)
@@ -374,10 +378,10 @@ private fun MetricCard(
             modifier = Modifier.fillMaxSize().padding(12.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            Text(title, color = TextSecondaryDark, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            Text(title, color = TextSecondaryDark, fontSize = 13.sp, fontWeight = FontWeight.Bold)
             Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(value, color = accentColor, fontSize = 22.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
-                Text(unit, color = TextSecondaryDark, fontSize = 11.sp, modifier = Modifier.padding(bottom = 2.dp))
+                Text(unit, color = TextSecondaryDark, fontSize = 13.sp, modifier = Modifier.padding(bottom = 2.dp))
             }
         }
     }
@@ -389,8 +393,8 @@ private fun DetailRow(label: String, value: String) {
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Text(label, color = TextSecondaryDark, fontSize = 12.sp)
-        Text(value, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+        Text(label, color = TextSecondaryDark, fontSize = 14.sp)
+        Text(value, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
     }
 }
 
@@ -485,7 +489,7 @@ private fun TripTrendsView(
                 ) {
                     Text(
                         ch.name,
-                        fontSize = 11.sp,
+                        fontSize = 13.sp,
                         color = if (isSelected) Color.White else TextSecondaryDark,
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
@@ -496,7 +500,7 @@ private fun TripTrendsView(
         Text(
             "Tap to overlay up to 4 signals \u00b7 first picked = left axis \u00b7 second = right axis \u00b7 pinch to zoom \u00b7 drag to read values",
             color = TextSecondaryDark,
-            fontSize = 10.sp
+            fontSize = 12.sp
         )
 
         // Trend chart (owner 2026-09-16 redesign + pipeline task 1 multi-signal overlay):
@@ -529,15 +533,15 @@ private fun TripTrendsView(
             ) {
                 Text(
                     timeFmt.format(Date(pts.first().first)),
-                    color = TextSecondaryDark, fontSize = 10.sp, fontFamily = FontFamily.Monospace
+                    color = TextSecondaryDark, fontSize = 12.sp, fontFamily = FontFamily.Monospace
                 )
                 Text(
                     "${primary.name}: ${spanSec / 60}m ${spanSec % 60}s span \u00b7 ${pts.size} samples",
-                    color = TextSecondaryDark, fontSize = 10.sp
+                    color = TextSecondaryDark, fontSize = 12.sp
                 )
                 Text(
                     timeFmt.format(Date(pts.last().first)),
-                    color = TextSecondaryDark, fontSize = 10.sp, fontFamily = FontFamily.Monospace
+                    color = TextSecondaryDark, fontSize = 12.sp, fontFamily = FontFamily.Monospace
                 )
             }
         }
@@ -555,10 +559,10 @@ private fun TripTrendsView(
                     modifier = Modifier.padding(14.dp),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text("MIN: ${String.format(java.util.Locale.US, "%.1f", numericValues.minOrNull() ?: 0.0)} ${primary.unit}", color = TextSecondaryDark, fontSize = 12.sp)
-                    Text("AVG: ${String.format(java.util.Locale.US, "%.1f", numericValues.average())} ${primary.unit}", color = primary.color, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    Text("MAX: ${String.format(java.util.Locale.US, "%.1f", numericValues.maxOrNull() ?: 0.0)} ${primary.unit}", color = NeonEmerald, fontSize = 12.sp)
-                    Text("COUNT: ${numericValues.size}", color = TextSecondaryDark, fontSize = 12.sp)
+                    Text("MIN: ${String.format(java.util.Locale.US, "%.1f", numericValues.minOrNull() ?: 0.0)} ${primary.unit}", color = TextSecondaryDark, fontSize = 14.sp)
+                    Text("AVG: ${String.format(java.util.Locale.US, "%.1f", numericValues.average())} ${primary.unit}", color = primary.color, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text("MAX: ${String.format(java.util.Locale.US, "%.1f", numericValues.maxOrNull() ?: 0.0)} ${primary.unit}", color = NeonEmerald, fontSize = 14.sp)
+                    Text("COUNT: ${numericValues.size}", color = TextSecondaryDark, fontSize = 14.sp)
                 }
             }
         }
@@ -582,7 +586,7 @@ private fun TripDoctorView(
                 Text(
                     "Deterministic on-device intelligence evaluates your vehicle telemetry for thermal, electrical, and powertrain health.",
                     color = TextSecondaryDark,
-                    fontSize = 13.sp,
+                    fontSize = 14.sp,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center
                 )
                 Button(
@@ -611,7 +615,10 @@ private fun TripDoctorView(
     }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
+        // OWNER READABILITY FIX (2026-09-16): edge-to-edge draws under the system
+        // navigation bar, so the last card scrolled out of reach behind it. Reserve
+        // the nav-bar insets so every card can be scrolled fully into view.
+        modifier = Modifier.fillMaxSize().navigationBarsPadding().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
@@ -628,10 +635,10 @@ private fun TripDoctorView(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("DIAGNOSTIC HEALTH REVIEW", color = CyberCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        Text(analysis.overallHealth, color = NeonEmerald, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Text("DIAGNOSTIC HEALTH REVIEW", color = CyberCyan, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Text(analysis.overallHealth, color = NeonEmerald, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                     }
-                    Text(analysis.drivingSummary, color = Color.White, fontSize = 13.sp)
+                    Text(analysis.drivingSummary, color = Color.White, fontSize = 14.sp)
                 }
             }
         }
@@ -660,9 +667,9 @@ private fun TripDoctorView(
                 color = DarkSurface
             ) {
                 Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("RECOMMENDED ACTIONS", color = ElectricAmber, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("RECOMMENDED ACTIONS", color = ElectricAmber, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     parsedRecommendations.forEach { rec ->
-                        Text("• $rec", color = Color.White, fontSize = 12.sp)
+                        Text("• $rec", color = Color.White, fontSize = 14.sp)
                     }
                 }
             }
@@ -678,8 +685,8 @@ private fun DoctorSection(title: String, body: String) {
         color = DarkSurface
     ) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(title, color = TextSecondaryDark, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-            Text(body, color = Color.White, fontSize = 13.sp)
+            Text(title, color = TextSecondaryDark, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Text(body, color = Color.White, fontSize = 14.sp)
         }
     }
 }
@@ -709,7 +716,7 @@ private fun TripRawLogsView(
                 FilterChip(
                     selected = selectedFilter == f,
                     onClick = { onSelectFilter(f) },
-                    label = { Text("[$f]", fontSize = 11.sp) },
+                    label = { Text("[$f]", fontSize = 13.sp) },
                     modifier = Modifier.padding(end = 6.dp)
                 )
             }
@@ -717,7 +724,7 @@ private fun TripRawLogsView(
 
         if (filteredLogs.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("No log entries match filter [$selectedFilter]", color = TextSecondaryDark, fontSize = 12.sp)
+                Text("No log entries match filter [$selectedFilter]", color = TextSecondaryDark, fontSize = 14.sp)
             }
         } else {
             LazyColumn(
@@ -735,9 +742,9 @@ private fun TripRawLogsView(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("[${log.category}]", color = CyberCyan, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
-                            Text("${log.direction}:", color = if (log.direction == "TX") ElectricAmber else NeonEmerald, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                            Text(log.rawLine, color = Color.White, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                            Text("[${log.category}]", color = CyberCyan, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                            Text("${log.direction}:", color = if (log.direction == "TX") ElectricAmber else NeonEmerald, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text(log.rawLine, color = Color.White, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
                         }
                     }
                 }
@@ -771,7 +778,7 @@ private fun TripExportView(
         modifier = Modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text("EXPORT & SHARE TRIP DATA", color = CyberCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Text("EXPORT & SHARE TRIP DATA", color = CyberCyan, fontSize = 14.sp, fontWeight = FontWeight.Bold)
 
         ExportActionCard(
             title = "Export Complete ZIP Bundle",
@@ -876,9 +883,9 @@ private fun ExportActionCard(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(title, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                Text(desc, color = TextSecondaryDark, fontSize = 11.sp)
-                Text("File size: ${if (file.exists()) "${file.length() / 1024} KB" else "Ready on generate"}", color = CyberCyan, fontSize = 10.sp)
+                Text(title, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text(desc, color = TextSecondaryDark, fontSize = 13.sp)
+                Text("File size: ${if (file.exists()) "${file.length() / 1024} KB" else "Ready on generate"}", color = CyberCyan, fontSize = 12.sp)
             }
             if (isGenerating) {
                 CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp, color = CyberCyan)
@@ -944,19 +951,19 @@ private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summar
             Row {
                 Column(modifier = Modifier.padding(end = 18.dp)) {
                     Text(String.format(java.util.Locale.US, "%.2f L", summary.fuelLiters), color = NeonEmerald, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                    Text("FUEL BURNED", color = TextSecondaryDark, fontSize = 10.sp)
+                    Text("FUEL BURNED", color = TextSecondaryDark, fontSize = 12.sp)
                 }
                 Column(modifier = Modifier.padding(end = 18.dp)) {
                     Text(String.format(java.util.Locale.US, "%.1f km", summary.distanceKm), color = NeonEmerald, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                    Text("DISTANCE", color = TextSecondaryDark, fontSize = 10.sp)
+                    Text("DISTANCE", color = TextSecondaryDark, fontSize = 12.sp)
                 }
                 Column(modifier = Modifier.padding(end = 18.dp)) {
                     Text(summary.kmPerLiter?.let { String.format(java.util.Locale.US, "%.1f", it) } ?: "--", color = ElectricAmber, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                    Text("KM/L", color = TextSecondaryDark, fontSize = 10.sp)
+                    Text("KM/L", color = TextSecondaryDark, fontSize = 12.sp)
                 }
                 Column {
                     Text(summary.litersPer100Km?.let { String.format(java.util.Locale.US, "%.1f", it) } ?: "--", color = ElectricAmber, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                    Text("L/100KM", color = TextSecondaryDark, fontSize = 10.sp)
+                    Text("L/100KM", color = TextSecondaryDark, fontSize = 12.sp)
                 }
             }
             Spacer(modifier = Modifier.height(6.dp))
@@ -972,7 +979,7 @@ private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summar
                         " • engine off ${String.format(java.util.Locale.US, "%.0f", summary.engineOffSeconds)} s"
                     } else "",
                 color = TextSecondaryDark,
-                fontSize = 11.sp
+                fontSize = 13.sp
             )
             val startStop = summary.startStop
             if (startStop.stopEvents > 0) {
@@ -992,7 +999,7 @@ private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summar
                         "${String.format(java.util.Locale.US, "%.0f", startStop.engineOffSeconds)} s • fuel saved ≈ " +
                         "${String.format(java.util.Locale.US, "%.2f", startStop.estimatedFuelSavedL)} L (estimate, $baselineNote)",
                     color = NeonEmerald,
-                    fontSize = 11.sp
+                    fontSize = 13.sp
                 )
             }
             if (startStop.restartCount > 0 && startStop.restartPeakFuelLh != null) {
@@ -1003,7 +1010,7 @@ private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summar
                         "${startStop.restartCount} restart(s) — cranking enrichment; real fuel, already inside the " +
                         "trip total and kept out of the idle averages.",
                     color = ElectricAmber,
-                    fontSize = 11.sp
+                    fontSize = 13.sp
                 )
             }
             // Owner pipeline task 5 (2026-09-16): "When engine start stop stopped car
@@ -1022,7 +1029,7 @@ private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summar
                         } ?: "") +
                         (if (sb.acOnStops > 0) " • ${sb.acOnStops}/${sb.acOnStopsTotal} stall(s) during measured AC-on: blower/fans ran off the battery - the belt-driven compressor cannot spin, so cooling pauses until restart" else ""),
                     color = ElectricAmber,
-                    fontSize = 11.sp
+                    fontSize = 13.sp
                 )
             }
             // Battery extremes RECORDED for this trip (owner pipeline task 3, 2026-09-16:
@@ -1040,7 +1047,7 @@ private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summar
                         " \u2192 " +
                         "${String.format(java.util.Locale.US, "%.1f", volts.maxV)} V max at ${vFmt.format(java.util.Date(volts.maxTs))}",
                     color = ElectricAmber,
-                    fontSize = 12.sp,
+                    fontSize = 14.sp,
                     fontWeight = FontWeight.Medium
                 )
             }
@@ -1058,7 +1065,7 @@ private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summar
                         "${String.format(java.util.Locale.US, "%.0f", tPeak)} Nm while running • reference " +
                         "${String.format(java.util.Locale.US, "%.0f", summary.torqueReferenceNm ?: 178.0)} Nm",
                     color = Color(0xFF64B5F6),
-                    fontSize = 11.sp
+                    fontSize = 13.sp
                 )
             }
             val ac = summary.ac
@@ -1080,7 +1087,7 @@ private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summar
                         " • quiet baseline ±${String.format(java.util.Locale.US, "%.2f", ac.quietMadV ?: 0.0)} V" +
                         (if (ac.confidence < 1.8) " • weak separation - treat as a hint" else ""),
                     color = ResearchPurple,
-                    fontSize = 11.sp
+                    fontSize = 13.sp
                 )
                 // What the measured AC state COSTS on this trip (owner pipeline task 4,
                 // 2026-09-16: "Engine load based on AC on off"): mean engine load (and
@@ -1102,7 +1109,7 @@ private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summar
                                 " • ${String.format(java.util.Locale.US, "%+.0f", it)} rpm"
                             } ?: ""),
                         color = ResearchPurple,
-                        fontSize = 11.sp
+                        fontSize = 13.sp
                     )
                 }
             }
@@ -1110,7 +1117,7 @@ private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summar
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
                     "No stored telemetry samples for this trip - nothing to integrate.",
-                    color = WarningRed, fontSize = 11.sp
+                    color = WarningRed, fontSize = 13.sp
                 )
             } else if (!summary.hasFuelSeries) {
                 Spacer(modifier = Modifier.height(6.dp))
@@ -1118,13 +1125,13 @@ private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summar
                     "FUEL RATE UNAVAILABLE: PIDs 015E/019D never answered on this ECU " +
                         "(common on some petrol ECUs). Fuel figures stay honest at zero - " +
                         "use refuel-log km/L in Fuel Costs instead.",
-                    color = ElectricAmber, fontSize = 10.sp
+                    color = ElectricAmber, fontSize = 12.sp
                 )
             } else if (!summary.hasSpeedSeries) {
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
                     "SPEED UNAVAILABLE: PID 010D never answered - distance cannot be integrated.",
-                    color = ElectricAmber, fontSize = 10.sp
+                    color = ElectricAmber, fontSize = 12.sp
                 )
             }
             if (summary.speedHistogram.isNotEmpty()) {
@@ -1134,7 +1141,7 @@ private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summar
                         "${it.first}-${it.first + 10}: ${String.format(java.util.Locale.US, "%.0f", it.second / 60.0)}m"
                     },
                     color = TextSecondaryDark,
-                    fontSize = 11.sp
+                    fontSize = 13.sp
                 )
             }
             Spacer(modifier = Modifier.height(4.dp))
@@ -1143,7 +1150,7 @@ private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summar
                     "technique, different fuel. Coasting seconds and idle minutes are the two " +
                     "biggest levers.",
                 color = TextSecondaryDark,
-                fontSize = 10.sp
+                fontSize = 12.sp
             )
         }
     }

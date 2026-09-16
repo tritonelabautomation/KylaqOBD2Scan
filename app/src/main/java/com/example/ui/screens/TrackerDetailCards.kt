@@ -63,7 +63,7 @@ fun TrackerSummaryCards(
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         // ── Trip summary grid ──────────────────────────────────────────────
         TkCard {
-            Text("Trip summary", color = TkGray, fontSize = 12.sp)
+            Text("Trip summary", color = TkGray, fontSize = 14.sp)
             Spacer(Modifier.height(6.dp))
             TkRow {
                 TkStat(Icons.Default.Route, "%.1f km".format(summary.distanceKm), "Distance", withDivider = true)
@@ -97,17 +97,17 @@ fun TrackerSummaryCards(
                     "* no GPS altitude was persisted for this trip (recorded before 2026-09-15, or no accuracy-gated GPS fix) - honest blank, never invented"
                 },
                 color = TkDim,
-                fontSize = 9.sp
+                fontSize = 11.sp
             )
         }
 
         // ── Fuel usage ─────────────────────────────────────────────────────
         TkCard {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("Fuel usage", color = TkWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Text("Fuel usage", color = TkWhite, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.width(8.dp))
                 Box(Modifier.background(TkInner, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp)) {
-                    Text("Estimated", color = TkGray, fontSize = 10.sp)
+                    Text("Estimated", color = TkGray, fontSize = 12.sp)
                 }
                 Spacer(Modifier.width(6.dp))
                 Icon(Icons.Default.Info, null, tint = TkGray, modifier = Modifier.size(14.dp))
@@ -123,7 +123,7 @@ fun TrackerSummaryCards(
                     Spacer(Modifier.width(10.dp))
                     Column {
                         Text("%.2f".format(summary.fuelLiters * pricePerL), color = TkWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                        Text("Trip cost", color = TkGray, fontSize = 10.sp)
+                        Text("Trip cost", color = TkGray, fontSize = 12.sp)
                     }
                 }
                 Box(Modifier.width(1.dp).height(34.dp).background(TkInner))
@@ -132,7 +132,7 @@ fun TrackerSummaryCards(
                     Spacer(Modifier.width(10.dp))
                     Column {
                         Text("%.1f l".format(summary.fuelLiters), color = TkWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                        Text("Fuel used", color = TkGray, fontSize = 10.sp)
+                        Text("Fuel used", color = TkGray, fontSize = 12.sp)
                     }
                 }
             }
@@ -140,14 +140,14 @@ fun TrackerSummaryCards(
             Box(Modifier.fillMaxWidth().height(1.dp).background(TkInner))
             Spacer(Modifier.height(10.dp))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("Price per l  ", color = TkGray, fontSize = 11.sp)
-                Text("%.2f".format(pricePerL), color = TkWhite, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text("Price per l  ", color = TkGray, fontSize = 13.sp)
+                Text("%.2f".format(pricePerL), color = TkWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.width(4.dp))
                 Icon(Icons.Default.Payments, null, tint = TkGray, modifier = Modifier.size(12.dp))
                 Spacer(Modifier.weight(1f))
                 Text(
                     if (summary.distanceKm > 0.5 && summary.fuelLiters > 0.01) "%.1f L/100km".format(summary.fuelLiters / summary.distanceKm * 100.0) else "-- L/100km",
-                    color = TkWhite, fontSize = 12.sp, fontWeight = FontWeight.SemiBold
+                    color = TkWhite, fontSize = 14.sp, fontWeight = FontWeight.SemiBold
                 )
             }
         }
@@ -158,11 +158,11 @@ fun TrackerSummaryCards(
                 Column(Modifier.weight(1f)) {
                     Text("Drive analysis", color = TkWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(3.dp))
-                    Text("A breakdown of your trip by traffic", color = TkGray, fontSize = 11.sp)
+                    Text("A breakdown of your trip by traffic", color = TkGray, fontSize = 13.sp)
                 }
                 Column(horizontalAlignment = Alignment.End) {
                     Text(fmtDur(summary.durationSeconds), color = TkWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    Text("Trip duration", color = TkGray, fontSize = 10.sp)
+                    Text("Trip duration", color = TkGray, fontSize = 12.sp)
                 }
             }
             Spacer(Modifier.height(12.dp))
@@ -175,9 +175,9 @@ fun TrackerSummaryCards(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(Modifier.size(7.dp).background(n.second, androidx.compose.foundation.shape.CircleShape))
                             Spacer(Modifier.width(5.dp))
-                            Text(n.first, color = TkGray, fontSize = 11.sp)
+                            Text(n.first, color = TkGray, fontSize = 13.sp)
                         }
-                        Text(TripDriveAnalysis.fmtMinutes(analysis.bandMinutes[i]), color = TkWhite, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 3.dp))
+                        Text(TripDriveAnalysis.fmtMinutes(analysis.bandMinutes[i]), color = TkWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 3.dp))
                     }
                 }
             }
@@ -189,7 +189,7 @@ fun TrackerSummaryCards(
                 Text("Driving score", color = TkWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.width(8.dp))
                 Box(Modifier.background(TkGreen, RoundedCornerShape(4.dp)).padding(horizontal = 7.dp, vertical = 2.dp)) {
-                    Text(WeeklyTripOverview.scoreLabel(score), color = Color.Black, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text(WeeklyTripOverview.scoreLabel(score), color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
                 Spacer(Modifier.width(6.dp))
                 Icon(Icons.Default.Info, null, tint = TkGray, modifier = Modifier.size(14.dp))
@@ -199,7 +199,7 @@ fun TrackerSummaryCards(
             Spacer(Modifier.height(8.dp))
             Text(
                 "A comprehensive measure of how well you drive, combining three key aspects: safety, comfort & efficiency",
-                color = TkGray, fontSize = 11.sp
+                color = TkGray, fontSize = 13.sp
             )
             Spacer(Modifier.height(12.dp))
             Box(Modifier.fillMaxWidth().height(1.dp).background(TkInner))
@@ -238,7 +238,7 @@ private fun RowScope.TkStat(icon: ImageVector, value: String, label: String, wit
         Spacer(Modifier.width(10.dp))
         Column {
             Text(value, color = TkWhite, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-            Text(label, color = TkGray, fontSize = 10.sp)
+            Text(label, color = TkGray, fontSize = 12.sp)
         }
     }
     if (withDivider) Box(Modifier.width(1.dp).height(32.dp).background(TkInner))
@@ -249,7 +249,7 @@ private fun SliderRow(label: String, fraction: Double, leftCap: String, rightCap
     val f = fraction.coerceIn(0.03, 0.97).toFloat()
     Column {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(label, color = TkWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text(label, color = TkWhite, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.width(6.dp))
             Icon(Icons.Default.Info, null, tint = TkGray, modifier = Modifier.size(13.dp))
         }
@@ -261,8 +261,8 @@ private fun SliderRow(label: String, fraction: Double, leftCap: String, rightCap
         }
         Spacer(Modifier.height(4.dp))
         Row(Modifier.fillMaxWidth()) {
-            Text(leftCap, color = TkOrange, fontSize = 10.sp, modifier = Modifier.weight(1f))
-            Text(rightCap, color = TkGreen, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+            Text(leftCap, color = TkOrange, fontSize = 12.sp, modifier = Modifier.weight(1f))
+            Text(rightCap, color = TkGreen, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
         }
     }
 }
