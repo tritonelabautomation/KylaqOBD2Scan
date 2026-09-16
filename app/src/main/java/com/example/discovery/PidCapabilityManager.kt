@@ -12,7 +12,9 @@ import java.util.concurrent.ConcurrentHashMap
  * Supports both global/aggregated state and granular per-ECU state (e.g. 7E8, 7E9, 7EA).
  * Strictly prevents confusion between unsupported PIDs and transport/timeout errors.
  */
-class PidCapabilityManager {
+class PidCapabilityManager(
+    private val snapshotStore: CapabilitySnapshotStore? = null
+) {
 
     // Global aggregated capability map: PID -> Status
     private val capabilityMap = ConcurrentHashMap<String, CapabilityStatus>()
@@ -40,12 +42,82 @@ class PidCapabilityManager {
     private val _discoveryInProgress = MutableStateFlow(false)
     val discoveryInProgress: StateFlow<Boolean> = _discoveryInProgress.asStateFlow()
 
+    init {
+        // Learned capability state survives process restarts (owner 2026-09-16: the trip
+        // card kept reading "reference 178 Nm" because 0163 - validated by discovery and
+        // by live polling alike - was forgotten on every restart, and the SLOW-tier gate
+        // then refused to poll it again: chicken and egg).
+        snapshotStore?.load()?.takeIf { it.isNotBlank() }?.let { text ->
+            val snap = parseSnapshot(text)
+            for ((pid, st) in snap.global) {
+                capabilityMap[pid] = st
+                capabilityMap["01$pid"] = st
+            }
+            for ((ecuId, m) in snap.ecu) {
+                val target = ecuCapabilityMap.getOrPut(ecuId) { ConcurrentHashMap() }
+                for ((pid, st) in m) {
+                    target[pid] = st
+                    target["01$pid"] = st
+                }
+            }
+            for ((pid, ecus) in snap.validating) {
+                for (ecu in ecus) {
+                    pidToValidatingEcuMap.getOrPut(pid) { ConcurrentHashMap.newKeySet() }.add(ecu)
+                    pidToValidatingEcuMap.getOrPut("01$pid") { ConcurrentHashMap.newKeySet() }.add(ecu)
+                }
+            }
+        }
+        seedBootstrapEligibility()
+        publishFlows()
+    }
+
+    /**
+     * Bootstrap seed (owner screenshot 2026-09-16, "reference 178 Nm" on a car that answers
+     * 175 on 0163): 0162 (actual torque %, FAST tier) is polled unconditionally, but it is
+     * only interpretable in Nm through the reference torque 0163/0164 - which sit in the
+     * SLOW tier behind [isLiveEligible] and would therefore NEVER be polled before being
+     * validated. Seed both reference PIDs as live-eligible on the default powertrain ECU so
+     * the very first poll can validate them (or mark them NOT_SUPPORTED on cars without
+     * them, via the existing unresolved-poll path). Learned state always wins: the seed
+     * only applies where NO entry exists yet - a stored NOT_SUPPORTED is respected.
+     */
+    private fun seedBootstrapEligibility() {
+        for (pid in listOf("63", "64")) {
+            if (capabilityMap[pid] != null) continue
+            capabilityMap[pid] = CapabilityStatus.LIVE_ELIGIBLE
+            capabilityMap["01$pid"] = CapabilityStatus.LIVE_ELIGIBLE
+            pidToValidatingEcuMap.getOrPut(pid) { ConcurrentHashMap.newKeySet() }.add("7E8")
+            pidToValidatingEcuMap.getOrPut("01$pid") { ConcurrentHashMap.newKeySet() }.add("7E8")
+        }
+    }
+
+    private fun publishFlows() {
+        _capabilitiesFlow.value = capabilityMap.toMap()
+        _ecuCapabilitiesFlow.value = ecuCapabilityMap.mapValues { it.value.toMap() }
+    }
+
+    /** Persists the learned matrix. A store failure must never disturb live polling. */
+    private fun persistSnapshot() {
+        val store = snapshotStore ?: return
+        runCatching {
+            store.save(
+                serializeSnapshot(
+                    capabilityMap.toMap(),
+                    ecuCapabilityMap.mapValues { it.value.toMap() },
+                    pidToValidatingEcuMap.mapValues { it.value.toList() }
+                )
+            )
+        }
+    }
+
     fun reset() {
         capabilityMap.clear()
         ecuCapabilityMap.clear()
         pidToValidatingEcuMap.clear()
-        _capabilitiesFlow.value = emptyMap()
-        _ecuCapabilitiesFlow.value = emptyMap()
+        // Re-apply the bootstrap seed (never persist from reset: the store keeps the
+        // learned matrix; an in-session reset must not degrade it to seed-only).
+        seedBootstrapEligibility()
+        publishFlows()
         _discoveryInProgress.value = false
     }
 
@@ -194,8 +266,8 @@ class PidCapabilityManager {
             }
         }
 
-        _capabilitiesFlow.value = capabilityMap.toMap()
-        _ecuCapabilitiesFlow.value = ecuCapabilityMap.mapValues { it.value.toMap() }
+        publishFlows()
+        persistSnapshot()
 
         // Bit 0 (PID basePid + 32) indicates if next 32-PID range is supported (only for basePid < 0xE0)
         return (basePid < 0xE0) && ((b3 and 0x01) != 0)
@@ -206,6 +278,7 @@ class PidCapabilityManager {
         capabilityMap[clean] = status
         capabilityMap[pidId.uppercase()] = status
         _capabilitiesFlow.value = capabilityMap.toMap()
+        persistSnapshot()
     }
 
     fun markPidStatus(ecuId: String, pidId: String, status: CapabilityStatus) {
@@ -230,8 +303,8 @@ class PidCapabilityManager {
             }
         }
 
-        _capabilitiesFlow.value = capabilityMap.toMap()
-        _ecuCapabilitiesFlow.value = ecuCapabilityMap.mapValues { it.value.toMap() }
+        publishFlows()
+        persistSnapshot()
     }
 
     /**
@@ -273,5 +346,89 @@ class PidCapabilityManager {
 
     fun setDiscoveryInProgress(inProgress: Boolean) {
         _discoveryInProgress.value = inProgress
+    }
+
+    companion object {
+        /**
+         * Compact line format (unit-testable without Android):
+         *   G|<pid2>|<STATUS>          global aggregate, canonical 2-hex key
+         *   E|<ECU>|<pid2>|<STATUS>    per-ECU entry
+         *   V|<pid2>|<ECU>,<ECU>       validating-ECU sets
+         * Unknown status names are skipped, never crash a restore.
+         */
+        fun serializeSnapshot(
+            global: Map<String, CapabilityStatus>,
+            ecu: Map<String, Map<String, CapabilityStatus>>,
+            validating: Map<String, List<String>>
+        ): String {
+            val sb = StringBuilder()
+            for ((pid, st) in global.toSortedMap()) {
+                val clean = pid.uppercase().removePrefix("01")
+                if (clean != pid.uppercase()) continue
+                sb.append("G|").append(clean).append('|').append(st.name).append('\n')
+            }
+            for ((ecuId, m) in ecu.toSortedMap()) {
+                for ((pid, st) in m.toSortedMap()) {
+                    val clean = pid.uppercase().removePrefix("01")
+                    if (clean != pid.uppercase()) continue
+                    sb.append("E|").append(ecuId.uppercase()).append('|').append(clean).append('|').append(st.name).append('\n')
+                }
+            }
+            for ((pid, ecus) in validating.toSortedMap()) {
+                val clean = pid.uppercase().removePrefix("01")
+                if (clean != pid.uppercase()) continue
+                if (ecus.isEmpty()) continue
+                sb.append("V|").append(clean).append('|').append(ecus.sorted().joinToString(",")).append('\n')
+            }
+            return sb.toString()
+        }
+
+        data class Snapshot(
+            val global: Map<String, CapabilityStatus>,
+            val ecu: Map<String, Map<String, CapabilityStatus>>,
+            val validating: Map<String, List<String>>
+        )
+
+        fun parseSnapshot(text: String): Snapshot {
+            val global = mutableMapOf<String, CapabilityStatus>()
+            val ecu = mutableMapOf<String, MutableMap<String, CapabilityStatus>>()
+            val validating = mutableMapOf<String, List<String>>()
+            for (line in text.lineSequence()) {
+                val parts = line.split('|')
+                when {
+                    parts.size == 3 && parts[0] == "G" ->
+                        statusOf(parts[2])?.let { global[parts[1].uppercase()] = it }
+                    parts.size == 4 && parts[0] == "E" ->
+                        statusOf(parts[3])?.let { ecu.getOrPut(parts[1].uppercase()) { mutableMapOf() }[parts[2].uppercase()] = it }
+                    parts.size == 3 && parts[0] == "V" ->
+                        validating[parts[1].uppercase()] = parts[2].split(',').map { it.trim().uppercase() }.filter { it.isNotBlank() }
+                }
+            }
+            return Snapshot(global, ecu, validating)
+        }
+
+        private fun statusOf(name: String): CapabilityStatus? =
+            CapabilityStatus.values().firstOrNull { it.name == name }
+    }
+}
+
+/**
+ * Persistence backend for the learned capability matrix. Implemented by
+ * [SharedPrefsCapabilityStore] in production and by an in-memory fake in unit tests.
+ */
+interface CapabilitySnapshotStore {
+    fun load(): String?
+    fun save(snapshot: String)
+}
+
+class SharedPrefsCapabilityStore(
+    private val prefs: android.content.SharedPreferences
+) : CapabilitySnapshotStore {
+    override fun load(): String? = runCatching { prefs.getString(KEY, null) }.getOrNull()
+    override fun save(snapshot: String) {
+        runCatching { prefs.edit().putString(KEY, snapshot).apply() }
+    }
+    companion object {
+        const val KEY = "capability_snapshot_v1"
     }
 }

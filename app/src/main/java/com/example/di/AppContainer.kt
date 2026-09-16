@@ -87,7 +87,14 @@ object AppContainer {
             settingsRepository = SettingsRepository(appContext)
             recordingManager = RecordingManager(appContext, rawLogManager)
             bluetoothManager = BluetoothManager(appContext)
-            obdScheduler = ObdScheduler(recordingManager, settingsRepository)
+            val capabilityStore = com.example.discovery.SharedPrefsCapabilityStore(
+                appContext.getSharedPreferences("pid_capability_snapshot", android.content.Context.MODE_PRIVATE)
+            )
+            obdScheduler = ObdScheduler(
+                recordingManager,
+                settingsRepository,
+                com.example.discovery.PidCapabilityManager(capabilityStore)
+            )
             pidDiscoveryService = com.example.discovery.PidDiscoveryService(obdScheduler.capabilityManager)
             cloudBackupManager = com.example.backup.CloudBackupManager(appContext, settingsRepository, recordingManager)
             fuelLogRepository = FuelLogRepository(appContext)

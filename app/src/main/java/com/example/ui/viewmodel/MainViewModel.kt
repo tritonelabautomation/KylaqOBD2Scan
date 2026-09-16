@@ -279,6 +279,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     val isRecording: StateFlow<Boolean> = recordingManager.isRecording
+
+    /** Non-suspending snapshot for lifecycle hooks (battery-exemption prompt). */
+    fun isSessionActiveNow(): Boolean =
+        isRecording.value || connectionState.value == com.example.bluetooth.ConnectionState.CONNECTED
     val currentSessionMetadata: StateFlow<RecordingMetadata?> = recordingManager.currentSessionMetadata
     val currentTransactions: StateFlow<List<TransactionRecord>> = recordingManager.currentTransactions
     val savedRecordings: StateFlow<List<SavedRecording>> = recordingManager.savedRecordings

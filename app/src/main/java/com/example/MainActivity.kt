@@ -107,6 +107,41 @@ class MainActivity : ComponentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
 
+    override fun onResume() {
+        super.onResume()
+        promptBatteryExemptionIfNeeded()
+    }
+
+    /**
+     * OEM battery management killed a 74-minute owner trip mid-recording (2026-09-16,
+     * "Recovered Run"): the foreground service alone does not survive OEM battery
+     * restrictions on this device class. Ask for the standard exemption once, while a
+     * session is live, then never again - and never crash on OEM firmware that lacks
+     * the standard settings action.
+     */
+    private fun promptBatteryExemptionIfNeeded() {
+        try {
+            val prefs = getSharedPreferences("kylaq_system", android.content.Context.MODE_PRIVATE)
+            val powerManager = getSystemService(android.os.PowerManager::class.java)
+            val ignoring = powerManager.isIgnoringBatteryOptimizations(packageName)
+            if (!com.example.service.BatteryOptimizationPolicy.shouldPrompt(
+                    ignoring,
+                    prefs.getBoolean("battery_exempt_prompted", false),
+                    viewModel.isSessionActiveNow()
+                )
+            ) return
+            prefs.edit().putBoolean("battery_exempt_prompted", true).apply()
+            startActivity(
+                android.content.Intent(
+                    android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                    android.net.Uri.parse("package:$packageName")
+                )
+            )
+        } catch (_: Exception) {
+            // Firmware without the standard action: skip silently.
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
