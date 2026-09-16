@@ -36,6 +36,6 @@ class AltitudeTrendChannelTest {
     @Test
     fun noFixesMeansEmptySeriesNotZeroes() {
         val rows = listOf(Row(1000, null), Row(2000, null))
-        assertEquals(emptyList(), TripTrendAnalyzer.altitudePoints(rows, { it.ts }, { it.alt }))
+        assertEquals(emptyList<Pair<Long, Double>>(), TripTrendAnalyzer.altitudePoints(rows, { it.ts }, { it.alt }))
     }
 }
