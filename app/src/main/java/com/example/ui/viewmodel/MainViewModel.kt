@@ -786,6 +786,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         speakWelcomeNow()
     }
 
+    // ── Fuelio import (owner 2026-09-16: "how i can import my data from fuelio") ──
+    private val _fuelioImportNotice = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+    val fuelioImportNotice: kotlinx.coroutines.flow.StateFlow<String?> = _fuelioImportNotice.asStateFlow()
+
+    fun importFuelioCsv(uri: android.net.Uri) {
+        viewModelScope.launch {
+            try {
+                val text = contentResolver.openInputStream(uri)?.use {
+                    it.reader(java.nio.charset.StandardCharsets.UTF_8).readText()
+                }
+                if (text == null) {
+                    _fuelioImportNotice.value = "Could not read that file - pick the CSV exported from Fuelio."
+                    return@launch
+                }
+                val parsed = com.example.data.FuelioImporter.parse(text, System.currentTimeMillis())
+                if (parsed.entries.isEmpty()) {
+                    _fuelioImportNotice.value = "No fill-ups found in that file. In Fuelio: menu -> " +
+                        "Backup -> Export to CSV (SD), then pick that CSV here."
+                    return@launch
+                }
+                val fresh = com.example.data.FuelioImporter.dedupe(fuelLogRepository.entries(), parsed.entries)
+                fresh.forEach { fuelLogRepository.add(it) }
+                val dupes = parsed.entries.size - fresh.size
+                _fuelioImportNotice.value = "Imported ${fresh.size} fill-up(s) from Fuelio" +
+                    (if (dupes > 0) " - skipped $dupes already in your log" else "") +
+                    ". They now feed km/L, cost/km and station stats."
+            } catch (e: Exception) {
+                _fuelioImportNotice.value = "Fuelio import failed: ${e.message ?: e.javaClass.simpleName}"
+            }
+        }
+    }
+
     val welcomeVoices: kotlinx.coroutines.flow.StateFlow<List<com.example.data.WelcomeSpeaker.VoiceOption>> =
         com.example.di.AppContainer.welcomeSpeaker.voices
     val welcomeVoiceId: kotlinx.coroutines.flow.StateFlow<String?> =

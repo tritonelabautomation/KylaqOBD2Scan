@@ -1,6 +1,8 @@
 package com.example.ui.screens
 
 import android.app.Activity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import android.content.Context
 import android.widget.Toast
 import androidx.compose.foundation.background
@@ -58,6 +60,9 @@ fun SettingsScreen(
         }
         ctx as? Activity
     }
+    val fuelioPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri -> uri?.let { viewModel.importFuelioCsv(it) } }
     val coroutineScope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
 
@@ -68,6 +73,7 @@ fun SettingsScreen(
     val welcomeVolumePct by viewModel.settingsRepository.welcomeVolumePct.collectAsState()
     val welcomeVoiceId by viewModel.welcomeVoiceId.collectAsState()
     val welcomeVoices by viewModel.welcomeVoices.collectAsState()
+    val fuelioNotice by viewModel.fuelioImportNotice.collectAsState()
     val canHeader by viewModel.canHeader.collectAsState()
     val sppUuid by viewModel.sppUuid.collectAsState()
     val pollingMode by viewModel.pollingMode.collectAsState()
@@ -383,6 +389,51 @@ fun SettingsScreen(
                 }
             }
             SettingsSectionHeader("DATA & BACKUP")
+            // ── Fuelio import (owner 2026-09-16) ──────────────────────────────────────
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Default.FileDownload,
+                            contentDescription = null,
+                            tint = CyberCyan,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Import from Fuelio",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Bring your whole Fuelio fill-up history across: in Fuelio open " +
+                                    "menu \u2192 Backup \u2192 Export (CSV) and pick that file here. Units, " +
+                                    "prices and partial fill-ups are converted automatically; re-imports " +
+                                    "never duplicate.",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    Button(
+                        onClick = { fuelioPicker.launch(arrayOf("text/csv", "text/comma-separated-values", "text/*", "*/*")) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Choose Fuelio CSV")
+                    }
+                    fuelioNotice?.let {
+                        Text(it, fontSize = 12.sp, lineHeight = 17.sp, color = NeonEmerald)
+                    }
+                }
+            }
             var exportStatus by remember { mutableStateOf<String?>(null) }
             Card(
                 modifier = Modifier
