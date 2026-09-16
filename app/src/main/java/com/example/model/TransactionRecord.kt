@@ -61,7 +61,12 @@ data class TransactionRecord(
     val unit: String = "",
     val decoderVersion: String = "1.0-ea211",
     val responseStatus: ResponseStatus = ResponseStatus.OK,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    // GPS altitude stamped at intake (owner 2026-09-16: "why altitude is missing in
+    // trend and trip logs?"): the elevation of this OBD line's own moment, from
+    // accuracy-gated fixes. Null when no fix exists - never 0.0, never invented.
+    // SynchronizedSample.altitudeM (CSV wide rows) is the separate, older stamp.
+    val altitudeM: Double? = null
 )
 
 /**
