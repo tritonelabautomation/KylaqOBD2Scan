@@ -421,9 +421,13 @@ private fun TripTrendsView(
     // crosshair bubble, which lists every overlaid signal with its own unit.
     // Reference torque for the derived Nm channel: the ECU's own 0164 when it answered,
     // else the factory 178 Nm plateau (owner pipeline task 6: "Engine torque calculations").
+    // 0163 first: the owner's 2026-09-16 on-car PID validation shows this ECU reports
+    // its 175 Nm reference on 0163 and stays silent on 0164.
     val torqueRefNm = samples
-        .firstOrNull { it.pid.equals("0164", ignoreCase = true) || it.pid.equals("64", ignoreCase = true) }
+        .firstOrNull { it.pid.equals("0163", ignoreCase = true) || it.pid.equals("63", ignoreCase = true) }
         ?.numericValue
+        ?: samples.firstOrNull { it.pid.equals("0164", ignoreCase = true) || it.pid.equals("64", ignoreCase = true) }
+            ?.numericValue
         ?: com.example.engine.PowertrainModel.PEAK_TORQUE_NM
     val channels = listOf(
         TrendChannel("010C", "Engine RPM", "rpm", CyberCyan),

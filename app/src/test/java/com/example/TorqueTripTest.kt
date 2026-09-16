@@ -18,10 +18,11 @@ class TorqueTripTest {
         TripFuelSummary.SamplePoint(pid, ts, value)
 
     /** 60 s of running engine: rpm ~1500, torque percentages 20/40/60 cycling. */
-    private fun drive(with0164: Double? = null): List<TripFuelSummary.SamplePoint> {
+    private fun drive(with0164: Double? = null, with0163: Double? = null): List<TripFuelSummary.SamplePoint> {
         val samples = mutableListOf<TripFuelSummary.SamplePoint>()
         var ts = 1_000_000L
         with0164?.let { samples.add(point("0164", ts, it)) }
+        with0163?.let { samples.add(point("0163", ts, it)) }
         repeat(60) { i ->
             samples.add(point("010C", ts, 1500.0))
             samples.add(point("0162", ts, listOf(20.0, 40.0, 60.0)[i % 3]))
@@ -73,6 +74,22 @@ class TorqueTripTest {
         val s = TripFuelSummary.summarize(samples)
         assertTrue("parked 90% reading must not lift the peak above the running 60%",
             s.peakTorqueNm!! <= 0.6 * PowertrainModel.PEAK_TORQUE_NM + 1e-6)
+    }
+
+    @Test
+    fun `the Kylaq reports its reference torque on 0163 - it wins over the factory figure`() {
+        // Owner on-car validation 2026-09-16 08:57 IST: PID 0163 answered 175 Nm; 0164
+        // never answered on this ECU.
+        val s = TripFuelSummary.summarize(drive(with0163 = 175.0))
+        assertEquals(0.4 * 175.0, s.meanTorqueNm!!, 1e-6)
+        assertEquals(0.6 * 175.0, s.peakTorqueNm!!, 1e-6)
+        assertEquals(175.0, s.torqueReferenceNm!!, 1e-9)
+    }
+
+    @Test
+    fun `0163 beats 0164 when both are stored (matches the live scheduler priority)`() {
+        val s = TripFuelSummary.summarize(drive(with0164 = 200.0, with0163 = 175.0))
+        assertEquals(175.0, s.torqueReferenceNm!!, 1e-9)
     }
 
     @Test

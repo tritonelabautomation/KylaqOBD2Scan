@@ -164,6 +164,54 @@ class PidDiscoveryService(
             var blockIndex = 0
             val totalBlocks = standardBaseRanges.size
 
+            // Records one decoded range block: ranges list, responding ECUs, per-ECU
+            // continuation state, capability marking and the published PID list. Local so
+            // a buffer-lag SALVAGE and the retried own-base result can BOTH be recorded in
+            // the same iteration (owner's Kylaq run 2026-09-16 lost the whole 0x00 block
+            // to ELM327 response lag).
+            fun recordRange(result: DiscoveryRangeResult) {
+                val baseCmd = "01${"%02X".format(result.basePid)}"
+                rangeResults.add(result)
+                _discoveredRanges.value = rangeResults.toList()
+
+                // Collect responding ECU CAN IDs
+                if (result.ecuResponses.isNotEmpty()) {
+                    for (ecuResp in result.ecuResponses) {
+                        respondingEcusSet.add(ecuResp.rxCanId)
+                        capabilityManager.parseCapabilityBitmap(result.basePid, ecuResp.bitmap.map { it.toInt() and 0xFF }, ecuResp.rxCanId)
+                        ecuContinuationState[ecuResp.rxCanId] = ecuResp.hasNextRange
+                        appendLog("ECU ${ecuResp.rxCanId} Bitmap for $baseCmd: [${ecuResp.bitmapHex}] (${ecuResp.supportedPids.size} supported)")
+                    }
+                } else if (result.rxCanId != null) {
+                    respondingEcusSet.add(result.rxCanId)
+                    capabilityManager.parseCapabilityBitmap(result.basePid, result.bitmap.map { it.toInt() and 0xFF }, result.rxCanId)
+                    ecuContinuationState[result.rxCanId] = result.hasNextRange
+                }
+                _discoveredEcus.value = respondingEcusSet.toList().sorted()
+
+                appendLog("Decoded $baseCmd Combined: [${result.bitmapHex}] (${result.supportedPids.size} supported PIDs)")
+
+                // Map all tested PIDs in this block (never includes PID 100)
+                val supportedSet = result.supportedPids.toSet()
+                for (pidInt in result.allTestedPids) {
+                    val hexPid = "%02X".format(pidInt)
+                    val isSupported = supportedSet.contains(pidInt)
+
+                    // Update capability manager with bitmap discovery result
+                    val status = if (isSupported) CapabilityStatus.BITMAP_SUPPORTED else CapabilityStatus.NOT_SUPPORTED
+                    capabilityManager.markPidStatus("01$hexPid", status)
+                    capabilityManager.markPidStatus(hexPid, status)
+
+                    val def = StandardPidCatalog.lookup(hexPid, isSupported = isSupported)
+                    cumulativePids[hexPid] = def
+                }
+
+                // Publish updated state
+                val sortedList = cumulativePids.values.sortedBy { it.hexPid }
+                _discoveredPids.value = sortedList
+                _supportedPidsCount.value = sortedList.count { it.supported }
+            }
+
             try {
                 for (basePid in standardBaseRanges) {
                     if (!isActive) break
@@ -237,57 +285,45 @@ class PidDiscoveryService(
                         break
                     }
 
-                    // Decode bitmap from response lines
-                    val rangeResult = PidDiscoveryDecoder.decodeFromRawResponse(basePid, response.lines)
+                    // Decode bitmap from response lines. ELM327 buffer-lag self-heal
+                    // (owner's Kylaq discovery run 2026-09-16 08:57 IST: TX 0100 returned a
+                    // garbled stale frame and TX 0120 received the 41 00 bitmap that BELONGED
+                    // to 0100 - rejecting the PID mismatch was correct, but the whole base
+                    // block (RPM, speed, coolant, MAP, throttle, fuel rate...) vanished from
+                    // the report). A late frame is still true car data: attribute it to its
+                    // real base, then retry the requested command once.
+                    var rangeResult = PidDiscoveryDecoder.decodeFromRawResponse(basePid, response.lines)
                     if (rangeResult == null) {
-                        appendLog("No valid 4-byte capability bitmap found in response to $cmd.")
+                        PidDiscoveryDecoder.salvageLaggedBitmap(
+                            basePid,
+                            response.lines,
+                            rangeResults.map { it.basePid }.toSet()
+                        )?.let { lagged ->
+                            appendLog("RX to $cmd carried a valid 01${"%02X".format(lagged.basePid)} bitmap (ELM buffer lag) - salvaged under its true base.")
+                            recordRange(lagged)
+                        }
+                        appendLog("No 01${"%02X".format(basePid)} bitmap in RX - retrying $cmd once.")
+                        val retry = transport.sendCommand(cmd, timeoutMs = 3000L)
+                        val retryRx = retry.lines.joinToString(" / ").ifEmpty { retry.rawText.trim() }
+                        appendLog("RX ($cmd retry): [${retry.status}] $retryRx")
+                        rangeResult = PidDiscoveryDecoder.decodeFromRawResponse(basePid, retry.lines)
+                        if (rangeResult == null) {
+                            PidDiscoveryDecoder.salvageLaggedBitmap(
+                                basePid,
+                                retry.lines,
+                                rangeResults.map { it.basePid }.toSet()
+                            )?.let { laggedRetry ->
+                                appendLog("Retry RX carried a valid 01${"%02X".format(laggedRetry.basePid)} bitmap - salvaged under its true base.")
+                                recordRange(laggedRetry)
+                            }
+                        }
+                    }
+                    if (rangeResult == null) {
+                        appendLog("No valid 4-byte capability bitmap found in response to $cmd (even after one retry).")
                         blockIndex++
                         continue
                     }
-
-                    rangeResults.add(rangeResult)
-                    _discoveredRanges.value = rangeResults.toList()
-
-                    // Collect responding ECU CAN IDs
-                    if (rangeResult.ecuResponses.isNotEmpty()) {
-                        for (ecuResp in rangeResult.ecuResponses) {
-                            respondingEcusSet.add(ecuResp.rxCanId)
-                            capabilityManager.parseCapabilityBitmap(basePid, ecuResp.bitmap.map { it.toInt() and 0xFF }, ecuResp.rxCanId)
-                            ecuContinuationState[ecuResp.rxCanId] = ecuResp.hasNextRange
-                            appendLog("ECU ${ecuResp.rxCanId} Bitmap for $cmd: [${ecuResp.bitmapHex}] (${ecuResp.supportedPids.size} supported)")
-                        }
-                    } else if (rangeResult.rxCanId != null) {
-                        respondingEcusSet.add(rangeResult.rxCanId)
-                        capabilityManager.parseCapabilityBitmap(basePid, rangeResult.bitmap.map { it.toInt() and 0xFF }, rangeResult.rxCanId)
-                        ecuContinuationState[rangeResult.rxCanId] = rangeResult.hasNextRange
-                    }
-                    _discoveredEcus.value = respondingEcusSet.toList().sorted()
-
-                    appendLog("Decoded $cmd Combined: [${rangeResult.bitmapHex}] (${rangeResult.supportedPids.size} supported PIDs)")
-
-                    // Map all tested PIDs in this block (never includes PID 100)
-                    val supportedSet = rangeResult.supportedPids.toSet()
-                    for (pidInt in rangeResult.allTestedPids) {
-                        val hexPid = "%02X".format(pidInt)
-                        val isSupported = supportedSet.contains(pidInt)
-
-                        // Update capability manager with bitmap discovery result
-                        val status = if (isSupported) CapabilityStatus.BITMAP_SUPPORTED else CapabilityStatus.NOT_SUPPORTED
-                        capabilityManager.markPidStatus("01$hexPid", status)
-                        capabilityManager.markPidStatus(hexPid, status)
-
-                        val def = StandardPidCatalog.lookup(hexPid, isSupported = isSupported)
-                        cumulativePids[hexPid] = def
-                    }
-
-                    // Also record per-ECU bitmaps
-                    // (REMOVED redundant parseCapabilityBitmap per Rule 4)
-
-                    // Publish updated state
-                    val sortedList = cumulativePids.values.sortedBy { it.hexPid }
-                    _discoveredPids.value = sortedList
-                    val currentSupportedCount = sortedList.count { it.supported }
-                    _supportedPidsCount.value = currentSupportedCount
+                    recordRange(rangeResult)
 
                     // Standard continuation rule: if bit 32 (basePid + 0x20) is NOT supported, stop!
                     // For base 0xE0, standard Mode 01 PID space ends at 0xFF

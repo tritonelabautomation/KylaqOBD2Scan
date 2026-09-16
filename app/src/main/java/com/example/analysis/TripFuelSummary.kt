@@ -201,7 +201,12 @@ object TripFuelSummary {
         // Engine torque (owner pipeline task 6): PID 0162 percent-of-reference converted
         // with the ECU's own 0164 reference when answered, else the factory plateau -
         // engine-running samples only, nothing fabricated when 0162 stays silent.
-        val torqueRef = (byPid["0164"] ?: emptyList()).mapNotNull { p -> p.value }.lastOrNull()
+        // Reference torque source order matches the live path (ObdScheduler): 0163 first -
+        // the owner's 2026-09-16 on-car validation proved THIS ECU reports its reference
+        // torque (175 Nm) on 0163 and never answers 0164; then 0164 for other ECUs; then
+        // the factory plateau.
+        val torqueRef = (byPid["0163"] ?: emptyList()).mapNotNull { p -> p.value }.lastOrNull()
+            ?: (byPid["0164"] ?: emptyList()).mapNotNull { p -> p.value }.lastOrNull()
             ?: com.example.engine.PowertrainModel.PEAK_TORQUE_NM
         val torqueNmSeries = (byPid["0162"] ?: emptyList())
             .mapNotNull { p -> p.value?.let { p.timestampMs to it } }

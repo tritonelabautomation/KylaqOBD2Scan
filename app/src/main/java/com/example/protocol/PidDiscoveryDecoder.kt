@@ -150,6 +150,27 @@ object PidDiscoveryDecoder {
     }
 
     /**
+     * ELM327 buffer-lag salvage (owner's Kylaq discovery 2026-09-16): responses can arrive
+     * ONE COMMAND LATE - TX 0120 received the 41 00 bitmap that belonged to TX 0100, and
+     * the strictly-correct PID-mismatch rejection dropped the entire base block from the
+     * report. A lagged frame is still true car data: when the frame for [requestedBase]
+     * did not arrive, check whether the lines carry a valid bitmap for ANOTHER standard
+     * base not yet decoded in this run, and return it under its true base.
+     */
+    fun salvageLaggedBitmap(
+        requestedBase: Int,
+        responseLines: List<String>,
+        alreadyDecodedBases: Set<Int>
+    ): DiscoveryRangeResult? {
+        for (alt in intArrayOf(0x00, 0x20, 0x40, 0x60, 0x80, 0xA0, 0xC0, 0xE0)) {
+            if (alt == requestedBase || alt in alreadyDecodedBases) continue
+            val result = decodeFromRawResponse(alt, responseLines)
+            if (result != null) return result
+        }
+        return null
+    }
+
+    /**
      * Extracts all bitmaps returned by multiple ECUs in a multi-ECU broadcast response.
      *
      * @return Map of CAN ID (e.g. "7E8", "7E9") to 4-byte bitmap ByteArray.

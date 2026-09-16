@@ -44,3 +44,13 @@ sciencedirect.com/science/article/pii/S1361920923004224 (fetched in full, open a
 | A/C > −25 % in very hot conditions (short trips) | energy.gov / article |
 | Tires +0.6 % avg, up to +3 % | afdc.energy.gov gas-saving_tips.pdf |
 | Idling 0.25-0.5 gal/h | article §4 (engine-size dependent); our app personalises with PowertrainModel 0.8 L/h warm |
+
+## Real-car lead (2026-09-16): measured warm-idle fuel rate 0.58 L/h — LEAD ONLY
+- Owner's live PID-discovery run (F-6 oracle, `kylaq-pid-validation-2026-09-16.md` §4) captured
+  PID **019D = 0.12 g/s** at warm idle, ≈31 °C ambient, AC ON → **0.58 L/h**
+  (×3600 ÷ 745 g/L, the app's own J1979 mass-rate decode).
+- `PowertrainModel.IDLE_FUEL_LH` stays **1.05 L/h** (trip-median anchored 2026-09-14; 0.8 L/h was
+  the bottom of that measured band). This is a SINGLE instantaneous sample — AC clutch may have
+  been between engagements, and rail-flow instants sit below trip-averaged burn.
+- Status: **lead, not a citation.** No in-app number may quote 0.58 L/h yet. Decision rule: if
+  repeated 019D idle samples across trips cluster near 0.6 L/h, revisit the anchor and this line.
