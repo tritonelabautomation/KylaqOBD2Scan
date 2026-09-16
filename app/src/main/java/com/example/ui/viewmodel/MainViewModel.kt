@@ -985,13 +985,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private val _recoveryNotice = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+    val recoveryNotice: kotlinx.coroutines.flow.StateFlow<String?> = _recoveryNotice.asStateFlow()
+
     fun recoverRawLog(file: java.io.File) {
         if (_isRecovering.value) return
         viewModelScope.launch {
             _isRecovering.value = true
             try {
-                recordingManager.recoverFromRawLog(file)
-            } catch (_: Exception) {
+                val outcome = recordingManager.recoverFromRawLog(file)
+                val sid = com.example.analysis.RawLogRecovery.sessionIdOf(file.name) ?: file.name
+                _recoveryNotice.value = when (outcome) {
+                    is com.example.data.RecordingManager.RecoveryOutcome.Recovered ->
+                        "Recovered session ${outcome.sessionId} - ${outcome.samples} OBD lines " +
+                            "rebuilt. It is now a normal trip in Trips & Recordings."
+                    com.example.data.RecordingManager.RecoveryOutcome.NothingToRecover -> {
+                        recordingManager.archiveUnrecoverableRawLog(file)
+                        "Session $sid holds NO decodable OBD responses - the link was silent that " +
+                            "whole time (engine off / adapter asleep), so there is no telemetry " +
+                            "inside to rebuild. The raw log is kept under raw_logs/archived."
+                    }
+                    com.example.data.RecordingManager.RecoveryOutcome.AlreadyRecovered ->
+                        "Session $sid was already recovered earlier - look for its 'Recovered Run' " +
+                            "card in Trips & Recordings."
+                    is com.example.data.RecordingManager.RecoveryOutcome.Failed ->
+                        "Recovery failed: ${outcome.reason}"
+                }
+            } catch (e: Exception) {
+                _recoveryNotice.value = "Recovery failed: ${e.message ?: e.javaClass.simpleName}"
             } finally {
                 _isRecovering.value = false
                 refreshUnsavedRawLogs()

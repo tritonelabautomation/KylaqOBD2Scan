@@ -419,21 +419,54 @@ class RecordingManager(
     }
 
     /**
+     * WHY every recovery outcome is reported (owner 2026-09-16: "Still im unable to
+     * recover the logs"): recoverFromRawLog used to return null silently and the
+     * ViewModel swallowed it, so tapping Recover looked completely dead - including
+     * when a half-finished earlier attempt left an EMPTY session dir that blocked all
+     * later attempts forever.
+     */
+    sealed class RecoveryOutcome {
+        data class Recovered(val sessionId: String, val samples: Int) : RecoveryOutcome()
+        object NothingToRecover : RecoveryOutcome()
+        object AlreadyRecovered : RecoveryOutcome()
+        data class Failed(val reason: String) : RecoveryOutcome()
+    }
+
+    /**
+     * Moves a raw log that carries no recoverable telemetry out of the scan dir (kept,
+     * never deleted) so the recovery banner stops offering it forever.
+     */
+    fun archiveUnrecoverableRawLog(file: File) {
+        try {
+            val archiveDir = File(rawLogsDir, "archived").apply { mkdirs() }
+            file.renameTo(File(archiveDir, file.name))
+        } catch (_: Exception) {}
+    }
+
+    /**
      * Rebuilds and persists a killed recording from its raw log, producing the same
      * artifacts as stopRecording() (session dir, CSV/JSON/ZIP bundle, Room trip +
-     * samples, AI analysis). Returns null when nothing is recoverable. GPS altitude
-     * stays null for recovered trips — honest blank, never invented.
+     * samples, AI analysis). Every outcome is reported - silence was the bug. GPS
+     * altitude stays null for recovered trips — honest blank, never invented.
      */
-    suspend fun recoverFromRawLog(file: File): SavedRecording? = withContext(Dispatchers.IO) {
+    suspend fun recoverFromRawLog(file: File): RecoveryOutcome = withContext(Dispatchers.IO) {
         try {
             val sessionId = com.example.analysis.RawLogRecovery.sessionIdOf(file.name)
-                ?: return@withContext null
-            if (File(recordingsDir, "session_$sessionId").exists()) return@withContext null
+                ?: return@withContext RecoveryOutcome.Failed("unrecognised raw-log file name")
+            val sessionDirCheck = File(recordingsDir, "session_$sessionId")
+            if (sessionDirCheck.exists()) {
+                // A crashed earlier attempt can leave an EMPTY stub dir that made every
+                // later Recover tap return null forever. Complete session = already in
+                // Trips; incomplete stub = delete it and recover properly this time.
+                val complete = File(sessionDirCheck, "${sessionId}_transactions.csv").exists()
+                if (complete) return@withContext RecoveryOutcome.AlreadyRecovered
+                sessionDirCheck.deleteRecursively()
+            }
 
             val telemetry = com.example.analysis.RawLogRecovery.extractTelemetry(
                 file.readText(), file.lastModified()
             )
-            if (telemetry.size < 10) return@withContext null // stub log - nothing worth saving
+            if (telemetry.size < 10) return@withContext RecoveryOutcome.NothingToRecover
 
             val txList = telemetry.map { t ->
                 val pidDef = com.example.model.StandardPidCatalog.lookup(t.pidHex2)
@@ -544,9 +577,10 @@ class RecordingManager(
                 rawLogFile = destRawLog,
                 zipFile = zipFile
             )
+            RecoveryOutcome.Recovered(sessionId, txList.size)
         } catch (e: Exception) {
             e.printStackTrace()
-            null
+            RecoveryOutcome.Failed(e.message ?: e.javaClass.simpleName)
         }
     }
 

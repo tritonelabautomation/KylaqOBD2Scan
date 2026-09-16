@@ -53,6 +53,7 @@ fun RecordingsScreen(
     // by line, so they can still be rebuilt here — no PC, no adb, no re-recording.
     val unsavedRawLogs by viewModel.unsavedRawLogs.collectAsState()
     val isRecovering by viewModel.isRecovering.collectAsState()
+    val recoveryNotice by viewModel.recoveryNotice.collectAsState()
     LaunchedEffect(Unit) { viewModel.refreshUnsavedRawLogs() }
 
     var renamingRecording by remember { mutableStateOf<SavedRecording?>(null) }
@@ -258,6 +259,15 @@ fun RecordingsScreen(
                                 }
                             }
                         }
+                    }
+                    recoveryNotice?.let {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            it,
+                            fontSize = 12.sp,
+                            lineHeight = 17.sp,
+                            color = ElectricAmber
+                        )
                     }
                 }
             }
