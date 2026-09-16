@@ -428,7 +428,11 @@ private fun TripTrendsView(
     val channels = listOf(
         TrendChannel("010C", "Engine RPM", "rpm", CyberCyan),
         TrendChannel("010D", "Speed", "km/h", NeonEmerald),
-        TrendChannel("0105", "Coolant", "\u00b0C", WarningRed),
+        // Bright cyan, NOT WarningRed: the owner's red accent theme paints Engine RPM in
+        // red, and two reds on one chart defeat the whole point of per-signal colours
+        // (owner question 2026-09-16: "does it show some variation of colour for each
+        // signal so I can see difference easily?").
+        TrendChannel("0105", "Coolant", "\u00b0C", Color(0xFF00E5FF)),
         TrendChannel("010B", "MAP / Boost", "kPa", ResearchPurple),
         TrendChannel("0142", "Voltage", "V", ElectricAmber),
         TrendChannel("0111", "Throttle", "%", Color(0xFFFF6EC7)),
