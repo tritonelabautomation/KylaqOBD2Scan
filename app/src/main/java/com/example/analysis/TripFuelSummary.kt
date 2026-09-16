@@ -57,7 +57,31 @@ object TripFuelSummary {
          * 2026-09-16: "Voltage min max recording"), reduced from the stored 0142 samples so
          * even pre-migration trips report them. Null = the trip has no voltage samples.
          */
-        val voltageExtremes: VoltageExtremes? = null
+        val voltageExtremes: VoltageExtremes? = null,
+        /**
+         * Engine-load/rpm/fuel impact of the measured AC state (owner pipeline task 4,
+         * 2026-09-16: "Engine load based on AC on off") - the compressor's actual cost on
+         * this trip, or an incomparable result when a regime lacks engine-running samples.
+         */
+        val acLoad: AcLoadAnalyzer.Comparison = AcLoadAnalyzer.Comparison(),
+        /**
+         * What the battery sees during start-stop stalls (owner pipeline task 5,
+         * 2026-09-16): mean/min voltage inside the measured stall windows vs the charging
+         * baseline, and how many stalls overlapped measured AC-on time (blower demand).
+         */
+        val stopBattery: StopBatteryAnalyzer.Result = StopBatteryAnalyzer.Result(),
+        /**
+         * Engine torque from PID 0162 (owner pipeline task 6, 2026-09-16: "Engine torque
+         * calculations"): mean and peak Nm over ENGINE-RUNNING samples, converted from the
+         * ECU's percent-of-reference with its own 0164 reference torque when answered,
+         * else the factory 178 Nm plateau ([torqueReferenceNm] says which was used).
+         * Null when 0162 never answered on this trip - the card then shows nothing rather
+         * than a fabricated torque (the fuel-energy recovery estimate lives in Insights,
+         * labelled as an estimate, per the no-fake-values rule).
+         */
+        val meanTorqueNm: Double? = null,
+        val peakTorqueNm: Double? = null,
+        val torqueReferenceNm: Double? = null
     ) {
         val litersPer100Km: Double?
             get() = if (distanceKm > 0.05) fuelLiters / distanceKm * 100.0 else null
@@ -161,6 +185,42 @@ object TripFuelSummary {
             }
         )
 
+        // AC load impact (owner pipeline task 4): attribute ENGINE-RUNNING observations to
+        // the measured AC-on / AC-off regimes. Running-only filter matters: a start-stop
+        // stall inside an AC-on segment would average in load=0 and fake a lighter engine.
+        val loadSeries = (byPid["0104"] ?: emptyList())
+            .mapNotNull { p -> p.value?.let { p.timestampMs to it } }
+            .sortedBy { it.first }
+        val acLoad = AcLoadAnalyzer.compare(
+            segments = ac.segments,
+            loadSeries = loadSeries.filter { (valueAt(rpmSeries, it.first) ?: 0.0) >= 400.0 },
+            rpmSeries = rpmSeries.filter { it.second >= 400.0 },
+            fuelSeries = fuelSeries.filter { (valueAt(rpmSeries, it.first) ?: 0.0) >= 400.0 }
+        )
+
+        // Engine torque (owner pipeline task 6): PID 0162 percent-of-reference converted
+        // with the ECU's own 0164 reference when answered, else the factory plateau -
+        // engine-running samples only, nothing fabricated when 0162 stays silent.
+        val torqueRef = (byPid["0164"] ?: emptyList()).mapNotNull { p -> p.value }.lastOrNull()
+            ?: com.example.engine.PowertrainModel.PEAK_TORQUE_NM
+        val torqueNmSeries = (byPid["0162"] ?: emptyList())
+            .mapNotNull { p -> p.value?.let { p.timestampMs to it } }
+            .sortedBy { it.first }
+            .filter { (valueAt(rpmSeries, it.first) ?: 0.0) >= 400.0 }
+            .map { (ts, pct) -> ts to com.example.engine.PowertrainModel.torqueNmFromPercent(pct, torqueRef) }
+        val meanTorqueNm = if (torqueNmSeries.isNotEmpty()) torqueNmSeries.map { it.second }.average() else null
+        val peakTorqueNm = torqueNmSeries.maxOfOrNull { it.second }
+
+        // Battery picture during the stalls (owner pipeline task 5): slice the MEASURED
+        // stall windows out of the stored voltage and compare with the charging baseline.
+        val runningVoltage = voltageSeries.filter { (valueAt(rpmSeries, it.first) ?: 0.0) >= 400.0 }
+        val stopBattery = StopBatteryAnalyzer.analyze(
+            stopWindows = startStop.stopWindows,
+            voltageSeries = voltageSeries,
+            runningVoltageSeries = runningVoltage,
+            acSegments = ac.segments
+        )
+
         val firstTs = samples.minOf { it.timestampMs }
         val lastTs = samples.maxOf { it.timestampMs }
         val duration = (lastTs - firstTs).coerceAtLeast(0L) / 1000L
@@ -185,7 +245,12 @@ object TripFuelSummary {
             engineOffSeconds = engineOffSeconds,
             startStop = startStop,
             ac = ac,
-            voltageExtremes = voltageExtremes
+            voltageExtremes = voltageExtremes,
+            acLoad = acLoad,
+            stopBattery = stopBattery,
+            meanTorqueNm = meanTorqueNm,
+            peakTorqueNm = peakTorqueNm,
+            torqueReferenceNm = if (meanTorqueNm != null) torqueRef else null
         )
     }
 

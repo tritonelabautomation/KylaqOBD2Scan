@@ -232,7 +232,8 @@ fun TripDetailScreen(
                     TripExportView(
                         tripId = tripId,
                         trip = trip,
-                        context = context
+                        context = context,
+                        summary = fuelSummary
                     )
                 }
             }
@@ -393,8 +394,18 @@ private fun DetailRow(label: String, value: String) {
     }
 }
 
-/** pid -> name -> unit -> series colour (chip fill + line + legend dot all match). */
-private data class TrendChannel(val pid: String, val name: String, val unit: String, val color: Color)
+/**
+ * pid -> name -> unit -> series colour (chip fill + line + legend dot all match).
+ * [transform] converts stored raw values for derived channels: Torque plots PID 0162
+ * (percent-of-reference) as Nm via the ECU's own 0164 reference or the factory plateau.
+ */
+private data class TrendChannel(
+    val pid: String,
+    val name: String,
+    val unit: String,
+    val color: Color,
+    val transform: ((Double) -> Double)? = null
+)
 
 @Composable
 private fun TripTrendsView(
@@ -408,6 +419,12 @@ private fun TripTrendsView(
     // the labelled left axis + envelope/area treatment; second gets a labelled right axis;
     // 3rd/4th are scaled to fit and flagged "fit" in the legend - exact values via the
     // crosshair bubble, which lists every overlaid signal with its own unit.
+    // Reference torque for the derived Nm channel: the ECU's own 0164 when it answered,
+    // else the factory 178 Nm plateau (owner pipeline task 6: "Engine torque calculations").
+    val torqueRefNm = samples
+        .firstOrNull { it.pid.equals("0164", ignoreCase = true) || it.pid.equals("64", ignoreCase = true) }
+        ?.numericValue
+        ?: com.example.engine.PowertrainModel.PEAK_TORQUE_NM
     val channels = listOf(
         TrendChannel("010C", "Engine RPM", "rpm", CyberCyan),
         TrendChannel("010D", "Speed", "km/h", NeonEmerald),
@@ -415,18 +432,22 @@ private fun TripTrendsView(
         TrendChannel("010B", "MAP / Boost", "kPa", ResearchPurple),
         TrendChannel("0142", "Voltage", "V", ElectricAmber),
         TrendChannel("0111", "Throttle", "%", Color(0xFFFF6EC7)),
-        TrendChannel("0104", "Load", "%", Color(0xFF64FFDA))
+        TrendChannel("0104", "Load", "%", Color(0xFF64FFDA)),
+        TrendChannel(
+            "0162", "Torque", "Nm", Color(0xFF64B5F6),
+            transform = { pct -> com.example.engine.PowertrainModel.torqueNmFromPercent(pct, torqueRefNm) }
+        )
     )
 
-    fun pointsFor(pid: String): List<Pair<Long, Double>> = samples
-        .filter { it.pid.equals(pid.removePrefix("01"), ignoreCase = true) || it.pid.equals(pid, ignoreCase = true) }
-        .mapNotNull { smp -> smp.numericValue?.let { smp.timestamp to it } }
+    fun pointsFor(ch: TrendChannel): List<Pair<Long, Double>> = samples
+        .filter { it.pid.equals(ch.pid.removePrefix("01"), ignoreCase = true) || it.pid.equals(ch.pid, ignoreCase = true) }
+        .mapNotNull { smp -> smp.numericValue?.let { smp.timestamp to (ch.transform?.invoke(it) ?: it) } }
         .sortedBy { it.first }
 
     // Selection order = axis priority; thin channels drop out here (chart re-checks too).
     val lines = selectedPids.mapNotNull { pid ->
         val ch = channels.firstOrNull { it.pid == pid } ?: return@mapNotNull null
-        val pts = pointsFor(pid)
+        val pts = pointsFor(ch)
         if (pts.size < 2) null else TrendLine(points = pts, name = ch.name, unit = ch.unit, color = ch.color)
     }
     val primary = lines.firstOrNull()
@@ -721,7 +742,8 @@ private fun TripRawLogsView(
 private fun TripExportView(
     tripId: String,
     trip: TripEntity?,
-    context: Context
+    context: Context,
+    summary: com.example.analysis.TripFuelSummary.Summary
 ) {
     val sessionDir = File(context.filesDir, "recordings/session_$tripId")
     val txCsv = File(sessionDir, "${tripId}_transactions.csv")
@@ -745,7 +767,7 @@ private fun TripExportView(
 
         ExportActionCard(
             title = "Export Complete ZIP Bundle",
-            desc = "Contains CSVs, JSON metadata, raw logs, and diagnostic analysis.",
+            desc = "Contains CSVs, JSON metadata, raw logs, and a measured analysis report (AC with/without load, stall battery, torque).",
             file = zipFile,
             mimeType = "application/zip",
             context = context,
@@ -755,7 +777,23 @@ private fun TripExportView(
                 isZipping = true
                 coroutineScope.launch {
                     try {
-                        val filesToZip = listOf(txCsv, sampleCsv, jsonFile, rawFile).filter { it.exists() }
+                        // Analysis report inside the shared bundle (owner pipeline task 7,
+                        // 2026-09-16: "Even with trends shared you didn't show me with &
+                        // without AC load analysis etc"): measured AC state, load WITH vs
+                        // WITHOUT AC, stall battery picture, torque, extremes - every
+                        // section evidence-gated, regenerated fresh from stored samples.
+                        val reportFile = File(sessionDir, "${tripId}_analysis.md")
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            runCatching {
+                                reportFile.writeText(
+                                    com.example.analysis.TripAnalysisReport.build(
+                                        trip?.title ?: tripId,
+                                        summary
+                                    )
+                                )
+                            }
+                        }
+                        val filesToZip = listOf(txCsv, sampleCsv, jsonFile, rawFile, reportFile).filter { it.exists() }
                         if (filesToZip.isEmpty()) {
                             Toast.makeText(context, "No trip data available to zip", Toast.LENGTH_SHORT).show()
                             return@launch
@@ -960,6 +998,25 @@ private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summar
                     fontSize = 11.sp
                 )
             }
+            // Owner pipeline task 5 (2026-09-16): "When engine start stop stopped car
+            // sometime AC will be still running during that time does it consuming
+            // battery" - measured answer from the stall windows themselves.
+            val sb = summary.stopBattery
+            if (sb.hasEvidence) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    "Battery during ${sb.stopsWithVoltage} stall(s): mean " +
+                        "${String.format(java.util.Locale.US, "%.1f", sb.meanVInStops ?: 0.0)} V (min " +
+                        "${String.format(java.util.Locale.US, "%.1f", sb.minVInStops ?: 0.0)} V) vs " +
+                        "${String.format(java.util.Locale.US, "%.1f", sb.meanVRunning ?: 0.0)} V charging" +
+                        (sb.depressionV?.let {
+                            " • ${String.format(java.util.Locale.US, "%.1f", it)} V sag under stall loads"
+                        } ?: "") +
+                        (if (sb.acOnStops > 0) " • ${sb.acOnStops}/${sb.acOnStopsTotal} stall(s) during measured AC-on: blower/fans ran off the battery - the belt-driven compressor cannot spin, so cooling pauses until restart" else ""),
+                    color = ElectricAmber,
+                    fontSize = 11.sp
+                )
+            }
             // Battery extremes RECORDED for this trip (owner pipeline task 3, 2026-09-16:
             // "Voltage min max recording"): min/max of the stored 0142 samples WITH the
             // instants they happened - an 11.9 V min at the start is a starter crank, not
@@ -977,6 +1034,23 @@ private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summar
                     color = ElectricAmber,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Medium
+                )
+            }
+            // Engine torque measured on this trip (owner pipeline task 6, 2026-09-16):
+            // PID 0162 percent-of-reference converted with the ECU's own 0164 reference
+            // or the factory 178 Nm plateau. Independent of AC evidence - shown whenever
+            // 0162 actually answered; when it never did, nothing is fabricated.
+            val tMean = summary.meanTorqueNm
+            val tPeak = summary.peakTorqueNm
+            if (tMean != null && tPeak != null) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    "Engine torque (measured, PID 0162): mean " +
+                        "${String.format(java.util.Locale.US, "%.0f", tMean)} Nm • peak " +
+                        "${String.format(java.util.Locale.US, "%.0f", tPeak)} Nm while running • reference " +
+                        "${String.format(java.util.Locale.US, "%.0f", summary.torqueReferenceNm ?: 178.0)} Nm",
+                    color = Color(0xFF64B5F6),
+                    fontSize = 11.sp
                 )
             }
             val ac = summary.ac
@@ -1000,6 +1074,29 @@ private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summar
                     color = ResearchPurple,
                     fontSize = 11.sp
                 )
+                // What the measured AC state COSTS on this trip (owner pipeline task 4,
+                // 2026-09-16: "Engine load based on AC on off"): mean engine load (and
+                // rpm / fuel when the ECU answers) attributed to the measured regimes,
+                // engine-running samples only. Shown only when BOTH regimes carry enough
+                // samples - a thin regime stays invisible instead of fabricating a delta.
+                val cmp = summary.acLoad
+                val d = cmp.loadDeltaPct
+                if (cmp.isMeaningful && d != null) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        "AC load impact: ${String.format(java.util.Locale.US, "%+.1f", d)} pts mean load with AC " +
+                            "(${String.format(java.util.Locale.US, "%.1f", cmp.acOn.meanLoadPct ?: 0.0)}% on vs " +
+                            "${String.format(java.util.Locale.US, "%.1f", cmp.acOff.meanLoadPct ?: 0.0)}% off)" +
+                            (cmp.fuelDeltaLh?.let {
+                                " • ${String.format(java.util.Locale.US, "%+.2f", it)} L/h fuel"
+                            } ?: "") +
+                            (cmp.rpmDelta?.let {
+                                " • ${String.format(java.util.Locale.US, "%+.0f", it)} rpm"
+                            } ?: ""),
+                        color = ResearchPurple,
+                        fontSize = 11.sp
+                    )
+                }
             }
             if (summary.sampleCount == 0) {
                 Spacer(modifier = Modifier.height(6.dp))

@@ -72,7 +72,14 @@ object StartStopAnalyzer {
          * (baseline x engine-off time) - measured fuel burned while stopped, clamped at 0.
          * An estimate relative to real recorded data - the UI must label it as such.
          */
-        val estimatedFuelSavedL: Double = 0.0
+        val estimatedFuelSavedL: Double = 0.0,
+        /**
+         * The measured stall windows themselves, (startTs, endTs) pairs, in trip order
+         * (added 2026-09-16, owner pipeline task 5): endTs is the LAST observation still
+         * proven stopped, never the restart instant - downstream slicing (battery voltage
+         * during stalls) must not credit running time to a stall.
+         */
+        val stopWindows: List<Pair<Long, Long>> = emptyList()
     ) {
         val hasStartStopActivity: Boolean get() = stopEvents > 0
     }
@@ -128,6 +135,8 @@ object StartStopAnalyzer {
         // proves real (>= MIN_STOP_SECONDS). A flicker is discarded, not claimed.
         var pendingSeconds = 0.0
         var pendingFuelL = 0.0
+        var pendingStartTs: Long? = null
+        val stopWindows = mutableListOf<Pair<Long, Long>>()
 
         for (i in 1 until sorted.size) {
             val prev = sorted[i - 1]
@@ -147,9 +156,11 @@ object StartStopAnalyzer {
                     stopEvents++
                     engineOffSeconds += pendingSeconds
                     fuelWhileStoppedL += pendingFuelL
+                    pendingStartTs?.let { stopWindows += it to prev.tsMs }
                 }
                 pendingSeconds = 0.0
                 pendingFuelL = 0.0
+                pendingStartTs = null
                 if (cur.tsMs - lastRpmTs > MAX_GAP_MS) lastRpm = null
                 if (cur.tsMs - lastSpeedTs > MAX_GAP_MS) lastSpeed = null
                 if (cur.tsMs - lastFuelTs > MAX_GAP_MS) lastFuel = null
@@ -169,6 +180,7 @@ object StartStopAnalyzer {
 
             when {
                 engineOff -> {
+                    if (pendingStartTs == null) pendingStartTs = prev.tsMs
                     pendingSeconds += dt
                     lastFuel?.let { pendingFuelL += it * dt / 3600.0 }
                 }
@@ -179,6 +191,7 @@ object StartStopAnalyzer {
                         stopEvents++
                         engineOffSeconds += pendingSeconds
                         fuelWhileStoppedL += pendingFuelL
+                        pendingStartTs?.let { stopWindows += it to prev.tsMs }
                         if (lastRpm != null && lastRpm >= RESTART_RPM) {
                             // Engine fired again: open the cranking-enrichment window at the
                             // start of the transition interval, where cranking actually began.
@@ -188,6 +201,7 @@ object StartStopAnalyzer {
                     }
                     pendingSeconds = 0.0
                     pendingFuelL = 0.0
+                    pendingStartTs = null
 
                     if (inSpikeWindow) {
                         lastFuel?.let {
@@ -211,6 +225,7 @@ object StartStopAnalyzer {
             stopEvents++
             engineOffSeconds += pendingSeconds
             fuelWhileStoppedL += pendingFuelL
+            pendingStartTs?.let { stopWindows += it to sorted.last().tsMs }
         }
 
         val measuredIdleLh =
@@ -247,7 +262,8 @@ object StartStopAnalyzer {
             warmIdleLh = measuredIdleLh,
             baselineSource = baselineSource,
             baselineIdleLh = baselineLh,
-            estimatedFuelSavedL = savedL
+            estimatedFuelSavedL = savedL,
+            stopWindows = stopWindows
         )
     }
 }
