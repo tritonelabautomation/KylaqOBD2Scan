@@ -66,6 +66,8 @@ fun SettingsScreen(
     val welcomeMessage by viewModel.settingsRepository.welcomeMessage.collectAsState()
     val welcomeVolumeEnabled by viewModel.settingsRepository.welcomeVolumeEnabled.collectAsState()
     val welcomeVolumePct by viewModel.settingsRepository.welcomeVolumePct.collectAsState()
+    val welcomeVoiceId by viewModel.welcomeVoiceId.collectAsState()
+    val welcomeVoices by viewModel.welcomeVoices.collectAsState()
     val canHeader by viewModel.canHeader.collectAsState()
     val sppUuid by viewModel.sppUuid.collectAsState()
     val pollingMode by viewModel.pollingMode.collectAsState()
@@ -746,6 +748,44 @@ fun SettingsScreen(
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    var voiceMenuOpen by remember { mutableStateOf(false) }
+                    val voiceLabel = welcomeVoices.firstOrNull { it.id == welcomeVoiceId }?.label
+                        ?: welcomeVoiceId?.let { com.example.data.WelcomeSpeaker.voiceLabel("default", it) }
+                        ?: "Default engine voice"
+                    ExposedDropdownMenuBox(
+                        expanded = voiceMenuOpen,
+                        onExpandedChange = { voiceMenuOpen = it }
+                    ) {
+                        OutlinedTextField(
+                            value = voiceLabel,
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Voice") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = voiceMenuOpen) },
+                            modifier = Modifier.fillMaxWidth().menuAnchor()
+                        )
+                        ExposedDropdownMenu(
+                            expanded = voiceMenuOpen,
+                            onDismissRequest = { voiceMenuOpen = false }
+                        ) {
+                            welcomeVoices.forEach { v ->
+                                DropdownMenuItem(
+                                    text = { Text(v.label, fontSize = 14.sp) },
+                                    onClick = {
+                                        viewModel.selectWelcomeVoice(v.id)
+                                        voiceMenuOpen = false
+                                    }
+                                )
+                            }
+                            if (welcomeVoices.isEmpty()) {
+                                DropdownMenuItem(
+                                    text = { Text("No speech voices installed - add a TTS engine (e.g. Google TTS) in system settings", fontSize = 12.sp) },
+                                    onClick = { voiceMenuOpen = false },
+                                    enabled = false
+                                )
+                            }
+                        }
+                    }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(

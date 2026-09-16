@@ -87,7 +87,7 @@ object AppContainer {
             gpsManager = GpsManager(appContext)
             settingsRepository = SettingsRepository(appContext)
             recordingManager = RecordingManager(appContext, rawLogManager)
-            welcomeSpeaker = com.example.data.WelcomeSpeaker(appContext)
+            welcomeSpeaker = com.example.data.WelcomeSpeaker(appContext, settingsRepository.welcomeVoiceId.value)
             bluetoothManager = BluetoothManager(appContext)
             val capabilityStore = com.example.discovery.SharedPrefsCapabilityStore(
                 appContext.getSharedPreferences("pid_capability_snapshot", android.content.Context.MODE_PRIVATE)

@@ -14,10 +14,22 @@ import java.util.Locale
  * PHONE speaking through the phone/media audio path - never claimed to come
  * from the OBD adapter or head unit.
  */
-class WelcomeSpeaker(private val context: Context) : TextToSpeech.OnInitListener {
+class WelcomeSpeaker(
+    private val context: Context,
+    initialVoiceId: String? = null
+) : TextToSpeech.OnInitListener {
+
+    /** One installable TTS voice the owner can pick for the greeting. */
+    data class VoiceOption(val id: String, val label: String)
 
     private var tts: TextToSpeech? = null
     @Volatile private var ready = false
+
+    private val _voices = kotlinx.coroutines.flow.MutableStateFlow<List<VoiceOption>>(emptyList())
+    val voices: kotlinx.coroutines.flow.StateFlow<List<VoiceOption>> = _voices.asStateFlow()
+
+    private val _currentVoiceId = kotlinx.coroutines.flow.MutableStateFlow(initialVoiceId)
+    val currentVoiceId: kotlinx.coroutines.flow.StateFlow<String?> = _currentVoiceId.asStateFlow()
 
     init {
         runCatching { tts = TextToSpeech(context, this) }
@@ -27,9 +39,33 @@ class WelcomeSpeaker(private val context: Context) : TextToSpeech.OnInitListener
         if (status == TextToSpeech.SUCCESS) {
             ready = true
             runCatching { tts?.language = Locale.getDefault() }
+            publishVoices()
+            // Re-apply the owner's saved choice once the engine is up.
+            _currentVoiceId.value?.let { selectVoice(it) }
         } else {
             ready = false
         }
+    }
+
+    private fun publishVoices() {
+        _voices.value = runCatching {
+            tts?.voices
+                ?.map { v -> VoiceOption(v.name, voiceLabel(v.locale.toLanguageTag(), v.name)) }
+                ?.sortedBy { it.label }
+                ?: emptyList()
+        }.getOrNull() ?: emptyList()
+    }
+
+    /**
+     * Switches the speaking voice (owner 2026-09-16: "Welcome voice is not good give me
+     * option to choose"). Returns false when the engine doesn't have that voice.
+     */
+    fun selectVoice(id: String?): Boolean {
+        _currentVoiceId.value = id
+        if (id.isNullOrBlank()) return false
+        val voice = runCatching { tts?.voices?.firstOrNull { it.name == id } }.getOrNull()
+            ?: return false
+        return runCatching { tts?.setVoice(voice) == TextToSpeech.SUCCESS }.getOrElse { false }
     }
 
     /** True when a TTS engine is available on this phone. */
@@ -74,5 +110,12 @@ class WelcomeSpeaker(private val context: Context) : TextToSpeech.OnInitListener
 
         fun volumeLevel(pct: Int, streamMax: Int): Int =
             ((streamMax.toLong() * pct.coerceIn(0, 100)) / 100L).toInt()
+
+        fun voiceLabel(localeTag: String, voiceName: String): String =
+            "$localeTag \u00b7 $voiceName"
+
+        /** Saved voice wins only if the engine still offers it; otherwise default. */
+        fun pickVoiceId(available: List<String>, saved: String?): String? =
+            saved?.takeIf { it in available }
     }
 }

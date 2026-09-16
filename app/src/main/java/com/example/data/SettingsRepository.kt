@@ -152,6 +152,13 @@ class SettingsRepository(private val context: Context) {
         _welcomeVolumeEnabled.value = enabled
     }
 
+    private val _welcomeVoiceId = MutableStateFlow(prefs.getString("welcome_voice_id", null))
+    val welcomeVoiceId: StateFlow<String?> = _welcomeVoiceId.asStateFlow()
+    fun setWelcomeVoiceId(id: String?) {
+        prefs.edit().putString("welcome_voice_id", id).apply()
+        _welcomeVoiceId.value = id
+    }
+
     private val _welcomeVolumePct = MutableStateFlow(prefs.getInt("welcome_volume_pct", 70))
     val welcomeVolumePct: StateFlow<Int> = _welcomeVolumePct.asStateFlow()
     fun setWelcomeVolumePct(pct: Int) {

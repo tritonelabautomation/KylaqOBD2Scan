@@ -786,6 +786,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         speakWelcomeNow()
     }
 
+    val welcomeVoices: kotlinx.coroutines.flow.StateFlow<List<com.example.data.WelcomeSpeaker.VoiceOption>> =
+        com.example.di.AppContainer.welcomeSpeaker.voices
+    val welcomeVoiceId: kotlinx.coroutines.flow.StateFlow<String?> =
+        settingsRepository.welcomeVoiceId
+
+    /** Settings voice picker: switch the TTS voice right now and persist the choice. */
+    fun selectWelcomeVoice(id: String?) {
+        settingsRepository.setWelcomeVoiceId(id)
+        com.example.di.AppContainer.welcomeSpeaker.selectVoice(id)
+    }
+
     /** Settings "Test voice" button: speaks immediately, ignoring the interval guard. */
     fun testWelcomeVoice() {
         speakWelcomeNow()
