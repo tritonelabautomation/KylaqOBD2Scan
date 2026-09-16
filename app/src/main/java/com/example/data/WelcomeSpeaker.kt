@@ -65,7 +65,7 @@ class WelcomeSpeaker(private val context: Context) : TextToSpeech.OnInitListener
         const val MIN_INTERVAL_MS = 5 * 60_000L
 
         fun shouldSpeak(lastSpokeMs: Long, nowMs: Long): Boolean =
-            nowMs - lastSpokeMs >= MIN_INTERVAL_MS
+            lastSpokeMs <= 0L || nowMs - lastSpokeMs >= MIN_INTERVAL_MS
 
         /** `{car}` placeholder = garage vehicle name; empty template falls back to default. */
         fun resolveMessage(template: String, vehicleName: String): String =
