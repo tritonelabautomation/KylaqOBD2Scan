@@ -793,7 +793,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun importFuelioCsv(uri: android.net.Uri) {
         viewModelScope.launch {
             try {
-                val text = contentResolver.openInputStream(uri)?.use {
+                val text = getApplication<android.app.Application>().contentResolver.openInputStream(uri)?.use {
                     it.reader(java.nio.charset.StandardCharsets.UTF_8).readText()
                 }
                 if (text == null) {
