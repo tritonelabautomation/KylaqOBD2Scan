@@ -275,88 +275,43 @@ fun RecordingsScreen(
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        if (savedRecordings.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(32.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Default.FolderOpen, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(48.dp))
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = "No saved recording runs yet.\nStart a diagnostic recording from Dashboard or import existing ZIP log bundles.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    OutlinedButton(
-                        onClick = {
-                            zipPickerLauncher.launch(arrayOf("application/zip", "application/x-zip-compressed", "*/*"))
-                        },
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Icon(Icons.Default.FileDownload, contentDescription = null, tint = CyberCyan, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Select .ZIP File to Import", color = CyberCyan)
-                    }
-                }
-            }
-        } else {
-            // ---- Vehicle trends across recorded trips (owner-requested) ----
-            Card(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-            ) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(
-                        "VEHICLE TRENDS - your last ${trends.size} recorded trip(s)",
-                        color = CyberCyan, fontWeight = FontWeight.Bold, fontSize = 14.sp
-                    )
-                    if (trends.size >= 2) {
-                        TrendRow("avg engine rpm", trends.mapNotNull { it.avgRpm }, "%.0f", NeonEmerald)
-                        TrendRow("avg speed (km/h)", trends.mapNotNull { it.avgSpeedKmh }, "%.1f", CyberCyan)
-                        TrendRow("avg engine load (%)", trends.mapNotNull { it.avgLoadPct }, "%.1f", ElectricAmber)
-                        TrendRow("avg torque (Nm, from PID 0162)", trends.mapNotNull { it.avgTorqueNm }, "%.1f", NeonEmerald)
-                        val idlePts = trends.filter { it.idleActualLh != null }
-                        if (idlePts.size >= 2) {
-                            Text(
-                                "idle burn vs math model (model = %.2f L/h):".format(java.util.Locale.US, com.example.analysis.TripTrendAnalyzer.MODEL_IDLE_LH),
-                                color = TextSecondaryDark, fontSize = 12.sp
-                            )
-                            SimpleLineChart(
-                                idlePts.mapNotNull { it.idleActualLh }.map { it.toFloat() },
-                                Modifier.fillMaxWidth().height(56.dp),
-                                ElectricAmber
-                            )
-                            val f = idlePts.first()
-                            val l = idlePts.last()
-                            Text(
-                                "idle ${String.format(java.util.Locale.US, "%.2f", f.idleActualLh!!)} → ${String.format("%.2f", l.idleActualLh!!)} L/h " +
-                                    "(model %.2f)".format(java.util.Locale.US, com.example.analysis.TripTrendAnalyzer.MODEL_IDLE_LH) +
-                                    (l.idleExcessPct?.let { " · latest ${if (it >= 0) "+" else ""}${String.format(java.util.Locale.US, "%.0f", it)}% vs model" } ?: ""),
-                                color = if ((l.idleExcessPct ?: 0.0) > 25.0) WarningRed else TextSecondaryDark,
-                                fontSize = 12.sp
-                            )
-                        }
-                    } else {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = PaddingValues(top = 10.dp, bottom = 96.dp)
+        ) {
+            if (savedRecordings.isEmpty()) {
+                item {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(32.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Default.FolderOpen, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(48.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
                         Text(
-                            "Record at least 2 trips with OBD logging and the rpm / speed / load / torque " +
-                                "and idle-vs-model trend charts appear here.",
-                            color = TextSecondaryDark, fontSize = 12.sp
+                            text = "No saved recording runs yet.\nStart a diagnostic recording from Dashboard or import existing ZIP log bundles.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
                         )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        OutlinedButton(
+                            onClick = {
+                                zipPickerLauncher.launch(arrayOf("application/zip", "application/x-zip-compressed", "*/*"))
+                            },
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Icon(Icons.Default.FileDownload, contentDescription = null, tint = CyberCyan, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Select .ZIP File to Import", color = CyberCyan)
+                        }
                     }
                 }
-            }
-
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                contentPadding = PaddingValues(bottom = 96.dp)
-            ) {
+                }
+            } else {
                 items(savedRecordings, key = { it.metadata.sessionId }) { rec ->
                     RecordingItemCard(
                         recording = rec,
@@ -365,6 +320,54 @@ fun RecordingsScreen(
                         onRename = { renamingRecording = rec },
                         onDelete = { deletingRecording = rec }
                     )
+                }
+                item {
+                // ---- Vehicle trends across recorded trips (owner-requested) ----
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            "VEHICLE TRENDS - your last ${trends.size} recorded trip(s)",
+                            color = CyberCyan, fontWeight = FontWeight.Bold, fontSize = 14.sp
+                        )
+                        if (trends.size >= 2) {
+                            TrendRow("avg engine rpm", trends.mapNotNull { it.avgRpm }, "%.0f", NeonEmerald)
+                            TrendRow("avg speed (km/h)", trends.mapNotNull { it.avgSpeedKmh }, "%.1f", CyberCyan)
+                            TrendRow("avg engine load (%)", trends.mapNotNull { it.avgLoadPct }, "%.1f", ElectricAmber)
+                            TrendRow("avg torque (Nm, from PID 0162)", trends.mapNotNull { it.avgTorqueNm }, "%.1f", NeonEmerald)
+                            val idlePts = trends.filter { it.idleActualLh != null }
+                            if (idlePts.size >= 2) {
+                                Text(
+                                    "idle burn vs math model (model = %.2f L/h):".format(java.util.Locale.US, com.example.analysis.TripTrendAnalyzer.MODEL_IDLE_LH),
+                                    color = TextSecondaryDark, fontSize = 12.sp
+                                )
+                                SimpleLineChart(
+                                    idlePts.mapNotNull { it.idleActualLh }.map { it.toFloat() },
+                                    Modifier.fillMaxWidth().height(56.dp),
+                                    ElectricAmber
+                                )
+                                val f = idlePts.first()
+                                val l = idlePts.last()
+                                Text(
+                                    "idle ${String.format(java.util.Locale.US, "%.2f", f.idleActualLh!!)} → ${String.format("%.2f", l.idleActualLh!!)} L/h " +
+                                        "(model %.2f)".format(java.util.Locale.US, com.example.analysis.TripTrendAnalyzer.MODEL_IDLE_LH) +
+                                        (l.idleExcessPct?.let { " · latest ${if (it >= 0) "+" else ""}${String.format(java.util.Locale.US, "%.0f", it)}% vs model" } ?: ""),
+                                    color = if ((l.idleExcessPct ?: 0.0) > 25.0) WarningRed else TextSecondaryDark,
+                                    fontSize = 12.sp
+                                )
+                            }
+                        } else {
+                            Text(
+                                "Record at least 2 trips with OBD logging and the rpm / speed / load / torque " +
+                                    "and idle-vs-model trend charts appear here.",
+                                color = TextSecondaryDark, fontSize = 12.sp
+                            )
+                        }
+                    }
+                }
                 }
             }
         }
