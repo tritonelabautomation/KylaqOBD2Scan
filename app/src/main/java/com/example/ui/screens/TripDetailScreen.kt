@@ -1,3 +1,6 @@
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Box
 package com.example.ui.screens
 
 import android.content.Context
@@ -934,6 +937,40 @@ private fun shareFileSafely(context: Context, file: File, mimeType: String) {
 }
 
 @Composable
+/**
+ * OWNER READABILITY REBUILD (2026-09-16, fourth report of "UI is not letting me
+ * read"): the fuel card was a wall of tight, fully-coloured bold paragraphs - no
+ * hierarchy, nothing for the eye to grab, every line shouting equally. Each insight
+ * is now a titled block: coloured 3dp accent bar + small-caps title in the signal
+ * colour + calm near-white body at a comfortable line height, air between blocks.
+ */
+@Composable
+private fun InsightBlock(accent: Color, title: String, body: String) {
+    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 7.dp)) {
+        Box(
+            modifier = Modifier.width(3.dp).fillMaxHeight()
+                .background(accent, RoundedCornerShape(2.dp))
+        )
+        Spacer(modifier = Modifier.width(10.dp))
+        Column {
+            Text(
+                title,
+                color = accent,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.8.sp
+            )
+            Spacer(modifier = Modifier.height(3.dp))
+            Text(
+                body,
+                color = Color(0xFFE4E9EE),
+                fontSize = 13.sp,
+                lineHeight = 20.sp
+            )
+        }
+    }
+}
+
 private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summary) {
     Card(
         modifier = Modifier.fillMaxWidth().padding(12.dp),
@@ -994,23 +1031,31 @@ private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summar
                         "baseline ${String.format(java.util.Locale.US, "%.2f", com.example.analysis.StartStopAnalyzer.MODEL_IDLE_LH)} L/h warm-idle model"
                     com.example.analysis.StartStopAnalyzer.Baseline.NONE -> "no baseline"
                 }
-                Text(
-                    "Start-stop: ${startStop.stopEvents} stall(s), engine off " +
+                InsightBlock(
+
+                    accent = NeonEmerald,
+
+                    title = "START-STOP & IDLE SAVE",
+
+                    body = "Start-stop: ${startStop.stopEvents} stall(s), engine off " +
                         "${String.format(java.util.Locale.US, "%.0f", startStop.engineOffSeconds)} s • fuel saved ≈ " +
-                        "${String.format(java.util.Locale.US, "%.2f", startStop.estimatedFuelSavedL)} L (estimate, $baselineNote)",
-                    color = NeonEmerald,
-                    fontSize = 13.sp
+                        "${String.format(java.util.Locale.US, "%.2f", startStop.estimatedFuelSavedL)} L (estimate, $baselineNote)"
+
                 )
             }
             if (startStop.restartCount > 0 && startStop.restartPeakFuelLh != null) {
                 Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    "Restart fuel spike: peak " +
+                InsightBlock(
+
+                    accent = ElectricAmber,
+
+                    title = "RESTART FUEL SPIKE",
+
+                    body = "Restart fuel spike: peak " +
                         "${String.format(java.util.Locale.US, "%.1f", startStop.restartPeakFuelLh)} L/h across " +
                         "${startStop.restartCount} restart(s) — cranking enrichment; real fuel, already inside the " +
-                        "trip total and kept out of the idle averages.",
-                    color = ElectricAmber,
-                    fontSize = 13.sp
+                        "trip total and kept out of the idle averages."
+
                 )
             }
             // Owner pipeline task 5 (2026-09-16): "When engine start stop stopped car
@@ -1019,17 +1064,21 @@ private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summar
             val sb = summary.stopBattery
             if (sb.hasEvidence) {
                 Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    "Battery during ${sb.stopsWithVoltage} stall(s): mean " +
+                InsightBlock(
+
+                    accent = ElectricAmber,
+
+                    title = "BATTERY DURING STALLS",
+
+                    body = "Battery during ${sb.stopsWithVoltage} stall(s): mean " +
                         "${String.format(java.util.Locale.US, "%.1f", sb.meanVInStops ?: 0.0)} V (min " +
                         "${String.format(java.util.Locale.US, "%.1f", sb.minVInStops ?: 0.0)} V) vs " +
                         "${String.format(java.util.Locale.US, "%.1f", sb.meanVRunning ?: 0.0)} V charging" +
                         (sb.depressionV?.let {
                             " • ${String.format(java.util.Locale.US, "%.1f", it)} V sag under stall loads"
                         } ?: "") +
-                        (if (sb.acOnStops > 0) " • ${sb.acOnStops}/${sb.acOnStopsTotal} stall(s) during measured AC-on: blower/fans ran off the battery - the belt-driven compressor cannot spin, so cooling pauses until restart" else ""),
-                    color = ElectricAmber,
-                    fontSize = 13.sp
+                        (if (sb.acOnStops > 0) " • ${sb.acOnStops}/${sb.acOnStopsTotal} stall(s) during measured AC-on: blower/fans ran off the battery - the belt-driven compressor cannot spin, so cooling pauses until restart" else "")
+
                 )
             }
             // Battery extremes RECORDED for this trip (owner pipeline task 3, 2026-09-16:
@@ -1041,14 +1090,17 @@ private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summar
             if (volts != null) {
                 Spacer(modifier = Modifier.height(4.dp))
                 val vFmt = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
-                Text(
-                    "Battery extremes: " +
+                InsightBlock(
+
+                    accent = ElectricAmber,
+
+                    title = "BATTERY EXTREMES",
+
+                    body = "Battery extremes: " +
                         "${String.format(java.util.Locale.US, "%.1f", volts.minV)} V min at ${vFmt.format(java.util.Date(volts.minTs))}" +
                         " \u2192 " +
-                        "${String.format(java.util.Locale.US, "%.1f", volts.maxV)} V max at ${vFmt.format(java.util.Date(volts.maxTs))}",
-                    color = ElectricAmber,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium
+                        "${String.format(java.util.Locale.US, "%.1f", volts.maxV)} V max at ${vFmt.format(java.util.Date(volts.maxTs))}"
+
                 )
             }
             // Engine torque measured on this trip (owner pipeline task 6, 2026-09-16):
@@ -1059,13 +1111,17 @@ private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summar
             val tPeak = summary.peakTorqueNm
             if (tMean != null && tPeak != null) {
                 Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    "Engine torque (measured, PID 0162): mean " +
+                InsightBlock(
+
+                    accent = Color(0xFF64B5F6),
+
+                    title = "ENGINE TORQUE - MEASURED (PID 0162)",
+
+                    body = "Engine torque (measured, PID 0162): mean " +
                         "${String.format(java.util.Locale.US, "%.0f", tMean)} Nm • peak " +
                         "${String.format(java.util.Locale.US, "%.0f", tPeak)} Nm while running • reference " +
-                        "${String.format(java.util.Locale.US, "%.0f", summary.torqueReferenceNm ?: 178.0)} Nm",
-                    color = Color(0xFF64B5F6),
-                    fontSize = 13.sp
+                        "${String.format(java.util.Locale.US, "%.0f", summary.torqueReferenceNm ?: 178.0)} Nm"
+
                 )
             }
             val ac = summary.ac
@@ -1079,15 +1135,19 @@ private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summar
                         java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
                             .format(java.util.Date(ts))
                 } ?: ""
-                Text(
-                    "AC (measured from voltage ripple): ON " +
+                InsightBlock(
+
+                    accent = ResearchPurple,
+
+                    title = "AC - MEASURED FROM VOLTAGE RIPPLE",
+
+                    body = "AC (measured from voltage ripple): ON " +
                         "${String.format(java.util.Locale.US, "%.0f", ac.acOnSeconds / 60.0)} min of " +
                         "${String.format(java.util.Locale.US, "%.0f", summary.durationSeconds / 60.0)} min" +
                         switchNote +
                         " • quiet baseline ±${String.format(java.util.Locale.US, "%.2f", ac.quietMadV ?: 0.0)} V" +
-                        (if (ac.confidence < 1.8) " • weak separation - treat as a hint" else ""),
-                    color = ResearchPurple,
-                    fontSize = 13.sp
+                        (if (ac.confidence < 1.8) " • weak separation - treat as a hint" else "")
+
                 )
                 // What the measured AC state COSTS on this trip (owner pipeline task 4,
                 // 2026-09-16: "Engine load based on AC on off"): mean engine load (and
@@ -1098,8 +1158,13 @@ private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summar
                 val d = cmp.loadDeltaPct
                 if (cmp.isMeaningful && d != null) {
                     Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        "AC load impact: ${String.format(java.util.Locale.US, "%+.1f", d)} pts mean load with AC " +
+                    InsightBlock(
+
+                        accent = ResearchPurple,
+
+                        title = "AC LOAD IMPACT",
+
+                        body = "AC load impact: ${String.format(java.util.Locale.US, "%+.1f", d)} pts mean load with AC " +
                             "(${String.format(java.util.Locale.US, "%.1f", cmp.acOn.meanLoadPct ?: 0.0)}% on vs " +
                             "${String.format(java.util.Locale.US, "%.1f", cmp.acOff.meanLoadPct ?: 0.0)}% off)" +
                             (cmp.fuelDeltaLh?.let {
@@ -1107,9 +1172,8 @@ private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summar
                             } ?: "") +
                             (cmp.rpmDelta?.let {
                                 " • ${String.format(java.util.Locale.US, "%+.0f", it)} rpm"
-                            } ?: ""),
-                        color = ResearchPurple,
-                        fontSize = 13.sp
+                            } ?: "")
+
                     )
                 }
             }
