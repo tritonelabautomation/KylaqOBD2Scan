@@ -136,6 +136,10 @@ object StartStopAnalyzer {
         var pendingSeconds = 0.0
         var pendingFuelL = 0.0
         var pendingStartTs: Long? = null
+        // Last observation that CARRIED the engine-off state (interval attribution): at
+        // commit time `prev` is already the restart observation, so the window end must
+        // come from here - never from the restart instant.
+        var pendingEndTs: Long? = null
         val stopWindows = mutableListOf<Pair<Long, Long>>()
 
         for (i in 1 until sorted.size) {
@@ -161,6 +165,7 @@ object StartStopAnalyzer {
                 pendingSeconds = 0.0
                 pendingFuelL = 0.0
                 pendingStartTs = null
+                pendingEndTs = null
                 if (cur.tsMs - lastRpmTs > MAX_GAP_MS) lastRpm = null
                 if (cur.tsMs - lastSpeedTs > MAX_GAP_MS) lastSpeed = null
                 if (cur.tsMs - lastFuelTs > MAX_GAP_MS) lastFuel = null
@@ -181,6 +186,7 @@ object StartStopAnalyzer {
             when {
                 engineOff -> {
                     if (pendingStartTs == null) pendingStartTs = prev.tsMs
+                    pendingEndTs = prev.tsMs
                     pendingSeconds += dt
                     lastFuel?.let { pendingFuelL += it * dt / 3600.0 }
                 }
@@ -191,7 +197,7 @@ object StartStopAnalyzer {
                         stopEvents++
                         engineOffSeconds += pendingSeconds
                         fuelWhileStoppedL += pendingFuelL
-                        pendingStartTs?.let { stopWindows += it to prev.tsMs }
+                        pendingStartTs?.let { st -> pendingEndTs?.let { en -> stopWindows += st to en } }
                         if (lastRpm != null && lastRpm >= RESTART_RPM) {
                             // Engine fired again: open the cranking-enrichment window at the
                             // start of the transition interval, where cranking actually began.
@@ -202,6 +208,7 @@ object StartStopAnalyzer {
                     pendingSeconds = 0.0
                     pendingFuelL = 0.0
                     pendingStartTs = null
+                    pendingEndTs = null
 
                     if (inSpikeWindow) {
                         lastFuel?.let {
@@ -225,7 +232,17 @@ object StartStopAnalyzer {
             stopEvents++
             engineOffSeconds += pendingSeconds
             fuelWhileStoppedL += pendingFuelL
-            pendingStartTs?.let { stopWindows += it to sorted.last().tsMs }
+            // If the final observation itself still reads stopped, the stall is proven up
+            // to its timestamp; if it was the restart, close at the last proven-stopped
+            // observation instead of claiming restart time as stall time.
+            val lastObs = sorted.last()
+            val lastObsRpm = lastObs.rpm ?: lastRpm
+            val endTs = if (lastObsRpm != null && lastObsRpm < ENGINE_RUNNING_RPM) {
+                lastObs.tsMs
+            } else {
+                pendingEndTs ?: lastObs.tsMs
+            }
+            pendingStartTs?.let { stopWindows += it to endTs }
         }
 
         val measuredIdleLh =
