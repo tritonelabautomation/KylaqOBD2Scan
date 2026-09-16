@@ -36,9 +36,9 @@ object FuelioImporter {
             .filter { it.isNotBlank() }
             .toList()
         if (lines.isEmpty()) return Parsed(emptyList(), 0)
-        // EU Fuelio builds export semicolon-separated with decimal commas.
-        val probe = lines.first { it.contains(',') || it.contains(';') }
-        val delim = if (probe.count { it == ';' } > probe.count { it == ',' }) ';' else ','
+        // Fuelio dialects: comma (classic), semicolon (EU, decimal commas),
+        // TAB (the Google-Drive "vehicle-N-sync.csv" export the owner sent).
+        val delim = detectDelim(lines.first { it.contains(',') || it.contains(';') || it.contains('	') })
 
         val dateFormat = vehicleDateFormat(lines)
         var headerIdx = -1
@@ -65,6 +65,8 @@ object FuelioImporter {
         val iFull = cols.indexOfFirst { it == "full" || it.startsWith("fillup") || it == "type" }
         val iPrice = cols.indexOfFirst { it.startsWith("price") && !it.contains("total") }
         val iTotal = cols.indexOfFirst { it.contains("total") && (it.contains("price") || it.contains("cost")) }
+        // Sync dialect: VolumePrice = price per fuel unit; Price = total cost.
+        val iVolPrice = cols.indexOfFirst { it.startsWith("volumeprice") }
         val iCity = cols.indexOfFirst { it.startsWith("city") || it.startsWith("station") }
         val iNotes = cols.indexOfFirst { it.startsWith("notes") || it.startsWith("comment") }
         val iMissed = cols.indexOfFirst { it.startsWith("missed") }
@@ -84,7 +86,8 @@ object FuelioImporter {
         var row = 0
         for (idx in headerIdx + 1..lines.lastIndex) {
             val line = lines[idx]
-            if (line.startsWith("##")) continue
+            // Next section (FavStations / Pictures / Category ...) ends the log.
+            if (line.startsWith("##")) break
             val c = split(line, delim)
             if (c.size <= iDate || c.size <= iFuel) continue
             val dateMs = parseDate(c[iDate], dateFormat) ?: continue
@@ -94,13 +97,15 @@ object FuelioImporter {
             val odoKm = if (iOdo >= 0 && c.size > iOdo) num(c[iOdo], delim)?.let { it * odoToKm } else null
             val pricePerUnit = if (iPrice >= 0 && c.size > iPrice) num(c[iPrice], delim) else null
             val totalCost = if (iTotal >= 0 && c.size > iTotal) num(c[iTotal], delim) else null
+            val volPrice = if (iVolPrice >= 0 && c.size > iVolPrice) num(c[iVolPrice], delim) else null
             val full = if (iFull >= 0 && c.size > iFull) fullFlag(c[iFull]) else null
             val missed = if (iMissed >= 0 && c.size > iMissed) c[iMissed].toIntOrNull() else null
             val station = if (iCity >= 0 && c.size > iCity) c[iCity].trim() else ""
             val notes = if (iNotes >= 0 && c.size > iNotes) c[iNotes].trim() else ""
             val pricePerL = when {
-                (pricePerUnit ?: 0.0) > 0.0 -> pricePerUnit!! / unitToL
+                (volPrice ?: 0.0) > 0.0 -> volPrice!! / unitToL
                 (totalCost ?: 0.0) > 0.0 -> totalCost!! / liters
+                (pricePerUnit ?: 0.0) > 0.0 -> pricePerUnit!! / unitToL
                 else -> 0.0
             }
             val note = buildString {
@@ -141,7 +146,7 @@ object FuelioImporter {
     private fun vehicleDateFormat(lines: List<String>): String? {
         val mark = lines.indexOfFirst { it.startsWith("## Vehicle", ignoreCase = true) }
         if (mark < 0 || mark + 2 > lines.lastIndex) return null
-        val valueRow = split(lines[mark + 2], if (lines[mark + 2].count { it == ';' } > lines[mark + 2].count { it == ',' }) ';' else ',')
+        val valueRow = split(lines[mark + 2], detectDelim(lines[mark + 2]))
         return valueRow.getOrNull(5)?.takeIf { it.isNotBlank() && it.contains('y', true) }
     }
 
@@ -164,6 +169,16 @@ object FuelioImporter {
         SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
             .apply { timeZone = TimeZone.getTimeZone("UTC") }
             .format(java.util.Date(millis))
+
+    private fun detectDelim(line: String): Char {
+        var best = ','
+        var bestN = 0
+        for (c in listOf(',', ';', '	')) {
+            val n = line.count { it == c }
+            if (n > bestN) { bestN = n; best = c }
+        }
+        return best
+    }
 
     private fun num(raw: String, delim: Char): Double? {
         val v = raw.trim().replace(" ", "")

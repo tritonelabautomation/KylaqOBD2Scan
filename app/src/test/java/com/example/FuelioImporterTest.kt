@@ -93,6 +93,25 @@ class FuelioImporterTest {
     }
 
     @Test
+    fun ownersRealTabSeparatedSyncExportParsesFully() {
+        val text = javaClass.classLoader
+            .getResourceAsStream("fuelio_vehicle2_sync.csv")!!.reader().readText()
+        val p = FuelioImporter.parse(text, 0L)
+        assertEquals("14 fill-ups in the owner's log", 14, p.entries.size)
+        val oldest = p.entries.first()
+        assertEquals(2.0, oldest.liters, 1e-9)
+        assertEquals(true, oldest.partial)                 // Full = 0
+        val newest = p.entries.last()
+        assertEquals(11.24, newest.liters, 1e-9)
+        assertEquals(115.31, newest.pricePerL, 1e-9)       // VolumePrice, not the 1296.08 total
+        assertEquals("Hyderabad", newest.station)
+        assertEquals(13317.0, newest.odometerKm!!, 1e-9)
+        assertEquals(false, newest.partial)
+        // FavStations / Category rows must never leak in as fill-ups.
+        assertTrue(p.entries.none { it.station.contains("NameBrand") || it.liters == 1.0 && it.note.contains("Private") })
+    }
+
+    @Test
     fun garbageFileYieldsNothingNotACrash() {
         assertEquals(0, FuelioImporter.parse("hello,world\n1,2,3", 0L).entries.size)
     }
