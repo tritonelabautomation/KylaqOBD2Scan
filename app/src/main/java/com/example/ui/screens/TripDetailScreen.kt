@@ -936,7 +936,6 @@ private fun shareFileSafely(context: Context, file: File, mimeType: String) {
     }
 }
 
-@Composable
 /**
  * OWNER READABILITY REBUILD (2026-09-16, fourth report of "UI is not letting me
  * read"): the fuel card was a wall of tight, fully-coloured bold paragraphs - no
@@ -971,6 +970,7 @@ private fun InsightBlock(accent: Color, title: String, body: String) {
     }
 }
 
+@Composable
 private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summary) {
     Card(
         modifier = Modifier.fillMaxWidth().padding(12.dp),
