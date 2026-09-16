@@ -59,7 +59,7 @@ object FuelioImporter {
         val iFuel = cols.indexOfFirst { it.startsWith("fuel") }
         val iFull = cols.indexOfFirst { it == "full" }
         val iPrice = cols.indexOfFirst { it.startsWith("price") }
-        val iCity = cols.indexOfFirst { it == "city" || it.startsWith("station") }
+        val iCity = cols.indexOfFirst { it.startsWith("city") || it.startsWith("station") }
         val iNotes = cols.indexOfFirst { it.startsWith("notes") }
         val iMissed = cols.indexOfFirst { it.startsWith("missed") }
         if (iDate < 0 || iFuel < 0) return Parsed(emptyList(), 0)
