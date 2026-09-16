@@ -54,6 +54,8 @@ fun DashboardScreen(
     val connectedDeviceName by viewModel.connectedDeviceName.collectAsState()
     val isPolling by viewModel.isPolling.collectAsState()
     val autoStopNotice by viewModel.autoStopNotice.collectAsState()
+    val gpsData by viewModel.gpsData.collectAsState()
+    val gpsStatus by viewModel.gpsManager.gpsStatus.collectAsState()
     val transactionCount by viewModel.transactionCount.collectAsState()
     val canResponseCount by viewModel.canResponseCount.collectAsState()
     val errorCount by viewModel.errorCount.collectAsState()
@@ -231,6 +233,20 @@ fun DashboardScreen(
             canResponseCount = canResponseCount,
             errorCount = errorCount,
             autoStopNotice = autoStopNotice,
+            gpsNotice = gpsNoticeFor(
+                isRecording = isRecording,
+                fixAvailable = gpsData.isAvailable,
+                fixHasAltitude = gpsData.hasAltitude,
+                gpsStatus = gpsStatus,
+                altitudeM = gpsData.altitudeMeters
+            )?.first,
+            gpsNoticeTone = gpsNoticeFor(
+                isRecording = isRecording,
+                fixAvailable = gpsData.isAvailable,
+                fixHasAltitude = gpsData.hasAltitude,
+                gpsStatus = gpsStatus,
+                altitudeM = gpsData.altitudeMeters
+            )?.second ?: 1,
             onStartRecording = { viewModel.startRecording() },
             onStopRecording = { viewModel.stopRecording() },
             onTogglePolling = { viewModel.togglePolling() }
@@ -480,6 +496,34 @@ fun VehicleStatusHeader(
     }
 }
 
+/**
+ * GPS/altitude status line for the recording bar (owner 2026-09-16: "Still Altitude
+ * logs are missing very very bad"). GPS failures - permission denied, provider off,
+ * waiting for first fix - used to be completely silent, so a whole trip could log null
+ * altitude with no clue why. Pure function, pinned by unit tests.
+ * Tone: 0 = altitude logging (green), 1 = degraded/waiting (amber), 2 = blocked (red).
+ */
+fun gpsNoticeFor(
+    isRecording: Boolean,
+    fixAvailable: Boolean,
+    fixHasAltitude: Boolean,
+    gpsStatus: String,
+    altitudeM: Double
+): Pair<String, Int>? {
+    if (!isRecording) return null
+    return when {
+        fixAvailable && fixHasAltitude ->
+            "GPS FIX - altitude logging - " +
+                String.format(java.util.Locale.US, "%.0f", altitudeM) + " m" to 0
+        fixAvailable -> "GPS fix - this fix carries no altitude" to 1
+        gpsStatus == com.example.data.GpsManager.STATUS_PERMISSION_DENIED ->
+            "GPS BLOCKED - grant PRECISE location in system settings or altitude stays missing" to 2
+        gpsStatus == com.example.data.GpsManager.STATUS_PROVIDER_OFF ->
+            "GPS OFF - enable phone Location or altitude stays missing" to 2
+        else -> "GPS - waiting for first fix, altitude starts logging then..." to 1
+    }
+}
+
 @Composable
 fun RecordingControlBar(
     isRecording: Boolean,
@@ -490,6 +534,8 @@ fun RecordingControlBar(
     canResponseCount: Long,
     errorCount: Long,
     autoStopNotice: String? = null,
+    gpsNotice: String? = null,
+    gpsNoticeTone: Int = 1,
     onStartRecording: () -> Unit,
     onStopRecording: () -> Unit,
     onTogglePolling: () -> Unit
@@ -594,6 +640,19 @@ fun RecordingControlBar(
             autoStopNotice?.let {
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(it, color = WarningRed, fontSize = 12.sp, lineHeight = 17.sp)
+            }
+            gpsNotice?.let {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    it,
+                    color = when (gpsNoticeTone) {
+                        0 -> NeonEmerald
+                        2 -> WarningRed
+                        else -> ElectricAmber
+                    },
+                    fontSize = 12.sp,
+                    lineHeight = 17.sp
+                )
             }
         }
     }

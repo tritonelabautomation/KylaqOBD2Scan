@@ -37,6 +37,22 @@ class GpsManager(private val context: Context) : LocationListener {
     private var totalDistance = 0f
 
     /**
+     * WHY GPS is not delivering fixes (owner 2026-09-16: "Still Altitude logs are
+     * missing very very bad"). startTracking() failures used to be silent, so a whole
+     * trip could record null altitude with zero clue why. The dashboard now shows this
+     * live while recording.
+     */
+    private val _gpsStatus = MutableStateFlow(STATUS_NO_FIX)
+    val gpsStatus: StateFlow<String> = _gpsStatus.asStateFlow()
+
+    companion object {
+        const val STATUS_OK = "OK"
+        const val STATUS_NO_FIX = "NO_FIX"
+        const val STATUS_PROVIDER_OFF = "PROVIDER_OFF"
+        const val STATUS_PERMISSION_DENIED = "PERMISSION_DENIED"
+    }
+
+    /**
      * Per-trip GPS altitude range (owner 2026-09-15). Fed only fixes that pass the
      * accuracy gate below AND report altitude; reset at every startTracking() so each
      * recording gets its own min/max; persisted by RecordingManager at stop.
@@ -63,14 +79,28 @@ class GpsManager(private val context: Context) : LocationListener {
                 // callbacks that drain battery. 5m is fine-grained enough for OBD correlation.
                 locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 5f, this)
                 isTracking = true
+                _gpsStatus.value = STATUS_NO_FIX
+                // Prime from the last known fix (accuracy-gated inside onLocationChanged) so a
+                // parked recording gets altitude IMMEDIATELY instead of waiting for the first
+                // 5 m displacement callback - short/stationary trips used to log zero altitude.
+                try {
+                    locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)?.let { onLocationChanged(it) }
+                } catch (_: Exception) {}
                 return true
             } else {
                 // FIX HIGH-1: GPS is disabled — mark unavailable and signal failure.
                 // Previously this was silent, making "GPS off" indistinguishable from
                 // "vehicle is stationary" (both result in speedKmh = 0f).
+                _gpsStatus.value = STATUS_PROVIDER_OFF
                 _gpsData.value = _gpsData.value.copy(isAvailable = false)
                 return false
             }
+        } catch (e: SecurityException) {
+            // Android 12+ "Approximate location" grants only COARSE - GPS_PROVIDER needs
+            // FINE and throws. Previously swallowed by the generic catch: silent null altitude.
+            _gpsStatus.value = STATUS_PERMISSION_DENIED
+            _gpsData.value = _gpsData.value.copy(isAvailable = false)
+            return false
         } catch (e: Exception) {
             e.printStackTrace()
             _gpsData.value = _gpsData.value.copy(isAvailable = false)
@@ -119,6 +149,7 @@ class GpsManager(private val context: Context) : LocationListener {
             isAvailable = true,
             distanceTraveledMeters = totalDistance
         )
+        _gpsStatus.value = STATUS_OK
     }
 
     override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
@@ -134,6 +165,7 @@ class GpsManager(private val context: Context) : LocationListener {
             locationManager.removeUpdates(this)
         } catch (_: Exception) {}
         isTracking = false
+        _gpsStatus.value = STATUS_PROVIDER_OFF
         _gpsData.value = _gpsData.value.copy(isAvailable = false)
     }
 }
