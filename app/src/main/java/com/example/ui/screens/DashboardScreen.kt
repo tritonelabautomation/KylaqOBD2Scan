@@ -73,7 +73,6 @@ fun DashboardScreen(
     val selectedCanProtocol by viewModel.selectedCanProtocol.collectAsState()
     val protocolHealth by viewModel.protocolHealth.collectAsState()
     val protocolResult by viewModel.protocolVerificationResult.collectAsState()
-    val gpsData by viewModel.gpsData.collectAsState()
 
     val realtimeEconomy by viewModel.realtimeEconomy.collectAsState()
     val acSetTempC by viewModel.acSetTempC.collectAsState()
