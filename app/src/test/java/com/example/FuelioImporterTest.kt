@@ -17,9 +17,9 @@ class FuelioImporterTest {
         My Car,Description,1,1,1,yyyy-MM-dd,,,,,
         ## Log,,,,,,,,,,
         Data,Odo (km),Fuel (litres),Full,Price (optional),mpg (optional),latitude (optional),longitude (optional),City (optional),Notes (optional),Missed
-        2026-08-01,12000,40.5,1,105.5,,,,,,IOCL,,0
-        2026-08-10,12400,39.0,0,104.2,,,,,,HP,,0
-        2026-08-20,12800,41.0,1,0,,,,,,IOCL,,1
+        2026-08-01,12000,40.5,1,105.5,,,,IOCL,,0
+        2026-08-10,12400,39.0,0,104.2,,,,HP,,0
+        2026-08-20,12800,41.0,1,0,,,,IOCL,,1
     """.trimIndent()
 
     @Test
@@ -42,7 +42,7 @@ class FuelioImporterTest {
         val csv = """
             ## Log,,,,,,,,,,
             Data,Odo (mi),Fuel (us gallons),Full,Price (optional),mpg (optional),latitude (optional),longitude (optional),City (optional),Notes (optional),Missed
-            2026-08-01,7456.4,10.7,1,3.90,,,,,,,0
+            2026-08-01,7456.4,10.7,1,3.90,,,,,,0
         """.trimIndent()
         val e = FuelioImporter.parse(csv, 0L).entries.single()
         assertEquals(7456.4 * FuelioImporter.MI_TO_KM, e.odometerKm!!, 0.01)
