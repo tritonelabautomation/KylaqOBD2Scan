@@ -138,7 +138,12 @@ class RecordingManager(
         if (!_isRecording.value) return
 
         synchronized(activeTransactionList) {
-            activeTransactionList.add(tx)
+            // GPS altitude per OBD line (owner 2026-09-16: "why altitude is missing in
+            // trend and trip logs?"): stamp at intake so EVERY persisted sample row
+            // carries the elevation of its own moment; null when no accuracy-gated
+            // fix exists at that instant - gaps stay gaps.
+            val stamped = tx.copy(altitudeM = com.example.di.AppContainer.currentAltitudeM())
+            activeTransactionList.add(stamped)
             _currentTransactions.value = activeTransactionList.toList()
 
             // Update current synchronized sample
@@ -281,6 +286,7 @@ class RecordingManager(
                 displayValue = tx.decodedValueDisplay,
                 unit = tx.unit,
                 quality = "VALID",
+                altitudeM = tx.altitudeM,
                 sequence = idx.toLong()
             )
         }
@@ -486,6 +492,7 @@ class RecordingManager(
                         displayValue = tx.decodedValueDisplay,
                         unit = tx.unit,
                         quality = "VALID",
+                        altitudeM = tx.altitudeM,
                         sequence = idx.toLong()
                     )
                 }

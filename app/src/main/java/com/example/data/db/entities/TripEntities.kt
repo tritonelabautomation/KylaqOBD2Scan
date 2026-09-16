@@ -71,7 +71,10 @@ data class TelemetrySampleEntity(
     val displayValue: String,
     val unit: String,
     val quality: String = "VALID", // "VALID", "STALE", "OUT_OF_RANGE", "INVALID"
-    val sequence: Long = 0L
+    val sequence: Long = 0L,
+    // GPS altitude stamp per sample row (owner 2026-09-16). NULL for rows recorded
+    // before MIGRATION_11_12 and for OBD-only recovered trips - honest blank.
+    val altitudeM: Double? = null
 )
 
 /**

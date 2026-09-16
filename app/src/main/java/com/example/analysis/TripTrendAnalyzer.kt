@@ -115,4 +115,22 @@ object TripTrendAnalyzer {
             idleActualLh = idleActualLh
         )
     }
+
+    /**
+     * GPS altitude series for the Trends tab (owner 2026-09-16: "why altitude is
+     * missing in trend and trip logs?"). Altitude is not an OBD PID: it is stamped on
+     * every sample row from accuracy-gated GPS fixes (<= 40 m), so its series is built
+     * from the row stamp rather than a pid filter. Rows without a fix are skipped -
+     * gaps stay gaps, never interpolated, never 0.0 (recovered OBD-only trips therefore
+     * yield an empty series and the chart honestly stays hidden).
+     */
+    const val PID_ALTITUDE_GPS = "ALT"
+
+    fun <T> altitudePoints(
+        samples: List<T>,
+        timestamp: (T) -> Long,
+        altitudeM: (T) -> Double?
+    ): List<Pair<Long, Double>> =
+        samples.mapNotNull { row -> altitudeM(row)?.let { timestamp(row) to it } }
+            .sortedBy { it.first }
 }

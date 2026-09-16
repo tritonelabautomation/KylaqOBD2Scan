@@ -246,3 +246,16 @@ val MIGRATION_10_11 = object : Migration(10, 11) {
         db.execSQL("ALTER TABLE `trips` ADD COLUMN `maxVoltageV` REAL DEFAULT NULL")
     }
 }
+
+/**
+ * v12: GPS altitude per telemetry sample row (owner 2026-09-16: "why altitude is
+ * missing in trend and trip logs?"). The stamp existed only on the in-memory wide
+ * samples (CSV export) - the per-pid rows the UI reads never carried it, so the
+ * Trends tab could not show elevation at all. Nullable like the altitude precedent:
+ * older rows and OBD-only recovered trips keep NULL and charts stay honestly hidden.
+ */
+val MIGRATION_11_12 = object : Migration(11, 12) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `telemetry_samples` ADD COLUMN `altitudeM` REAL DEFAULT NULL")
+    }
+}

@@ -451,13 +451,26 @@ private fun TripTrendsView(
         TrendChannel(
             "0162", "Torque", "Nm", Color(0xFF64B5F6),
             transform = { pct -> com.example.engine.PowertrainModel.torqueNmFromPercent(pct, torqueRefNm) }
-        )
+        ),
+        // GPS altitude: not an OBD PID - extracted from the per-sample altitude stamp.
+        // Deep-orange 200: distinct from every other channel colour, incl. the red
+        // accent theme and the cyan coolant line.
+        TrendChannel(com.example.analysis.TripTrendAnalyzer.PID_ALTITUDE_GPS, "Altitude (GPS)", "m", Color(0xFFFFAB91))
     )
 
-    fun pointsFor(ch: TrendChannel): List<Pair<Long, Double>> = samples
-        .filter { it.pid.equals(ch.pid.removePrefix("01"), ignoreCase = true) || it.pid.equals(ch.pid, ignoreCase = true) }
-        .mapNotNull { smp -> smp.numericValue?.let { smp.timestamp to (ch.transform?.invoke(it) ?: it) } }
-        .sortedBy { it.first }
+    fun pointsFor(ch: TrendChannel): List<Pair<Long, Double>> =
+        if (ch.pid == com.example.analysis.TripTrendAnalyzer.PID_ALTITUDE_GPS) {
+            com.example.analysis.TripTrendAnalyzer.altitudePoints(
+                samples,
+                timestamp = { it.timestamp },
+                altitudeM = { it.altitudeM }
+            )
+        } else {
+            samples
+                .filter { it.pid.equals(ch.pid.removePrefix("01"), ignoreCase = true) || it.pid.equals(ch.pid, ignoreCase = true) }
+                .mapNotNull { smp -> smp.numericValue?.let { smp.timestamp to (ch.transform?.invoke(it) ?: it) } }
+                .sortedBy { it.first }
+        }
 
     // Selection order = axis priority; thin channels drop out here (chart re-checks too).
     val lines = selectedPids.mapNotNull { pid ->
