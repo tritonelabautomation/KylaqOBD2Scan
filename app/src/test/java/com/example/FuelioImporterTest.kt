@@ -71,7 +71,7 @@ class FuelioImporterTest {
         val csv = """
             ## Log;;;;;;;;;;
             Data;Odo (km);Fuel (litres);Full;Total price;mpg (optional);latitude (optional);longitude (optional);City (optional);Notes (optional);Missed
-            2026-08-01;12000;40,5;full;4252,50;;;;;IOCL;;0
+            2026-08-01;12000;40,5;full;4252,50;;;;IOCL;;0
         """.trimIndent()
         val e = FuelioImporter.parse(csv, 0L).entries.single()
         assertEquals(40.5, e.liters, 1e-9)

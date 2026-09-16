@@ -51,7 +51,7 @@ object FuelioImporter {
                 val c = split(l, delim).map { it.lowercase() }
                 (c.any { it.startsWith("date") || it == "data" }) &&
                     (c.any { it.startsWith("odo") }) &&
-                    (c.any { it.startsWith("fuel") })
+                    (c.any { isFuelCol(it) })
             }
         }
         if (headerIdx < 0) return Parsed(emptyList(), 0)
@@ -59,9 +59,7 @@ object FuelioImporter {
         val cols = header.map { it.lowercase() }
         val iDate = cols.indexOfFirst { it == "data" || it.startsWith("date") }
         val iOdo = cols.indexOfFirst { it.startsWith("odo") }
-        val iFuel = cols.indexOfFirst {
-            it.startsWith("fuel") || it.startsWith("quantity") || it == "litres" || it == "liters"
-        }
+        val iFuel = cols.indexOfFirst { isFuelCol(it) }
         val iFull = cols.indexOfFirst { it == "full" || it.startsWith("fillup") || it == "type" }
         val iPrice = cols.indexOfFirst { it.startsWith("price") && !it.contains("total") }
         val iTotal = cols.indexOfFirst { it.contains("total") && (it.contains("price") || it.contains("cost")) }
@@ -169,6 +167,9 @@ object FuelioImporter {
         SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
             .apply { timeZone = TimeZone.getTimeZone("UTC") }
             .format(java.util.Date(millis))
+
+    private fun isFuelCol(c: String): Boolean =
+        c.startsWith("fuel") || c.startsWith("quantity") || c == "litres" || c == "liters"
 
     private fun detectDelim(line: String): Char {
         var best = ','
