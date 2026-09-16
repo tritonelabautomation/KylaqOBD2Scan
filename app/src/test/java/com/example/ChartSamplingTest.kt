@@ -162,8 +162,12 @@ class TrendAxisMathTest {
     }
 
     @Test
-    fun `flat zero signal falls back to the absolute floor`() {
-        val (_, span) = yDomain(0.0, 0.0)
-        assertEquals(1.0, span, 1e-9) // maxOf(|0|*0.05, 0.5)*2
+    fun `flat zero signal sits on a zero-floor axis`() {
+        // Owner 16:54: parked sessions used to draw -0.5…+0.5 km/h under an
+        // all-zero speed line. A signal that never dips below zero now gets a
+        // 0…+0.5 axis - the floor, not an invented negative range.
+        val (min, span) = yDomain(0.0, 0.0)
+        assertEquals(0.0, min, 1e-9)
+        assertEquals(0.5, span, 1e-9) // maxOf(|0|*0.05, 0.5)
     }
 }
