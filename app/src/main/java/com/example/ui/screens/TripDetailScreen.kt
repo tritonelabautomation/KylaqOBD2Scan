@@ -199,9 +199,15 @@ fun TripDetailScreen(
                                 fontSize = 13.sp
                             )
                         }
-                    }
-                    Column {
-                        TripFuelLogCard(fuelSummary)
+                    } else {
+                        // ONE scrolling list for the whole tab (owner 2026-09-16: "unable
+                        // to see Trip summary etc"): the fuel card used to sit in a
+                        // non-scrolling Column ABOVE the overview's inner LazyColumn - on
+                        // trips with a tall card (7 insight blocks) the card ate the whole
+                        // viewport, clipped its own last block and left the inner list
+                        // zero height. The card is now the first ITEM of the overview
+                        // list: everything scrolls together, every card gets its full
+                        // content height, nothing is pinned or clipped.
                         TripOverviewView(
                             trip = trip, sampleCount = samples.size, rawCount = rawLogs.size, analysis = aiAnalysis,
                             summary = fuelSummary,
@@ -290,6 +296,9 @@ private fun TripOverviewView(
         modifier = Modifier.fillMaxSize().navigationBarsPadding().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        item {
+            TripFuelLogCard(summary)
+        }
         item {
             // Replicated OBDeleven trip-detail cards (owner reference screen 2, 2026-09-13)
             TrackerSummaryCards(
