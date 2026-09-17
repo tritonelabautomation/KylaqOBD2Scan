@@ -1,6 +1,7 @@
 package com.example
 
 import com.example.model.DecoderType
+import com.example.model.DefaultPidDefinitions
 import com.example.model.PidDefinition
 import com.example.model.StandardPidCatalog
 import com.example.protocol.PidDecoder
