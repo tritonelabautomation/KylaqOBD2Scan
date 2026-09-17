@@ -227,6 +227,11 @@ class ObdKeepAliveService : Service() {
                         )
                         when (decision) {
                             AutoRecordPolicy.Decision.START_RECORDING -> {
+                                // The ride X-ray belongs to the drive about to start. When the UI
+                                // opens a session it resets this itself; a drive opened here, in the
+                                // background, would otherwise inherit the previous drive's X-ray and
+                                // report it as part of this one.
+                                container.obdScheduler.rideRecorder.reset()
                                 container.recordingManager.startRecording()
                                 container.gpsManager.startTracking()
                                 lastRecordingState = true
