@@ -485,11 +485,29 @@ private fun TripTrendsView(
         // GPS altitude: not an OBD PID - extracted from the per-sample altitude stamp.
         // Deep-orange 200: distinct from every other channel colour, incl. the red
         // accent theme and the cyan coolant line.
-        TrendChannel(com.example.analysis.TripTrendAnalyzer.PID_ALTITUDE_GPS, "Altitude (GPS)", "m", Color(0xFFFFAB91))
+        TrendChannel(com.example.analysis.TripTrendAnalyzer.PID_ALTITUDE_GPS, "Altitude (GPS)", "m", Color(0xFFFFAB91)),
+        // Derived channels (owner 2026-09-16): calculated from stored rpm/torque/speed,
+        // so every trip - old, recovered, imported - shows them, no new data needed.
+        TrendChannel(com.example.analysis.TripTrendAnalyzer.PID_POWER_KW, "Power (2\u03c0NT/60)", "kW", Color(0xFFEEFF41)),
+        TrendChannel(com.example.analysis.TripTrendAnalyzer.PID_GEAR, "Gear (est)", "gear", Color(0xFFB0BEC5))
     )
 
     fun pointsFor(ch: TrendChannel): List<Pair<Long, Double>> =
-        if (ch.pid == com.example.analysis.TripTrendAnalyzer.PID_ALTITUDE_GPS) {
+        if (ch.pid == com.example.analysis.TripTrendAnalyzer.PID_POWER_KW) {
+            com.example.analysis.TripTrendAnalyzer.powerPoints(
+                samples,
+                timestamp = { it.timestamp },
+                pid = { it.pid },
+                value = { it.numericValue }
+            )
+        } else if (ch.pid == com.example.analysis.TripTrendAnalyzer.PID_GEAR) {
+            com.example.analysis.TripTrendAnalyzer.gearPoints(
+                samples,
+                timestamp = { it.timestamp },
+                pid = { it.pid },
+                value = { it.numericValue }
+            )
+        } else if (ch.pid == com.example.analysis.TripTrendAnalyzer.PID_ALTITUDE_GPS) {
             com.example.analysis.TripTrendAnalyzer.altitudePoints(
                 samples,
                 timestamp = { it.timestamp },

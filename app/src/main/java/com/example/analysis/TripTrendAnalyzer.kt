@@ -172,6 +172,84 @@ object TripTrendAnalyzer {
      */
     const val PID_ALTITUDE_GPS = "ALT"
 
+    /**
+     * Derived channels (owner 2026-09-16: "Calculated power & gears are not displaying
+     * why. These are approximated and calculated so it should be available for even old
+     * trip logs right"): computed ON THE FLY from each trip's stored rpm / torque /
+     * speed rows, so EVERY trip ever recorded - old, recovered, imported - gets them.
+     */
+    const val PID_POWER_KW = "PWR"
+    const val PID_GEAR = "GEAR"
+
+    private fun normPid(p: String): String = p.removePrefix("01").uppercase()
+
+    /**
+     * Mechanical power series P = 2*pi*N*T/60000 kW over timestamp-paired rpm+torque
+     * rows (same 2.5 s pairing rule as the cross-trip average). Emits a point whenever
+     * either signal arrives while the other is fresh.
+     */
+    fun <T> powerPoints(
+        rows: List<T>,
+        timestamp: (T) -> Long,
+        pid: (T) -> String,
+        value: (T) -> Double?
+    ): List<Pair<Long, Double>> {
+        var rpmTs = -1L; var rpmV = 0.0
+        var tqTs = -1L; var tqNm = 0.0
+        val out = mutableListOf<Pair<Long, Double>>()
+        for (r in rows.sortedBy { timestamp(it) }) {
+            val v = value(r) ?: continue
+            val ts = timestamp(r)
+            when (normPid(pid(r))) {
+                "0C" -> {
+                    rpmTs = ts; rpmV = v
+                    if (tqTs >= 0 && kotlin.math.abs(ts - tqTs) <= PAIR_MS) {
+                        out += ts to (kotlin.math.PI * 2.0 * rpmV * tqNm / 60000.0)
+                    }
+                }
+                "62" -> {
+                    tqTs = ts; tqNm = v * NM_PER_PERCENT
+                    if (rpmTs >= 0 && kotlin.math.abs(ts - rpmTs) <= PAIR_MS) {
+                        out += ts to (kotlin.math.PI * 2.0 * rpmV * tqNm / 60000.0)
+                    }
+                }
+                else -> {}
+            }
+        }
+        return out
+    }
+
+    /**
+     * Estimated-gear step series from rpm-per-km/h against the AQ250 factory ratios
+     * (confident estimate first, nearest gear fallback); only while moving >= 10 km/h.
+     */
+    fun <T> gearPoints(
+        rows: List<T>,
+        timestamp: (T) -> Long,
+        pid: (T) -> String,
+        value: (T) -> Double?
+    ): List<Pair<Long, Double>> {
+        val model = com.example.engine.Aq250GearModel()
+        var spdTs = -1L; var spdV = 0.0
+        val out = mutableListOf<Pair<Long, Double>>()
+        for (r in rows.sortedBy { timestamp(it) }) {
+            val v = value(r) ?: continue
+            val ts = timestamp(r)
+            when (normPid(pid(r))) {
+                "0D" -> { spdTs = ts; spdV = v }
+                "0C" -> {
+                    if (spdTs >= 0 && kotlin.math.abs(ts - spdTs) <= PAIR_MS && spdV >= 10.0) {
+                        val ratio = v / spdV
+                        val g = model.estimate(ratio)?.first ?: model.nearestGear(ratio)?.first
+                        if (g != null) out += ts to g.toDouble()
+                    }
+                }
+                else -> {}
+            }
+        }
+        return out
+    }
+
     fun <T> altitudePoints(
         samples: List<T>,
         timestamp: (T) -> Long,
