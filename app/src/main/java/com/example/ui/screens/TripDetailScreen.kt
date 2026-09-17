@@ -227,7 +227,11 @@ fun TripDetailScreen(
                                     if (selectedTrendPids.size > 1) selectedTrendPids - pid
                                     else selectedTrendPids // keep at least one signal
                                 selectedTrendPids.size < 4 -> selectedTrendPids + pid
-                                else -> selectedTrendPids // 4-way overlay cap
+                                // Owner 2026-09-17: "gear display not working bro" - at the
+                                // 4-overlay cap a 5th tap used to be SILENTLY DROPPED, which
+                                // read as a dead chip. Now the newest signal swaps out so
+                                // every tap visibly does something.
+                                else -> selectedTrendPids.dropLast(1) + pid
                             }
                         }
                     )
@@ -482,14 +486,15 @@ private fun TripTrendsView(
             "0162", "Torque", "Nm", Color(0xFF64B5F6),
             transform = { pct -> com.example.engine.PowertrainModel.torqueNmFromPercent(pct, torqueRefNm) }
         ),
+        // Derived channels (owner 2026-09-16/17): computed from stored rpm/torque/speed,
+        // available on EVERY trip ever recorded. Kept next to Torque so they are found
+        // without scrolling the whole chip row.
+        TrendChannel(com.example.analysis.TripTrendAnalyzer.PID_POWER_KW, "Power (2\u03c0NT/60)", "kW", Color(0xFFEEFF41)),
+        TrendChannel(com.example.analysis.TripTrendAnalyzer.PID_GEAR, "Gear (est)", "gear", Color(0xFFB0BEC5)),
         // GPS altitude: not an OBD PID - extracted from the per-sample altitude stamp.
         // Deep-orange 200: distinct from every other channel colour, incl. the red
         // accent theme and the cyan coolant line.
-        TrendChannel(com.example.analysis.TripTrendAnalyzer.PID_ALTITUDE_GPS, "Altitude (GPS)", "m", Color(0xFFFFAB91)),
-        // Derived channels (owner 2026-09-16): calculated from stored rpm/torque/speed,
-        // so every trip - old, recovered, imported - shows them, no new data needed.
-        TrendChannel(com.example.analysis.TripTrendAnalyzer.PID_POWER_KW, "Power (2\u03c0NT/60)", "kW", Color(0xFFEEFF41)),
-        TrendChannel(com.example.analysis.TripTrendAnalyzer.PID_GEAR, "Gear (est)", "gear", Color(0xFFB0BEC5))
+        TrendChannel(com.example.analysis.TripTrendAnalyzer.PID_ALTITUDE_GPS, "Altitude (GPS)", "m", Color(0xFFFFAB91))
     )
 
     fun pointsFor(ch: TrendChannel): List<Pair<Long, Double>> =
@@ -562,7 +567,7 @@ private fun TripTrendsView(
             }
         }
         Text(
-            "Tap to overlay up to 4 signals \u00b7 first picked = left axis \u00b7 second = right axis \u00b7 pinch to zoom \u00b7 drag to read values",
+            "Tap to overlay up to 4 signals \u00b7 first picked = left axis \u00b7 second = right axis \u00b7 a 5th tap swaps the newest out \u00b7 pinch to zoom \u00b7 drag to read values",
             color = TextSecondaryDark,
             fontSize = 12.sp
         )

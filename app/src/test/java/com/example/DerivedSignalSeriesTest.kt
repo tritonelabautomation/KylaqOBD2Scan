@@ -47,6 +47,20 @@ class DerivedSignalSeriesTest {
     }
 
     @Test
+    fun realOneSecondCadenceAlternatingPidsStillPairs() {
+        // Recovered-log shape: pids arrive round-robin, rpm and speed ~0.7 s apart.
+        val rows = mutableListOf<Row>()
+        var ts = 1_000L
+        repeat(10) {
+            rows += Row(ts, "0C", 2464.0); ts += 700
+            rows += Row(ts, "0D", 40.0); ts += 700
+            rows += Row(ts, "62", 50.0); ts += 700
+        }
+        assertTrue(gearPoints(rows, { it.ts }, { it.pid }, { it.v }).size >= 9)
+        assertTrue(powerPoints(rows, { it.ts }, { it.pid }, { it.v }).size >= 9)
+    }
+
+    @Test
     fun fourHexAndTwoHexPidsBothWork() {
         val rows = listOf(Row(1_000, "010D", 40.0), Row(1_000, "010C", 2464.0))
         assertEquals(1, gearPoints(rows, { it.ts }, { it.pid }, { it.v }).size)
