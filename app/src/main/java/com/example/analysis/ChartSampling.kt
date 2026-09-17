@@ -89,7 +89,7 @@ object ChartSampling {
     }
 
     private fun modeOf(values: List<Double>): Double =
-        values.groupingBy { kotlin.math.roundToInt(it) }.eachCount()
+        values.groupingBy { Math.round(it) }.eachCount()
             .maxByOrNull { it.value }?.key?.toDouble()
             ?: values.average()
 
