@@ -273,6 +273,106 @@ happen again silently.
 
 ---
 
+## 4b. Defect 7: the supervisors lived in the UI, so "background" meant "not recording"
+
+Found from the owner's exact words: *"it supposed to be service right even in background all ways it
+should run and record."* He was describing what a service does, and the code contradicted him.
+`MainViewModel.startSessionAutomation()` owned both loops - the 10 s auto-connect and the 2 s
+auto-record watchdog - and its own KDoc admitted the consequence: *"Both loops live in
+viewModelScope, so they stop with the app UI."*
+
+So `ObdKeepAliveService` was keeping a process alive that was **doing nothing**. After a kill, or
+with the phone in a pocket and the UI never opened, nothing reconnected, nothing polled, nothing
+recorded. The journal fixes defects 1-6 - the drive up to the kill is now on disk - but the drive
+*after* the kill still went unrecorded. That is the second half of "never lose the logs".
+
+**Fix.** Both loops now also run inside the service, for as long as the process lives.
+
+  * `AutoRecordPolicy` (new, `com.example.service`) holds the whole rule as pure functions:
+    `ENGINE_RUNNING_RPM = 200.0`, `START_STOP_GRACE_MS = 300_000`, `ENGINE_OFF_GRACE_MS = 60_000`,
+    `decide(...)` and `nextEngineOffSince(...)`. One definition, two callers, so the supervisors can
+    never drift apart. The Idle Start-Stop rule the owner reported on 2026-09-15 lives here now with
+    its reason written down: a FRESH `rpm <= 200` is a traffic light and gets five minutes; a
+    MISSING reading means the link went stale and gets one.
+  * `ObdKeepAliveService.startSupervisors()` runs both loops on its own scope from `onCreate`, so a
+    START_STICKY restart after a kill reconnects, polls and records again with no UI and no user
+    action. Each action is guarded by the state it would change, and every tick re-reads the owner's
+    settings, so switching auto-record off takes effect within seconds.
+  * `MainViewModel.startSessionAutomation()` calls the same policy instead of inlining the timing,
+    and keeps only the UI-side work a service cannot do.
+
+**Two supervisors, one trip.** With both loops running, both can see "engine on, nothing recording"
+on the same tick. Two guards stop that becoming two trips: `RecordingManager.startRecording()` now
+returns the live session instead of opening a second one (its return type became
+`RecordingMetadata?`), and `MainViewModel.startRecording()` returns early when a session is already
+open, so it cannot wipe the ride X-ray or restart the duration timer mid-drive.
+
+**Closing a drive from the background still has to do the closing work.** Everything that must
+happen after a STOP lives in `MainViewModel.stopRecording()`: the ride X-ray (`persistDriveInsights`),
+the OAuth-free Drive mirror, the cloud backup and the unsaved-raw-log banner. Once the service can
+stop a drive, a background stop would have saved the trip and silently skipped all four. So
+`MainViewModel` now watches `isRecording` for the falling edge and runs that aftermath, guarded by
+`stopInitiatedHere` so its own STOP cannot trigger it twice - `persistDriveInsights()` has no dedup
+key, so running it twice appends the same ride X-ray twice, which is the 2026-09-15 duplicate-ride
+bug in a new hat. The flag is raised *before* the launch, because `stopRecording()` is asynchronous
+and the watcher would otherwise see the fall while the flag was still false. The service supervisor
+also calls `rideRecorder.reset()` when IT opens a drive, so a background drive does not inherit the
+previous one's X-ray.
+
+## 4c. Defect 8: recovery rejected frames the live parser accepted - and it was speed that went
+
+The symptom behind this whole task, and the one it kept circling without naming: **a recovered log
+had rpm in it and no km/h.**
+
+This car's adapter writes a single-byte answer as `04 41 0D 50` - four bytes carrying a count byte
+of 04 - where strict ISO 15765-2 single-frame would declare `03`. The live path never minded:
+`CanFrameParser` reads the declared length, and when it does not fit falls back to
+`dataBytes.drop(1)`, decoding the PID from the bytes actually present. `RawLogRecovery` minded a
+great deal. It had two guards that both trusted the count byte to state the number of FOLLOWING
+bytes:
+
+    if (bytes.size < pci + 1) return null     // "truncated line"  -> 4 < 5, rejected
+    if (bytes.size < 3 + dataLen) return null //                   -> 4 < 5, rejected
+
+So `04 41 0D 50` was thrown away as truncated while the dashboard was displaying 80 km/h from the
+identical bytes. Every single-byte answer went the same way: 010D speed, 0105 coolant, 010F intake
+air temp, 0111 throttle, 0106/0107 fuel trims, 0146 ambient. Two-byte answers such as 010C rpm
+satisfy both guards, which is exactly why the pattern was "rpm yes, km/h no".
+
+**Fix.** Both guards now require only what is needed to identify a row - `bytes.size >= 3`, i.e.
+`41 + pid` - and the payload length is `min(declaredDataLen, bytes.size - 3)`. Recovery and the live
+parser now produce the same PID and the same payload for every frame shape checked
+(`recoveryDecodesEverySingleBytePidTheLiveParserAccepts`, nine real frames including the odometer).
+Nothing is padded out to the length the count byte claims, and nothing unreadable is invented:
+`framesWithoutAPidToReadAreStillRejectedRatherThanGuessedAt` pins that a pid-less body, an
+odd-length body, the ISO 9141 shape with no PCI byte, an ISO-TP first frame, a 7F negative response
+and a flow-control frame all still come back as nothing.
+
+**Retraction.** While diagnosing this I first "fixed" only the second guard and wrote in a comment
+that the first one was correct - `4 >= 3 is right`. That was my own arithmetic, and it was wrong: the
+first guard is the one that fired. I also twice built a Python model of the parser that disagreed
+with the Kotlin, once because I passed a flag where the frame belonged. The version above was
+re-derived line by line against `CanFrameParser` and checked against real frames before it went in.
+
+**Honest limits of defects 7 and 8.**
+
+  * **A kill still splits a drive in two.** The killed process's journal is recovered as
+    `<id> (recovered)`; the new session gets a new id. Both halves are saved - nothing is lost - but
+    one drive can appear as two trips. Resuming the unfinished journal as the live session would
+    merge them, and is the obvious next step; it is not done here because resurrecting the wrong
+    session (yesterday's drive) is a worse failure than a split trip.
+  * **GPS may not update in the background.** The manifest declares only `ACCESS_FINE_LOCATION` and
+    `ACCESS_COARSE_LOCATION`, with no `ACCESS_BACKGROUND_LOCATION`, so a service-started recording
+    can be denied location updates on Android 10+. This does not cost the trip: distance is
+    integrated from OBD vehicle speed (`EconomyEngine.accumulatedDistanceKm`, from 010D), not from
+    GPS - and 010D is precisely the PID defect 8 was dropping. Distance, economy, CO2/km, the
+    plateau table and every curve survive; what can be sparse is the map trace and altitude. Adding
+    background location means a second "Allow all the time" prompt and Play Store scrutiny for a
+    sensitive permission, so that is the owner's decision, not something to slip into a logging fix.
+  * **The service can only run inside a live process.** Android itself can stop a foreground service
+    - aggressive OEM battery management, "force stop", a swipe-away on some skins. Nothing in an app
+    overrides that; the battery exemption in §4 is what buys the process its life.
+
 ## 5. Tests added / changed
 
 | File | What it pins |
