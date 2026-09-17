@@ -83,47 +83,92 @@ object RecordTime {
     fun offsetLabel(millis: Long = System.currentTimeMillis()): String =
         SimpleDateFormat("XXX", Locale.US).apply { timeZone = recordZone }.format(Date(millis))
 
-    /**
-     * Accepted shapes, most specific first.
-     *
-     * `XXX` reads `+05:30` and `Z`; the two `'Z'` patterns read the UTC stamps every file
-     * written before 2026-09-17 carries; the last two read naive stamps as IST, which is what
-     * they always were on this device (they were formatted with the default zone and simply
-     * never said so).
-     */
-    private val PARSE_PATTERNS = listOf(
-        "yyyy-MM-dd'T'HH:mm:ss.SSSXXX",
-        "yyyy-MM-dd'T'HH:mm:ssXXX",
-        "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
-        "yyyy-MM-dd'T'HH:mm:ss'Z'",
-        "yyyy-MM-dd HH:mm:ss.SSS",
-        "yyyy-MM-dd HH:mm:ss",
-        "yyyy-MM-dd HH:mm"
+    /** An ISO-8601 stamp whose zone is stated as an offset: `+05:30`, `+0530`. */
+    private val ZONED_OFFSET = Regex(
+        """^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})(?::(\d{2}))?(?:\.(\d{1,3}))?([+-]\d{2}:?\d{2})$"""
+    )
+
+    /** An ISO-8601 stamp whose zone is stated as `Z` - genuine UTC, written before 2026-09-17. */
+    private val ZONED_Z = Regex(
+        """^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})(?::(\d{2}))?(?:\.(\d{1,3}))?[Zz]$"""
+    )
+
+    /** A stamp with no zone at all: formatted in the record zone and never said so. */
+    private val NAIVE = Regex(
+        """^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})(?::(\d{2}))?(?:\.(\d{1,3}))?$"""
     )
 
     /**
      * Epoch milliseconds for any stamp this app has ever written, or null when it is missing,
      * blank or unparsable. A stamp carrying an explicit offset is honoured exactly; a legacy
      * `...Z` stamp is read as UTC; a naive stamp is read as IST.
+     *
+     * The pattern is chosen from the stamp's SHAPE, not by trying patterns in order until one
+     * takes. `SimpleDateFormat.parse` reads a PREFIX and ignores whatever is left over, so an
+     * ordered list is a trap: `yyyy-MM-dd HH:mm` happily "parses" `2026-09-17 14:27:05.123` by
+     * stopping at the minutes and dropping the seconds and the fraction on the floor. That is 65 s
+     * off every such stamp in a recovered trip, and it is invisible in the file. Recognise the
+     * shape, normalise it to one canonical spelling, then parse exactly that - strictly.
      */
     fun parseMillis(stamp: String?): Long? {
         val text = stamp?.trim().orEmpty()
         if (text.isEmpty()) return null
-        for (pattern in PARSE_PATTERNS) {
-            val parsed = runCatching {
-                SimpleDateFormat(pattern, Locale.US).apply {
-                    // Patterns ending in a literal 'Z' must be parsed as UTC; everything else
-                    // is read in the record zone.
-                    timeZone = if (pattern.endsWith("'Z'")) TimeZone.getTimeZone("UTC") else recordZone
-                    // Strict: "2026-09-15T16:07:42Z" must NOT match the .SSS pattern by
-                    // silently reinterpreting fields.
-                    isLenient = false
-                }.parse(text)?.time
-            }.getOrNull()
-            if (parsed != null) return parsed
+
+        ZONED_OFFSET.matchEntire(text)?.let { m ->
+            // XXX wants a colon in the offset; +0530 and +05:30 must both read.
+            val rawOffset = m.groupValues[5]
+            val offset = if (rawOffset.length == 5) rawOffset.substring(0, 3) + ":" + rawOffset.substring(3) else rawOffset
+            return parseStrict(
+                patternFor(hasSeconds = m.groups[3] != null, hasFraction = m.groups[4] != null, zoneSuffix = "XXX"),
+                canonical(m, zoneSuffix = offset),
+                recordZone
+            )
+        }
+
+        ZONED_Z.matchEntire(text)?.let { m ->
+            return parseStrict(
+                patternFor(hasSeconds = m.groups[3] != null, hasFraction = m.groups[4] != null, zoneSuffix = "'Z'"),
+                canonical(m, zoneSuffix = "Z"),
+                // Genuine UTC: every trip file written before 2026-09-17 carries this shape.
+                TimeZone.getTimeZone("UTC")
+            )
+        }
+
+        NAIVE.matchEntire(text)?.let { m ->
+            return parseStrict(
+                patternFor(hasSeconds = m.groups[3] != null, hasFraction = m.groups[4] != null, zoneSuffix = ""),
+                canonical(m, zoneSuffix = ""),
+                // No zone stated: it was formatted in the record zone and simply never said so.
+                recordZone
+            )
         }
         return null
     }
+
+    /** The exact pattern for a shape that has already been recognised - never a guess. */
+    private fun patternFor(hasSeconds: Boolean, hasFraction: Boolean, zoneSuffix: String): String =
+        "yyyy-MM-dd'T'HH:mm" +
+            (if (hasSeconds) ":ss" else "") +
+            (if (hasFraction) ".SSS" else "") +
+            zoneSuffix
+
+    /** Re-spells a recognised stamp in exactly what [patternFor] describes. */
+    private fun canonical(m: MatchResult, zoneSuffix: String): String {
+        val g = m.groupValues
+        val seconds = m.groups[3]?.value ?: "00"
+        // A fraction of 1 or 2 digits means tenths/hundredths: pad, never truncate.
+        val fraction = m.groups[4]?.value?.padEnd(3, '0')?.take(3)
+        return g[1] + "T" + g[2] + ":" + seconds +
+            (if (fraction != null) ".$fraction" else "") + zoneSuffix
+    }
+
+    /** Strict parse of an exactly-shaped stamp: no prefix-matching, no field reinterpretation. */
+    private fun parseStrict(pattern: String, text: String, zone: TimeZone): Long? = runCatching {
+        SimpleDateFormat(pattern, Locale.US).apply {
+            timeZone = zone
+            isLenient = false
+        }.parse(text)?.time
+    }.getOrNull()
 
     /** True when [stamp] carries an explicit zone (offset or `Z`) rather than being naive. */
     fun isZoned(stamp: String?): Boolean {

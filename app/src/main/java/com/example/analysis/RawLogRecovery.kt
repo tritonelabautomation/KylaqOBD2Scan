@@ -64,6 +64,25 @@ object RawLogRecovery {
         """^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})\.(\d{3})\s+(TX >|RX <)\s+(.+?)\s*$"""
     )
     private val CAN_ID = Regex("""^7[A-F0-9]{2}$""")
+
+    /**
+     * A compact body whose length is odd cannot be byte-aligned hex, so it must still be carrying
+     * its 3-character CAN id: `7E804410D50` is `7E8` + `04410D50`.
+     *
+     * This is the shape every SINGLE-BYTE PID produces - 0D vehicle speed, 04 engine load, 0F
+     * intake air temp, 11 throttle, 46 ambient - because PCI 3 + `41` + pid + one data byte is
+     * four bytes, eight hex characters, plus the three of the CAN id makes nine. The old
+     * `compact.length > 3` test handed all nine characters to [telemetryFromFrame], which rejects
+     * odd-length hex, so the FUSED form of every single-byte answer was dropped: a log recovered
+     * from a reference trace or an owner paste came back with RPM (a two-byte payload, even length)
+     * and no km/h.
+     *
+     * Scope, stated exactly: `RawLogManager` writes the separated form (`7E8 04410D50`), which
+     * always split correctly, so the app's own logs were not losing speed - the compact form was.
+     * Both now work. Requiring a 7xx functional/physical id before stripping keeps a genuinely
+     * corrupt odd-length frame from being mangled into a plausible one.
+     */
+    private val COMPACT_WITH_ID = Regex("""^(7[A-Fa-f0-9]{2})([0-9A-Fa-f]+)$""")
     private val HEX_ONLY = Regex("""^[0-9A-Fa-f]+$""")
 
     /** `raw_log_<sessionId>.txt` → `<sessionId>`, null for anything else. */
@@ -147,6 +166,12 @@ object RawLogRecovery {
         val compact = tokens.joinToString("").uppercase()
         if (compact.length > 3 && CAN_ID.matches(compact.take(3))) {
             return compact.take(3) to compact.drop(3)
+        }
+        // Odd-length compact body: the CAN id was never separated, and the frame that follows it
+        // IS byte-aligned. See COMPACT_WITH_ID.
+        if (compact.length % 2 != 0) {
+            val m = COMPACT_WITH_ID.matchEntire(compact)
+            if (m != null) return m.groupValues[1].uppercase() to m.groupValues[2].uppercase()
         }
         return "" to compact
     }

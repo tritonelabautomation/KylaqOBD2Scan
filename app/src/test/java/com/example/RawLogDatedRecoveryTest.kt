@@ -63,6 +63,47 @@ class RawLogDatedRecoveryTest {
     }
 
     @Test
+    fun aSingleBytePidInCompactFormIsRecoveredInsteadOfSilentlyDropped() {
+        // `41 0D 50` = 80 km/h. PCI 3 + 41 + pid + ONE data byte is 4 bytes = 8 hex chars, and
+        // with the CAN id fused in front that is 9 characters - an odd-length string. The old
+        // parser handed all nine to the hex check, which rejects odd lengths, so the FUSED form of
+        // every single-byte answer was dropped: a log recovered from a reference trace or an owner
+        // paste came back with RPM (two-byte payload, even length) and no km/h. Every single-byte
+        // PID has this shape - 0D, 04, 0F, 11, 46 - i.e. most of the dashboard. The separated form
+        // `7E8 04410D50` always worked; this pins that both do now.
+        val day = istMillis(2026, 9, 15, 19, 33, 16, 9)
+        val compactSpeed = "${istWall(day)} RX < 7E804410D50"
+        val spacedSpeed = "${istWall(day + 130)} RX < 7E8 04410D50"
+        val out = RawLogRecovery.extractTelemetry(
+            listOf(compactSpeed, spacedSpeed).joinToString("\n"), anchorMillis = day, tz = ist
+        )
+        assertEquals("both shapes of a single-byte PID must survive", 2, out.size)
+        assertEquals("0D", out[0].pidHex2)
+        assertEquals("7E8", out[0].canId)
+        assertEquals("410D50", out[0].responseHex)
+        assertEquals(listOf(0x50), out[0].payloadBytes)
+        assertEquals(day, out[0].epochMillis)
+        assertEquals("0D", out[1].pidHex2)
+        // decode() gets the payload WITH its "41 <pid>" header, so the rebuild stays honest.
+        assertEquals(listOf(0x41, 0x0D, 0x50), out[0].decodeBytes)
+    }
+
+    @Test
+    fun anOddLengthBodyThatIsNotACanIdIsNotMangledIntoAFakeFrame() {
+        // Stripping 3 characters is only safe when they are a 7xx OBD id. Junk stays junk.
+        val day = istMillis(2026, 9, 15, 19, 33, 16, 9)
+        val out = RawLogRecovery.extractTelemetry(
+            listOf(
+                "${istWall(day)} RX < 9Z804410D50",     // not a 7xx id
+                "${istWall(day + 10)} RX < 7E804410D5",  // truncated: 8 chars, even, not a frame
+                "${istWall(day + 20)} RX < hello"
+            ).joinToString("\n"),
+            anchorMillis = day, tz = ist
+        )
+        assertEquals(0, out.size)
+    }
+
+    @Test
     fun aDatedDriveCrossingMidnightKeepsItsOrderWithoutAnyHeuristic() {
         val beforeMidnight = istMillis(2026, 9, 16, 23, 59, 30)
         val afterMidnight = istMillis(2026, 9, 17, 0, 1, 5)

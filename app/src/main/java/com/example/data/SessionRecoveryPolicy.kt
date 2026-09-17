@@ -88,10 +88,24 @@ object SessionRecoveryPolicy {
         sampleRowCount >= transactionRowCount && transactionRowCount > 0
 
     /**
-     * A journal file smaller than this holds only its header row: the session never received a
-     * single OBD response, so there is no drive inside to rebuild and no reason to report one.
+     * A journal file at or below this size cannot hold a data row, so it is not even worth opening.
+     *
+     * Deliberately NOT the real test: the transactions header alone is 146 characters, so a byte
+     * threshold big enough to admit one row would also admit a header-only file, and a session that
+     * never received a single ECU response would be offered for "recovery" as an empty trip. The
+     * real test is [hasDataRow], which looks for a second line.
      */
-    const val MIN_RAW_LOG_BYTES: Long = 96L
+    const val MIN_JOURNAL_BYTES: Long = 64L
+
+    /**
+     * True when a journal (or any CSV) holds at least one row under its header.
+     *
+     * Ignition off and the adapter asleep produces a journal with a header and nothing else; that
+     * is not a drive, and rebuilding it would create a zero-line trip that looks exactly like a
+     * successful recovery of a drive that never happened.
+     */
+    fun hasDataRow(fileSizeBytes: Long, lineCount: Int): Boolean =
+        fileSizeBytes > MIN_JOURNAL_BYTES && lineCount >= 2
 
     /**
      * Whether the automatic pass should announce anything at all.

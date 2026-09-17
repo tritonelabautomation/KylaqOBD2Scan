@@ -126,6 +126,16 @@ Two further defects in the same file were fixed while in there:
   clocks.** The raw log therefore takes its wall time from the record stamp and never from the
   monotonic argument, which would otherwise print 1970.
 
+While testing this, a third defect turned up in the recovery parser itself: a compact log body
+whose length is odd (`7E804410D50`) cannot be byte-aligned hex, so it must still be carrying its
+3-character CAN id. The old splitter handed all nine characters to the hex check, which rejects odd
+lengths, so the **fused** form of every single-byte answer was dropped - 0D vehicle speed, 04 load,
+0F intake air temp, 11 throttle, 46 ambient. A log recovered from a reference trace or an owner
+paste came back with RPM and no km/h. `RawLogManager` writes the *separated* form
+(`7E8 04410D50`), which always split correctly, so the app's own logs were not losing speed; both
+shapes work now, and stripping is gated on a `7xx` id so junk is never mangled into a plausible
+frame.
+
 Write failures are counted and exposed (`writeFailureCount`, `lastWriteFailure`) and surfaced at STOP
 and on the Settings card, instead of being swallowed.
 
@@ -201,6 +211,15 @@ Two date-only bugs came out of the same audit:
 **Reading is tolerant forever** (`RecordTime.parseMillis`): explicit offset honoured, trailing `Z`
 read as UTC (every file written before this change), naive stamp read as IST. Unparsable → `null`,
 never `0`, because a zero silently becomes 1970 and corrupts every duration computed from it.
+
+The parser recognises the stamp's **shape** and then parses exactly that shape, rather than trying
+patterns in order until one takes. That distinction is not pedantry: `SimpleDateFormat.parse` reads a
+*prefix* and ignores the rest, so a shortest-patterns-last ordering let `yyyy-MM-dd HH:mm` swallow
+`2026-09-17 14:27:05.123`, stop at the minutes, and return the instant of `14:27:00.000` — 65 s and
+123 ms off every naive stamp in a recovered trip, invisible in the file. CI caught it
+(`RecordTimeIstTest.naiveStampsAreReadAsIstBecauseThatIsWhatTheyAlwaysWere`); it is now pinned by
+`noShapeLosesItsFractionOrItsSecondsToAGreedyShorterPattern`, including 1- and 2-digit fractions,
+which are tenths and hundredths and must be padded, never truncated.
 `SessionTime.parseMillis` now delegates to it, so an imported trip keeps the window it was recorded
 in — the bug that helper was originally created to kill. A history that spans the upgrade has no
 five-hour tear in it; a test mixes a legacy `…Z` start with an IST end and asserts the duration.

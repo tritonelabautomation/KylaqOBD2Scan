@@ -203,11 +203,17 @@ class SessionJournal(private val journalDir: File) {
      * Newest first, and ignoring files too small to hold a row (header only = the session never
      * received a single OBD response, so there is nothing to rebuild).
      */
-    fun unfinishedSessions(minBytes: Long = SessionRecoveryPolicy.MIN_RAW_LOG_BYTES): List<String> {
+    fun unfinishedSessions(): List<String> {
         val files = journalDir.listFiles() ?: return emptyList()
         return files.mapNotNull { sessionIdOf(it.name) }
             .distinct()
-            .filter { id -> txFile(id).exists() && txFile(id).length() > minBytes && !finishedFile(id).exists() }
+            .filter { id ->
+                val tx = txFile(id)
+                tx.exists() && !finishedFile(id).exists() &&
+                    // A header-only journal is a session that never got an ECU response: nothing
+                    // to rebuild, and rebuilding it would invent an empty trip.
+                    SessionRecoveryPolicy.hasDataRow(tx.length(), runCatching { tx.readLines().size }.getOrDefault(0))
+            }
             .sortedByDescending { txFile(it).lastModified() }
     }
 

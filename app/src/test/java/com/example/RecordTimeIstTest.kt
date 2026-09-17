@@ -99,6 +99,25 @@ class RecordTimeIstTest {
     }
 
     @Test
+    fun noShapeLosesItsFractionOrItsSecondsToAGreedyShorterPattern() {
+        // CI caught this: SimpleDateFormat.parse reads a PREFIX and ignores the rest, so trying
+        // patterns shortest-first let "yyyy-MM-dd HH:mm" swallow "2026-09-17 14:27:05.123" and
+        // return the instant of 14:27:00.000 - 65 s and 123 ms off, invisibly.
+        val full = istMillis
+        assertEquals(full, RecordTime.parseMillis(istWall(full)))
+        assertEquals(full, RecordTime.parseMillis(istWall(full).replace(' ', 'T')))
+        assertEquals(full, RecordTime.parseMillis(istWall(full).replace(' ', 'T') + "+05:30"))
+        assertEquals(full, RecordTime.parseMillis(istWall(full).replace(' ', 'T') + "Z") + 19_800_000L)
+        // One and two digit fractions are tenths and hundredths: padded, never truncated.
+        val tenth = RecordTime.parseMillis("2026-09-17 14:27:05.1")!!
+        assertEquals(100, tenth % 1000)
+        val hundredth = RecordTime.parseMillis("2026-09-17T14:27:05.12+05:30")!!
+        assertEquals(120, hundredth % 1000)
+        // No seconds at all still means :00, not "unparsable".
+        assertEquals(RecordTime.parseMillis("2026-09-17 14:27:00"), RecordTime.parseMillis("2026-09-17 14:27"))
+    }
+
+    @Test
     fun logStampCarriesTheDateSoRecoveryNeverGuessesIt() {
         val log = RecordTime.logStamp(istMillis)
         assertEquals(istWall(istMillis), log)
