@@ -59,6 +59,40 @@ object ChartSampling {
      *
      * Pure JVM, unit tested in ChartSamplingTest.
      */
+    /**
+     * Bucketing for DISCRETE signals (owner 2026-09-17: "showing 1.5 gear ... stupidity
+     * at its peaks"): gears are integers 1-6, so averaging them inside a time bucket
+     * invents fractional gears. Each bucket instead takes the MODE (most frequent
+     * integer) of its raw points - downsampling without inventing values.
+     */
+    fun bucketizeDiscrete(points: List<Pair<Long, Double>>, maxBuckets: Int): List<Bucket> {
+        if (points.isEmpty() || maxBuckets < 1) return emptyList()
+        val sorted = if (isSortedByTs(points)) points else points.sortedBy { it.first }
+        val first = sorted.first().first
+        val last = sorted.last().first
+        if (last <= first) {
+            val m = modeOf(sorted.map { it.second })
+            return listOf(Bucket(first, m, m, m, sorted.size))
+        }
+        val bucketCount = minOf(maxBuckets.toLong(), last - first).toInt().coerceAtLeast(1)
+        val width = (last - first + 1) / bucketCount.toDouble()
+        val out = mutableListOf<Bucket>()
+        for (i in 0 until bucketCount) {
+            val lo = first + (i * width).toLong()
+            val hi = if (i == bucketCount - 1) last + 1 else first + ((i + 1) * width).toLong()
+            val inB = sorted.filter { it.first in lo until hi }
+            if (inB.isEmpty()) continue
+            val m = modeOf(inB.map { it.second })
+            out += Bucket(inB.map { it.first }.average().toLong(), m, m, m, inB.size)
+        }
+        return out
+    }
+
+    private fun modeOf(values: List<Double>): Double =
+        values.groupingBy { kotlin.math.roundToInt(it) }.eachCount()
+            .maxByOrNull { it.value }?.key?.toDouble()
+            ?: values.average()
+
     fun bucketize(points: List<Pair<Long, Double>>, maxBuckets: Int): List<Bucket> {
         if (points.isEmpty() || maxBuckets < 1) return emptyList()
         val sorted = if (isSortedByTs(points)) points else points.sortedBy { it.first }
