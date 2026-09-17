@@ -39,7 +39,6 @@ import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.io.File
@@ -69,34 +68,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // would save the trip and quietly skip the backups.
         viewModelScope.launch {
             var wasRecording = false
-            recordingManager.isRecording
-                .distinctUntilChanged()
-                .collect { recording ->
-                    if (wasRecording && !recording && !stopInitiatedHere) {
-                        stopInitiatedHere = true
-                        recordingTimerJob?.cancel()
-                        gpsManager.stopTracking()
-                        if (!insightsPersistedForRecording) {
-                            insightsPersistedForRecording = true
-                            persistDriveInsights()
-                        }
-                        if (settingsRepository.autoCloudBackup.value) {
-                            settingsRepository.driveTreeUri()?.let { tree ->
-                                try {
-                                    com.example.backup.DriveBackupClient.sendBackup(
-                                        getApplication(), android.net.Uri.parse(tree), recordingManager
-                                    )
-                                    settingsRepository.setLastBackupTimestamp(System.currentTimeMillis())
-                                } catch (e: Exception) {
-                                    // Backup is best-effort; never block the stop path.
-                                }
+            // No distinctUntilChanged(): a StateFlow is already conflated and only ever emits a
+            // value that differs from the last, and applying the operator to one is deprecated -
+            // which this build treats as an error.
+            recordingManager.isRecording.collect { recording ->
+                if (wasRecording && !recording && !stopInitiatedHere) {
+                    stopInitiatedHere = true
+                    recordingTimerJob?.cancel()
+                    gpsManager.stopTracking()
+                    if (!insightsPersistedForRecording) {
+                        insightsPersistedForRecording = true
+                        persistDriveInsights()
+                    }
+                    if (settingsRepository.autoCloudBackup.value) {
+                        settingsRepository.driveTreeUri()?.let { tree ->
+                            try {
+                                com.example.backup.DriveBackupClient.sendBackup(
+                                    getApplication(), android.net.Uri.parse(tree), recordingManager
+                                )
+                                settingsRepository.setLastBackupTimestamp(System.currentTimeMillis())
+                            } catch (e: Exception) {
+                                // Backup is best-effort; never block the stop path.
                             }
                         }
-                        AppContainer.cloudBackupManager.performAutoBackupIfNeeded()
-                        refreshUnsavedRawLogs()
                     }
-                    wasRecording = recording
+                    AppContainer.cloudBackupManager.performAutoBackupIfNeeded()
+                    refreshUnsavedRawLogs()
                 }
+                wasRecording = recording
+            }
         }
 
         // Elevation logging for the ride X-ray: GPS altitude when available, silent otherwise.
