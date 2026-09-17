@@ -10,13 +10,25 @@
 > background it supposed to be service right even in background all ways it should run and record it
 > never ever loose the logs"*
 
-**Shipped.** Build **1.0.360 (versionCode 10360)**, CI run #360, commit `394764f3`, 83 suites /
-719 tests, **0 failed**. Published to the rolling release at
-`https://github.com/tritonelabautomation/KylaqOBD2Scan/releases/latest` (SHA-256
-`7c8f393c075086145ba39278c6018cde3e4c227b2dec66c35f5c089bbe41838d`). It installs in place over the
-current build, so trips, raw logs and fuel records survive. Until the owner installs it, none of
-this exists on his phone - he lost today's drive because he was still on 1.0.336, which kept the
-whole trip in RAM and wrote its first byte at STOP.
+**Shipped.** Green: 83 suites / 719 tests, **0 failed**, `unit-tests` and `build` both success,
+PR #1 `MERGEABLE/CLEAN`.
+
+The build is published to ONE rolling release that is updated in place forever, so the URL never
+moves and always resolves to the newest green build of this branch:
+
+    https://github.com/tritonelabautomation/KylaqOBD2Scan/releases/latest
+    .../releases/latest/download/KylaqOBD2Scan.apk     <- the APK
+    .../releases/latest/download/latest.json           <- versionCode, sha256, size (the in-app feed)
+
+`versionName` is `1.0.<workflow run number>` and `versionCode` is `10000 + <run number>`, so the
+number rises with every push and is not worth pinning in a document that outlives the build - read
+it off the release title, or let the in-app updater (**Settings → App update → Download & install**)
+compare `versionCode` and offer the newer one. At the time of writing that was **1.0.362 / code
+10362** from commit `ee703926`. It installs in place over the current build (stable sideload signing
+key), so trips, raw logs, fuel records and granted permissions all survive - no uninstall.
+
+Until the owner installs it, none of this exists on his phone. He lost today's drive because he was
+still on 1.0.336, which kept the whole trip in RAM and wrote its first byte at STOP.
 
 Five CI rounds got here: five compile errors, then six test failures, then an unresolved constant,
 then a nullable-receiver compile error, then a deprecated `distinctUntilChanged` on a `StateFlow`
