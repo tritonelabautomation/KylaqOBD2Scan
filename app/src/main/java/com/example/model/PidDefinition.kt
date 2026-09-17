@@ -117,6 +117,86 @@ data class PidDefinition(
     }
 }
 
+/**
+ * Reconciles a PERSISTED PID definition with the shipped catalogue.
+ *
+ * `pid_definitions_json` is written on every settings change and used to be loaded back
+ * verbatim, so a device that had run the app once kept the definitions it saved forever.
+ * Every catalogue correction made after that point - a wrong J1979 name, a decoder that
+ * printed a capability bitmap as a temperature, a research channel later proven to be the
+ * odometer - silently never reached an installed app. The only escape was "Reset to
+ * defaults", which also throws away the owner's CAN header, RX id and enable choices.
+ * The 2026-09-17 J1979 correction pass is worthless on an upgraded device without this.
+ *
+ * Split of ownership:
+ *  - the CATALOGUE owns what a PID *is*: name, shortName, unit, dataBytes, decoderType,
+ *    formulaDisplay, isResearch, description, priority. It is code, it is unit-tested, and it
+ *    is the only place a J1979 correction can be made.
+ *  - the USER owns how it is *polled*: enabled, canHeader, expectedRxId, defaultIntervalMs.
+ *  - exception: an entry the catalogue disables (the six range markers 00/20/40/60/80/A0 and
+ *    every channel whose meaning is not established) cannot be switched back on, because the
+ *    toggle would re-publish a bitmap or a guess as a measurement.
+ *
+ * PIDs the catalogue does not know (user-added custom entries) are returned untouched.
+ */
+object PidDefinitionReconciler {
+
+    fun reconcile(saved: PidDefinition): PidDefinition {
+        val known = StandardPidCatalog.getAllKnownPids()
+            .firstOrNull { it.hexPid == saved.hexPid } ?: return saved
+        return saved.copy(
+            name = known.name,
+            shortName = known.shortName,
+            unit = known.unit,
+            dataBytes = known.dataBytes,
+            decoderType = known.decoderType,
+            formulaDisplay = known.formulaDisplay,
+            isResearch = known.isResearch,
+            description = known.description,
+            priority = known.priority,
+            // the catalogue's polling band, but never faster than the user asked for
+            defaultIntervalMs = maxOf(saved.defaultIntervalMs, known.priority.floorMs),
+            enabled = saved.enabled && known.enabled
+        )
+    }
+}
+
+/**
+ * Channels this specific car has PROVEN it answers, defined once and referenced from both the
+ * shipped defaults (so they are polled) and the J1979 catalogue (so lookup() resolves them).
+ *
+ * Keeping them here rather than duplicating the definition is what stopped the catalogue from
+ * carrying two entries for the same PID - ten of which existed before 2026-09-17, with the
+ * later one silently winning the map.
+ */
+object ProvenChannels {
+
+    /**
+     * J1979 PID A6 = ODOMETER, ((A*2^24)+(B*2^16)+(C*2^8)+D)/10 km.
+     * The 2026-09-16 discovery run on VIN MEXKPEPC2TG028855 recorded `41 A6 00 00 86 EB`
+     * while the app printed "Unknown Research PID 01A6". 34539 / 10 = 10279.5 km, and the car
+     * claims the PID in its 01A0 bitmap `14 00 00 00` (which sets A4 and A6 only).
+     */
+    val ODOMETER = PidDefinition(
+        id = "01A6",
+        service = "01",
+        pid = "A6",
+        name = "Odometer",
+        shortName = "Odo",
+        unit = "km",
+        canHeader = "7DF",
+        expectedRxId = "7E8",
+        dataBytes = 4,
+        decoderType = DecoderType.ODOMETER_4B,
+        formulaDisplay = "((A * 2^24) + (B * 2^16) + (C * 2^8) + D) / 10",
+        isResearch = false,
+        enabled = true,
+        description = "SAE J1979 PID A6 is the ODOMETER in km at 0.1 km resolution. The owner run of 2026-09-16 recorded `41 A6 00 00 86 EB` and the app printed 'Unknown Research PID 01A6'; the frame is 34539 / 10 = 10279.5 km. The car claims it in the 01A0 bitmap `14 00 00 00`, so it is a live channel, not research. The VIN is not in Mode 01 at all - it is Mode 09 PID 0902 - and a duplicate catalogue entry used to mislabel this PID as a partial VIN.",
+        priority = PollingPriority.SLOW,
+        defaultIntervalMs = 3000L
+    )
+}
+
 object DefaultPidDefinitions {
     fun getDefaults(): List<PidDefinition> {
         return listOf(
@@ -610,6 +690,13 @@ object DefaultPidDefinitions {
                 description = "EA211 1.0 TSI Turbocharger Wastegate & Boost Control Research PID",
                 priority = PollingPriority.MEDIUM
             )
+        ) + listOf(
+            // The defaults list is what a fresh install polls and what an existing install
+            // reconciles against, so a channel this car demonstrably answers belongs here too.
+            // ProvenChannels.ODOMETER is referenced, NOT copied: one definition, two lists, and
+            // no recursion (StandardPidCatalog.lookup() reads the lazy catalog that is itself
+            // built from getDefaults(), so calling it here would deadlock the initializer).
+            ProvenChannels.ODOMETER
         )
     }
 }
@@ -1432,7 +1519,7 @@ object StandardPidCatalog {
                 defaultIntervalMs = 3000L,
                 enabled = false
             ),
-            // ─── 0187 Intake MAP (answered by the car, bitmap silent) ─────────
+            // ─── 0187 Intake MAP (J1979) - not claimed by this car ──────────
             PidDefinition(
                 id = "0187", service = "01", pid = "87",
                 name = "Intake Manifold Absolute Pressure [87]",
@@ -1706,20 +1793,8 @@ object StandardPidCatalog {
                 priority = PollingPriority.SLOW,
                 defaultIntervalMs = 3000L
             ),
-            // ─── 01A6 OBD Vehicle Identification Number ────────────────
-            PidDefinition(
-                id = "01A6", service = "01", pid = "A6",
-                name = "Odometer",
-                shortName = "Odo",
-                dataBytes = 4, decoderType = DecoderType.ODOMETER_4B,
-                description = "SAE J1979 PID A6 = the ODOMETER in km at 0.1 km resolution. The owner run of 2026-09-16 recorded `41 A6 00 00 86 EB` and the app printed 'Unknown Research PID 01A6'; the frame is 34539 / 10 = 10279.5 km. The car claims it in the 01A0 bitmap `14 00 00 00` (which sets A4 and A6 only), so this is a live channel, not research. The VIN is not in Mode 01 at all - it is Mode 09 PID 0902 - and a duplicate catalogue entry used to mislabel this PID as a partial VIN.",
-                priority = PollingPriority.SLOW,
-                defaultIntervalMs = 3000L,
-                unit = "km",
-                formulaDisplay = "((A * 2^24) + (B * 2^16) + (C * 2^8) + D) / 10",
-                isResearch = false,
-                enabled = true
-            ),
+            // ─── 01A6 Odometer - defined once in ProvenChannels, referenced here ─
+            ProvenChannels.ODOMETER,
             // ─── 01A7 OBD Vehicle ID / Calibration ──────────────────────
             PidDefinition(
                 id = "01A7", service = "01", pid = "A7",

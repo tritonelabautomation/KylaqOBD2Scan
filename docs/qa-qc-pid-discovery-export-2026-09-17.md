@@ -133,7 +133,10 @@ anything above 2 000 000 km rather than displaying a sentinel. `SimulationTransp
 answer `01A6` with **three random bytes** labelled "Unknown EA211 Channel" — a simulation that
 invents data for a channel it does not understand. It now simulates a real odometer that
 advances with simulated distance. `ProfileDefinitions.vagExperimentalRequests` asked for it as
-"VW Candidate A6 / Experimental EA211 value"; it now asks for the odometer.
+"VW Candidate A6 / Experimental EA211 value"; it now asks for the odometer. The definition
+lives once in `ProvenChannels.ODOMETER` and is **referenced** from both the shipped defaults
+(so a fresh install polls it) and the J1979 catalogue (so `lookup("A6")` resolves it) —
+copying it into both lists is exactly how the ten duplicate ids below came to exist.
 
 **Check on the next run:** the discovery export should show `01A6 ≈ 10279.5 km + whatever the
 car has driven since 2026-09-16`. If it shows a number near the trip odometer on the dash, the
@@ -172,6 +175,28 @@ J1979 gives 2- and 3-byte forms, but under those the pinned sentinel `41 67 03 5
 a *believable* 44.4 °C. Under `A − 40` it decodes to −37 °C and the plausibility gate rejects it.
 NO-FAKE-VALUES beats the spec sheet; a decoder change needs car-frame evidence, not a table.
 
+### 4.1 None of this reaches an installed device without the reconciler
+
+`pid_definitions_json` is written on every settings change and was read back **verbatim**, so a
+phone that had run the app once kept the definitions it saved forever. Every correction above
+would have changed nothing on the owner's device: the saved list would still say *"Turbocharger
+Boost Pressure"*, still decode `01A0` as a transmission sump temperature and still call the
+odometer *"Unknown Research PID 01A6"*. The only escape was *Reset to defaults*, which also
+throws away the owner's CAN header, RX id and enable choices.
+
+`PidDefinitionReconciler` now splits ownership on load:
+
+| owner | fields |
+|---|---|
+| **catalogue** (code, unit-tested) | `name`, `shortName`, `unit`, `dataBytes`, `decoderType`, `formulaDisplay`, `isResearch`, `description`, `priority` |
+| **user** | `enabled`, `canHeader`, `expectedRxId`, `defaultIntervalMs` (never shortened below the catalogue's band floor) |
+
+One deliberate exception: an entry the catalogue **disables** cannot be switched back on
+(`enabled = saved && catalogue`), because the toggle would put a capability bitmap or an
+unproven guess back on the dashboard as a measurement. PIDs the catalogue does not know —
+user-added custom channels — are returned untouched. `PidCatalogReconciliationTest` pins all of
+it, including idempotence over the whole catalogue.
+
 **Catalogue integrity:** ten PIDs (`0107`, `010A`, `010E`, `0123`, `012F`, `0143`, `0144`,
 `0145`, `015D`, `01A6`) were defined **twice** — once in `DefaultPidDefinitions`, once in the
 "additional" list — and the later entry silently won the map. `0145` relative throttle position
@@ -206,8 +231,11 @@ field. `PidDiscoveryService` now emits `dataQuality` (`VALIDATED` / `SENTINEL_RE
 
 ## 7. Owner action checklist
 
-1. **Re-run PID discovery** on the new build (≥ 1.0.327) and export the JSON again. The
-   comparison against this document is the acceptance test.
+1. **Re-run PID discovery** on the new build and export the JSON again. The comparison against
+   this document is the acceptance test. **Do not press "Reset to defaults" first** - it is no
+   longer needed (§4.1: `PidDefinitionReconciler` refreshes what a PID *is* from the catalogue
+   on every load and keeps your CAN header, RX id and enable choices), and resetting would
+   discard the PID list the discovery run built.
 2. **`01A4` while moving.** Gear ratio is only meaningful above ~20 km/h in D. Stationary it
    returns *Not available* — that is correct, not a bug.
 3. **Coding Lab:** SCAN, then `22 F187` / `22 F189` / `22 F190` on **both** `7E0` and `7E1`.

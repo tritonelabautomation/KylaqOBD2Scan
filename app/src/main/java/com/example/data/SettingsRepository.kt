@@ -353,10 +353,10 @@ class SettingsRepository(private val context: Context) {
             if (list.isEmpty()) {
                 DefaultPidDefinitions.getDefaults()
             } else {
+                val refreshed = list.map { com.example.model.PidDefinitionReconciler.reconcile(it) }
                 val defaultList = DefaultPidDefinitions.getDefaults()
-                val existingIds = list.map { it.id }.toSet()
-                list.addAll(defaultList.filter { !existingIds.contains(it.id) })
-                list
+                val existingKeys = refreshed.map { it.hexPid }.toSet()
+                refreshed + defaultList.filter { !existingKeys.contains(it.hexPid) }
             }
         } catch (_: Exception) {
             DefaultPidDefinitions.getDefaults()
