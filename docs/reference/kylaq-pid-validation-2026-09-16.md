@@ -135,3 +135,11 @@ is a **lead, not a citation**: if repeated 019D idle samples across trips cluste
 3. If `0142` control-module voltage reads zero on the discovery path while the live poller
    shows ~12–14 V, note it in the export — the live recorder's voltage series (feeding the
    AC ripple detector) remains the trusted source for voltage.
+4. **ECU identification + module census** (added 2026-09-17, see
+   `vag-ecu-did-research-audit-2026-09-17.md` §4): record `0904`/`090A` verbatim, run the
+   Coding Lab `22 F190` sweep across `7E0`–`7E7`, and read `F187`/`F189` at `7E0` and `7E1`.
+   This settles Simos18-vs-MED17.1.27 (evidence points to Bosch MED17.1.27, `04C9060xx`) and
+   finally names the second responder `7E9`.
+   Correction to §2 above: the "(manual gearbox)" gloss on silent `01A4` was an inference and
+   is wrong about the car (6-speed AQ250 torque-converter automatic). The honest reading is
+   only that the engine ECU does not publish gear via `01A4`.
