@@ -84,8 +84,15 @@ class RecordTimeIstTest {
             timeZone = TimeZone.getTimeZone("Asia/Kolkata")
         }.parse(naive)!!.time
         assertEquals(expected, RecordTime.parseMillis(naive))
-        assertEquals(expected, RecordTime.parseMillis("2026-09-17 14:27:05"))
-        assertTrue(RecordTime.parseMillis("2026-09-17 14:27")!! > 0L)
+        // No seconds means :00, and no fraction means .000 - a shape that states less is not a
+        // shape that states the same instant. This line used to assert that "2026-09-17 14:27:05"
+        // equalled `expected`, i.e. that dropping ".123" still gave 05.123, which is 123 ms of
+        // arithmetic nobody can see. It never ran: the commit that added it did not compile, so the
+        // assertion was wrong from the day it was written until the build went green.
+        assertEquals(expected - 123L, RecordTime.parseMillis("2026-09-17 14:27:05"))
+        assertEquals(expected - 5_123L, RecordTime.parseMillis("2026-09-17 14:27"))
+        // And the whole family lands on the same IST day, which is the part the mandate is about.
+        assertEquals(RecordTime.display(expected), RecordTime.display(expected - 5_123L))
     }
 
     @Test
@@ -107,12 +114,23 @@ class RecordTimeIstTest {
         assertEquals(full, RecordTime.parseMillis(istWall(full)))
         assertEquals(full, RecordTime.parseMillis(istWall(full).replace(' ', 'T')))
         assertEquals(full, RecordTime.parseMillis(istWall(full).replace(' ', 'T') + "+05:30"))
-        // A legacy UTC stamp and the new IST stamp for the SAME instant must agree: 08:57:05.123Z
-        // is 14:27:05.123 in IST, 19 800 000 ms ahead of the UTC digits.
+        // A 'Z' suffix is read as UTC, so the SAME DIGITS with a Z on them are a different instant
+        // - 5.5 h later, because IST is 5.5 h ahead of UTC. That is not a bug, it is what the
+        // suffix means, and it is why the honest 'Z' rule exists: the old builds stamped IST wall
+        // time and then printed a 'Z' that lied about it.
+        //
+        // This assertion used to add 19 800 000 ms to the PARSED value to make it equal `full`,
+        // which put it 11 h out. The offset belongs on the other side: `…14:27:05.123Z` is 5.5 h
+        // (19 800 000 ms) LATER than `full`, not earlier. And an instant needs no offset at all
+        // once parsed - what actually has to hold is that a legacy stamp of the same INSTANT reads
+        // back identical, which is the next assertion's job.
         assertEquals(
-            full,
-            RecordTime.parseMillis(istWall(full).replace(' ', 'T') + "Z")!! + 19_800_000L
+            full + 19_800_000L,
+            RecordTime.parseMillis(istWall(full).replace(' ', 'T') + "Z")
         )
+        // The same instant, one written the old way and one the new way: identical, no arithmetic.
+        assertEquals(full, RecordTime.parseMillis(utcWall(full).replace(' ', 'T') + "Z"))
+        assertEquals(full, RecordTime.parseMillis(RecordTime.stamp(full)))
         // One and two digit fractions are tenths and hundredths: padded, never truncated.
         val tenth = RecordTime.parseMillis("2026-09-17 14:27:05.1")!!
         assertEquals(100, tenth % 1000)
