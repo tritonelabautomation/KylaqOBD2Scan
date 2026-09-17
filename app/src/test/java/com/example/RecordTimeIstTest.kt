@@ -107,7 +107,12 @@ class RecordTimeIstTest {
         assertEquals(full, RecordTime.parseMillis(istWall(full)))
         assertEquals(full, RecordTime.parseMillis(istWall(full).replace(' ', 'T')))
         assertEquals(full, RecordTime.parseMillis(istWall(full).replace(' ', 'T') + "+05:30"))
-        assertEquals(full, RecordTime.parseMillis(istWall(full).replace(' ', 'T') + "Z") + 19_800_000L)
+        // A legacy UTC stamp and the new IST stamp for the SAME instant must agree: 08:57:05.123Z
+        // is 14:27:05.123 in IST, 19 800 000 ms ahead of the UTC digits.
+        assertEquals(
+            full,
+            RecordTime.parseMillis(istWall(full).replace(' ', 'T') + "Z")!! + 19_800_000L
+        )
         // One and two digit fractions are tenths and hundredths: padded, never truncated.
         val tenth = RecordTime.parseMillis("2026-09-17 14:27:05.1")!!
         assertEquals(100, tenth % 1000)
