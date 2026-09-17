@@ -52,7 +52,15 @@ data class PidValidationResult(
     val rawResponse: String,
     val latencyMs: Long,
     val decodedValue: String? = null,
-    val respondingCanId: String? = null
+    val respondingCanId: String? = null,
+    /**
+     * Data quality of [decodedValue], reported separately from [directStatus] since
+     * 2026-09-17. directStatus answers whether the ECU replied positively, NOT whether
+     * the value is usable: the owner export of the 2026-09-16 run carried six rows that
+     * read DIRECT_VALIDATED while their decoded value was an implausible-raw sentinel or
+     * Not available. Two facts, two fields - never one dressed as the other.
+     */
+    val dataQuality: String = "NOT_DECODED"
 )
 
 /**
@@ -462,7 +470,20 @@ class PidDiscoveryService(
                         } catch (_: Exception) { null }
                     } else null
 
-                    appendLog("PID $cleanPid Validation: status=$status (${latencyMs}ms) | Decoded: $decodedVal | Responding ECU: $respondingCanId")
+                    // A POSITIVE REPLY IS NOT A USABLE VALUE. Classify what came back so the
+                    // report can never again claim a PID is validated while its payload is a
+                    // sentinel the ECU returns for "not implemented / not available now".
+                    val dataQuality = when {
+                        !isPositive -> "NO_REPLY"
+                        decodedVal == null -> "NOT_DECODED"
+                        decodedVal.startsWith("implausible") -> "RESPONDED_IMPLAUSIBLE"
+                        decodedVal == "NO DATA" -> "RESPONDED_NO_DATA"
+                        decodedVal == "INVALID_RESPONSE" -> "RESPONDED_MISMATCHED_FRAME"
+                        decodedVal == "Not available" -> "RESPONDED_NOT_AVAILABLE"
+                        else -> "PLAUSIBLE"
+                    }
+
+                    appendLog("PID $cleanPid Validation: status=$status (${latencyMs}ms) | Decoded: $decodedVal | Data: $dataQuality | Responding ECU: $respondingCanId")
 
                     val valResult = PidValidationResult(
                         hexPid = cleanPid,
@@ -472,7 +493,8 @@ class PidDiscoveryService(
                         rawResponse = rxSummary,
                         latencyMs = latencyMs,
                         decodedValue = decodedVal,
-                        respondingCanId = respondingCanId
+                        respondingCanId = respondingCanId,
+                        dataQuality = dataQuality
                     )
                     results.add(valResult)
                     _validatedPids.value = results.toList()
@@ -612,6 +634,17 @@ class PidDiscoveryService(
         }
         json.put("ranges", rangesArr)
 
+        // Range markers (0x20/0x40/0x60/0x80/0xA0/0xC0) are availability bitmaps, NOT
+        // parameters. They are listed explicitly since 2026-09-17 so a reader can never
+        // mistake one for a data channel again: the owner export of 2026-09-16 listed PID
+        // 60 and PID 80 under supportedPids and then "validated" PID 80 as a diesel
+        // particulate filter temperature on a petrol car.
+        val markersArr = JSONArray()
+        for (range in _discoveredRanges.value) {
+            if (range.basePid < 0xE0) markersArr.put("01%02X".format(range.basePid + 0x20))
+        }
+        json.put("rangeMarkersNotDataPids", markersArr)
+
         // Supported PIDs
         val supportedArr = JSONArray()
         for (p in _discoveredPids.value.filter { it.supported }) {
@@ -632,10 +665,13 @@ class PidDiscoveryService(
             vObj.put("directStatus", v.directStatus.name)
             vObj.put("latencyMs", v.latencyMs)
             vObj.put("decodedValue", v.decodedValue ?: "")
+            vObj.put("dataQuality", v.dataQuality)
             vObj.put("respondingCanId", v.respondingCanId ?: "")
             valArr.put(vObj)
         }
         json.put("validationResults", valArr)
+        json.put("positiveReplies", valArr.length())
+        json.put("usableValues", _validatedPids.value.count { it.dataQuality == "PLAUSIBLE" })
 
         // Raw Logs
         val logsArr = JSONArray()
@@ -650,16 +686,17 @@ class PidDiscoveryService(
      */
     fun exportDiscoveryReportCsv(): String {
         val sb = StringBuilder()
-        sb.append("PID,Name,ShortName,Unit,BitmapSupported,ValidationStatus,DecodedValue,LatencyMs\n")
+        sb.append("PID,Name,ShortName,Unit,BitmapSupported,ValidationStatus,DataQuality,DecodedValue,LatencyMs\n")
         val valMap = _validatedPids.value.associateBy { it.hexPid.uppercase() }
 
         for (pid in _discoveredPids.value) {
             val clean = pid.hexPid.uppercase()
             val v = valMap[clean]
             val valStatus = v?.directStatus?.name ?: "NOT_VALIDATED"
+            val dataQuality = v?.dataQuality ?: "NOT_VALIDATED"
             val decoded = (v?.decodedValue ?: "").replace(",", ";")
             val lat = v?.latencyMs ?: 0L
-            sb.append("${pid.pid},\"${pid.name}\",\"${pid.shortName}\",\"${pid.unit}\",${pid.supported},$valStatus,\"$decoded\",$lat\n")
+            sb.append("${pid.pid},\"${pid.name}\",\"${pid.shortName}\",\"${pid.unit}\",${pid.supported},$valStatus,$dataQuality,\"$decoded\",$lat\n")
         }
         return sb.toString()
     }

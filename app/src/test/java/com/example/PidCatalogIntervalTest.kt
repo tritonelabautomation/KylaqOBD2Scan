@@ -57,12 +57,16 @@ class PidCatalogIntervalTest {
     @Test
     fun `uncatalogued discovery fallback gets an explicit conservative interval`() {
         // 0xEF is not in the catalogue -> lookup() builds the generic fallback,
-        // which must also carry an explicit interval (MEDIUM/500 ms), never a
-        // constructor default.
+        // which must carry an explicit interval, never a constructor default.
+        // Tightened 2026-09-17 from MEDIUM/500 ms to SLOW/3000 ms: "Apply to Live
+        // Polling" adds every discovered PID with enabled = true, so a channel of
+        // unknown meaning used to take a 500 ms slot away from the FAST channels
+        // (rpm, speed, throttle, torque) that the gear and power pairing need.
         val fallback = StandardPidCatalog.lookup("EF")
         assertEquals("01EF", fallback.id)
-        assertEquals(PollingPriority.MEDIUM, fallback.priority)
-        assertEquals(500L, fallback.defaultIntervalMs)
+        assertEquals(PollingPriority.SLOW, fallback.priority)
+        assertEquals(3000L, fallback.defaultIntervalMs)
+        assertTrue("unknown meaning must be flagged as research", fallback.isResearch)
     }
 
     @Test

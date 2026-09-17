@@ -31,38 +31,40 @@ class KylaqDiscoveryComprehensiveTest {
         // BE (10111110) -> 01, 03, 04, 05, 06, 07
         // 3E (00111110) -> 0B, 0C, 0D, 0E, 0F
         // B8 (10111000) -> 11, 13, 14, 15
-        // 13 (00010011) -> 1C, 1F, 20
+        // 13 (00010011) -> 1C, 1F, and bit 32 = the 0120 range MARKER
         val bitmap = byteArrayOf(0xBE.toByte(), 0x3E.toByte(), 0xB8.toByte(), 0x13.toByte())
         val supported = PidDiscoveryDecoder.decodeSupportedPids(0x00, bitmap)
 
-        assertEquals(18, supported.size)
+        // 2026-09-17: the range marker (basePid + 0x20) is NOT a data PID and must never be
+        // emitted as one - it is what made the owner export "validate" PID 60 and PID 80.
+        assertEquals(17, supported.size)
         assertTrue(supported.contains(0x0C)) // Engine RPM
         assertTrue(supported.contains(0x0D)) // Vehicle Speed
-        assertTrue(supported.contains(0x20)) // Next range indicator
+        assertFalse(supported.contains(0x20)) // range marker, reported by hasNextRange only
         assertTrue(PidDiscoveryDecoder.hasNextRange(bitmap))
     }
 
     @Test
     fun testBitmapDecodingRange0120() {
         // Range 0120: basePid = 0x20 -> PIDs 0x21..0x40
-        // 80 00 00 01 -> PID 0x21 and PID 0x40 supported
+        // 80 00 00 01 -> PID 0x21 supported, plus bit 32 = the 0140 range marker
         val bitmap = byteArrayOf(0x80.toByte(), 0x00, 0x00, 0x01)
         val supported = PidDiscoveryDecoder.decodeSupportedPids(0x20, bitmap)
 
-        assertEquals(listOf(0x21, 0x40), supported)
+        assertEquals(listOf(0x21), supported)
         assertTrue("Bit 0 set -> hasNextRange true", PidDiscoveryDecoder.hasNextRange(bitmap))
     }
 
     @Test
     fun testBitmapDecodingRange0140() {
         // Range 0140: basePid = 0x40 -> PIDs 0x41..0x60
-        // FED00001 -> 41..45, 49, 4B, 60
+        // FED00001 -> 41..45, 49, 4B (0x60 is the range marker, never a data PID)
         val bitmap = byteArrayOf(0xFE.toByte(), 0xD0.toByte(), 0x00, 0x01)
         val supported = PidDiscoveryDecoder.decodeSupportedPids(0x40, bitmap)
 
         assertTrue(supported.contains(0x41))
         assertTrue(supported.contains(0x42)) // Control module voltage
-        assertTrue(supported.contains(0x60))
+        assertFalse(supported.contains(0x60))
         assertTrue(PidDiscoveryDecoder.hasNextRange(bitmap))
     }
 
@@ -72,7 +74,7 @@ class KylaqDiscoveryComprehensiveTest {
         val bitmap = byteArrayOf(0x00, 0x01, 0x00, 0x01)
         val supported = PidDiscoveryDecoder.decodeSupportedPids(0x60, bitmap)
 
-        assertEquals(listOf(0x70, 0x80), supported)
+        assertEquals(listOf(0x70), supported)
         assertTrue(PidDiscoveryDecoder.hasNextRange(bitmap))
     }
 
@@ -82,7 +84,7 @@ class KylaqDiscoveryComprehensiveTest {
         val bitmap = byteArrayOf(0x80.toByte(), 0x00, 0x00, 0x01)
         val supported = PidDiscoveryDecoder.decodeSupportedPids(0x80, bitmap)
 
-        assertEquals(listOf(0x81, 0xA0), supported)
+        assertEquals(listOf(0x81), supported)
         assertTrue(PidDiscoveryDecoder.hasNextRange(bitmap))
     }
 
@@ -92,7 +94,7 @@ class KylaqDiscoveryComprehensiveTest {
         val bitmap = byteArrayOf(0x00, 0x80.toByte(), 0x00, 0x01)
         val supported = PidDiscoveryDecoder.decodeSupportedPids(0xA0, bitmap)
 
-        assertEquals(listOf(0xA9, 0xC0), supported)
+        assertEquals(listOf(0xA9), supported)
         assertTrue(PidDiscoveryDecoder.hasNextRange(bitmap))
     }
 
@@ -102,7 +104,7 @@ class KylaqDiscoveryComprehensiveTest {
         val bitmap = byteArrayOf(0x40, 0x00, 0x00, 0x01)
         val supported = PidDiscoveryDecoder.decodeSupportedPids(0xC0, bitmap)
 
-        assertEquals(listOf(0xC2, 0xE0), supported)
+        assertEquals(listOf(0xC2), supported)
         assertTrue(PidDiscoveryDecoder.hasNextRange(bitmap))
     }
 

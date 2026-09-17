@@ -511,6 +511,64 @@ object PidDecoder {
                 }
             }
 
+            // SAE J1979 PID 56-59: byte A is the equivalence ratio in 1/128 lambda, byte B
+            // is the sensor voltage in 1/128 V. The owner Kylaq run 2026-09-16 answered
+            // 7F 00 for PID 56, i.e. lambda 0.992 and 0.635 V at closed-loop stoichiometry,
+            // while the catalog had it as RESEARCH_RAW so the export printed the bare byte.
+            DecoderType.LAMBDA_SENSOR_VOLTAGE -> {
+                if (dataBytes.size < 2) {
+                    DecodedResult(
+                        parameterName = pidDef.name,
+                        numericValue = null,
+                        displayValue = "NO DATA",
+                        unit = pidDef.unit,
+                        rawPayloadHex = rawHex,
+                        dataBytes = dataBytes,
+                        isKnown = false
+                    )
+                } else {
+                    val lambdaValue = ((a * 256.0) + b) / 32768.0
+                    val volts = a / 128.0
+                    DecodedResult(
+                        parameterName = pidDef.name,
+                        numericValue = lambdaValue,
+                        displayValue = String.format(Locale.US, "\u03BB %.3f / %.3f V", lambdaValue, volts),
+                        unit = pidDef.unit,
+                        rawPayloadHex = rawHex,
+                        dataBytes = dataBytes,
+                        isKnown = true
+                    )
+                }
+            }
+
+            // SAE J1979 PID 55: A-B is the equivalence ratio (1/128 lambda), C-D is the
+            // short-term fuel trim of that sensor (1/128 %, offset 128).
+            DecoderType.LAMBDA_STFT_PAIR -> {
+                if (dataBytes.size < 4) {
+                    DecodedResult(
+                        parameterName = pidDef.name,
+                        numericValue = null,
+                        displayValue = "NO DATA",
+                        unit = pidDef.unit,
+                        rawPayloadHex = rawHex,
+                        dataBytes = dataBytes,
+                        isKnown = false
+                    )
+                } else {
+                    val lambdaValue = ((a * 256.0) + b) / 32768.0
+                    val stftPct = (c - 128) * 100.0 / 128.0
+                    DecodedResult(
+                        parameterName = pidDef.name,
+                        numericValue = lambdaValue,
+                        displayValue = String.format(Locale.US, "\u03BB %.3f / %+.1f %%", lambdaValue, stftPct),
+                        unit = pidDef.unit,
+                        rawPayloadHex = rawHex,
+                        dataBytes = dataBytes,
+                        isKnown = true
+                    )
+                }
+            }
+
             DecoderType.CUSTOM_EXPRESSION, DecoderType.RESEARCH_RAW -> {
                 DecodedResult(
                     parameterName = pidDef.name,

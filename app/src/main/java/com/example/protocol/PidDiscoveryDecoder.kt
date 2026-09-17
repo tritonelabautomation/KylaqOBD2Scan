@@ -33,8 +33,17 @@ object PidDiscoveryDecoder {
         if (bitmap.size < 4) return emptyList()
         val supported = mutableListOf<Int>()
 
+        // Bit 32 of a block (basePid + 0x20) is the "next 32 PIDs are supported" MARKER, not a
+        // parameter - hasNextRange() reports it separately. Emitting it as a supported PID made
+        // the owner's 2026-09-16 export list PID 60 and PID 80 as data channels, TX them during
+        // validation, and decode the capability bitmap that answered as if it were a measurement
+        // ("Mode 01 PID 60 = 6B 09 00 41", "DPF Temperature = 00 24 00 0D" on a petrol car). It
+        // also burned the real 0180 answer, so PID 83/85/86 were never discovered at all.
+        val continuationPid = if (basePid < 0xE0) basePid + 0x20 else -1
+
         for (i in 0 until 32) {
             val pidNum = basePid + (i + 1)
+            if (pidNum == continuationPid) continue
             // Strict check: Valid conventional PID space is 01–FF. Never generate PID 100 (256)
             if (pidNum > 0xFF) continue
 
@@ -53,9 +62,10 @@ object PidDiscoveryDecoder {
      * For base 0xE0, returns E1..FF (31 PIDs), strictly omitting PID 100.
      */
     fun allTestedPidsForRange(basePid: Int): List<Int> {
+        val continuationPid = if (basePid < 0xE0) basePid + 0x20 else -1
         return (1..32).mapNotNull { offset ->
             val pidNum = basePid + offset
-            if (pidNum <= 0xFF) pidNum else null
+            if (pidNum <= 0xFF && pidNum != continuationPid) pidNum else null
         }
     }
 

@@ -30,11 +30,12 @@ class PidDiscoveryDecoderTest {
 
         val supported = PidDiscoveryDecoder.decodeSupportedPids(basePid = 0x00, bitmap = bitmap)
 
+        // 2026-09-17: 0x20 here is the range marker, not a parameter - excluded.
         val expectedPids = listOf(
             0x01, 0x03, 0x04, 0x05, 0x06, 0x07,
             0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
             0x11, 0x13, 0x14, 0x15,
-            0x1C, 0x1F, 0x20
+            0x1C, 0x1F
         )
 
         assertEquals(expectedPids, supported)
@@ -51,9 +52,10 @@ class PidDiscoveryDecoderTest {
         )
 
         val supported = PidDiscoveryDecoder.decodeSupportedPids(basePid = 0x00, bitmap = bitmap)
-        assertEquals(32, supported.size)
+        // 31 data PIDs: 0x01-0x1F. 0x20 is the range marker and is never emitted.
+        assertEquals(31, supported.size)
         assertEquals(1, supported.first())
-        assertEquals(32, supported.last())
+        assertEquals(0x1F, supported.last())
         assertTrue(PidDiscoveryDecoder.hasNextRange(bitmap))
     }
 
@@ -78,10 +80,10 @@ class PidDiscoveryDecoderTest {
     @Test
     fun testRangeOffsets() {
         // Base PID 0x20 (Range 0120)
-        // Only first and last bit set: 0x21 and 0x40
+        // First bit set (0x21) plus bit 32, which is the 0x40 range marker
         val bitmap = byteArrayOf(0x80.toByte(), 0x00, 0x00, 0x01)
         val supported = PidDiscoveryDecoder.decodeSupportedPids(basePid = 0x20, bitmap = bitmap)
-        assertEquals(listOf(0x21, 0x40), supported)
+        assertEquals(listOf(0x21), supported)
         assertTrue(PidDiscoveryDecoder.hasNextRange(bitmap))
 
         // Base PID 0x40 with bit 0 of byte 3 cleared (no subsequent block)
