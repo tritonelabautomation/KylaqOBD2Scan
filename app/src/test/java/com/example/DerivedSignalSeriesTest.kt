@@ -61,6 +61,22 @@ class DerivedSignalSeriesTest {
     }
 
     @Test
+    fun gearSurvivesSpeedPolledRightAfterRpm() {
+        // The owner's real poll order: 0D lands just AFTER 0C, so at the next 0C row the
+        // speed is a whole 3 s cycle stale - the old rpm-only emission produced ZERO
+        // points ("Still gears doesn't display"). Symmetric emission must fix it.
+        val rows = mutableListOf<Row>()
+        var ts = 1_000L
+        repeat(10) {
+            rows += Row(ts, "0C", 2464.0); ts += 300
+            rows += Row(ts, "0D", 40.0); ts += 2700
+        }
+        val pts = gearPoints(rows, { it.ts }, { it.pid }, { it.v })
+        assertTrue("gear points from rpm-then-speed cadence: ${pts.size}", pts.size >= 9)
+        assertEquals(2.0, pts.first().second, 1e-9)
+    }
+
+    @Test
     fun fourHexAndTwoHexPidsBothWork() {
         val rows = listOf(Row(1_000, "010D", 40.0), Row(1_000, "010C", 2464.0))
         assertEquals(1, gearPoints(rows, { it.ts }, { it.pid }, { it.v }).size)

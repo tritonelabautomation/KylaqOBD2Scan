@@ -231,18 +231,29 @@ object TripTrendAnalyzer {
     ): List<Pair<Long, Double>> {
         val model = com.example.engine.Aq250GearModel()
         var spdTs = -1L; var spdV = 0.0
+        var rpmTs = -1L; var rpmV = 0.0
         val out = mutableListOf<Pair<Long, Double>>()
+        // Owner 2026-09-17: "Still gears doesn't display". Emission used to happen only
+        // on RPM rows - but when the poller cycles [0C, 0D, ...] the speed row lands
+        // just AFTER rpm, so at the NEXT rpm row the speed is a whole cycle (~3 s)
+        // stale and every pair missed PAIR_MS. Emit on WHICHEVER of the two arrives
+        // second, so one of the two always sees a fresh partner.
+        fun emit(ts: Long, rpm: Double, spd: Double) {
+            val ratio = rpm / spd
+            val g = model.estimate(ratio)?.first ?: model.nearestGear(ratio)?.first
+            if (g != null) out += ts to g.toDouble()
+        }
         for (r in rows.sortedBy { timestamp(it) }) {
             val v = value(r) ?: continue
             val ts = timestamp(r)
             when (normPid(pid(r))) {
-                "0D" -> { spdTs = ts; spdV = v }
+                "0D" -> {
+                    spdTs = ts; spdV = v
+                    if (rpmTs >= 0 && ts - rpmTs <= PAIR_MS && spdV >= 10.0) emit(ts, rpmV, spdV)
+                }
                 "0C" -> {
-                    if (spdTs >= 0 && kotlin.math.abs(ts - spdTs) <= PAIR_MS && spdV >= 10.0) {
-                        val ratio = v / spdV
-                        val g = model.estimate(ratio)?.first ?: model.nearestGear(ratio)?.first
-                        if (g != null) out += ts to g.toDouble()
-                    }
+                    rpmTs = ts; rpmV = v
+                    if (spdTs >= 0 && ts - spdTs <= PAIR_MS && spdV >= 10.0) emit(ts, rpmV, spdV)
                 }
                 else -> {}
             }

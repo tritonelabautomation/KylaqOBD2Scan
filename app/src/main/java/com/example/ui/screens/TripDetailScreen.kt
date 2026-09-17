@@ -576,11 +576,14 @@ private fun TripTrendsView(
         // fills the remaining screen height; bucket-mean lines, volatility envelope on the
         // primary, real axes with units, HH:mm ticks, mean reference, min/max markers and
         // a crosshair whose bubble lists every overlaid signal.
+        // Owner 2026-09-17 screenshot: with nothing drawable the weight(1f) chart card
+        // still stretched to full remaining height = a ~1200px bordered void. Wrap it.
+        val hasDrawableLines = lines.any { it.points.size >= 2 }
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .weight(1f)
-                .heightIn(min = 260.dp),
+                .then(if (hasDrawableLines) Modifier.weight(1f) else Modifier)
+                .heightIn(min = if (hasDrawableLines) 260.dp else 0.dp),
             shape = RoundedCornerShape(14.dp),
             color = DarkSurface,
             border = androidx.compose.foundation.BorderStroke(1.dp, CyberCyan.copy(alpha = 0.2f))
