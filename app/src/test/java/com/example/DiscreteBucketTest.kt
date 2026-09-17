@@ -18,7 +18,7 @@ class DiscreteBucketTest {
         // mean of [1,1,2] = 1.33; mode = 1
         val b = ChartSampling.bucketizeDiscrete(pts(1.0, 1.0, 2.0, 2.0, 2.0, 3.0), 2)
         b.forEach { bucket ->
-            assertEquals("bucket value must be a whole gear", bucket.avg, Math.round(bucket.avg), 1e-9)
+            assertEquals("bucket value must be a whole gear", bucket.avg, Math.round(bucket.avg).toDouble(), 1e-9)
         }
         assertEquals(1.0, b.first().avg, 1e-9)
         assertEquals(2.0, b.last().avg, 1e-9)
