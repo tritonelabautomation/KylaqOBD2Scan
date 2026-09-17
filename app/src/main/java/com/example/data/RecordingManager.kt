@@ -20,10 +20,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-import java.util.TimeZone
 import java.util.UUID
 
 data class SavedRecording(
@@ -79,6 +75,29 @@ class RecordingManager(
 
     private var sessionStartTimestamp = 0L
 
+    /**
+     * Manager-owned scope for the watchdog, the initial Room insert and background recovery.
+     * It used to be a fresh `CoroutineScope(Dispatchers.IO)` per launch - unmanaged, uncancelled,
+     * and invisible to tests. One scope means one place to cancel and one place to look.
+     */
+    private val managerScope =
+        CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
+
+    /**
+     * The crash-proof journal (owner 2026-09-17: "it never ever loose the logs").
+     * Every OBD transaction is appended here AND FLUSHED before `recordTransaction` returns, so a
+     * process kill costs at most the row in flight instead of the whole drive.
+     */
+    val journal: SessionJournal = SessionJournal(File(recordingsDir, "journal"))
+
+    private val _journalRecovery = MutableStateFlow<RecoverySummary?>(null)
+
+    /** Result of the automatic recovery that runs on app start. Null = nothing was pending. */
+    val journalRecovery: StateFlow<RecoverySummary?> = _journalRecovery.asStateFlow()
+
+    private val _recoveryRunning = MutableStateFlow(false)
+    val recoveryRunning: StateFlow<Boolean> = _recoveryRunning.asStateFlow()
+
     init {
         loadSavedRecordings()
     }
@@ -89,6 +108,58 @@ class RecordingManager(
         /** Pure so the watchdog rule is testable: silent only counts once a first RX existed. */
         fun shouldAutoStop(lastRxMs: Long, nowMs: Long, silentLimitMs: Long = SILENT_LIMIT_MS): Boolean =
             lastRxMs > 0L && nowMs - lastRxMs > silentLimitMs
+
+        /**
+         * The wide-row merge: one OBD answer folded into the current synchronized sample, taking
+         * that line's own stamp.
+         *
+         * Pure and public for two reasons. It is the single definition of how a sample row is
+         * built, and [recoverJournalSession] has to REPLAY it over the journaled transactions
+         * when a killed session left no usable samples file - so a recovered trip gets exactly
+         * the rows the live recorder would have written, not an approximation of them.
+         */
+        fun mergeSample(current: SynchronizedSample, tx: TransactionRecord): SynchronizedSample {
+            val base = current.copy(
+                timestampUtc = tx.timestampUtc,
+                timestampMonotonic = tx.timestampMonotonic
+            )
+            return when (tx.pid.uppercase()) {
+                "0C" -> base.copy(rpm = tx.decodedValue)
+                "0D" -> base.copy(speedKmh = tx.decodedValue)
+                "04" -> base.copy(engineLoadPct = tx.decodedValue)
+                "0B" -> base.copy(mapKpa = tx.decodedValue)
+                "11" -> base.copy(throttlePct = tx.decodedValue)
+                "49" -> base.copy(acceleratorPct = tx.decodedValue)
+                "05" -> base.copy(coolantC = tx.decodedValue)
+                "0F" -> base.copy(iatC = tx.decodedValue)
+                "46" -> base.copy(ambientC = tx.decodedValue)
+                "9D" -> base.copy(fuelRateLh = tx.decodedValue)
+                "62" -> base.copy(engineTorquePct = tx.decodedValue)
+                "42" -> base.copy(voltageV = tx.decodedValue)
+                "6D" -> base.copy(fuelPressureRaw = tx.rawPayload)
+                "70" -> base.copy(boostPressureRaw = tx.rawPayload)
+                else -> base
+            }
+        }
+
+        /** Which of a sample's channels PID [pid] fills. Pure; mirrors [mergeSample]. */
+        fun sampleFieldForPid(pid: String): String? = when (pid.uppercase()) {
+            "0C" -> "rpm"
+            "0D" -> "speedKmh"
+            "04" -> "engineLoadPct"
+            "0B" -> "mapKpa"
+            "11" -> "throttlePct"
+            "49" -> "acceleratorPct"
+            "05" -> "coolantC"
+            "0F" -> "iatC"
+            "46" -> "ambientC"
+            "9D" -> "fuelRateLh"
+            "62" -> "engineTorquePct"
+            "42" -> "voltageV"
+            "6D" -> "fuelPressureRaw"
+            "70" -> "boostPressureRaw"
+            else -> null
+        }
     }
 
     fun startRecording(
@@ -98,14 +169,36 @@ class RecordingManager(
         adapterName: String = "ELM327 v1.5 Bluetooth Classic",
         protocolName: String = "ISO 15765-4 CAN 11-bit 500kbps"
     ): RecordingMetadata {
+        // DATA-LOSS FIX 1 (owner 2026-09-17). This method used to call clear() on both RAM lists
+        // unconditionally, so a second START - auto-reconnect, screen re-entry, a retry after a
+        // dropped link - threw the whole previous session away without writing a byte of it. Any
+        // session still in RAM is now persisted BEFORE the lists are cleared, and the snapshot is
+        // taken under the same lock so the two cannot interleave.
+        val orphanMeta = _currentSessionMetadata.value
+        val orphanTx: List<TransactionRecord>
+        val orphanSamples: List<SynchronizedSample>
+        synchronized(activeTransactionList) {
+            orphanTx = activeTransactionList.toList()
+            orphanSamples = activeSampleList.toList()
+            activeTransactionList.clear()
+            activeSampleList.clear()
+            currentSample = SynchronizedSample(timestampUtc = "", timestampMonotonic = 0L)
+        }
+        if (orphanMeta != null && orphanTx.isNotEmpty()) {
+            managerScope.launch {
+                runCatching { finalizeSession(orphanMeta, orphanTx, orphanSamples, null, recovered = false) }
+                    .onFailure { android.util.Log.e("RecordingManager", "orphan session save failed", it) }
+            }
+        }
+
         val sessionId = UUID.randomUUID().toString().take(8)
         sessionStartTimestamp = System.currentTimeMillis()
-        val nowUtc = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
-            timeZone = TimeZone.getTimeZone("UTC")
-        }.format(Date())
+        // IST with its offset - owner mandate 2026-09-17: "For all records use IST time only no
+        // UTC." The field is still called startTimeUtc because trip JSON, Room and every existing
+        // backup use that key; the VALUE is now local time that says which zone it is in.
+        val startStamp = RecordTime.stamp(sessionStartTimestamp)
 
-        val dateDisplay = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date())
-        val defaultName = "Kylaq Run $dateDisplay"
+        val defaultName = "Kylaq Run ${RecordTime.display(sessionStartTimestamp)}"
 
         val metadata = RecordingMetadata(
             sessionId = sessionId,
@@ -116,13 +209,8 @@ class RecordingManager(
             adapter = adapterName,
             protocol = protocolName,
             canBitrate = "500 kbps",
-            startTimeUtc = nowUtc
+            startTimeUtc = startStamp
         )
-
-        synchronized(activeTransactionList) {
-            activeTransactionList.clear()
-            activeSampleList.clear()
-        }
 
         _currentSessionMetadata.value = metadata
         _currentTransactions.value = emptyList()
@@ -130,7 +218,7 @@ class RecordingManager(
         _autoStopNotice.value = null
         lastRxAtMs = System.currentTimeMillis()
         watchdogJob?.cancel()
-        watchdogJob = CoroutineScope(Dispatchers.IO).launch {
+        watchdogJob = managerScope.launch {
             while (isActive) {
                 kotlinx.coroutines.delay(20_000L)
                 if (_isRecording.value && shouldAutoStop(lastRxAtMs, System.currentTimeMillis())) {
@@ -145,8 +233,18 @@ class RecordingManager(
 
         rawLogManager.startFileLogging(sessionId)
 
+        // DATA-LOSS FIX 2. Open the journal BEFORE the first OBD line can arrive, so the very
+        // first transaction is already on disk. If the journal cannot be opened the recording
+        // still runs - but the owner is told that this drive is not crash-protected, instead of
+        // finding out after the kill.
+        if (!journal.open(metadata)) {
+            _autoStopNotice.value =
+                "WARNING: could not open the crash journal (${journal.lastFailureReason}). This " +
+                "recording is not kill-protected - check free storage."
+        }
+
         // Asynchronously insert initial Trip record in Room
-        CoroutineScope(Dispatchers.IO).launch {
+        managerScope.launch {
             // QA H2: uncaught Room exception here would crash the process mid-recording.
             runCatching {
                 tripRepository.insertTrip(
@@ -156,7 +254,7 @@ class RecordingManager(
                         vehicleName = vehicleName,
                         adapterName = adapterName,
                         protocolName = protocolName,
-                        startTimeUtc = nowUtc,
+                        startTimeUtc = startStamp,
                         startTimestamp = sessionStartTimestamp,
                         status = "RECORDING"
                     )
@@ -170,6 +268,8 @@ class RecordingManager(
     fun recordTransaction(tx: TransactionRecord) {
         if (!_isRecording.value) return
 
+        val journaled: TransactionRecord
+        val row: SynchronizedSample
         synchronized(activeTransactionList) {
             // GPS altitude per OBD line (owner 2026-09-16: "why altitude is missing in
             // trend and trip logs?"): stamp at intake so EVERY persisted sample row
@@ -180,24 +280,9 @@ class RecordingManager(
             activeTransactionList.add(stamped)
             _currentTransactions.value = activeTransactionList.toList()
 
-            // Update current synchronized sample
-            val updated = when (tx.pid.uppercase()) {
-                "0C" -> currentSample.copy(timestampUtc = tx.timestampUtc, timestampMonotonic = tx.timestampMonotonic, rpm = tx.decodedValue)
-                "0D" -> currentSample.copy(timestampUtc = tx.timestampUtc, timestampMonotonic = tx.timestampMonotonic, speedKmh = tx.decodedValue)
-                "04" -> currentSample.copy(timestampUtc = tx.timestampUtc, timestampMonotonic = tx.timestampMonotonic, engineLoadPct = tx.decodedValue)
-                "0B" -> currentSample.copy(timestampUtc = tx.timestampUtc, timestampMonotonic = tx.timestampMonotonic, mapKpa = tx.decodedValue)
-                "11" -> currentSample.copy(timestampUtc = tx.timestampUtc, timestampMonotonic = tx.timestampMonotonic, throttlePct = tx.decodedValue)
-                "49" -> currentSample.copy(timestampUtc = tx.timestampUtc, timestampMonotonic = tx.timestampMonotonic, acceleratorPct = tx.decodedValue)
-                "05" -> currentSample.copy(timestampUtc = tx.timestampUtc, timestampMonotonic = tx.timestampMonotonic, coolantC = tx.decodedValue)
-                "0F" -> currentSample.copy(timestampUtc = tx.timestampUtc, timestampMonotonic = tx.timestampMonotonic, iatC = tx.decodedValue)
-                "46" -> currentSample.copy(timestampUtc = tx.timestampUtc, timestampMonotonic = tx.timestampMonotonic, ambientC = tx.decodedValue)
-                "9D" -> currentSample.copy(timestampUtc = tx.timestampUtc, timestampMonotonic = tx.timestampMonotonic, fuelRateLh = tx.decodedValue)
-                "62" -> currentSample.copy(timestampUtc = tx.timestampUtc, timestampMonotonic = tx.timestampMonotonic, engineTorquePct = tx.decodedValue)
-                "42" -> currentSample.copy(timestampUtc = tx.timestampUtc, timestampMonotonic = tx.timestampMonotonic, voltageV = tx.decodedValue)
-                "6D" -> currentSample.copy(timestampUtc = tx.timestampUtc, timestampMonotonic = tx.timestampMonotonic, fuelPressureRaw = tx.rawPayload)
-                "70" -> currentSample.copy(timestampUtc = tx.timestampUtc, timestampMonotonic = tx.timestampMonotonic, boostPressureRaw = tx.rawPayload)
-                else -> currentSample.copy(timestampUtc = tx.timestampUtc, timestampMonotonic = tx.timestampMonotonic)
-            }
+            // Wide-row merge, extracted to the pure companion RecordingManager.mergeSample so
+            // journal recovery replays the identical rows.
+            val updated = mergeSample(currentSample, stamped)
             // Per-sample GPS altitude for the trip log (owner 2026-09-15). Stamped on every
             // row so the samples CSV carries the elevation profile; null when no accuracy-gated
             // fix with altitude exists at that moment - never the 0.0 default.
@@ -206,6 +291,17 @@ class RecordingManager(
             )
             currentSample = withAltitude
             activeSampleList.add(withAltitude)
+            journaled = stamped
+            row = withAltitude
+        }
+
+        // DATA-LOSS FIX 3 - the whole point of this change. The transaction is appended to the
+        // on-disk journal and FLUSHED before this call returns, so a process kill after this line
+        // costs at most one row instead of the entire drive. Outside the list lock: file I/O must
+        // never hold the lock the UI reads through.
+        _currentSessionMetadata.value?.let { meta ->
+            journal.appendTransaction(meta, journaled)
+            journal.appendSample(row)
         }
     }
 
@@ -213,10 +309,8 @@ class RecordingManager(
         watchdogJob?.cancel()
         val metadata = _currentSessionMetadata.value ?: return@withContext null
         val endTimestamp = System.currentTimeMillis()
-        val nowUtc = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
-            timeZone = TimeZone.getTimeZone("UTC")
-        }.format(Date())
-        metadata.endTimeUtc = nowUtc
+        val endStamp = RecordTime.stamp(endTimestamp)
+        metadata.endTimeUtc = endStamp
 
         val txList: List<TransactionRecord>
         val sampleList: List<SynchronizedSample>
@@ -227,128 +321,419 @@ class RecordingManager(
 
         val rawLogFile = rawLogManager.stopFileLogging()
 
-        // GPS altitude window for this trip (owner 2026-09-15 fix: altitude was captured
-        // live but never persisted - the trip summary showed an honest "-- m" blank).
-        // Null only when the recording never had an accuracy-gated GPS fix with altitude.
-        val altStats = com.example.di.AppContainer.tripAltitudeStats()
-        // The trip log files must carry the same altitude window as the database row, or a
-        // backup -> reinstall -> import round trip silently strips elevation from every past
-        // trip and the restored summary degrades back to "-- m".
-        // Battery voltage extremes of this trip (owner pipeline task 3, 2026-09-16):
-        // reduced from the real 0142 samples exactly like the altitude window - null when
-        // the trip never carried voltage samples, so nothing invented reaches the exports.
-        val voltStats = com.example.analysis.VoltageStats.extremes(
-            activeSampleList.mapNotNull { smp -> smp.voltageV?.let { smp.timestampMonotonic to it } }
-        )
-        val metadataWithAltitude = metadata.copy(
-            maxAltitudeM = altStats?.maxAltitudeM,
-            minAltitudeM = altStats?.minAltitudeM,
-            minVoltageV = voltStats?.minV,
-            maxVoltageV = voltStats?.maxV
-        )
+        // DATA-LOSS FIX 4. A clean STOP closes the journal with its `.finished` marker, which is
+        // what tells the next app start "this one is done, do not rebuild it".
+        //
+        // A journal that is LARGER than RAM is used instead of RAM. That happens when the process
+        // was restarted mid-drive (auto-reconnect after a kill): the old rows are on disk, the new
+        // process only holds the rows it saw itself. Taking the longer source keeps the drive whole
+        // rather than silently truncating it to whatever survived in memory.
+        val journalTx = if (journal.txFile(metadata.sessionId).exists()) {
+            runCatching { CsvExporter.readTransactionsFromCsv(journal.txFile(metadata.sessionId)) }
+                .getOrDefault(emptyList())
+        } else emptyList()
+        val journalSamples = if (journal.sampleFile(metadata.sessionId).exists()) {
+            runCatching { CsvExporter.readSamplesFromCsv(journal.sampleFile(metadata.sessionId)) }
+                .getOrDefault(emptyList())
+        } else emptyList()
+        val effectiveTx = SessionRecoveryPolicy.preferLonger(txList, journalTx)
+        val effectiveSamples = SessionRecoveryPolicy.preferLonger(sampleList, journalSamples)
+        journal.markFinished(metadata.sessionId, endTimestamp)
+        journal.close()
 
-        // Generate files
-        val sessionDir = File(recordingsDir, "session_${metadata.sessionId}").apply { mkdirs() }
-        val txCsvFile = File(sessionDir, "${metadata.sessionId}_transactions.csv")
-        val sampleCsvFile = File(sessionDir, "${metadata.sessionId}_samples.csv")
-        val jsonFile = File(sessionDir, "${metadata.sessionId}.json")
+        val journalFailures = journal.writeFailures
+        if (journalFailures > 0) {
+            _autoStopNotice.value =
+                "Saved, but $journalFailures journal write(s) failed (${journal.lastFailureReason}). " +
+                "The crash journal was incomplete for part of this drive - check free storage."
+        }
 
-        CsvExporter.exportTransactionsToCsv(txCsvFile, metadataWithAltitude, txList)
-        CsvExporter.exportSynchronizedSamplesToCsv(sampleCsvFile, sampleList)
-        JsonExporter.exportToJson(jsonFile, metadataWithAltitude, txList)
+        _isRecording.value = false
+        _currentSessionMetadata.value = null
 
-        // Copy raw log if available
-        val destRawLog = if (rawLogFile != null && rawLogFile.exists()) {
-            val dest = File(sessionDir, "${metadata.sessionId}_raw.txt")
-            rawLogFile.copyTo(dest, overwrite = true)
-            dest
-        } else null
-
-        // Generate full ZIP bundle
-        val zipFile = File(sessionDir, "${metadata.sessionId}_bundle.zip")
-        val filesToZip = listOfNotNull(txCsvFile, sampleCsvFile, jsonFile, destRawLog)
-        ZipExporter.createTripZip(zipFile, filesToZip)
-
-        // Calculate summary metrics for Room
-        val maxRpm = txList.filter { it.pid.equals("0C", ignoreCase = true) }.mapNotNull { it.decodedValue }.maxOrNull() ?: 0.0
-        val maxSpeed = txList.filter { it.pid.equals("0D", ignoreCase = true) }.mapNotNull { it.decodedValue }.maxOrNull() ?: 0.0
-        val maxCoolant = txList.filter { it.pid.equals("05", ignoreCase = true) }.mapNotNull { it.decodedValue }.maxOrNull() ?: 0.0
-        val voltList = txList.filter { it.pid.equals("42", ignoreCase = true) }.mapNotNull { it.decodedValue }
-        val avgVolt = if (voltList.isNotEmpty()) voltList.average() else 0.0
-        val detectedEcus = txList.mapNotNull { it.canRxId.takeIf { id -> id.isNotBlank() } }.distinct().joinToString(", ").ifBlank { "7E8" }
-        val durationSec = maxOf(1L, (endTimestamp - sessionStartTimestamp) / 1000)
-
-        // Save complete entities into Room Database (altStats computed above, before the
-        // trip log files were written, so the JSON/CSV and the row agree).
-        val tripEntity = TripEntity(
-            id = metadata.sessionId,
-            title = metadata.sessionName,
-            vehicleName = metadata.vehicle,
-            adapterName = metadata.adapter,
-            protocolName = metadata.protocol,
-            startTimeUtc = metadata.startTimeUtc,
-            endTimeUtc = nowUtc,
+        val saved = finalizeSession(
+            metadata = metadata,
+            txList = effectiveTx,
+            sampleList = effectiveSamples,
+            rawLogFile = rawLogFile,
             startTimestamp = sessionStartTimestamp,
             endTimestamp = endTimestamp,
-            durationSeconds = durationSec,
-            status = "COMPLETED",
-            sampleCount = txList.size,
-            rawLogCount = txList.size,
-            maxRpm = maxRpm,
-            maxSpeedKmh = maxSpeed,
-            maxCoolantC = maxCoolant,
-            avgVoltageV = avgVolt,
-            detectedEcus = detectedEcus,
-            healthScore = 100,
+            endStamp = endStamp,
+            recovered = false
+        )
+        loadSavedRecordings()
+        saved
+    }
+
+    // ── Session finalization (shared by STOP, orphan save and crash recovery) ──────────
+    //
+    // One code path writes a trip: the two CSVs, the session JSON, the ZIP bundle, the Room trip
+    // row, the Room telemetry rows and the AI analysis. STOP used to own it, raw-log recovery had
+    // a near-copy of it, and the two had already drifted (recovery wrote an empty samples CSV and
+    // skipped the altitude/voltage extremes). Three callers, one implementation.
+
+    /**
+     * Writes a session's files and Room rows.
+     *
+     * @param recovered true when the session was rebuilt after the process died, so the trip says
+     *                  so in its adapter field instead of pretending it ended with a clean STOP.
+     * @return the saved recording, or null when [txList] holds nothing worth saving.
+     */
+    private fun finalizeSession(
+        metadata: RecordingMetadata,
+        txList: List<TransactionRecord>,
+        sampleList: List<SynchronizedSample>,
+        rawLogFile: File?,
+        startTimestamp: Long,
+        endTimestamp: Long,
+        endStamp: String,
+        recovered: Boolean
+    ): SavedRecording? {
+        if (txList.isEmpty()) return null
+        val sessionId = metadata.sessionId
+
+        // GPS altitude window for this trip (owner 2026-09-15 fix: altitude was captured live but
+        // never persisted - the trip summary showed an honest "-- m" blank). Null only when the
+        // recording never had an accuracy-gated GPS fix with altitude; never 0.0, never invented.
+        val altStats = com.example.di.AppContainer.tripAltitudeStats()
+        // Battery voltage extremes (owner pipeline task 3, 2026-09-16), reduced from the real 0142
+        // samples exactly like the altitude window.
+        val voltStats = com.example.analysis.VoltageStats.extremes(
+            sampleList.mapNotNull { smp -> smp.voltageV?.let { smp.timestampMonotonic to it } }
+        )
+        // The trip log files must carry the same altitude window as the database row, or a
+        // backup -> reinstall -> import round trip silently strips elevation from every past trip.
+        val metadataForFiles = metadata.copy(
             maxAltitudeM = altStats?.maxAltitudeM,
             minAltitudeM = altStats?.minAltitudeM,
             minVoltageV = voltStats?.minV,
-            maxVoltageV = voltStats?.maxV
+            maxVoltageV = voltStats?.maxV,
+            adapter = if (recovered) metadata.adapter + " (recovered after the app was killed)" else metadata.adapter
+        ).apply { endTimeUtc = endStamp }
+
+        val sessionDir = File(recordingsDir, "session_$sessionId").apply { mkdirs() }
+        val txCsvFile = File(sessionDir, "${sessionId}_transactions.csv")
+        val sampleCsvFile = File(sessionDir, "${sessionId}_samples.csv")
+        val jsonFile = File(sessionDir, "$sessionId.json")
+
+        CsvExporter.exportTransactionsToCsv(txCsvFile, metadataForFiles, txList)
+        CsvExporter.exportSynchronizedSamplesToCsv(sampleCsvFile, sampleList)
+        JsonExporter.exportToJson(jsonFile, metadataForFiles, txList)
+
+        // Copy the raw log into the session folder so the bundle is self-contained. The original
+        // stays in files/raw_logs: findUnsavedRawLogs() filters by saved session id, so it will no
+        // longer be offered for recovery, and keeping it costs nothing.
+        val destRawLog = if (rawLogFile != null && rawLogFile.exists()) {
+            runCatching {
+                val dest = File(sessionDir, "${sessionId}_raw.txt")
+                rawLogFile.copyTo(dest, overwrite = true)
+                dest
+            }.getOrNull()
+        } else null
+
+        val zipFile = File(sessionDir, "${sessionId}_bundle.zip")
+        runCatching {
+            ZipExporter.createTripZip(zipFile, listOfNotNull(txCsvFile, sampleCsvFile, jsonFile, destRawLog))
+        }.onFailure { android.util.Log.e("RecordingManager", "zip bundle failed", it) }
+
+        persistTripToRoom(
+            sessionId = sessionId,
+            metadata = metadataForFiles,
+            txList = txList,
+            startTimestamp = startTimestamp,
+            endTimestamp = endTimestamp,
+            endStamp = endStamp,
+            altStats = altStats,
+            voltStats = voltStats
         )
-        tripRepository.insertTrip(tripEntity)
 
-        // Insert telemetry sample records
-        val dbSamples = txList.mapIndexed { idx, tx ->
-            TelemetrySampleEntity(
-                tripId = metadata.sessionId,
-                timestamp = tx.timestampMonotonic,
-                timestampUtc = tx.timestampUtc,
-                ecuCanId = tx.canRxId.ifBlank { "7E8" },
-                pid = tx.pid,
-                parameterName = tx.decodedParameter.ifBlank { "PID ${tx.pid}" },
-                rawHex = tx.responseHex,
-                numericValue = tx.decodedValue,
-                displayValue = tx.decodedValueDisplay,
-                unit = tx.unit,
-                quality = "VALID",
-                altitudeM = tx.altitudeM,
-                sequence = idx.toLong()
-            )
-        }
-        tripRepository.insertSamples(dbSamples)
-
-        // Auto-run local AI Doctor analysis
-        try {
-            tripRepository.runAiCarDoctorAnalysis(metadata.sessionId)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-
-        val saved = SavedRecording(
-            metadata = metadata,
+        return SavedRecording(
+            metadata = metadataForFiles,
             transactionCount = txList.size,
             transactionCsvFile = txCsvFile,
             samplesCsvFile = sampleCsvFile,
             jsonFile = jsonFile,
             rawLogFile = destRawLog,
-            zipFile = zipFile
+            zipFile = if (zipFile.exists()) zipFile else null
         )
-
-        _isRecording.value = false
-        _currentSessionMetadata.value = null
-        loadSavedRecordings()
-        saved
     }
+
+    /** Room reductions + rows. Shared so a recovered trip and a stopped trip are stored alike. */
+    private fun persistTripToRoom(
+        sessionId: String,
+        metadata: RecordingMetadata,
+        txList: List<TransactionRecord>,
+        startTimestamp: Long,
+        endTimestamp: Long,
+        endStamp: String,
+        altStats: com.example.analysis.AltitudeStats?,
+        voltStats: com.example.analysis.VoltageExtremes?
+    ) {
+        val maxRpm = txList.filter { it.pid.equals("0C", ignoreCase = true) }.mapNotNull { it.decodedValue }.maxOrNull() ?: 0.0
+        val maxSpeed = txList.filter { it.pid.equals("0D", ignoreCase = true) }.mapNotNull { it.decodedValue }.maxOrNull() ?: 0.0
+        val maxCoolant = txList.filter { it.pid.equals("05", ignoreCase = true) }.mapNotNull { it.decodedValue }.maxOrNull() ?: 0.0
+        val voltList = txList.filter { it.pid.equals("42", ignoreCase = true) }.mapNotNull { it.decodedValue }
+        val avgVolt = if (voltList.isNotEmpty()) voltList.average() else 0.0
+        val detectedEcus = txList.mapNotNull { it.canRxId.takeIf { id -> id.isNotBlank() } }.distinct()
+            .joinToString(", ").ifBlank { "7E8" }
+        val durationSec = maxOf(1L, (endTimestamp - startTimestamp) / 1000)
+
+        runCatching {
+            tripRepository.insertTrip(
+                TripEntity(
+                    id = sessionId,
+                    title = metadata.sessionName,
+                    vehicleName = metadata.vehicle,
+                    adapterName = metadata.adapter,
+                    protocolName = metadata.protocol,
+                    startTimeUtc = metadata.startTimeUtc,
+                    endTimeUtc = endStamp,
+                    startTimestamp = startTimestamp,
+                    endTimestamp = endTimestamp,
+                    durationSeconds = durationSec,
+                    status = "COMPLETED",
+                    sampleCount = txList.size,
+                    rawLogCount = txList.size,
+                    maxRpm = maxRpm,
+                    maxSpeedKmh = maxSpeed,
+                    maxCoolantC = maxCoolant,
+                    avgVoltageV = avgVolt,
+                    detectedEcus = detectedEcus,
+                    healthScore = 100,
+                    maxAltitudeM = altStats?.maxAltitudeM,
+                    minAltitudeM = altStats?.minAltitudeM,
+                    minVoltageV = voltStats?.minV,
+                    maxVoltageV = voltStats?.maxV
+                )
+            )
+        }.onFailure { android.util.Log.e("RecordingManager", "trip insert failed for $sessionId", it) }
+
+        runCatching {
+            tripRepository.insertSamples(
+                txList.mapIndexed { idx, tx ->
+                    TelemetrySampleEntity(
+                        tripId = sessionId,
+                        timestamp = tx.timestampMonotonic,
+                        timestampUtc = tx.timestampUtc,
+                        ecuCanId = tx.canRxId.ifBlank { "7E8" },
+                        pid = tx.pid,
+                        parameterName = tx.decodedParameter.ifBlank { "PID ${tx.pid}" },
+                        rawHex = tx.responseHex,
+                        numericValue = tx.decodedValue,
+                        displayValue = tx.decodedValueDisplay,
+                        unit = tx.unit,
+                        quality = "VALID",
+                        altitudeM = tx.altitudeM,
+                        sequence = idx.toLong()
+                    )
+                }
+            )
+        }.onFailure { android.util.Log.e("RecordingManager", "sample insert failed for $sessionId", it) }
+
+        // Auto-run local AI Doctor analysis
+        runCatching { tripRepository.runAiCarDoctorAnalysis(sessionId) }
+            .onFailure { android.util.Log.e("RecordingManager", "AI doctor failed for $sessionId", it) }
+    }
+
+    // ── AUTOMATIC recovery of killed sessions (owner 2026-09-17) ───────────────────────
+    //
+    // Recovery used to be a banner on the Trips & Recordings screen that the owner had to notice
+    // and tap. He did not, and a full day of driving stayed unrecovered. Recovery now runs BY
+    // ITSELF on app start, rebuilds every cut-off session, and reports what it did.
+
+    /** What the automatic pass did. Worded for the owner, not for a logcat. */
+    data class RecoverySummary(
+        val recoveredSessions: Int = 0,
+        val recoveredTransactions: Int = 0,
+        val sessionIds: List<String> = emptyList(),
+        val lostSessions: List<String> = emptyList(),
+        val failures: List<String> = emptyList()
+    ) {
+        val isClean: Boolean
+            get() = recoveredSessions == 0 && lostSessions.isEmpty() && failures.isEmpty()
+
+        fun notice(): String {
+            val parts = mutableListOf<String>()
+            if (recoveredSessions > 0) {
+                parts += "Recovered $recoveredSessions killed session(s) - $recoveredTransactions " +
+                    "OBD lines saved. They are in Trips & Recordings now; nothing to tap."
+            }
+            if (lostSessions.isNotEmpty()) {
+                parts += "Could not recover ${lostSessions.size} session(s) " +
+                    "(${lostSessions.joinToString()}) - no journal rows and no readable raw log."
+            }
+            if (failures.isNotEmpty()) parts += failures.joinToString(" | ")
+            return parts.joinToString(" ")
+        }
+    }
+
+    /**
+     * Rebuilds every session the process died during. Safe to call repeatedly: a session is
+     * removed from the pending set as soon as it is rebuilt, and one that cannot be rebuilt is
+     * archived so it is reported once instead of forever.
+     */
+    suspend fun recoverUnfinishedSessions(): RecoverySummary? = withContext(Dispatchers.IO) {
+        if (_recoveryRunning.value) return@withContext _journalRecovery.value
+        _recoveryRunning.value = true
+        val summary = try {
+            var recovered = 0
+            var transactions = 0
+            val ids = mutableListOf<String>()
+            val lost = mutableListOf<String>()
+            val failures = mutableListOf<String>()
+            val savedIds = _savedRecordings.value.map { it.metadata.sessionId }.toSet()
+            // The session THIS process is recording right now has an unfinished journal by
+            // definition - it only gets its `.finished` marker at STOP. Rebuilding it would write a
+            // half trip and then fight the live recorder over the same files.
+            val liveId = if (_isRecording.value) _currentSessionMetadata.value?.sessionId else null
+
+            for (id in journal.unfinishedSessions()) {
+                if (id == liveId) continue
+                if (id in savedIds) { journal.discard(id); continue }
+                val rawLog = File(rawLogsDir, "raw_log_$id.txt").takeIf { it.exists() }
+                val source = SessionRecoveryPolicy.chooseSource(
+                    journalRowCount = CsvExporter.readTransactionsFromCsv(journal.txFile(id)).size,
+                    rawLogBytes = rawLog?.length() ?: 0L
+                )
+                when (val r = if (source == SessionRecoveryPolicy.RecoverySource.JOURNAL) {
+                    recoverJournalSession(id, rawLog)
+                } else {
+                    RecoveryOutcome.NothingToRecover
+                }) {
+                    is RecoveryOutcome.Recovered -> {
+                        recovered++; transactions += r.samples; ids += id
+                        journal.discard(id)
+                    }
+                    else -> {
+                        // The journal is empty or unreadable. Fall back to the raw log, which is
+                        // the older recovery path and still holds every frame that reached the phone.
+                        val fromRaw = if (rawLog != null) {
+                            runCatching { recoverFromRawLog(rawLog) }.getOrNull()
+                        } else null
+                        if (fromRaw is RecoveryOutcome.Recovered) {
+                            recovered++; transactions += fromRaw.samples; ids += id
+                            journal.discard(id)
+                        } else {
+                            lost += id
+                            (fromRaw as? RecoveryOutcome.Failed)?.reason?.let { failures += "$id: $it" }
+                            // Archive it so the next launch does not offer the same corpse again.
+                            if (rawLog != null) runCatching { archiveUnrecoverableRawLog(rawLog) }
+                            journal.discard(id)
+                        }
+                    }
+                }
+            }
+
+            // Raw logs with no journal at all: sessions recorded by an older build, or a drive
+            // whose journal could not be opened. Still recoverable, still automatic.
+            for (file in findUnsavedRawLogs()) {
+                val id = com.example.analysis.RawLogRecovery.sessionIdOf(file.name) ?: continue
+                if (id in savedIds || id in ids || id in lost || id == liveId) continue
+                when (val r = runCatching { recoverFromRawLog(file) }.getOrNull()) {
+                    is RecoveryOutcome.Recovered -> {
+                        recovered++; transactions += r.samples; ids += id
+                    }
+                    is RecoveryOutcome.Failed -> {
+                        lost += id; failures += "$id: ${r.reason}"
+                        runCatching { archiveUnrecoverableRawLog(file) }
+                    }
+                    else -> Unit // NothingToRecover: leave it, it may still be mid-drive.
+                }
+            }
+
+            if (recovered > 0) loadSavedRecordings()
+            if (SessionRecoveryPolicy.shouldAnnounce(recovered, lost.size, failures.size)) {
+                RecoverySummary(recovered, transactions, ids, lost, failures)
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("RecordingManager", "auto recovery failed", e)
+            RecoverySummary(failures = listOf("auto-recovery error: ${e.message ?: e.javaClass.simpleName}"))
+        }
+        _recoveryRunning.value = false
+        _journalRecovery.value = summary
+        summary
+    }
+
+    /**
+     * Rebuilds one cut-off session from its journal.
+     *
+     * The journal already holds the DECODED transactions - parameter name, value, unit, status,
+     * per-line GPS altitude - so recovery reads them back instead of re-parsing raw hex and
+     * re-decoding, which is what the raw-log path has to do. Rows are replayed through the same
+     * pure [mergeSample] the live recorder used, so the wide sample rows are identical to the ones
+     * STOP would have written.
+     */
+    internal fun recoverJournalSession(sessionId: String, rawLogFile: File?): RecoveryOutcome {
+        return try {
+            val txList = CsvExporter.readTransactionsFromCsv(journal.txFile(sessionId))
+            if (txList.isEmpty()) return RecoveryOutcome.NothingToRecover
+
+            val meta = journal.readMeta(sessionId)
+            // The trip window is the DATA window: first frame to last frame. The journal also
+            // records when the session was opened, but using that as the start would add the
+            // connect-to-first-response gap to every recovered duration - and the raw-log recovery
+            // path has always used the first telemetry line, so the two now agree.
+            val startMs = txList.minOf { it.timestampMonotonic }
+            val endMs = txList.maxOf { it.timestampMonotonic }
+            val openedMs = meta["startEpochMillis"]?.toLongOrNull()
+                ?: RecordTime.parseMillis(meta["startTime"])
+                ?: startMs
+
+            val sampleRows = CsvExporter.readSamplesFromCsv(journal.sampleFile(sessionId))
+            // Samples journal missing or short (an older build, a write failure): replay the wide
+            // rows from the transactions so the trip still gets them. Same pure fold as live.
+            val samples = if (SessionRecoveryPolicy.samplesUsable(sampleRows.size, txList.size)) {
+                sampleRows
+            } else {
+                SessionRecoveryPolicy.replaySamples(
+                    transactions = txList,
+                    seed = SynchronizedSample(timestampUtc = "", timestampMonotonic = 0L),
+                    merge = { acc, tx -> mergeSample(acc, tx).copy(altitudeM = tx.altitudeM) }
+                )
+            }
+
+            // Keep the name the drive was given when it started, but say it was recovered: the
+            // owner looks for "Recovered Run" in the trip list to know a drive was rescued rather
+            // than stopped, and losing that marker would make a killed trip indistinguishable from
+            // a normal one.
+            val recordedName = meta["sessionName"]?.takeIf { it.isNotBlank() }
+            val name = when {
+                recordedName == null -> "Recovered Run " + RecordTime.display(openedMs)
+                recordedName.startsWith("Recovered") -> recordedName
+                else -> "$recordedName (recovered)"
+            }
+            val metadata = RecordingMetadata(
+                sessionId = sessionId,
+                sessionName = name,
+                vehicle = meta["vehicle"]?.ifBlank { null } ?: "Škoda Kylaq 1.0 TSI (EA211)",
+                vehicleId = meta["vehicleId"]?.ifBlank { null },
+                profile = meta["profile"]?.ifBlank { null } ?: "India-Market 1.0 TSI",
+                adapter = meta["adapter"]?.ifBlank { null } ?: "ELM327 v1.5 Bluetooth Classic",
+                protocol = meta["protocol"]?.ifBlank { null } ?: "ISO 15765-4 CAN 11-bit 500kbps",
+                canBitrate = meta["canBitrate"]?.ifBlank { null } ?: "500 kbps",
+                startTimeUtc = RecordTime.stamp(startMs)
+            )
+
+            val saved = finalizeSession(
+                metadata = metadata,
+                txList = txList,
+                sampleList = samples,
+                rawLogFile = rawLogFile,
+                startTimestamp = startMs,
+                endTimestamp = endMs,
+                endStamp = RecordTime.stamp(endMs),
+                recovered = true
+            ) ?: return RecoveryOutcome.NothingToRecover
+
+            RecoveryOutcome.Recovered(sessionId, saved.transactionCount)
+        } catch (e: Exception) {
+            android.util.Log.e("RecordingManager", "journal recovery failed for $sessionId", e)
+            RecoveryOutcome.Failed(e.message ?: e.javaClass.simpleName)
+        }
+    }
+
 
     fun loadSavedRecordings() {
         val result = mutableListOf<SavedRecording>()
@@ -476,7 +861,7 @@ class RecordingManager(
                 // bare data bytes returns INVALID_RESPONSE (strict malformed-frame rule).
                 val decoded = com.example.protocol.PidDecoder.decode(pidDef, t.decodeBytes)
                 TransactionRecord(
-                    timestampUtc = isoUtc(t.epochMillis),
+                    timestampUtc = iso(t.epochMillis),
                     timestampMonotonic = t.epochMillis,
                     direction = Direction.RX,
                     canRxId = t.canId,
@@ -496,89 +881,38 @@ class RecordingManager(
             val endMs = telemetry.last().epochMillis
             val metadata = RecordingMetadata(
                 sessionId = sessionId,
-                sessionName = "Recovered Run " +
-                    SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date(startMs)),
-                startTimeUtc = isoUtc(startMs),
+                sessionName = "Recovered Run " + RecordTime.display(startMs),
+                startTimeUtc = iso(startMs),
                 adapter = "ELM327 Bluetooth (recovered from raw log)"
             )
-            metadata.endTimeUtc = isoUtc(endMs)
+            metadata.endTimeUtc = iso(endMs)
 
-            val sessionDir = File(recordingsDir, "session_$sessionId").apply { mkdirs() }
-            val txCsvFile = File(sessionDir, "${sessionId}_transactions.csv")
-            val sampleCsvFile = File(sessionDir, "${sessionId}_samples.csv")
-            val jsonFile = File(sessionDir, "$sessionId.json")
-            CsvExporter.exportTransactionsToCsv(txCsvFile, metadata, txList)
-            CsvExporter.exportSynchronizedSamplesToCsv(sampleCsvFile, emptyList())
-            JsonExporter.exportToJson(jsonFile, metadata, txList)
-            val destRawLog = File(sessionDir, "${sessionId}_raw.txt")
-            file.copyTo(destRawLog, overwrite = true)
-            val zipFile = File(sessionDir, "${sessionId}_bundle.zip")
-            ZipExporter.createTripZip(zipFile, listOf(txCsvFile, sampleCsvFile, jsonFile, destRawLog))
-
-            // Room summary metrics - the same reductions stopRecording() computes.
-            val maxRpm = txList.filter { it.pid.equals("0C", true) }.mapNotNull { it.decodedValue }.maxOrNull() ?: 0.0
-            val maxSpeed = txList.filter { it.pid.equals("0D", true) }.mapNotNull { it.decodedValue }.maxOrNull() ?: 0.0
-            val maxCoolant = txList.filter { it.pid.equals("05", true) }.mapNotNull { it.decodedValue }.maxOrNull() ?: 0.0
-            val voltList = txList.filter { it.pid.equals("42", true) }.mapNotNull { it.decodedValue }
-            val avgVolt = if (voltList.isNotEmpty()) voltList.average() else 0.0
-            val detectedEcus = txList.map { it.canRxId }.filter { it.isNotBlank() }.distinct()
-                .joinToString(", ").ifBlank { "7E8" }
-            val durationSec = maxOf(1L, (endMs - startMs) / 1000)
-
-            tripRepository.insertTrip(
-                TripEntity(
-                    id = sessionId,
-                    title = metadata.sessionName,
-                    vehicleName = metadata.vehicle,
-                    adapterName = metadata.adapter,
-                    protocolName = metadata.protocol,
-                    startTimeUtc = metadata.startTimeUtc,
-                    endTimeUtc = metadata.endTimeUtc,
-                    startTimestamp = startMs,
-                    endTimestamp = endMs,
-                    durationSeconds = durationSec,
-                    status = "COMPLETED",
-                    sampleCount = txList.size,
-                    rawLogCount = txList.size,
-                    maxRpm = maxRpm,
-                    maxSpeedKmh = maxSpeed,
-                    maxCoolantC = maxCoolant,
-                    avgVoltageV = avgVolt,
-                    detectedEcus = detectedEcus,
-                    healthScore = 100
-                )
+            // This path used to write an EMPTY samples CSV, so a trip recovered from its raw log
+            // came back with a transactions file and no curves, no fuel trend and no X-ray wide
+            // rows. Replay the same pure fold the live recorder uses and the recovered trip is
+            // shaped exactly like a stopped one.
+            val sampleList = SessionRecoveryPolicy.replaySamples(
+                transactions = txList,
+                seed = SynchronizedSample(timestampUtc = "", timestampMonotonic = 0L),
+                merge = { acc, tx -> mergeSample(acc, tx) }
             )
-            tripRepository.insertSamples(
-                txList.mapIndexed { idx, tx ->
-                    TelemetrySampleEntity(
-                        tripId = sessionId,
-                        timestamp = tx.timestampMonotonic,
-                        timestampUtc = tx.timestampUtc,
-                        ecuCanId = tx.canRxId.ifBlank { "7E8" },
-                        pid = tx.pid,
-                        parameterName = tx.decodedParameter.ifBlank { "PID ${tx.pid}" },
-                        rawHex = tx.responseHex,
-                        numericValue = tx.decodedValue,
-                        displayValue = tx.decodedValueDisplay,
-                        unit = tx.unit,
-                        quality = "VALID",
-                        altitudeM = tx.altitudeM,
-                        sequence = idx.toLong()
-                    )
-                }
+
+            // One finalization path for STOP, orphan save, journal recovery and raw-log recovery:
+            // they had already drifted (this one skipped the altitude/voltage extremes and wrote no
+            // sample rows), and drift between copies of the same job is how a trip ends up half
+            // saved.
+            finalizeSession(
+                metadata = metadata,
+                txList = txList,
+                sampleList = sampleList,
+                rawLogFile = file,
+                startTimestamp = startMs,
+                endTimestamp = endMs,
+                endStamp = iso(endMs),
+                recovered = true
             )
-            try { tripRepository.runAiCarDoctorAnalysis(sessionId) } catch (_: Exception) {}
 
             loadSavedRecordings()
-            SavedRecording(
-                metadata = metadata,
-                transactionCount = txList.size,
-                transactionCsvFile = txCsvFile,
-                samplesCsvFile = sampleCsvFile,
-                jsonFile = jsonFile,
-                rawLogFile = destRawLog,
-                zipFile = zipFile
-            )
             RecoveryOutcome.Recovered(sessionId, txList.size)
         } catch (e: Exception) {
             e.printStackTrace()
@@ -586,10 +920,15 @@ class RecordingManager(
         }
     }
 
-    private fun isoUtc(millis: Long): String =
-        SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
-            timeZone = TimeZone.getTimeZone("UTC")
-        }.format(Date(millis))
+    /**
+     * Every stamp this class writes goes through here.
+     *
+     * It used to be `isoUtc()`, formatting in UTC with a trailing `Z`. Owner mandate 2026-09-17:
+     * "For all records use IST time only no UTC." The name stays `iso` because the shape is still
+     * ISO-8601; the zone is now Asia/Kolkata and the offset is printed (`+05:30`), so a stamp can
+     * never again be read as the wrong local time.
+     */
+    private fun iso(millis: Long): String = RecordTime.stamp(millis)
 
     fun renameRecording(sessionId: String, newName: String) {
         val sessionDir = File(recordingsDir, "session_$sessionId")

@@ -20,7 +20,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.testTag
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -65,6 +68,38 @@ fun SettingsScreen(
     ) { uri -> uri?.let { viewModel.importFuelioCsv(it) } }
     val coroutineScope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
+
+    // ── Background-recording protection state (owner 2026-09-17: "why the hell ... app is
+    // killed in background ... it never ever loose the logs"). Re-read on every resume, so the
+    // card tells the truth the moment the owner comes back from system Settings.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var batteryExempt by remember {
+        mutableStateOf(
+            runCatching {
+                context.getSystemService(android.os.PowerManager::class.java)
+                    ?.isIgnoringBatteryOptimizations(context.packageName) ?: false
+            }.getOrDefault(false)
+        )
+    }
+    DisposableEffect(lifecycleOwner) {
+        val readExemption = {
+            batteryExempt = runCatching {
+                context.getSystemService(android.os.PowerManager::class.java)
+                    ?.isIgnoringBatteryOptimizations(context.packageName) ?: false
+            }.getOrDefault(false)
+        }
+        readExemption()
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) readExemption()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    val isRecordingNow by viewModel.isRecording.collectAsState()
+    val connectionNow by viewModel.connectionState.collectAsState()
+    val rawLogWriteFailures = viewModel.rawLogManager.writeFailureCount
+    val autoRecoveryNotice by viewModel.autoRecoveryNotice.collectAsState()
+    val isAutoRecovering by viewModel.isAutoRecovering.collectAsState()
 
     val vehicleName by viewModel.vehicleName.collectAsState()
     val welcomeEnabled by viewModel.settingsRepository.welcomeEnabled.collectAsState()
@@ -389,6 +424,130 @@ fun SettingsScreen(
                 }
             }
             SettingsSectionHeader("DATA & BACKUP")
+
+            // ── Never lose a drive (owner 2026-09-17) ─────────────────────────────────
+            // The owner lost a whole day of logging to a background kill and could not see why or
+            // what to do about it. This card answers both: what is protecting the recording right
+            // now, what is still exposed, and the one tap that closes the exposure. It states
+            // plainly that a foreground service does not make the process unkillable - claiming
+            // otherwise is what let the loss happen silently.
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp).testTag("card_drive_protection"),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Default.Shield,
+                            contentDescription = null,
+                            tint = if (batteryExempt) NeonEmerald else ElectricAmber,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Never lose a drive",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Every OBD line is written to disk as it arrives, so a kill " +
+                                    "costs at most one line - and the drive is rebuilt automatically " +
+                                    "the next time the app or its service starts.",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    ProtectionStatusRow(
+                        ok = batteryExempt,
+                        label = "Battery optimisation",
+                        detail = if (batteryExempt) {
+                            "Unrestricted - Android will not doze this app out of a recording."
+                        } else {
+                            "STILL RESTRICTED. Motorola's battery management can stop the service " +
+                                "mid-drive. This is the one setting the app cannot change for you."
+                        }
+                    )
+                    ProtectionStatusRow(
+                        ok = connectionNow == com.example.bluetooth.ConnectionState.CONNECTED,
+                        label = "Keep-alive service",
+                        detail = if (connectionNow == com.example.bluetooth.ConnectionState.CONNECTED) {
+                            "Foreground service running${if (isRecordingNow) " and recording" else ""}, " +
+                                "wake lock held, restarts itself after a swipe-away."
+                        } else {
+                            "Not running - it starts the moment the adapter connects."
+                        }
+                    )
+                    ProtectionStatusRow(
+                        ok = rawLogWriteFailures == 0,
+                        label = "Disk writes",
+                        detail = if (rawLogWriteFailures == 0) {
+                            "No failed log or journal writes. All timestamps are IST (+05:30)."
+                        } else {
+                            "$rawLogWriteFailures write(s) FAILED - the log is incomplete. " +
+                                "Check free storage now."
+                        }
+                    )
+
+                    if (!batteryExempt) {
+                        Button(
+                            onClick = {
+                                val standard = android.content.Intent(
+                                    android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                                    android.net.Uri.parse("package:${context.packageName}")
+                                )
+                                val launched = runCatching { context.startActivity(standard) }.isSuccess
+                                if (!launched) {
+                                    // OEM firmware without the standard action: fall back to the
+                                    // app details page rather than doing nothing at all.
+                                    runCatching {
+                                        context.startActivity(
+                                            android.content.Intent(
+                                                android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                                android.net.Uri.parse("package:${context.packageName}")
+                                            )
+                                        )
+                                    }.onFailure {
+                                        Toast.makeText(context, "Open Settings > Apps > Kylaq TSI Coach > Battery > Unrestricted", Toast.LENGTH_LONG).show()
+                                    }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth().testTag("btn_battery_exempt")
+                        ) {
+                            Icon(Icons.Default.BatterySaver, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Make battery Unrestricted")
+                        }
+                    }
+
+                    OutlinedButton(
+                        onClick = { viewModel.runAutoRecovery() },
+                        enabled = !isAutoRecovering,
+                        modifier = Modifier.fillMaxWidth().testTag("btn_recover_now")
+                    ) {
+                        Icon(Icons.Default.SettingsBackupRestore, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(if (isAutoRecovering) "Checking for killed sessions..." else "Recover killed sessions now")
+                    }
+
+                    autoRecoveryNotice?.let {
+                        Surface(shape = RoundedCornerShape(10.dp), color = ElectricAmber.copy(alpha = 0.14f)) {
+                            Text(
+                                text = it,
+                                modifier = Modifier.padding(10.dp),
+                                fontSize = 12.sp,
+                                lineHeight = 17.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                }
+            }
+
             // ── Fuelio import (owner 2026-09-16) ──────────────────────────────────────
             Card(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
@@ -1109,6 +1268,38 @@ fun SettingsScreen(
  * grouping the cards below it the way the platform Settings app groups its pages.
  */
 @Composable
+/**
+ * One line of the "Never lose a drive" card: a plain verdict plus what it means.
+ * Green only when the protection is actually in place - an amber row that says what to do beats a
+ * green one that hides an exposure.
+ */
+@Composable
+private fun ProtectionStatusRow(ok: Boolean, label: String, detail: String) {
+    Row(verticalAlignment = Alignment.Top) {
+        Icon(
+            if (ok) Icons.Default.CheckCircle else Icons.Default.Warning,
+            contentDescription = null,
+            tint = if (ok) NeonEmerald else ElectricAmber,
+            modifier = Modifier.size(16.dp)
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = label,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = detail,
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
 private fun SettingsSectionHeader(title: String) {
     Column(
         modifier = Modifier

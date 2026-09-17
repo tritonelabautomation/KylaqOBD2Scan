@@ -15,7 +15,8 @@ import java.util.TimeZone
  *
  * This object rebuilds a recording from that file:
  *  1. [sessionIdOf] maps `raw_log_2df90142.txt` → session id.
- *  2. [extractTelemetry] parses `HH:mm:ss.SSS TX >|RX < ...` lines, re-anchors the
+ *  2. [extractTelemetry] parses `HH:mm:ss.SSS TX >|RX < ...` lines (and, since 1.0.337,
+ *     `yyyy-MM-dd HH:mm:ss.SSS ...` lines that carry their own date), re-anchors the
  *     wall-clock times to the file's last-modified day (a line whose time-of-day is
  *     more than 12 h AFTER the anchor belongs to the previous calendar day, so drives
  *     ending just past midnight keep their order), and keeps only RX Mode-01
@@ -49,6 +50,19 @@ object RawLogRecovery {
     }
 
     private val LINE = Regex("""^(\d{2}):(\d{2}):(\d{2})\.(\d{3})\s+(TX >|RX <)\s+(.+?)\s*$""")
+
+    /**
+     * Dated line, written by every build from 1.0.337 on:
+     * `2026-09-17 14:27:05.123 RX < 7E8 04410C0F28`.
+     *
+     * The undated [LINE] shape stays supported forever - the owner's existing raw logs use it -
+     * but a dated line carries its own calendar day, so recovery never has to GUESS one from the
+     * file's last-modified time. Guessing was wrong for any drive that spanned midnight, any log
+     * copied off the phone, and any log recovered days after the drive.
+     */
+    private val DATED_LINE = Regex(
+        """^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})\.(\d{3})\s+(TX >|RX <)\s+(.+?)\s*$"""
+    )
     private val CAN_ID = Regex("""^7[A-F0-9]{2}$""")
     private val HEX_ONLY = Regex("""^[0-9A-Fa-f]+$""")
 
@@ -78,20 +92,45 @@ object RawLogRecovery {
 
         val out = mutableListOf<Telemetry>()
         for (line in text.lineSequence()) {
-            val m = LINE.matchEntire(line) ?: continue
-            val isTx = m.groupValues[5] == "TX >"
-            if (isTx) continue
-            val hours = m.groupValues[1].toLong()
-            val minutes = m.groupValues[2].toLong()
-            val seconds = m.groupValues[3].toLong()
-            val millis = m.groupValues[4].toLong()
-            val timeOfDay = ((hours * 60 + minutes) * 60 + seconds) * 1000 + millis
-            var epoch = dayStart + timeOfDay
-            // Drive ended just after midnight: an evening time-of-day would land ~24 h in
-            // the future relative to the anchor - it belongs to the previous day.
-            if (epoch - anchorMillis > 12L * 3_600_000L) epoch -= 24L * 3_600_000L
+            val epoch: Long
+            val dirGroup: String
+            val bodyGroup: String
 
-            val (canId, frameHex) = splitCanId(m.groupValues[6])
+            val dated = DATED_LINE.matchEntire(line)
+            if (dated != null) {
+                // The line states its own date - use it exactly, no anchoring heuristic.
+                epoch = Calendar.getInstance(tz).apply {
+                    clear()
+                    set(
+                        dated.groupValues[1].toInt(),
+                        dated.groupValues[2].toInt() - 1,
+                        dated.groupValues[3].toInt(),
+                        dated.groupValues[4].toInt(),
+                        dated.groupValues[5].toInt(),
+                        dated.groupValues[6].toInt()
+                    )
+                    set(Calendar.MILLISECOND, dated.groupValues[7].toInt())
+                }.timeInMillis
+                dirGroup = dated.groupValues[8]
+                bodyGroup = dated.groupValues[9]
+            } else {
+                val m = LINE.matchEntire(line) ?: continue
+                val hours = m.groupValues[1].toLong()
+                val minutes = m.groupValues[2].toLong()
+                val seconds = m.groupValues[3].toLong()
+                val millis = m.groupValues[4].toLong()
+                val timeOfDay = ((hours * 60 + minutes) * 60 + seconds) * 1000 + millis
+                var guessed = dayStart + timeOfDay
+                // Drive ended just after midnight: an evening time-of-day would land ~24 h in
+                // the future relative to the anchor - it belongs to the previous day.
+                if (guessed - anchorMillis > 12L * 3_600_000L) guessed -= 24L * 3_600_000L
+                epoch = guessed
+                dirGroup = m.groupValues[5]
+                bodyGroup = m.groupValues[6]
+            }
+
+            if (dirGroup == "TX >") continue
+            val (canId, frameHex) = splitCanId(bodyGroup)
             val t = telemetryFromFrame(epoch, canId, frameHex) ?: continue
             out += t
         }

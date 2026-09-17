@@ -263,9 +263,8 @@ class BluetoothElmTransport(
     }
 
     private fun logRaw(isTx: Boolean, canId: String?, text: String, status: String) {
-        val nowUtc = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
-            timeZone = TimeZone.getTimeZone("UTC")
-        }.format(Date())
+        // IST with offset (owner 2026-09-17: records use IST only, never UTC).
+        val nowUtc = com.example.data.RecordTime.stamp()
         rawLogListener?.onRawLog(
             timestampUtc = nowUtc,
             timestampMonotonic = SystemClock.elapsedRealtime(),

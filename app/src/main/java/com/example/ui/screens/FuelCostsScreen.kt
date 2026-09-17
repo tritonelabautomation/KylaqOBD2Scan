@@ -359,9 +359,10 @@ fun FuelCostsScreen(
                 }
                 editTarget?.let { repo.delete(it.idMs) }
                 val ms = cal.timeInMillis
-                val utc = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
-                    .apply { timeZone = TimeZone.getTimeZone("UTC") }
-                    .format(Date(ms))
+                // IST with offset (owner 2026-09-17). The fuel log groups and displays on
+                // dateUtc.take(10), so this is what decides which DAY a fill-up belongs to - and
+                // in UTC a fill-up made before 05:30 IST was filed under the previous date.
+                val utc = com.example.data.RecordTime.stamp(ms)
                 repo.add(
                     FuelLogCodec.FuelEntry(
                         idMs = ms, dateUtc = utc, liters = liters, pricePerL = price,

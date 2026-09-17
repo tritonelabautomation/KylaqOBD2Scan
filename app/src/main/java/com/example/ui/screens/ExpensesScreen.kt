@@ -199,8 +199,8 @@ fun ExpensesScreen(
             onDismiss = { showAdd = false },
             onSave = { category, amount, vendor, note ->
                 val now = System.currentTimeMillis()
-                val utc = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
-                    .apply { timeZone = TimeZone.getTimeZone("UTC") }.format(Date(now))
+                // IST with offset (owner 2026-09-17). idMs stays the authoritative instant.
+                val utc = com.example.data.RecordTime.stamp(now)
                 viewModel.expenseRepository.add(
                     ExpenseCodec.ExpenseEntry(now, utc, category, amount, vendor, note)
                 )

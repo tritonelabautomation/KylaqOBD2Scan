@@ -44,6 +44,20 @@ enum class ResponseStatus {
  */
 data class TransactionRecord(
     val id: String = UUID.randomUUID().toString(),
+    /**
+     * When this frame happened, as an ISO-8601 stamp that STATES its zone.
+     *
+     * The name says "utc" and the value has not been UTC since 1.0.337: owner mandate
+     * 2026-09-17, "For all records use IST time only no UTC." It is now
+     * `2026-09-17T14:27:05.123+05:30`, written by [com.example.data.RecordTime].
+     *
+     * The key is NOT renamed because session JSON, both CSVs, the ZIP bundle, the Room
+     * `telemetry_samples.timestampUtc` column and every backup the owner already holds use it -
+     * renaming would orphan his whole trip history for a cosmetic gain. Files written before
+     * 1.0.337 carry genuine `...Z` UTC and still parse to the same instant
+     * ([com.example.data.RecordTime.parseMillis] honours an explicit offset, a `Z`, and a naive
+     * stamp read as IST), so a history that spans the upgrade has no five-hour tear in it.
+     */
     val timestampUtc: String,
     val timestampMonotonic: Long,
     val direction: Direction,
@@ -73,6 +87,7 @@ data class TransactionRecord(
  * Synchronized live snapshot for dashboard and time-series export
  */
 data class SynchronizedSample(
+    /** IST stamp with its offset since 1.0.337 - see [TransactionRecord.timestampUtc]. */
     val timestampUtc: String,
     val timestampMonotonic: Long,
     val rpm: Double? = null,
@@ -124,6 +139,7 @@ data class RecordingMetadata(
     val adapter: String = "ELM327 v1.5 Bluetooth Classic",
     val protocol: String = "ISO 15765-4 CAN 11-bit 500kbps",
     val canBitrate: String = "500 kbps",
+    /** IST with its offset since 1.0.337 - see [TransactionRecord.timestampUtc] for why the name stays. */
     val startTimeUtc: String,
     var endTimeUtc: String? = null,
     val appVersion: String = "1.0-research",

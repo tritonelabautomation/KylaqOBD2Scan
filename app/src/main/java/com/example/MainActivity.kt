@@ -125,12 +125,17 @@ class MainActivity : ComponentActivity() {
             val powerManager = getSystemService(android.os.PowerManager::class.java)
             val ignoring = powerManager.isIgnoringBatteryOptimizations(packageName)
             if (!com.example.service.BatteryOptimizationPolicy.shouldPrompt(
-                    ignoring,
-                    prefs.getBoolean("battery_exempt_prompted", false),
-                    viewModel.isSessionActiveNow()
+                    isIgnoringBatteryOptimizations = ignoring,
+                    alreadyPrompted = prefs.getBoolean("battery_exempt_prompted", false),
+                    sessionActive = viewModel.isSessionActiveNow(),
+                    lastPromptAtMs = prefs.getLong("battery_exempt_prompted_at", 0L),
+                    nowMs = System.currentTimeMillis()
                 )
             ) return
-            prefs.edit().putBoolean("battery_exempt_prompted", true).apply()
+            prefs.edit()
+                .putBoolean("battery_exempt_prompted", true)
+                .putLong("battery_exempt_prompted_at", System.currentTimeMillis())
+                .apply()
             startActivity(
                 android.content.Intent(
                     android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,

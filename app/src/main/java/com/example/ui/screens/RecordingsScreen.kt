@@ -207,9 +207,11 @@ fun RecordingsScreen(
                     }
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "These drives ended before STOP could save them (app killed, battery " +
-                            "optimisation, or a crash), but every OBD line stayed on disk. Recover " +
-                            "rebuilds the full trip — fuel, trends and X-ray — from that raw log.",
+                        text = "Recovery now runs BY ITSELF when the app or its keep-alive service " +
+                            "starts, so a killed drive is normally rebuilt before you ever reach " +
+                            "this screen. Anything listed here still needs a tap: its journal was " +
+                            "unreadable, or it was recorded by an older build. Every OBD line stayed " +
+                            "on disk, and Recover rebuilds the full trip — fuel, trends and X-ray.",
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

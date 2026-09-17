@@ -119,7 +119,14 @@ class PidDiscoveryService(
     private val _discoveredEcus = MutableStateFlow<List<String>>(emptyList())
     val discoveredEcus: StateFlow<List<String>> = _discoveredEcus.asStateFlow()
 
-    private val timeFormat = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
+    /**
+     * Discovery log lines carry their full IST date, not just a time of day.
+     *
+     * The owner audits these lines against the raw ELM log and against the export's run stamp; a
+     * time-only line cannot be tied to a day, and the run stamp used to disagree with them by five
+     * and a half hours (it claimed UTC while holding local time). One clock, one zone, stated.
+     */
+    private fun logStamp(): String = com.example.data.RecordTime.logStamp()
 
     /**
      * Standard OBD-II Mode 01 Base Ranges:
@@ -615,7 +622,11 @@ class PidDiscoveryService(
         json.put("canBitrate", KylaqProtocolProfile.BITRATE_DISPLAY)
         json.put("elmProtocolCommand", KylaqProtocolProfile.ELM_PROTOCOL_COMMAND)
         json.put("functionalRequestId", KylaqProtocolProfile.FUNCTIONAL_REQUEST_ID)
-        json.put("timestamp", SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).format(Date()))
+        // IST with its offset (owner mandate 2026-09-17: "For all records use IST time only no
+        // UTC"). This is the stamp on the PID discovery export the owner pastes back for auditing,
+        // and it used to claim UTC while holding device-local time - which is why it disagreed with
+        // the raw log lines in the same investigation.
+        json.put("timestamp", com.example.data.RecordTime.stamp())
 
         // Responding ECUs
         val ecusArr = JSONArray()
@@ -702,7 +713,7 @@ class PidDiscoveryService(
     }
 
     private fun appendLog(message: String) {
-        val timestamp = timeFormat.format(Date())
+        val timestamp = logStamp()
         val entry = "[$timestamp] $message"
         val current = _rawLogEntries.value.toMutableList()
         current.add(entry)

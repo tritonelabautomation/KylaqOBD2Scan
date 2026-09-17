@@ -26,6 +26,9 @@ object JsonExporter {
             put("adapter", metadata.adapter)
             put("protocol", metadata.protocol)
             put("canBitrate", metadata.canBitrate)
+            // Keys keep their historical "utc" names; the VALUES are IST with their offset stated
+            // (owner mandate 2026-09-17: "For all records use IST time only no UTC"). Renaming the
+            // keys would make every trip JSON and backup written before 1.0.337 unreadable.
             put("startTimeUtc", metadata.startTimeUtc)
             put("endTimeUtc", metadata.endTimeUtc ?: "")
             put("appVersion", metadata.appVersion)

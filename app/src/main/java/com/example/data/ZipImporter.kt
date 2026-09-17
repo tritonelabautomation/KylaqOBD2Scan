@@ -166,7 +166,9 @@ object ZipImporter {
             var profile: String = "India-Market 1.0 TSI 6MT/6AT"
             var adapter: String = "ELM327 v1.5 Bluetooth Classic"
             var protocol: String = "ISO 15765-4 CAN 11-bit 500kbps"
-            var startTimeUtc: String = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).format(java.util.Date())
+            // Fallback stamp for a bundle whose JSON carries no start time. IST with its offset
+            // (owner mandate 2026-09-17); the old literal 'Z' claimed UTC while writing local time.
+            var startTimeUtc: String = com.example.data.RecordTime.stamp()
             var endTimeUtc: String? = null
             var appVersion: String = "1.0"
             // GPS altitude window of the recorded trip. Null for backups written before

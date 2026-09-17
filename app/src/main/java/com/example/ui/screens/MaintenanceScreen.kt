@@ -466,9 +466,8 @@ fun MaintenanceScreen(
             onDismiss = { logTarget = null },
             onSave = { odo, cost, rating, notes ->
                 val now = System.currentTimeMillis()
-                val utc = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
-                    .apply { timeZone = TimeZone.getTimeZone("UTC") }
-                    .format(Date(now))
+                // IST with offset (owner 2026-09-17). dateMs stays the authoritative instant.
+                val utc = com.example.data.RecordTime.stamp(now)
                 repo.log(
                     MaintenanceCatalog.ServiceLog(
                         itemId = item.id, dateUtc = utc, dateMs = now,

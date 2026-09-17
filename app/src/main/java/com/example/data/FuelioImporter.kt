@@ -155,7 +155,10 @@ object FuelioImporter {
         val formats = (preferred?.let { listOf(it) } ?: emptyList()) + FALLBACK_FORMATS
         for (f in formats) {
             val ms = runCatching {
-                SimpleDateFormat(f, Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }
+                // Fuelio writes naive local dates. Parsing them as UTC moved every imported
+                // fill-up 5.5 h, so a fill-up logged on the 17th could land on the 16th. Read them
+                // in the record zone (IST) instead - owner mandate 2026-09-17.
+                SimpleDateFormat(f, Locale.US).apply { timeZone = RecordTime.zone }
                     .parse(value)?.time
             }.getOrNull()
             if (ms != null) return ms
@@ -163,10 +166,8 @@ object FuelioImporter {
         return raw.toLongOrNull()?.let { it * 1000 }   // epoch seconds fallback
     }
 
-    private fun isoUtc(millis: Long): String =
-        SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
-            .apply { timeZone = TimeZone.getTimeZone("UTC") }
-            .format(java.util.Date(millis))
+    /** IST with offset (owner 2026-09-17: records use IST only, never UTC). */
+    private fun isoUtc(millis: Long): String = RecordTime.stamp(millis)
 
     private fun isFuelCol(c: String): Boolean =
         c.startsWith("fuel") || c.startsWith("quantity") || c == "litres" || c == "liters"

@@ -33,12 +33,31 @@ import com.example.R
  *
  * Purely additive: polling/recording logic stays exactly where it was; this
  * service only keeps the process and CPU alive and tells the owner it is live.
+ *
+ * ## What it does since 1.0.337 (owner 2026-09-17: "why the hell ... app is killed in
+ * ## background it supposed to be service right ... it never ever loose the logs")
+ *
+ * Being a foreground service lowers the chance of a kill. It does not make the process
+ * unkillable, and no app can promise that - Motorola's battery management in particular
+ * kills foreground services. So this service now does three things beyond staying alive:
+ *
+ *  1. **Recovers on start.** When Android restarts it after a kill (START_STICKY, or a reboot),
+ *     the process is fresh and holds nothing - so it immediately rebuilds every session the
+ *     previous process died during, from the crash journal and the raw logs. No screen to open,
+ *     no banner to tap.
+ *  2. **Survives a swipe-away.** `onTaskRemoved` used to be inherited (do nothing). It now
+ *     restarts the service, so removing the app from Recents does not end the OBD session.
+ *  3. **Says when it is exposed.** If the battery-optimisation exemption has not been granted,
+ *     the notification states that plainly and carries an action that opens the exemption
+ *     request. Pretending the service is bulletproof is what let a whole day of logging go
+ *     missing once already.
  */
 class ObdKeepAliveService : Service() {
 
     companion object {
         const val CHANNEL_ID = "obd_keep_alive"
         const val NOTIFICATION_ID = 9001
+        const val RECOVERY_NOTIFICATION_ID = 9002
         const val EXTRA_RECORDING = "recording"
         private const val WAKELOCK_TAG = "KylaqOBD2Scan:obd-keep-alive"
         private const val WAKELOCK_TIMEOUT_MS = 60 * 60 * 1000L
@@ -52,18 +71,47 @@ class ObdKeepAliveService : Service() {
             } else {
                 "Kylaq TSI Coach keeps the adapter socket and polling alive in the background."
             }
+
+        /**
+         * The honest warning shown while the battery exemption is missing.
+         *
+         * Pure so the wording is testable, and so a test can pin the rule that the service never
+         * claims more protection than Android actually gives: exempted -> no warning, not
+         * exempted -> say so and offer the fix.
+         */
+        fun warningText(exempted: Boolean): String? =
+            if (exempted) null
+            else "Battery optimisation is still ON for this app - Android may kill the session. " +
+                "Tap "Make Unrestricted" so the recording survives."
     }
 
     private var wakeLock: PowerManager.WakeLock? = null
     private val refreshScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val recoveryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var refreshJob: Job? = null
+
+    /** Remembered so [onTaskRemoved] can restart the service in the same state. */
+    @Volatile private var lastRecordingState: Boolean = false
+
+    private companion object {
+        const val RECOVERY_CHANNEL_ID = "obd_recovery"
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    override fun onCreate() {
+        super.onCreate()
+        // A kill is exactly when this matters: Android restarts a START_STICKY service in a FRESH
+        // process that holds no session in RAM. Recover the drive that process died during, now.
+        recoverKilledSessions()
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val recording = intent?.getBooleanExtra(EXTRA_RECORDING, false) == true
+        lastRecordingState = recording
         startForegroundCompat(recording)
         refreshWakeLock()
+        recoverKilledSessions()
         // QA M1: re-acquire before the 60 min timeout so multi-hour drives never lose CPU.
         if (refreshJob == null) {
             refreshJob = refreshScope.launch {
@@ -87,19 +135,126 @@ class ObdKeepAliveService : Service() {
             this, 0, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val notification: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
+        // Say plainly when the session is exposed to an OEM kill, and give the owner the one tap
+        // that fixes it. A service that quietly claims invulnerability is how a day of logging went
+        // missing.
+        val exempted = runCatching {
+            getSystemService(PowerManager::class.java)?.isIgnoringBatteryOptimizations(packageName) ?: true
+        }.getOrDefault(true)
+        val warning = warningText(exempted)
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_kylaq)
             .setContentTitle(notificationTitle(recording))
             .setContentText(notificationText(recording))
             .setOngoing(true)
             .setSilent(true)
             .setContentIntent(pending)
-            .build()
+        if (warning != null) {
+            builder.setStyle(
+                NotificationCompat.BigTextStyle().bigText(notificationText(recording) + "\n" + warning)
+            ).addAction(0, "Make Unrestricted", exemptionPendingIntent())
+        }
+        val notification: Notification = builder.build()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
+    }
+
+    /**
+     * Rebuilds every session a previous process died during.
+     *
+     * Runs off the main thread, is guarded against re-entry inside RecordingManager, and skips the
+     * session this process is recording right now. Silently does nothing when the app container is
+     * not up yet - a service restart must never crash the process it is trying to protect.
+     */
+    private fun recoverKilledSessions() {
+        recoveryScope.launch {
+            runCatching {
+                com.example.di.AppContainer.init(applicationContext)
+                val manager = com.example.di.AppContainer.recordingManager
+                val summary = manager.recoverUnfinishedSessions()
+                if (summary != null && summary.recoveredSessions > 0) {
+                    showRecoveryNotification(summary.notice())
+                }
+            }.onFailure {
+                android.util.Log.e("ObdKeepAliveService", "session recovery failed", it)
+            }
+        }
+    }
+
+    /**
+     * Tells the owner what was rescued. Recovery must not be silent: a trip that reappears in the
+     * list with no explanation looks like a bug, and a trip that stays missing looks like the app
+     * lost it - which is the complaint this fixes.
+     */
+    private fun showRecoveryNotification(text: String) {
+        runCatching {
+            val nm = getSystemService(NotificationManager::class.java) ?: return
+            if (nm.getNotificationChannel(RECOVERY_CHANNEL_ID) == null) {
+                nm.createNotificationChannel(
+                    NotificationChannel(RECOVERY_CHANNEL_ID, "Recovered trips", NotificationManager.IMPORTANCE_HIGH)
+                )
+            }
+            val pending = PendingIntent.getActivity(
+                this, 1, Intent(this, MainActivity::class.java),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            val n: Notification = NotificationCompat.Builder(this, RECOVERY_CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_stat_kylaq)
+                .setContentTitle("Killed session recovered - logs saved")
+                .setContentText(text)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+                .setContentIntent(pending)
+                .setAutoCancel(true)
+                .build()
+            nm.notify(RECOVERY_NOTIFICATION_ID, n)
+        }
+    }
+
+    /**
+     * Removing the app from Recents must not end the OBD session.
+     *
+     * The inherited implementation does nothing, so a swipe-away left the service running only if
+     * the OS felt like it - on Motorola it usually did not, and the drive stopped being recorded.
+     * Restarting here keeps the foreground service, the socket, the polling and the journal alive
+     * after the task is gone.
+     */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        runCatching {
+            val restart = Intent(applicationContext, ObdKeepAliveService::class.java)
+                .putExtra(EXTRA_RECORDING, lastRecordingState)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(restart)
+            } else {
+                startService(restart)
+            }
+        }.onFailure { android.util.Log.e("ObdKeepAliveService", "restart after task removal failed", it) }
+        super.onTaskRemoved(rootIntent)
+    }
+
+    /**
+     * Opens the standard exemption dialog, or the app details page on OEM firmware that does not
+     * implement the standard action. Never throws - firmware varies wildly, and a crash here would
+     * kill the very session it is trying to protect.
+     */
+    private fun exemptionPendingIntent(): PendingIntent {
+        val standard = Intent(
+            android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+            android.net.Uri.parse("package:$packageName")
+        )
+        val fallback = Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+            data = android.net.Uri.parse("package:$packageName")
+        }
+        val intent = if (runCatching { packageManager.resolveActivity(standard, 0) }.getOrNull() != null) {
+            standard
+        } else {
+            fallback
+        }
+        return PendingIntent.getActivity(
+            this, 2, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
     }
 
     /** Partial wake lock so polling coroutines keep running with the screen off. */
@@ -115,6 +270,7 @@ class ObdKeepAliveService : Service() {
     override fun onDestroy() {
         refreshJob?.cancel()
         refreshScope.cancel()
+        recoveryScope.cancel()
         wakeLock?.let { if (it.isHeld) it.release() }
         wakeLock = null
         super.onDestroy()

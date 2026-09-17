@@ -111,9 +111,9 @@ object FleetExporter {
             put("app", "KylaqOBD2Scan")
             put("vehicle", vehicleName)
             put("stats", statsLine)
-            put("generated_utc", java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US)
-                .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
-                .format(java.util.Date()))
+            // Owner mandate 2026-09-17: IST only. The KEY stays `generated_utc` because fleet
+            // sheets already in the wild use it; the value is IST with its offset printed.
+            put("generated_utc", com.example.data.RecordTime.stamp())
             put("entries", arr)
         }.toString(2)
     }

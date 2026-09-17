@@ -256,9 +256,7 @@ fun TripsScreen(
                         viewModel.expenseRepository.add(
                             ExpenseCodec.ExpenseEntry(
                                 idMs = System.currentTimeMillis(),
-                                dateUtc = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
-                                    .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
-                                    .format(Date()),
+                                dateUtc = com.example.data.RecordTime.stamp(),
                                 category = "Trip",
                                 amount = plan.budget ?: 0.0,
                                 vendor = plan.name,

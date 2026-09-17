@@ -116,7 +116,10 @@ fun DocumentsScreen(
             onSave = { type, title, number, issuer, expiry ->
                 val expiryMs = expiry?.let {
                     runCatching {
-                        SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }
+                        // A date-only expiry parsed as UTC landed 5.5 h before IST midnight, i.e. on
+                        // the PREVIOUS day - insurance shown as expiring a day early. Parse it in the
+                        // record zone (owner mandate 2026-09-17: IST only).
+                        SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { timeZone = com.example.data.RecordTime.zone }
                             .parse(it)?.time
                     }.getOrNull()
                 }

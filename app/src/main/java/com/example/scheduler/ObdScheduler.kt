@@ -353,7 +353,7 @@ class ObdScheduler(
         }
 
         val requestHex = "${pidDef.service}${pidDef.pid}"
-        val txUtc = getNowUtc()
+        val txUtc = getNowStamp()
         val txMonotonic = SystemClock.elapsedRealtime()
 
         // 1. Record TX transaction
@@ -375,7 +375,7 @@ class ObdScheduler(
 
         // 2. Transmit over ELM327 and await response
         val elmResponse = transport.sendCommand(requestHex, timeoutMs = 1800L)
-        val rxUtc = getNowUtc()
+        val rxUtc = getNowStamp()
         val rxMonotonic = SystemClock.elapsedRealtime()
 
         if (elmResponse.status != ResponseStatus.OK) {
@@ -812,9 +812,15 @@ class ObdScheduler(
         )
     }
 
-    private fun getNowUtc(): String {
-        return SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
-            timeZone = TimeZone.getTimeZone("UTC")
-        }.format(Date())
-    }
+    /**
+     * The stamp on EVERY transaction this scheduler produces.
+     *
+     * Renamed from `getNowUtc` and re-zoned: owner mandate 2026-09-17, "For all records use IST
+     * time only no UTC." This one function fed `TransactionRecord.timestampUtc` for the whole app
+     * - live table, session JSON, both CSVs, the ZIP bundle, the Room telemetry rows and every
+     * export - so a 08:57 Hyderabad start was recorded as 03:27 everywhere. It is now IST with
+     * its offset printed (`+05:30`); the field name stays because trip JSON, Room and every
+     * existing backup use that key.
+     */
+    private fun getNowStamp(): String = com.example.data.RecordTime.stamp()
 }

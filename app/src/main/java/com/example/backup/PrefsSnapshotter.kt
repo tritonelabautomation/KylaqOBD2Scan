@@ -29,9 +29,9 @@ object PrefsSnapshotter {
 
     /** Writes the snapshot to [dest] (the file name ZipExporter packs) and returns it. */
     fun writeToFile(context: Context, dest: File): File {
-        val nowUtc = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
-            timeZone = TimeZone.getTimeZone("UTC")
-        }.format(Date())
+        // IST with offset (owner 2026-09-17): the backup snapshot says when it was taken in the
+        // owner's own clock, not five and a half hours earlier.
+        val nowUtc = com.example.data.RecordTime.stamp()
         dest.writeText(AppDataSnapshot.build(nowUtc, collect(context)))
         return dest
     }

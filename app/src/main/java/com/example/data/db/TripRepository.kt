@@ -138,7 +138,10 @@ class TripRepository(context: Context) {
         val report = ruleBasedEngine.analyzeTrip(trip, samples, events)
 
         // Store analysis in Room database
-        val nowUtc = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).format(Date())
+        // IST with its offset (owner mandate 2026-09-17). This used to be a literal 'Z' with no
+        // timeZone set, i.e. device-local wall time LABELLED as UTC - a stamp that lied about its
+        // own zone by five and a half hours.
+        val nowUtc = com.example.data.RecordTime.stamp()
         val obsArray = JSONArray()
         report.observations.forEach { obs ->
             val obj = JSONObject().apply {

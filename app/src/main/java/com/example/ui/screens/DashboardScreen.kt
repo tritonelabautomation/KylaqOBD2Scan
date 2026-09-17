@@ -54,6 +54,11 @@ fun DashboardScreen(
     val connectedDeviceName by viewModel.connectedDeviceName.collectAsState()
     val isPolling by viewModel.isPolling.collectAsState()
     val autoStopNotice by viewModel.autoStopNotice.collectAsState()
+    // What the automatic crash recovery did on this launch (owner 2026-09-17: "today logs not
+    // saved unable to recover it"). Shown on the landing screen because a rescued trip that
+    // reappears with no explanation looks like a bug, and one that stays missing looks like the
+    // app lost it.
+    val autoRecoveryNotice by viewModel.autoRecoveryNotice.collectAsState()
     val gpsData by viewModel.gpsData.collectAsState()
     val gpsStatus by viewModel.gpsManager.gpsStatus.collectAsState()
     val transactionCount by viewModel.transactionCount.collectAsState()
@@ -232,6 +237,7 @@ fun DashboardScreen(
             canResponseCount = canResponseCount,
             errorCount = errorCount,
             autoStopNotice = autoStopNotice,
+            autoRecoveryNotice = autoRecoveryNotice,
             gpsNotice = gpsNoticeFor(
                 isRecording = isRecording,
                 fixAvailable = gpsData.isAvailable,
@@ -533,6 +539,7 @@ fun RecordingControlBar(
     canResponseCount: Long,
     errorCount: Long,
     autoStopNotice: String? = null,
+    autoRecoveryNotice: String? = null,
     gpsNotice: String? = null,
     gpsNoticeTone: Int = 1,
     onStartRecording: () -> Unit,
@@ -639,6 +646,16 @@ fun RecordingControlBar(
             autoStopNotice?.let {
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(it, color = WarningRed, fontSize = 12.sp, lineHeight = 17.sp)
+            }
+            autoRecoveryNotice?.let {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    it,
+                    modifier = Modifier.testTag("txt_auto_recovery_notice"),
+                    color = NeonEmerald,
+                    fontSize = 12.sp,
+                    lineHeight = 17.sp
+                )
             }
             gpsNotice?.let {
                 Spacer(modifier = Modifier.height(6.dp))

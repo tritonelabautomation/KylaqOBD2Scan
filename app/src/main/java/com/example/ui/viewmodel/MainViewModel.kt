@@ -65,6 +65,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val g = gpsManager.gpsData.value
             if (g.isAvailable) g.altitudeMeters else null
         }
+        // Rebuild anything a killed process left behind, before the owner has to ask.
+        runAutoRecovery()
     }
     val cloudBackupManager = AppContainer.cloudBackupManager
     val catalogRepository = AppContainer.catalogRepository
@@ -768,10 +770,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             var prev = bluetoothManager.connectionState.value
             bluetoothManager.connectionState.collect { st ->
-                val connectEdge = st == com.example.bluetooth.ConnectionState.CONNECTED &&
-                    prev != com.example.bluetooth.ConnectionState.CONNECTED
+                val connected = st == com.example.bluetooth.ConnectionState.CONNECTED
+                val connectEdge = connected && prev != com.example.bluetooth.ConnectionState.CONNECTED
+                val disconnectEdge = !connected && prev == com.example.bluetooth.ConnectionState.CONNECTED
                 prev = st
                 if (connectEdge) maybeSpeakWelcome()
+                // Log adapter traffic from the moment the link is up, not only while a trip is
+                // being recorded (owner 2026-09-17: "it never ever loose the logs"). Frames that
+                // arrive before auto-record starts used to exist only in the RAM ring buffer, so a
+                // kill in that window left nothing on disk at all. A session log, once open, always
+                // takes precedence and this is a no-op.
+                if (connectEdge) runCatching { rawLogManager.startConnectionLogging() }
+                if (disconnectEdge) runCatching { rawLogManager.stopConnectionLogging() }
             }
         }
     }
@@ -1071,6 +1081,42 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _recoveryNotice = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
     val recoveryNotice: kotlinx.coroutines.flow.StateFlow<String?> = _recoveryNotice.asStateFlow()
 
+    // ── AUTOMATIC recovery (owner 2026-09-17: "today logs not saved unable to recover it ...
+    // it never ever loose the logs") ────────────────────────────────────────────────────
+    //
+    // Recovery used to be a banner on Trips & Recordings that had to be noticed and tapped. The
+    // owner never saw it and a whole day of driving stayed unrecovered. It now runs by itself the
+    // moment the app starts - and again whenever the keep-alive service is restarted by Android
+    // after a kill, which needs no UI at all - rebuilding every session from the crash journal and
+    // the raw logs.
+
+    private val _autoRecoveryNotice = MutableStateFlow<String?>(null)
+    val autoRecoveryNotice: StateFlow<String?> = _autoRecoveryNotice.asStateFlow()
+
+    val isAutoRecovering: StateFlow<Boolean> = recordingManager.recoveryRunning
+
+    private var autoRecoveryStarted = false
+
+    /** Idempotent: safe from init, from a resume, and from the service at the same time. */
+    fun runAutoRecovery() {
+        if (autoRecoveryStarted) return
+        autoRecoveryStarted = true
+        viewModelScope.launch {
+            val summary = try {
+                recordingManager.recoverUnfinishedSessions()
+            } catch (e: Exception) {
+                null
+            }
+            if (summary != null) {
+                _autoRecoveryNotice.value = summary.notice()
+                _recoveryNotice.value = summary.notice()
+                refreshUnsavedRawLogs()
+            }
+        }
+    }
+
+    fun clearAutoRecoveryNotice() { _autoRecoveryNotice.value = null }
+
     fun recoverRawLog(file: java.io.File) {
         if (_isRecovering.value) return
         viewModelScope.launch {
@@ -1239,9 +1285,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun persistDriveInsights() {
         try {
             val snap = obdScheduler.driveAnalytics.snapshot.value
-            val nowUtc = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US)
-                .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
-                .format(java.util.Date())
+            // IST with offset (owner 2026-09-17): coast/ride insight logs carry the owner's clock.
+            val nowUtc = com.example.data.RecordTime.stamp()
             if (snap.coast.totalSeconds >= 30.0 || snap.coast.totalDistanceM >= 200.0) {
                 settingsRepository.appendCoastLog(DriveInsightsStore.encodeCoast(nowUtc, snap.coast))
             }
