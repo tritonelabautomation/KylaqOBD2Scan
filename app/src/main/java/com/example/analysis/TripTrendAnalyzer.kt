@@ -238,10 +238,33 @@ object TripTrendAnalyzer {
         // just AFTER rpm, so at the NEXT rpm row the speed is a whole cycle (~3 s)
         // stale and every pair missed PAIR_MS. Emit on WHICHEVER of the two arrives
         // second, so one of the two always sees a fresh partner.
+        var lastGear: Int? = null
+        var lastTs = -1L
         fun emit(ts: Long, rpm: Double, spd: Double) {
             val ratio = rpm / spd
             val g = model.estimate(ratio)?.first ?: model.nearestGear(ratio)?.first
-            if (g != null) out += ts to g.toDouble()
+            if (g == null) return
+            // Owner 2026-09-17: "Why the hell gear switched from 1 to 3? Is that real
+            // in 6speed TC AT" - NO: a torque-converter box shifts ONE gear at a time.
+            // A 1->3 jump means the sampler missed the brief 2nd-gear phase (hard
+            // accel: 1->2->3 inside ~8 s, samples ~3 s apart). A physical gearbox must
+            // pass through every intermediate gear, so reconstruct the missed phases
+            // evenly between the two observations instead of drawing an impossible skip.
+            val prev = lastGear
+            if (prev != null && ts > lastTs) {
+                val step = g - prev
+                val n = kotlin.math.abs(step)
+                if (n >= 2) {
+                    val sign = if (step > 0) 1 else -1
+                    for (k in 1 until n) {
+                        val tk = lastTs + (ts - lastTs) * k / n
+                        out += tk to (prev + sign * k).toDouble()
+                    }
+                }
+            }
+            out += ts to g.toDouble()
+            lastGear = g
+            lastTs = ts
         }
         for (r in rows.sortedBy { timestamp(it) }) {
             val v = value(r) ?: continue

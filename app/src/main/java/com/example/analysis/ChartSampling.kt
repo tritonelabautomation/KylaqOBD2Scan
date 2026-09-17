@@ -74,8 +74,13 @@ object ChartSampling {
             val m = modeOf(sorted.map { it.second })
             return listOf(Bucket(first, m, m, m, sorted.size))
         }
-        val bucketCount = minOf(maxBuckets.toLong(), last - first).toInt().coerceAtLeast(1)
-        val width = (last - first + 1) / bucketCount.toDouble()
+        // Discrete phases can be SHORT (a 2-4 s 2nd-gear window under hard accel).
+        // At full-span zoom 180 buckets over 73 min = 24 s buckets, and the mode of a
+        // 24 s bucket erases a 3 s gear entirely - that is why the owner saw 1 jump to
+        // 3. Cap bucket width at 2 s so every real phase survives at every zoom level.
+        val span = last - first
+        val bucketCount = minOf(maxBuckets.toLong(), span / 2000L, span).toInt().coerceAtLeast(1)
+        val width = (span + 1) / bucketCount.toDouble()
         val out = mutableListOf<Bucket>()
         for (i in 0 until bucketCount) {
             val lo = first + (i * width).toLong()

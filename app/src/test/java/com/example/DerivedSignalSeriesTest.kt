@@ -77,6 +77,23 @@ class DerivedSignalSeriesTest {
     }
 
     @Test
+    fun impossibleGearSkipReconstructsTheMissedPhase() {
+        // 1st gear crawl, then (sampler blind through the 2nd-gear window) 3rd gear:
+        // the series must pass through 2, never draw a 1->3 teleport.
+        val rows = mutableListOf<Row>()
+        var ts = 1_000L
+        repeat(3) { rows += Row(ts, "0D", 8.0); rows += Row(ts + 100, "0C", 862.0); ts += 1_000 }
+        ts += 6_000
+        repeat(3) { rows += Row(ts, "0D", 45.0); rows += Row(ts + 100, "0C", 1820.0); ts += 1_000 }
+        val gears = gearPoints(rows, { it.ts }, { it.pid }, { it.v }).map { it.second }
+        assertTrue("series must contain the reconstructed 2nd: $gears", gears.contains(2.0))
+        val seq = gears.distinct()
+        for (i in 1 until seq.size) {
+            assertTrue("consecutive plateaus step by 1: $seq", kotlin.math.abs(seq[i] - seq[i - 1]) <= 1.0)
+        }
+    }
+
+    @Test
     fun fourHexAndTwoHexPidsBothWork() {
         val rows = listOf(Row(1_000, "010D", 40.0), Row(1_000, "010C", 2464.0))
         assertEquals(1, gearPoints(rows, { it.ts }, { it.pid }, { it.v }).size)

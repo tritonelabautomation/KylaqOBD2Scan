@@ -31,6 +31,22 @@ class DiscreteBucketTest {
     }
 
     @Test
+    fun briefPhaseSurvivesFullSpanZoom() {
+        // 10-minute span, one 3-second 2nd-gear window inside a sea of 3rd:
+        // 24 s mean-buckets used to erase it; the 2 s cap must keep it.
+        val pts = mutableListOf<Pair<Long, Double>>()
+        var ts = 0L
+        repeat(200) { pts += ts to 3.0; ts += 3_000 }
+        val phaseStart = 300_000L
+        pts += phaseStart to 2.0
+        pts += phaseStart + 1_000 to 2.0
+        pts += phaseStart + 2_000 to 2.0
+        val buckets = ChartSampling.bucketizeDiscrete(pts.sortedBy { it.first }, 180)
+        assertTrue("a 2-gear bucket must survive: ${buckets.distinctBy { it.avg }.map { it.avg }}",
+            buckets.any { it.avg == 2.0 })
+    }
+
+    @Test
     fun emptyStaysEmpty() {
         assertTrue(ChartSampling.bucketizeDiscrete(emptyList(), 4).isEmpty())
     }
