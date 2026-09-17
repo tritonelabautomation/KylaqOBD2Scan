@@ -35,7 +35,8 @@ object CsvExporter {
             ?: tx.decodedValueDisplay
         return listOf(
             escapeCsv(sessionId),
-            escapeCsv(tx.timestampUtc),
+            // IST on the way out - see RecordTime.normalizeToIst.
+            escapeCsv(RecordTime.normalizeToIst(tx.timestampMonotonic, tx.timestampUtc) ?: tx.timestampUtc),
             tx.timestampMonotonic.toString(),
             escapeCsv(tx.direction.name),
             escapeCsv(canId),
@@ -54,7 +55,8 @@ object CsvExporter {
 
     /** One synchronized-sample row, WITHOUT the trailing newline. See [transactionRow]. */
     fun sampleRow(s: SynchronizedSample): String = listOf(
-        escapeCsv(s.timestampUtc),
+        // IST on the way out - see RecordTime.normalizeToIst.
+        escapeCsv(RecordTime.normalizeToIst(s.timestampMonotonic, s.timestampUtc) ?: s.timestampUtc),
         s.rpm?.let { String.format(Locale.US, "%.1f", it) } ?: "",
         s.speedKmh?.let { String.format(Locale.US, "%.1f", it) } ?: "",
         s.engineLoadPct?.let { String.format(Locale.US, "%.2f", it) } ?: "",

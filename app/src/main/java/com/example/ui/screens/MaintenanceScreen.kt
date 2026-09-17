@@ -516,7 +516,7 @@ private fun ServiceDialog(
         title = { Text("Log service: ${item.label}") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Recorded now (${SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date())}).", fontSize = 11.sp, color = TextSecondaryDark)
+                Text("Recorded now (${com.example.data.RecordTime.format("dd MMM yyyy", System.currentTimeMillis())}).", fontSize = 11.sp, color = TextSecondaryDark)
                 OutlinedTextField(value = odo, onValueChange = { odo = it }, label = { Text("Odometer km") }, singleLine = true)
                 OutlinedTextField(value = cost, onValueChange = { cost = it }, label = { Text("Cost ₹ (optional)") }, singleLine = true)
                 Row(verticalAlignment = Alignment.CenterVertically) {

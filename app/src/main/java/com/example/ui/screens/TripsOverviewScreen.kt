@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.sp
 import com.example.analysis.TripFuelSummary
 import com.example.analysis.WeeklyTripOverview
 import com.example.analysis.WeeklyTripOverview.DriveBand
+import com.example.data.db.entities.instantMs
 import com.example.ui.viewmodel.MainViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.map
@@ -90,7 +91,7 @@ fun TripsOverviewScreen(
                 WeeklyTripOverview.TripInput(
                     tripId = t.id, title = t.title, startMs = t.startTimestamp,
                     summary = TripFuelSummary.summarize(
-                        samples.map { TripFuelSummary.SamplePoint(it.pid, it.timestamp, it.numericValue) }
+                        samples.map { TripFuelSummary.SamplePoint(it.pid, it.instantMs, it.numericValue) }
                     )
                 )
             }
@@ -311,7 +312,7 @@ private fun bandName(b: DriveBand): String = when (b) {
     DriveBand.NORMAL -> "Normal"; DriveBand.SLOW -> "Slow"; DriveBand.CONGESTED -> "Congested"; DriveBand.STOPPED -> "Stopped"
 }
 
-private fun dayHeader(startMs: Long): String = SimpleDateFormat("EEEE, MMM d", Locale.US).format(Date(startMs))
+private fun dayHeader(startMs: Long): String = com.example.data.RecordTime.format("EEEE, MMM d", startMs)
 
 /** Tri-colour gradient score ring exactly like the reference (green→yellow→blue arcs). */
 @Composable
@@ -363,7 +364,7 @@ fun BandStrip(fractions: List<Double>) {
 
 @Composable
 private fun TripRow(trip: WeeklyTripOverview.TripCard, price: Double, onOpenTrip: (String) -> Unit) {
-    val timeFmt = remember { SimpleDateFormat("HH:mm", Locale.US) }
+    val timeFmt = remember { com.example.data.RecordTime.formatter("HH:mm") }
     Column(Modifier.fillMaxWidth().background(TtInner, RoundedCornerShape(14.dp)).clickable { onOpenTrip(trip.tripId) }.padding(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             GradientRing(score = trip.score, size = 42.dp, stroke = 3.5.dp, numberSp = 13)

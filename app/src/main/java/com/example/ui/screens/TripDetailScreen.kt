@@ -32,6 +32,7 @@ import androidx.core.content.FileProvider
 import com.example.data.db.entities.AiAnalysisEntity
 import com.example.data.db.entities.RawLogEntity
 import com.example.data.db.entities.TelemetrySampleEntity
+import com.example.data.db.entities.instantMs
 import com.example.data.db.entities.TripEntity
 import com.example.ui.components.TrendChart
 import com.example.ui.components.TrendLine
@@ -79,7 +80,7 @@ fun TripDetailScreen(
     // "Log fuel" for this trip: fuel rate integrated over the stored samples.
     val fuelSummary = remember(samples) {
         com.example.analysis.TripFuelSummary.summarize(
-            samples.map { com.example.analysis.TripFuelSummary.SamplePoint(it.pid, it.timestamp, it.numericValue) }
+            samples.map { com.example.analysis.TripFuelSummary.SamplePoint(it.pid, it.instantMs, it.numericValue) }
         )
     }
 
@@ -213,7 +214,7 @@ fun TripDetailScreen(
                             summary = fuelSummary,
                             pricePerL = viewModel.fuelLogRepository.entries().maxByOrNull { it.idMs }?.pricePerL ?: 0.0,
                             speedPoints = samples.filter { it.pid.takeLast(2) == "0D" }
-                                .map { it.timestamp to (it.numericValue ?: 0.0) }
+                                .map { it.instantMs to (it.numericValue ?: 0.0) }
                         )
                     }
                 }
@@ -391,7 +392,22 @@ private fun TripOverviewView(
                     DetailRow("Duration", "${trip.durationSeconds / 60}m ${trip.durationSeconds % 60}s")
                     DetailRow("Samples Recorded", "$sampleCount samples")
                     DetailRow("Raw CAN Frames", "$rawCount frames")
-                    DetailRow("Start Time (UTC)", trip.startTimeUtc)
+                    // Was: DetailRow("Start Time (UTC)", trip.startTimeUtc) - the stored string
+                    // printed verbatim under a label that announced UTC. For a trip recorded before
+                    // 1.0.337 that string really is UTC, so the owner read a time five and a half
+                    // hours behind the drive he was looking at; for one recorded after, the label
+                    // contradicted the IST value beside it. Either way it was the one place in the
+                    // app that showed him a zone he did not ask for.
+                    //
+                    // The instant comes from startTimestamp, not from the string: this row carries
+                    // both, and the millis cannot have been written in the wrong zone. See
+                    // RecordTime.instantOf for why that matters for history spanning the change.
+                    DetailRow(
+                        "Start Time (IST)",
+                        com.example.data.RecordTime.instantOf(trip.startTimestamp, trip.startTimeUtc)
+                            ?.let { com.example.data.RecordTime.format("yyyy-MM-dd HH:mm:ss", it) }
+                            ?: "--"
+                    )
                 }
             }
         }
@@ -502,27 +518,27 @@ private fun TripTrendsView(
         if (ch.pid == com.example.analysis.TripTrendAnalyzer.PID_POWER_KW) {
             com.example.analysis.TripTrendAnalyzer.powerPoints(
                 samples,
-                timestamp = { it.timestamp },
+                timestamp = { it.instantMs },
                 pid = { it.pid },
                 value = { it.numericValue }
             )
         } else if (ch.pid == com.example.analysis.TripTrendAnalyzer.PID_GEAR) {
             com.example.analysis.TripTrendAnalyzer.gearPoints(
                 samples,
-                timestamp = { it.timestamp },
+                timestamp = { it.instantMs },
                 pid = { it.pid },
                 value = { it.numericValue }
             )
         } else if (ch.pid == com.example.analysis.TripTrendAnalyzer.PID_ALTITUDE_GPS) {
             com.example.analysis.TripTrendAnalyzer.altitudePoints(
                 samples,
-                timestamp = { it.timestamp },
+                timestamp = { it.instantMs },
                 altitudeM = { it.altitudeM }
             )
         } else {
             samples
                 .filter { it.pid.equals(ch.pid.removePrefix("01"), ignoreCase = true) || it.pid.equals(ch.pid, ignoreCase = true) }
-                .mapNotNull { smp -> smp.numericValue?.let { smp.timestamp to (ch.transform?.invoke(it) ?: it) } }
+                .mapNotNull { smp -> smp.numericValue?.let { smp.instantMs to (ch.transform?.invoke(it) ?: it) } }
                 .sortedBy { it.first }
         }
 
@@ -597,7 +613,7 @@ private fun TripTrendsView(
 
         // Time context for the PRIMARY signal (which window the trend covers).
         if (primary != null && primary.points.size >= 2) {
-            val timeFmt = remember { SimpleDateFormat("HH:mm:ss", Locale.US) }
+            val timeFmt = remember { com.example.data.RecordTime.formatter("HH:mm:ss") }
             val pts = primary.points
             val spanSec = (pts.last().first - pts.first().first) / 1000L
             Row(
@@ -841,7 +857,7 @@ private fun TripExportView(
     val rawFile = File(sessionDir, "${tripId}_raw.txt")
     
     val safeVehicle = trip?.vehicleName?.replace(Regex("[^a-zA-Z0-9.-]"), "_") ?: "Vehicle"
-    val safeDate = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date(trip?.startTimestamp ?: System.currentTimeMillis()))
+    val safeDate = com.example.data.RecordTime.format("yyyyMMdd_HHmmss", trip?.startTimestamp ?: System.currentTimeMillis())
     val bundleName = "OBDLogger_${safeVehicle}_${safeDate}_$tripId.zip"
     val zipFile = File(sessionDir, bundleName)
     
@@ -1166,7 +1182,7 @@ private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summar
             val volts = summary.voltageExtremes
             if (volts != null) {
                 Spacer(modifier = Modifier.height(4.dp))
-                val vFmt = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
+                val vFmt = com.example.data.RecordTime.formatter("HH:mm:ss")
                 InsightBlock(
 
                     accent = ElectricAmber,
@@ -1209,8 +1225,7 @@ private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summar
                 val firstSwitch = ac.switchEvents.firstOrNull()
                 val switchNote = firstSwitch?.let { (ts, on) ->
                     " • first flip ${if (on) "ON" else "OFF"} at " +
-                        java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
-                            .format(java.util.Date(ts))
+                        com.example.data.RecordTime.format("HH:mm:ss", ts)
                 } ?: ""
                 InsightBlock(
 

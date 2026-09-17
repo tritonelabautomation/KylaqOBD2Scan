@@ -51,7 +51,7 @@ object DriveBackupClient {
         withContext(Dispatchers.IO) {
             val tree = DocumentFile.fromTreeUri(context, treeUri)
                 ?: error("Drive folder is no longer accessible - pick it again.")
-            val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
+            val stamp = com.example.data.RecordTime.format("yyyyMMdd-HHmmss", System.currentTimeMillis())
             val name = "kylaq-obd-backup-$stamp.zip"
             val cacheZip = File(context.cacheDir, name)
             val snapshotFile = File(context.cacheDir, AppDataSnapshot.FILE_NAME)

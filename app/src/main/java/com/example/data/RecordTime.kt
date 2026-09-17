@@ -52,8 +52,125 @@ object RecordTime {
     /** `2026-09-17 14:27:05.123` - raw ELM log lines, where every line must carry its date. */
     private const val LOG_PATTERN = "yyyy-MM-dd HH:mm:ss.SSS"
 
-    private fun format(pattern: String, millis: Long): String =
+    /**
+     * Renders an instant in IST with any shape. This is the ONLY sanctioned way to turn a millis
+     * value into text anywhere in the app.
+     *
+     * It exists because 21 call sites were building their own `SimpleDateFormat` with no timezone,
+     * which silently means "whatever zone this device is set to". On the owner's phone that is IST,
+     * so it looked correct - until the device zone changes, a backup is restored elsewhere, or a
+     * log is read on a second phone, and every trend axis and trip time shifts by hours with nothing
+     * in the code to explain it. Owner mandate 2026-09-17: *"All logs, trends everything should be
+     * IST even the old logs should be IST by default."* "By default" cannot mean "by accident of the
+     * device setting", so the zone is pinned here instead.
+     */
+    fun format(pattern: String, millis: Long): String =
         SimpleDateFormat(pattern, Locale.US).apply { timeZone = recordZone }.format(Date(millis))
+
+    /**
+     * An IST-pinned [SimpleDateFormat] for callers that format many instants in a loop - a chart
+     * drawing its axis ticks, a list binding rows - where building a formatter per value would
+     * show up as jank. `remember { RecordTime.formatter("HH:mm:ss") }` replaces
+     * `remember { SimpleDateFormat("HH:mm:ss", Locale.US) }` with the same cost and the zone
+     * guaranteed. Not thread-safe, exactly like the SimpleDateFormat it hands back: keep one per
+     * composition, do not share it across threads.
+     */
+    fun formatter(pattern: String): SimpleDateFormat =
+        SimpleDateFormat(pattern, Locale.US).apply { timeZone = recordZone }
+
+    /**
+     * The instant a record refers to, when the record carries BOTH an epoch-millis field and a
+     * string stamp - which every Room row in this app does (`TripEntity.startTimestamp` beside
+     * `startTimeUtc`, `timestamp` beside `timestampUtc` in the four sample tables).
+     *
+     * **The millis win, and that is not a tie-break, it is the only defensible reading.** Two
+     * conventions wrote the strings in the owner's existing history. Auditing build 1.0.336 - the one
+     * that wrote every log currently on his phone - found 18 formatters that printed a literal `Z`:
+     * **15 formatted in UTC and meant it**, including `RecordingManager`, so the trips and logs
+     * themselves, and **3 formatted in the device zone and printed the same `Z` while holding IST
+     * digits**: `ZipImporter`'s fallback stamp for an import with no meta, `TripRepository`'s AI
+     * analysis stamp, and `PidDiscoveryService`'s discovery export. Both shapes are in his data and
+     * they need opposite corrections: read the honest ones as IST and the drive moves 5.5 h early,
+     * read the dishonest ones as UTC and it moves 5.5 h late. No single rule for "an old `Z`" can be
+     * right for both.
+     *
+     * `System.currentTimeMillis()` has no zone to get wrong, so where it was stored alongside the
+     * string it settles the question per record without guessing. The string is then display-only.
+     * A record with no millis (a Fuelio CSV, an imported ZIP, a hand-edited file) falls through to
+     * [parseMillis], which honours an explicit offset, reads `Z` as UTC and reads a naive stamp as
+     * IST - the documented default, and the best available when there is nothing to check against.
+     *
+     * **A millis value only counts as an instant if it could be one.** Two ways this app stores a
+     * non-instant in a `Long` that sits beside a stamp:
+     *
+     *  - `0` / negative - an unfilled column or a `?: 0L` fallback. `0` is 1970, and plotting it
+     *    would put a drive forty years before the car was built.
+     *  - **`SystemClock.elapsedRealtime()`** - milliseconds since boot. `TransactionRecord
+     *    .timestampMonotonic` is filled with uptime by the live transport and scheduler, and
+     *    `RecordingManager` copied it into the indexed `TelemetrySampleEntity.timestamp` column. So
+     *    for every live-recorded trip that column held uptime, and the trend chart formatted it as a
+     *    time of day: a drive taken three hours after boot drew its axis from ~08:30 IST on
+     *    1970-01-01 whatever the real hour, and cross-trip trends compared one phone's uptime
+     *    against another's. Nothing crashed, because uptime still increases - the shape of the
+     *    curve stayed right while every label on it was wrong.
+     *
+     * Both are outside [MIN_PLAUSIBLE_EPOCH_MS]..[MAX_PLAUSIBLE_EPOCH_MS], so both fall through to
+     * the stamp beside them, which does state the instant. That repairs rows already on the owner's
+     * phone with no migration and no rewrite of his history.
+     *
+     * @return the instant, or null when neither field yields one. Never 0: null means "unknown".
+     */
+    fun instantOf(millis: Long?, stored: String?): Long? {
+        if (millis != null && millis in MIN_PLAUSIBLE_EPOCH_MS..MAX_PLAUSIBLE_EPOCH_MS) return millis
+        return parseMillis(stored)
+    }
+
+    /**
+     * 2020-01-01T00:00:00Z. Every record this app can hold is later than that, while uptime would
+     * take fifty years of continuous runtime to reach it - so the two populations do not overlap and
+     * the bound separates them cleanly rather than by taste.
+     */
+    const val MIN_PLAUSIBLE_EPOCH_MS = 1_577_836_800_000L
+
+    /** 2100-01-01T00:00:00Z. A value past this is corrupt, not a future booking. */
+    const val MAX_PLAUSIBLE_EPOCH_MS = 4_102_444_800_000L
+
+    /** True when [millis] can only be an epoch instant, not uptime and not an unfilled column. */
+    fun isPlausibleEpoch(millis: Long?): Boolean =
+        millis != null && millis in MIN_PLAUSIBLE_EPOCH_MS..MAX_PLAUSIBLE_EPOCH_MS
+
+    /**
+     * Re-states any record's time in canonical IST, for the write paths that emit a file: CSV
+     * export, session JSON, the ZIP bundle, a fleet sheet.
+     *
+     * Exporting used to copy the stored string through untouched, so exporting a trip recorded
+     * before the IST mandate produced a file full of `...Z` UTC stamps - the owner's data left the
+     * phone in the one zone he asked never to see. This resolves the instant with [instantOf] (so an
+     * old honest-UTC row, an old dishonest-`Z` row and a row carrying uptime all land on the real
+     * moment) and re-stamps it in IST.
+     *
+     * **Byte-stable for anything already IST.** A stamp that already ends in the IST offset and
+     * parses to the same instant is returned exactly as stored, so exports of recent sessions do not
+     * change by one character. That matters because the crash journal is required to be
+     * byte-identical to the CSV export of the same session; a normalizer that re-flowed canonical
+     * stamps would have broken that for no gain.
+     *
+     * @return the IST stamp, or null when no instant can be resolved - in which case the caller
+     *         should keep whatever it had rather than write a blank over real data.
+     */
+    // The parameter is `stored`, NOT `stamp`: a parameter called `stamp` shadows the `stamp(millis)`
+    // function, so `return stamp(instant)` would have tried to invoke a String. Kotlin rejects that,
+    // but only at compile time, and only in CI.
+    fun normalizeToIst(millis: Long?, stored: String?): String? {
+        val instant = instantOf(millis, stored) ?: return null
+        if (stored != null && stored.endsWith(IST_OFFSET_SUFFIX) && parseMillis(stored) == instant) {
+            return stored
+        }
+        return stamp(instant)
+    }
+
+    /** The offset every canonical record stamp ends with. */
+    private const val IST_OFFSET_SUFFIX = "+05:30"
 
     /** Canonical record stamp for "now", in IST with its offset. */
     fun stamp(): String = stamp(System.currentTimeMillis())

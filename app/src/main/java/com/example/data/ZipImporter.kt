@@ -382,7 +382,11 @@ object ZipImporter {
                 val dbSamples = txEntities.mapIndexed { idx, tx ->
                     TelemetrySampleEntity(
                         tripId = sessionId,
-                        timestamp = tx.timestampMonotonic,
+                        // A ZIP written by the live path carries uptime in timestampMonotonic, so the
+                        // stamp decides the instant here too. See RecordingManager's insertSamples.
+                        timestamp = com.example.data.RecordTime.instantOf(
+                            tx.timestampMonotonic, tx.timestampUtc
+                        ) ?: tx.timestampMonotonic,
                         timestampUtc = tx.timestampUtc,
                         ecuCanId = tx.canRxId.ifBlank { "7E8" },
                         pid = tx.pid,

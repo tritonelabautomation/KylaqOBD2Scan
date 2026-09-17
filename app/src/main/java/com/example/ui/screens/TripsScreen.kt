@@ -376,7 +376,7 @@ private fun TripCard(
                     Text(plan.name, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                     Text(
                         "${plan.from} \u2192 ${plan.to} \u00B7 ${String.format(java.util.Locale.US, "%.0f", plan.distanceKm)} km \u00B7 " +
-                            SimpleDateFormat("dd MMM", Locale.getDefault()).format(Date(plan.dateMs)),
+                            com.example.data.RecordTime.format("dd MMM", plan.dateMs),
                         color = TextSecondaryDark, fontSize = 11.sp
                     )
                 }

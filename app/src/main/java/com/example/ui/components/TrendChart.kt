@@ -195,10 +195,13 @@ fun TrendChart(
         }
 
         // Adaptive time ticks: HH:mm:ss once the visible window is under 10 minutes.
+        // Axis ticks and the touch bubble are records of when a sample happened, so they are
+        // pinned to IST rather than to whatever zone this device is set to. A chart that redraws
+        // its axis every frame must not build a formatter per tick, hence formatter() + remember.
         val tickFmt = remember(viewT0, viewT1) {
-            SimpleDateFormat(if (viewT1 - viewT0 < 600_000L) "HH:mm:ss" else "HH:mm", Locale.US)
+            com.example.data.RecordTime.formatter(if (viewT1 - viewT0 < 600_000L) "HH:mm:ss" else "HH:mm")
         }
-        val bubbleFmt = remember { SimpleDateFormat("HH:mm:ss", Locale.US) }
+        val bubbleFmt = remember { com.example.data.RecordTime.formatter("HH:mm:ss") }
         val viewState = rememberUpdatedState(Pair(viewT0, viewT1))
 
         Canvas(

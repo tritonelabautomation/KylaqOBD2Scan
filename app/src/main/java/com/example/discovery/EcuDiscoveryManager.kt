@@ -169,7 +169,7 @@ class EcuDiscoveryManager(
 
         val logLines = mutableListOf<String>()
         fun log(msg: String) {
-            logLines.add("[${SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date())}] $msg")
+            logLines.add("[${com.example.data.RecordTime.format("HH:mm:ss.SSS", System.currentTimeMillis())}] $msg")
         }
 
         // IST with offset (owner 2026-09-17). The discovery export used to carry a UTC run stamp

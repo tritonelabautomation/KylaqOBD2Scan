@@ -230,7 +230,7 @@ private fun shareConsoleLog(context: Context, logText: String) {
             rawLogsDir.mkdirs()
         }
 
-        val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+        val timeStamp = com.example.data.RecordTime.format("yyyyMMdd_HHmmss", System.currentTimeMillis())
         val logFile = File(rawLogsDir, "ELM327_Console_$timeStamp.txt")
         logFile.writeText(logText)
 

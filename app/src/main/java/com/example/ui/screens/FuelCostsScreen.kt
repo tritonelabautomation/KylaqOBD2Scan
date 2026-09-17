@@ -129,7 +129,7 @@ fun FuelCostsScreen(
                         Box(Modifier.size(10.dp).border(1.5.dp, Color(0xFF636366), CircleShape))
                         Spacer(Modifier.width(8.dp))
                         Text(relativeLabel(entry.idMs), color = Color(0xFF8E8E93), fontSize = 11.sp, modifier = Modifier.weight(1f))
-                        Text(SimpleDateFormat("MMM d, HH:mm", Locale.US).format(Date(entry.idMs)), color = Color(0xFF8E8E93), fontSize = 11.sp)
+                        Text(com.example.data.RecordTime.format("MMM d, HH:mm", entry.idMs), color = Color(0xFF8E8E93), fontSize = 11.sp)
                     }
                     Row(Modifier.padding(start = 4.dp, top = 6.dp, bottom = 10.dp)) {
                         Box(Modifier.width(1.dp).height(92.dp).background(Color(0xFF2C2C2E)))
@@ -449,8 +449,10 @@ private fun RefuelDialog(
             grade = e.grade
             note = e.note
             partial = e.partial
-            val local = SimpleDateFormat("yyyy-MM-dd'T'HH:mm", Locale.US)
-                .apply { timeZone = TimeZone.getDefault() }.format(Date(e.idMs))
+            // Pinned to IST rather than TimeZone.getDefault(): this splits into the date and time
+            // columns of a fuel record, so a device set to another zone used to file the fill-up
+            // under a different day - and a fill-up at 00:20 IST would land on the previous date.
+            val local = com.example.data.RecordTime.format("yyyy-MM-dd'T'HH:mm", e.idMs)
             val parts = local.split('T')
             dateStr = parts[0]
             timeStr = parts.getOrNull(1) ?: "12:00"

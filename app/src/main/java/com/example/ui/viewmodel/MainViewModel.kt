@@ -7,6 +7,7 @@ import com.example.bluetooth.BluetoothDeviceInfo
 import com.example.bluetooth.BluetoothManager
 import com.example.bluetooth.ConnectionState
 import com.example.bluetooth.ElmResponse
+import com.example.data.db.entities.instantMs
 import com.example.bluetooth.ElmTransport
 import com.example.bluetooth.SimulationTransport
 import kotlinx.coroutines.flow.firstOrNull
@@ -1435,7 +1436,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 com.example.analysis.TripTrendAnalyzer.Sample(
                     tripId = it.tripId,
                     pid = if (pid.length == 2) "01$pid" else pid,
-                    ts = it.timestamp,
+                    ts = it.instantMs,
                     value = it.numericValue
                 )
             }

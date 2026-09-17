@@ -101,7 +101,22 @@ object RawLogRecovery {
      * @param anchorMillis the log file's last-modified time (≈ end of the drive); its
      *                     calendar day in [tz] anchors every line's time-of-day.
      */
-    fun extractTelemetry(text: String, anchorMillis: Long, tz: TimeZone = TimeZone.getDefault()): List<Telemetry> {
+    /**
+     * @param tz the zone an UNDATED line's time-of-day is read in - it decides which calendar day a
+     *   line belongs to, and therefore which day the recovered trip is filed under. Defaults to IST
+     *   rather than `TimeZone.getDefault()`, because the only production caller
+     *   (`RecordingManager.recoverFromRawLog`) does not pass one: the default WAS the behaviour.
+     *   With a device set to another zone, an old log recovered from it was anchored to the wrong
+     *   day, and a drive that started before 05:30 local was filed under the previous date. Owner
+     *   mandate 2026-09-17: *"even the old logs should be IST by default."* A dated line states its
+     *   own day and is unaffected - this only governs the undated shape, which is the shape every
+     *   log written before 1.0.337 has.
+     */
+    fun extractTelemetry(
+        text: String,
+        anchorMillis: Long,
+        tz: TimeZone = com.example.data.RecordTime.zone
+    ): List<Telemetry> {
         val cal = Calendar.getInstance(tz).apply {
             timeInMillis = anchorMillis
             set(Calendar.HOUR_OF_DAY, 0)

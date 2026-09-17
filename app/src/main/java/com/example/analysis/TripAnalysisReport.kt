@@ -19,7 +19,9 @@ object TripAnalysisReport {
     fun build(tripName: String, summary: TripFuelSummary.Summary): String {
         val sb = StringBuilder()
         val us = Locale.US
-        val timeFmt = SimpleDateFormat("HH:mm:ss", us)
+        // Pinned to IST: this report is a record, and a record must not depend on the
+        // zone the phone happens to be set to (owner mandate 2026-09-17).
+        val timeFmt = com.example.data.RecordTime.formatter("HH:mm:ss")
 
         sb.appendLine("# Trip analysis - $tripName")
         sb.appendLine()

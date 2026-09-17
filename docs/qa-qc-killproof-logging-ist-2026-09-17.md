@@ -395,9 +395,109 @@ re-derived line by line against `CanFrameParser` and checked against real frames
     plateau table and every curve survive; what can be sparse is the map trace and altitude. Adding
     background location means a second "Allow all the time" prompt and Play Store scrutiny for a
     sensitive permission, so that is the owner's decision, not something to slip into a logging fix.
+  * **One class of old file can still read 5.5 h off.** Of the three dishonest writers, two stored
+    their stamp beside epoch millis (`TripRepository`'s AI analysis uses `System.currentTimeMillis()`,
+    `ZipImporter` writes Room rows), so `instantOf` resolves them exactly. The third,
+    `PidDiscoveryService`'s discovery export, wrote a `timestamp` string with no millis anywhere in
+    the file. Reading it back there is nothing to corroborate against and the documented default
+    applies - `Z` means UTC - so a discovery JSON exported before 1.0.337 can display five and a half
+    hours late. Guessing instead would risk moving the fifteen honest writers' output, which is far
+    more data. Discovery exports are diagnostic snapshots rather than drive history, and a fresh
+    discovery run on the current build writes honest IST.
   * **The service can only run inside a live process.** Android itself can stop a foreground service
     - aggressive OEM battery management, "force stop", a swipe-away on some skins. Nothing in an app
     overrides that; the battery exemption in §4 is what buys the process its life.
+
+## 4d. Display followed the device zone, not IST
+
+Owner mandate, restated the same day: *"All logs, trends everything should be IST even the old logs
+should be IST by default."* The writers were already fixed; the readers were not.
+
+**22 formatters built their own `SimpleDateFormat` with no timezone**, which means "whatever this
+phone is set to". On the owner's phone that is IST, so every one of them looked correct - the defect
+only appears when the zone is not IST: a backup restored onto another handset, a drive abroad, an
+emulator, a QA device. They included the surfaces named in the mandate: the **trend chart axis and
+touch bubble** (`TrendChart`), the trip-detail curves, the trips-overview day headers and row times,
+the recordings list, the fuel-cost rows, maintenance and document dates, the diagnostics dialog, and
+three filename stamps.
+
+Two more were not formatters but the same mistake:
+
+  * `FuelCostsScreen` split a fuel record into date and time columns with
+    `timeZone = TimeZone.getDefault()` explicitly - so a device in another zone filed a fill-up under
+    the wrong day, and one at 00:20 IST landed on the previous date.
+  * `RawLogRecovery.extractTelemetry(tz = TimeZone.getDefault())` - a default parameter, and the only
+    production caller passes none, so **the default was the behaviour**. It decides which calendar day
+    an UNDATED raw-log line belongs to. Every log written before 1.0.337 is undated, so recovering an
+    old log on a non-IST device anchored the whole trip to the wrong day. The default is now IST.
+
+**Fix.** `RecordTime.format(pattern, millis)` is now public and is the only sanctioned way to turn an
+instant into text; `RecordTime.formatter(pattern)` returns an IST-pinned `SimpleDateFormat` for the
+hot paths that cannot afford to build one per value (a chart redrawing its axis every frame). All 22
+sites route through them. `tools/audit_stamp_conventions.py` (new) classifies every formatter in the
+tree and now reports **0 unpinned**; 1.0.336 reports 23.
+
+## 4e. The trend chart's X axis was phone uptime, not the time of the drive
+
+Found while chasing 4d, and the most consequential defect in this round.
+
+`TransactionRecord.timestampMonotonic` is filled with `SystemClock.elapsedRealtime()` - milliseconds
+since boot - by `Elm327Transport`, `SimulationTransport` and `ObdScheduler`. `RecordingManager` then
+copied it into the indexed `TelemetrySampleEntity.timestamp` column:
+
+    timestamp = tx.timestampMonotonic,     // uptime, stored beside the true IST stamp
+
+That column is the trend chart's X axis (`TrendChart` formats it straight into a tick label), the
+fuel integrator's timeline (`TripFuelSummary`), and the input to **cross-trip** trend analysis
+(`MainViewModel` -> `TripTrendAnalyzer`). So for every trip recorded live:
+
+  * the axis labels were `Date(uptime)` - a drive taken three hours after boot drew its axis from
+    ~08:30 on **1970-01-01**, whatever hour it was actually driven;
+  * cross-trip trends compared one phone's uptime against another's, so the ordering and spacing
+    between trips was meaningless.
+
+Nothing crashed and no value looked absurd, because uptime still increases: **the shape of every
+curve stayed right while every time label on it was wrong.** That is why it survived so long.
+
+**Fix, in three places, with no migration.**
+
+  * `RecordTime.instantOf(millis, stored)` returns the millis only if they *could* be an epoch
+    instant - inside `2020-01-01..2100-01-01` - and otherwise falls back to the stamp beside them,
+    which always stated the truth. Uptime, `0` and negatives all fall through. Fifty years of
+    continuous runtime would be needed for the two populations to overlap, so the bound separates
+    them cleanly rather than by taste.
+  * `TelemetrySampleEntity.instantMs` (new extension) applies that on read, so the rows **already on
+    the owner's phone** are repaired without rewriting his history. All six consumers use it.
+  * The write path now stores the resolved instant, so new rows are correct at rest. `ZipImporter`
+    too, since a ZIP written by the live path carries the same uptime.
+
+## 4f. What leaves the phone is IST as well
+
+`CsvExporter` and `JsonExporter` copied the stored stamp through verbatim, so exporting a trip
+recorded before the mandate produced a CSV and a session JSON full of `...Z` UTC - the owner's data
+leaving the phone in the one zone he asked never to see. Both now call
+`RecordTime.normalizeToIst(millis, stored)`.
+
+It is **byte-stable for anything already IST**: a stamp that ends in `+05:30` and parses to the same
+instant is returned character for character. That is not cosmetics - the crash journal is required to
+be byte-identical to the CSV export of the same session, and a normalizer that re-flowed canonical
+stamps would have broken that invariant for no gain. Verified: re-exporting a canonical stamp at four
+different instants returns it unchanged.
+
+## 4g. Correction: 3 dishonest writers, not 6
+
+§3 states that three writers stamped IST wall time and labelled it `Z`. While re-auditing 1.0.336 for
+this round I first reported **6**, and quoted that figure. It was wrong, and the error was in my own
+tool: the classifier recognised `TimeZone.getTimeZone("UTC")` but not the fully-qualified
+`java.util.TimeZone.getTimeZone("UTC")`, so it reported five honest UTC writers as dishonest. The
+true count from 18 `Z`-printing formatters is **15 honest UTC and 3 dishonest** - `ZipImporter`'s
+fallback for an import with no meta, `TripRepository`'s AI-analysis stamp, and `PidDiscoveryService`'s
+discovery export. The tool is fixed and now recognises the qualified form, `recordZone` and
+`RecordTime.zone`.
+
+A classifier that cannot see the qualified form over-reports exactly the defect it is looking for,
+which is the worst direction to be wrong in: it would have justified a "fix" that shifted 15 correct
+writers' output by five and a half hours.
 
 ## 5. Tests added / changed
 
@@ -408,10 +508,11 @@ re-derived line by line against `CanFrameParser` and checked against real frames
 | `RecordTimeIstTest` (13 tests) | IST wall time with `+05:30`, never `Z`; round-trip; legacy `…Z` still parses to its true instant; naive read as IST; legacy-UTC and IST stamps for the same instant agree; `logStamp` carries the date; `display` is the IST date; zone/offset labels; zoned-vs-naive detection; unparsable → `null`, never `0`; `SessionTime` delegation keeps an imported trip's duration, including a window written half legacy and half IST; and `noShapeLosesItsFractionOrItsSecondsToAGreedyShorterPattern`, which pins the prefix-parsing trap described in §3 |
 | `RawLogDatedRecoveryTest` (13 tests) | Dated lines read at the instant they state, not the file mtime (mtime three days later); a dated drive crossing midnight keeps its order with no heuristic; undated lines still recover; a mixed log reads each line by its own shape; TX/negatives/multi-frame/junk/header still skipped in both shapes; a connection log is never read as a trip; connection logs prunable, session logs never; **and the two parser-agreement tests from §4c** — `recoveryDecodesEverySingleBytePidTheLiveParserAccepts` decodes nine real frames (speed, coolant, IAT, throttle, STFT, ambient, both spellings of a single-byte answer, rpm and the odometer) and checks pid, CAN id, instant, payload and response hex against what `CanFrameParser` produces; `framesWithoutAPidToReadAreStillRejectedRatherThanGuessedAt` pins that a pid-less body, an odd-length body, the ISO 9141 shape, an ISO-TP first frame, a 7F negative and a flow-control frame all still yield nothing |
 | `IstOnlyRecordTimeTest` (3 tests) | Source scan: no production file formats a record stamp in UTC; allow-list entries still exist; `RecordTime` still prints its offset |
+| `LegacyRecordsDisplayInIstTest` (new, 14 tests) | The mandate for data that already exists. **Display cannot be moved by the device zone**: sets the default zone to UTC, New York, Tokyo and London and requires identical IST output from `format`, `formatter`, `stamp`, `display`, `logStamp` and `offsetLabel`; pins the exact patterns the trend axis, trip rows and day headers use. **Both legacy conventions resolve to the same instant**: writes one drive as honest UTC and as a dishonest `Z`, shows the two strings read five and a half hours apart and that no single rule gets both right, then requires `instantOf` to land both on the real moment. Uptime is rejected as an instant and the stamp decides instead - including asserting the old axis label really did start `1970-01-01`, so the regression is visible rather than implied; a genuine epoch row passes through untouched; the bounds exclude uptime and admit any real record; a stored `TelemetrySampleEntity` resolves to the drive and not to the boot; exports re-state every legacy shape in IST; **normalizing is byte-identical for a stamp already in IST**, which is what keeps the journal equal to the CSV; and nothing readable is ever blanked out |
 | `AutoRecordPolicyTest` (new, 13 tests) | The auto-record rule as a pure function, so the two supervisors cannot drift: engine on with nothing recording starts a drive; engine on while recording changes nothing; never starts against a dead link (an empty trip looks like a drive that got 0 km); setting off means the supervisor touches nothing; **a fresh `rpm = 0` is a traffic light, not the end of the drive**, and gets the five-minute Idle Start-Stop grace; a stall longer than that still saves the trip; a MISSING reading is an ignition-off and gets one minute; the engine-off clock is armed once and not rearmed every tick; a restarted engine clears it; the 200.0 threshold is strict, so a cranking motor cannot open a trip; and `aWholeCityDriveWithSixJunctionsStaysOneTrip` runs a whole drive through the rule tick by tick and asserts one start and one stop |
 | `BatteryOptimizationPolicyTest` (rewritten, 5 tests) | The new contract, and *why* the old one was wrong: prompts when restricted; prompts with no session live so the next drive is protected; never nags once granted; stays quiet inside the 24 h interval; asks again after it while still restricted |
 
-Committed total: 83 suites, 719 tests (baseline before this task was 82 suites / 699 tests).
+Committed total: 84 suites, 733 tests (baseline before this task was 82 suites / 699 tests).
 
 Two existing assertions were deliberately changed rather than worked around, both in
 `BatteryOptimizationPolicyTest`: `neverNagsAfterTheFirstPrompt` and `silentWhenNoSessionIsLive`
@@ -454,7 +555,15 @@ pinned the behaviour that caused today's loss. The file documents that reversal 
    other added `19 800 000 ms` to the parsed side of an equation where the offset belonged on the
    other side (§5, `RecordTimeIstTest`). Rule taken: a test that has never run is a claim, not a
    check, and "CI is red for an unrelated reason" is exactly when untested assertions hide.
-8. **"Both loops live in viewModelScope" was an acceptable design** — it was written in the code's
+8. **"Six writers were stamping IST and labelling it `Z`"** - reported this round and quoted before
+   it was checked. The classifier I wrote to find them recognised `TimeZone.getTimeZone("UTC")` but
+   not `java.util.TimeZone.getTimeZone("UTC")`, so five honest UTC writers were reported as liars.
+   The true figure is 15 honest and 3 dishonest (§4g). The same tool also used `[^"\']*?` to match a
+   date pattern, which cannot span the `'T'` in `"yyyy-MM-dd'T'HH:mm"`, so it silently skipped every
+   pattern containing a quoted separator and reported the tree clean while an unpinned formatter sat
+   in `FuelCostsScreen`. Both fixed in `tools/audit_stamp_conventions.py`, with the reason recorded
+   in the file so the next reader does not "simplify" them back.
+9. **"Both loops live in viewModelScope" was an acceptable design** — it was written in the code's
    own KDoc as though it were a note rather than a defect. It is the reason a foreground service was
    keeping alive a process that did nothing (§4b).
 

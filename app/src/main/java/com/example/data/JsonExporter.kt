@@ -29,8 +29,19 @@ object JsonExporter {
             // Keys keep their historical "utc" names; the VALUES are IST with their offset stated
             // (owner mandate 2026-09-17: "For all records use IST time only no UTC"). Renaming the
             // keys would make every trip JSON and backup written before 1.0.337 unreadable.
-            put("startTimeUtc", metadata.startTimeUtc)
-            put("endTimeUtc", metadata.endTimeUtc ?: "")
+            // Values are re-stated in IST on the way out; the KEYS keep their `Utc` names so every
+            // file written before the mandate stays readable. See RecordTime.normalizeToIst.
+            put(
+                "startTimeUtc",
+                com.example.data.RecordTime.normalizeToIst(null, metadata.startTimeUtc)
+                    ?: metadata.startTimeUtc
+            )
+            put(
+                "endTimeUtc",
+                metadata.endTimeUtc?.let {
+                    com.example.data.RecordTime.normalizeToIst(null, it) ?: it
+                } ?: ""
+            )
             put("appVersion", metadata.appVersion)
             put("totalTransactions", transactions.size)
             // GPS altitude window of the trip (owner 2026-09-15). Written as an explicit
@@ -50,7 +61,11 @@ object JsonExporter {
         for (tx in transactions) {
             val txObj = JSONObject().apply {
                 put("id", tx.id)
-                put("timestampUtc", tx.timestampUtc)
+                put(
+                    "timestampUtc",
+                    com.example.data.RecordTime.normalizeToIst(tx.timestampMonotonic, tx.timestampUtc)
+                        ?: tx.timestampUtc
+                )
                 put("timestampMonotonic", tx.timestampMonotonic)
                 put("direction", tx.direction.name)
                 put("elmCommand", tx.elmCommand)

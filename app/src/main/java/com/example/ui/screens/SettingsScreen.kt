@@ -654,7 +654,7 @@ fun SettingsScreen(
                                     "Lifetime %.1f km/L · cost/km %.2f · %d ledger rows".format(
                                         stats.avgKmPerL ?: Double.NaN, stats.costPerKm ?: Double.NaN, rows.size
                                     ),
-                                    "Generated ${java.text.SimpleDateFormat("dd MMM yyyy HH:mm", java.util.Locale.getDefault()).format(java.util.Date())}"
+                                    "Generated ${com.example.data.RecordTime.format("dd MMM yyyy HH:mm", System.currentTimeMillis())}"
                                 ),
                                 rows
                             )
@@ -754,7 +754,7 @@ fun SettingsScreen(
 
                         // Last Backup Info
                         val lastBackupFormatted = if (lastBackupTimestamp > 0) {
-                            SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(lastBackupTimestamp))
+                            com.example.data.RecordTime.format("yyyy-MM-dd HH:mm:ss", lastBackupTimestamp)
                         } else {
                             "Never"
                         }
@@ -1212,7 +1212,7 @@ fun SettingsScreen(
                     if (updateState.upToDate && updateState.available == null && !updateState.downloading) {
                         Spacer(modifier = Modifier.height(10.dp))
                         val checkedAt = if (updateState.lastCheckedAtMs > 0L) {
-                            " (checked " + SimpleDateFormat("HH:mm", Locale.US).format(Date(updateState.lastCheckedAtMs)) + ")"
+                            " (checked " + com.example.data.RecordTime.format("HH:mm", updateState.lastCheckedAtMs) + ")"
                         } else ""
                         Text(
                             text = "You are on the newest build$checkedAt",

@@ -231,8 +231,7 @@ fun RecordingsScreen(
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US)
-                                        .format(java.util.Date(logFile.lastModified())) +
+                                    text = com.example.data.RecordTime.format("yyyy-MM-dd HH:mm", logFile.lastModified()) +
                                         " · ${logFile.length() / 1024} KB raw log",
                                     fontSize = 11.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant

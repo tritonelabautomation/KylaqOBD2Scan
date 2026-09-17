@@ -188,7 +188,7 @@ object WeeklyTripOverview {
         val totalMinutes = days.sumOf { d -> d.minutes.values.sum() }
         val avgScore = cards.map { it.score }.average().takeIf { cards.isNotEmpty() }
 
-        val fmt = SimpleDateFormat("d MMM", Locale.US)
+        val fmt = com.example.data.RecordTime.formatter("d MMM")
         val rangeLabel = "${fmt.format(java.util.Date(start))} – ${fmt.format(java.util.Date(end - 86_400_000L))}"
 
         return WeekOverview(

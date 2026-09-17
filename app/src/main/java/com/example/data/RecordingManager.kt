@@ -532,7 +532,17 @@ class RecordingManager(
                 txList.mapIndexed { idx, tx ->
                     TelemetrySampleEntity(
                         tripId = sessionId,
-                        timestamp = tx.timestampMonotonic,
+                        // Was `tx.timestampMonotonic`, which the live transport fills with
+                        // SystemClock.elapsedRealtime() - uptime, not an instant. This indexed
+                        // column is the trend chart's X axis and the fuel integrator's timeline, so
+                        // storing uptime made every axis label a 1970 clock time and made
+                        // cross-trip trends compare one phone's uptime against another's. The stamp
+                        // beside it states the real instant; store that. instantOf falls back to the
+                        // monotonic value only if the stamp cannot be read at all, which keeps the
+                        // column monotonic for ordering either way.
+                        timestamp = com.example.data.RecordTime.instantOf(
+                            tx.timestampMonotonic, tx.timestampUtc
+                        ) ?: tx.timestampMonotonic,
                         timestampUtc = tx.timestampUtc,
                         ecuCanId = tx.canRxId.ifBlank { "7E8" },
                         pid = tx.pid,
