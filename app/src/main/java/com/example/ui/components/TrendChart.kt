@@ -72,7 +72,12 @@ data class TrendLine(
     val points: List<Pair<Long, Double>>,
     val name: String,
     val unit: String,
-    val color: Color
+    val color: Color,
+    /**
+     * Integer-valued signal (gear estimate): bucket by MODE, integer axis labels and
+     * integer crosshair reads - never "1.5 gear" (owner 2026-09-17).
+     */
+    val discrete: Boolean = false
 )
 
 /**
@@ -135,7 +140,9 @@ fun TrendChart(
     val bucketed = remember(drawable, bucketTarget, viewT0, viewT1) {
         drawable.map { line ->
             val visible = line.points.filter { it.first in viewT0..viewT1 }
-            ChartSampling.bucketize(if (visible.size >= 2) visible else line.points, bucketTarget)
+            val src = if (visible.size >= 2) visible else line.points
+            if (line.discrete) ChartSampling.bucketizeDiscrete(src, bucketTarget)
+            else ChartSampling.bucketize(src, bucketTarget)
         }
     }
 
@@ -247,7 +254,14 @@ fun TrendChart(
 
             // One y-domain per series (own units, own scale).
             val domains = drawable.map { line ->
-                yDomain(line.points.minOf { it.second }, line.points.maxOf { it.second })
+                if (line.discrete) {
+                    // Integer axis: 1..N gears, no 0.7 / 5.3 fractions.
+                    val lo = kotlin.math.floor(line.points.minOf { it.second })
+                    val hi = kotlin.math.ceil(line.points.maxOf { it.second }).coerceAtLeast(lo + 1.0)
+                    lo to (hi - lo)
+                } else {
+                    yDomain(line.points.minOf { it.second }, line.points.maxOf { it.second })
+                }
             }
 
             fun xOf(ts: Long) = left + ((ts - viewT0).toDouble() / (viewT1 - viewT0)) * plotW
@@ -273,6 +287,8 @@ fun TrendChart(
                 if (abs(v) >= 100.0) String.format(Locale.US, "%.0f", v)
                 else String.format(Locale.US, "%.1f", v)
             }
+            fun fmtFor(line: TrendLine): (Double) -> String =
+                if (line.discrete) ({ v -> String.format(Locale.US, "%.0f", v) }) else fmt
 
             // ── grid + LEFT axis labels (primary series, unit on the top label) ──
             val (pMin, pSpan) = domains[0]
@@ -280,7 +296,8 @@ fun TrendChart(
                 val v = pMin + pSpan * (4 - i) / 4.0
                 val y = top + plotH * i / 4f
                 drawLine(gridColor, Offset(left, y), Offset(left + plotW, y), strokeWidth = 1f)
-                val label = if (i == 0) "${fmt(v)} ${drawable[0].unit}" else fmt(v)
+                val lf = fmtFor(drawable[0])
+                val label = if (i == 0) "${lf(v)} ${drawable[0].unit}" else lf(v)
                 drawContext.canvas.nativeCanvas.drawText(label, 2f, y + textSize / 2f, textPaint)
             }
 
@@ -291,7 +308,8 @@ fun TrendChart(
                 for (i in 0..4) {
                     val v = sMin + sSpan * (4 - i) / 4.0
                     val y = top + plotH * i / 4f
-                    val label = if (i == 0) "${fmt(v)} ${drawable[1].unit}" else fmt(v)
+                    val rf = fmtFor(drawable[1])
+                    val label = if (i == 0) "${rf(v)} ${drawable[1].unit}" else rf(v)
                     val lw = rightPaint.measureText(label)
                     drawContext.canvas.nativeCanvas.drawText(
                         label,
@@ -413,8 +431,9 @@ fun TrendChart(
                 val headerH = textSize + 8f
                 var bw = textPaint.measureText(bubbleFmt.format(Date(anchor.ts)))
                 rows.forEach { (line, b, _) ->
-                    val label = if (line.name.isBlank()) "${fmt(b.avg)} ${line.unit}"
-                    else "${line.name}  ${fmt(b.avg)} ${line.unit}"
+                    val lf2 = fmtFor(line)
+                    val label = if (line.name.isBlank()) "${lf2(b.avg)} ${line.unit}"
+                    else "${line.name}  ${lf2(b.avg)} ${line.unit}"
                     bw = maxOf(bw, textPaint.measureText(label) + 14f)
                 }
                 bw += 16f
@@ -442,8 +461,9 @@ fun TrendChart(
                         topLeft = Offset(bx + 8f, ry - textSize + 2f),
                         size = androidx.compose.ui.geometry.Size(6f, 6f)
                     )
-                    val label = if (line.name.isBlank()) "${fmt(b.avg)} ${line.unit}"
-                    else "${line.name}  ${fmt(b.avg)} ${line.unit}"
+                    val lf2 = fmtFor(line)
+                    val label = if (line.name.isBlank()) "${lf2(b.avg)} ${line.unit}"
+                    else "${line.name}  ${lf2(b.avg)} ${line.unit}"
                     drawContext.canvas.nativeCanvas.drawText(label, bx + 18f, ry, rowPaint)
                 }
             }

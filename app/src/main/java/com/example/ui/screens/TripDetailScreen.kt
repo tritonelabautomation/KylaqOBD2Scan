@@ -445,7 +445,8 @@ private data class TrendChannel(
     val name: String,
     val unit: String,
     val color: Color,
-    val transform: ((Double) -> Double)? = null
+    val transform: ((Double) -> Double)? = null,
+    val discrete: Boolean = false
 )
 
 @Composable
@@ -490,7 +491,7 @@ private fun TripTrendsView(
         // available on EVERY trip ever recorded. Kept next to Torque so they are found
         // without scrolling the whole chip row.
         TrendChannel(com.example.analysis.TripTrendAnalyzer.PID_POWER_KW, "Power (2\u03c0NT/60)", "kW", Color(0xFFEEFF41)),
-        TrendChannel(com.example.analysis.TripTrendAnalyzer.PID_GEAR, "Gear (est)", "gear", Color(0xFFB0BEC5)),
+        TrendChannel(com.example.analysis.TripTrendAnalyzer.PID_GEAR, "Gear (est)", "gear", Color(0xFFB0BEC5), discrete = true),
         // GPS altitude: not an OBD PID - extracted from the per-sample altitude stamp.
         // Deep-orange 200: distinct from every other channel colour, incl. the red
         // accent theme and the cyan coolant line.
@@ -529,7 +530,7 @@ private fun TripTrendsView(
     val lines = selectedPids.mapNotNull { pid ->
         val ch = channels.firstOrNull { it.pid == pid } ?: return@mapNotNull null
         val pts = pointsFor(ch)
-        if (pts.size < 2) null else TrendLine(points = pts, name = ch.name, unit = ch.unit, color = ch.color)
+        if (pts.size < 2) null else TrendLine(points = pts, name = ch.name, unit = ch.unit, color = ch.color, discrete = ch.discrete)
     }
     val primary = lines.firstOrNull()
 
@@ -631,9 +632,10 @@ private fun TripTrendsView(
                     modifier = Modifier.padding(14.dp),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text("MIN: ${String.format(java.util.Locale.US, "%.1f", numericValues.minOrNull() ?: 0.0)} ${primary.unit}", color = TextSecondaryDark, fontSize = 14.sp)
+                    val statFmt = if (primary.discrete) "%.0f" else "%.1f"
+                    Text("MIN: ${String.format(java.util.Locale.US, statFmt, numericValues.minOrNull() ?: 0.0)} ${primary.unit}", color = TextSecondaryDark, fontSize = 14.sp)
                     Text("AVG: ${String.format(java.util.Locale.US, "%.1f", numericValues.average())} ${primary.unit}", color = primary.color, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    Text("MAX: ${String.format(java.util.Locale.US, "%.1f", numericValues.maxOrNull() ?: 0.0)} ${primary.unit}", color = NeonEmerald, fontSize = 14.sp)
+                    Text("MAX: ${String.format(java.util.Locale.US, statFmt, numericValues.maxOrNull() ?: 0.0)} ${primary.unit}", color = NeonEmerald, fontSize = 14.sp)
                     Text("COUNT: ${numericValues.size}", color = TextSecondaryDark, fontSize = 14.sp)
                 }
             }
