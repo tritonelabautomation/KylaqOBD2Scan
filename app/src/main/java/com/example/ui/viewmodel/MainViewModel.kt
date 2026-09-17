@@ -39,6 +39,7 @@ import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.io.File
@@ -60,6 +61,44 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val obdScheduler = AppContainer.obdScheduler
 
     init {
+        // A recording can now be stopped by something other than this ViewModel: the keep-alive
+        // service runs the same auto-record rule, so it closes the drive when the engine has been
+        // off long enough, whether or not the UI is open. Everything that has to happen after a
+        // stop - the ride X-ray, the OAuth-free Drive mirror, the cloud backup, the unsaved-raw-log
+        // banner - lives here, so watch for the fall and run it. Without this a background stop
+        // would save the trip and quietly skip the backups.
+        viewModelScope.launch {
+            var wasRecording = false
+            recordingManager.isRecording
+                .distinctUntilChanged()
+                .collect { recording ->
+                    if (wasRecording && !recording && !stopInitiatedHere) {
+                        stopInitiatedHere = true
+                        recordingTimerJob?.cancel()
+                        gpsManager.stopTracking()
+                        if (!insightsPersistedForRecording) {
+                            insightsPersistedForRecording = true
+                            persistDriveInsights()
+                        }
+                        if (settingsRepository.autoCloudBackup.value) {
+                            settingsRepository.driveTreeUri()?.let { tree ->
+                                try {
+                                    com.example.backup.DriveBackupClient.sendBackup(
+                                        getApplication(), android.net.Uri.parse(tree), recordingManager
+                                    )
+                                    settingsRepository.setLastBackupTimestamp(System.currentTimeMillis())
+                                } catch (e: Exception) {
+                                    // Backup is best-effort; never block the stop path.
+                                }
+                            }
+                        }
+                        AppContainer.cloudBackupManager.performAutoBackupIfNeeded()
+                        refreshUnsavedRawLogs()
+                    }
+                    wasRecording = recording
+                }
+        }
+
         // Elevation logging for the ride X-ray: GPS altitude when available, silent otherwise.
         obdScheduler.altitudeSource = {
             val g = gpsManager.gpsData.value
@@ -77,6 +116,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /** One-persist-per-recording guard for coast/ride/tank insight logs (dup-ride fix 2026-09-15). */
     private var insightsPersistedForRecording = false
+
+    /**
+     * Set the moment THIS ViewModel begins stopping a recording, so the external-stop watcher below
+     * does not run the same aftermath a second time. `stopRecording()` launches, so the flag has to
+     * be raised before the launch rather than inside it - otherwise the watcher can see
+     * `isRecording` fall while the flag is still false and persist the ride X-ray twice, which is
+     * the 2026-09-15 duplicate-ride bug wearing a different hat.
+     */
+    @Volatile private var stopInitiatedHere = false
 
     val connectionState: StateFlow<ConnectionState> = bluetoothManager.connectionState
     val connectedDeviceName: StateFlow<String?> = bluetoothManager.connectedDeviceName
@@ -1031,6 +1079,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun stopRecording() {
+        stopInitiatedHere = true
         viewModelScope.launch {
             recordingTimerJob?.cancel()
             gpsManager.stopTracking()
