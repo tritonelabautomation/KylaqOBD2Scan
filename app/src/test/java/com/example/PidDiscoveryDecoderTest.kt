@@ -135,11 +135,14 @@ class PidDiscoveryDecoderTest {
         val result = PidDiscoveryDecoder.decodeFromRawResponse(0x00, lines)
         assertNotNull(result)
         assertEquals(0x00, result!!.basePid)
-        assertEquals(18, result.supportedPids.size)
+        // 0x20 is bit 32 of this bitmap: the "next block" marker, not a data PID.
+        assertEquals(17, result.supportedPids.size)
+        assertFalse(result.supportedPids.contains(0x20))
         assertTrue(result.supportedPids.contains(0x0C)) // Engine RPM
         assertTrue(result.supportedPids.contains(0x0D)) // Speed
         assertTrue(result.hasNextRange)
-        assertEquals(32, result.allTestedPids.size)
+        // 31 PIDs are tested per block (0x01-0x1F plus the marker excluded = 31 slots)
+        assertEquals(31, result.allTestedPids.size)
     }
 
     /**

@@ -27,8 +27,9 @@ enum class DecoderType {
     MAF_100,              // ((A * 256) + B) / 100.0 (Air Flow: g/s) - PID 0110
     INJECTION_TIMING_128, // ((((A * 256) + B) - 26880) / 128.0) ° - PID 015D
     TRANSMISSION_GEAR_A4, // SAE J1979 PID 01A4 Actual Gear Ratio / Status
-    LAMBDA_SENSOR_VOLTAGE,// A/128 lambda + B/128 V - SAE J1979 PID 56-59 (owner run 2026-09-16 showed raw 7F)
-    LAMBDA_STFT_PAIR,     // A/128 lambda + (C-128)*100/128 % - SAE J1979 PID 55
+    LAMBDA_2B,            // ((A*256)+B)/32768 lambda, two bytes - J1979 PID 24-2B / 34-3B lambda half
+    O2_TRIM_PAIR_2B,      // (A-128)*100/128 % and (B-128)*100/128 % - J1979 PID 55-58 secondary O2 trims
+    ODOMETER_4B,          // ((A*2^24)+(B*2^16)+(C*2^8)+D)/10 km - J1979 PID A6 (car answered 00 00 86 EB = 10279.5 km)
     RESEARCH_RAW,         // Preserve raw bytes without calculation
     CUSTOM_EXPRESSION     // Custom expression if user defined
 }
@@ -119,6 +120,18 @@ data class PidDefinition(
 object DefaultPidDefinitions {
     fun getDefaults(): List<PidDefinition> {
         return listOf(
+            // ─── 0100 Range marker: PIDs supported [01-20] ────────────────────
+            PidDefinition(
+                id = "0100", service = "01", pid = "00",
+                name = "Mode 01 PID 00 - range marker (PIDs supported 01-20)",
+                shortName = "Range 01-20", unit = "",
+                dataBytes = 4, decoderType = DecoderType.RESEARCH_RAW,
+                isResearch = true,
+                enabled = false,
+                description = "SAE J1979 PID 00 is the 32-bit availability bitmap for PID 01 to 20. It is a capability row, never a measurement. The owner run of 2026-09-16 got a garbled stale frame for TX 0100 and the valid 41 00 bitmap arrived one command late, so the whole 0x00 block - rpm, speed, coolant, MAP, throttle, fuel rate, 16 PIDs the app polls on every trip - vanished from a report about the car. PidDiscoveryDecoder.decodeSupportedPids excludes it from the supported list and hasNextRange reports it separately.",
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
+            ),
             // FAST TIER (Dynamic powertrain controls)
             PidDefinition(
                 id = "010C",
@@ -215,6 +228,18 @@ object DefaultPidDefinitions {
                 formulaDisplay = "A - 125",
                 description = "Actual engine percent torque output",
                 priority = PollingPriority.FAST
+            ),
+            // ─── 0160 Range marker: PIDs supported [61-80] ────────────────────
+            PidDefinition(
+                id = "0160", service = "01", pid = "60",
+                name = "Mode 01 PID 60 - range marker (PIDs supported 61-80)",
+                shortName = "Range 61-80", unit = "",
+                dataBytes = 4, decoderType = DecoderType.RESEARCH_RAW,
+                isResearch = true,
+                enabled = false,
+                description = "SAE J1979 PID 60 is the 32-bit availability bitmap for PID 61 to 80. It is a capability row, never a measurement. This is the hole that produced the phantom export row 'Mode 01 PID 60 = 6B 09 00 41': PID 60 had no catalogue entry, lookup() fell through to the generic research row, and the 0160 capability bitmap that answered was printed as if it were a measurement. The owner run answered `41 60 6B 09 00 41` = PID 62 63 65 67 68 6D 70 7A. PidDiscoveryDecoder.decodeSupportedPids excludes it from the supported list and hasNextRange reports it separately.",
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
             ),
             PidDefinition(
                 id = "0161",
@@ -363,134 +388,6 @@ object DefaultPidDefinitions {
                 priority = PollingPriority.MEDIUM
             ),
             PidDefinition(
-                id = "0107",
-                service = "01",
-                pid = "07",
-                name = "Long Term Fuel Trim Bank 1",
-                shortName = "LTFT B1",
-                unit = "%",
-                canHeader = "7DF",
-                expectedRxId = "7E8",
-                defaultIntervalMs = 1200L,
-                enabled = true,
-                decoderType = DecoderType.FUEL_TRIM,
-                formulaDisplay = "(A - 128) * 100 / 128",
-                description = "Long term adaptive fuel correction",
-                priority = PollingPriority.MEDIUM
-            ),
-            PidDefinition(
-                id = "010E",
-                service = "01",
-                pid = "0E",
-                name = "Timing Advance",
-                shortName = "Timing",
-                unit = "°",
-                canHeader = "7DF",
-                expectedRxId = "7E8",
-                defaultIntervalMs = 500L,
-                enabled = true,
-                decoderType = DecoderType.TIMING_ADVANCE,
-                formulaDisplay = "A / 2 - 64",
-                description = "Ignition timing advance cylinder 1",
-                priority = PollingPriority.MEDIUM
-            ),
-            PidDefinition(
-                id = "0123",
-                service = "01",
-                pid = "23",
-                name = "Fuel Rail Pressure",
-                shortName = "FRP",
-                unit = "kPa",
-                canHeader = "7DF",
-                expectedRxId = "7E8",
-                defaultIntervalMs = 600L,
-                enabled = true,
-                decoderType = DecoderType.FUEL_RAIL_PRESSURE,
-                formulaDisplay = "((A * 256) + B) * 10",
-                description = "Fuel rail direct injection pressure",
-                priority = PollingPriority.MEDIUM
-            ),
-            PidDefinition(
-                id = "010A",
-                service = "01",
-                pid = "0A",
-                name = "Fuel Pressure",
-                shortName = "Fuel Press",
-                unit = "kPa",
-                canHeader = "7DF",
-                expectedRxId = "7E8",
-                defaultIntervalMs = 1000L,
-                enabled = true,
-                decoderType = DecoderType.FUEL_PRESSURE_3_KPA,
-                formulaDisplay = "A * 3",
-                description = "Low-pressure fuel supply gauge pressure",
-                priority = PollingPriority.MEDIUM
-            ),
-            PidDefinition(
-                id = "0144",
-                service = "01",
-                pid = "44",
-                name = "Commanded Equivalence Ratio",
-                shortName = "Lambda",
-                unit = "λ",
-                canHeader = "7DF",
-                expectedRxId = "7E8",
-                defaultIntervalMs = 600L,
-                enabled = true,
-                decoderType = DecoderType.EQUIVALENCE_RATIO,
-                formulaDisplay = "((A * 256) + B) / 32768",
-                description = "Target air-fuel equivalence ratio (Lambda)",
-                priority = PollingPriority.MEDIUM
-            ),
-            PidDefinition(
-                id = "0143",
-                service = "01",
-                pid = "43",
-                name = "Absolute Load Value",
-                shortName = "Abs Load",
-                unit = "%",
-                canHeader = "7DF",
-                expectedRxId = "7E8",
-                defaultIntervalMs = 600L,
-                enabled = true,
-                decoderType = DecoderType.PERCENT_LOAD_255,
-                formulaDisplay = "((A * 256) + B) / 2.55",
-                description = "Normalized volumetric engine load",
-                priority = PollingPriority.MEDIUM
-            ),
-            PidDefinition(
-                id = "0145",
-                service = "01",
-                pid = "45",
-                name = "Relative Throttle Position",
-                shortName = "Rel Throttle",
-                unit = "%",
-                canHeader = "7DF",
-                expectedRxId = "7E8",
-                defaultIntervalMs = 600L,
-                enabled = true,
-                decoderType = DecoderType.PERCENT_255,
-                formulaDisplay = "A * 100 / 255",
-                description = "Relative throttle plate opening",
-                priority = PollingPriority.MEDIUM
-            ),
-            PidDefinition(
-                id = "015D",
-                service = "01",
-                pid = "5D",
-                name = "Engine Fuel Injection Timing",
-                shortName = "Inj Timing",
-                unit = "°",
-                canHeader = "7DF",
-                expectedRxId = "7E8",
-                defaultIntervalMs = 600L,
-                enabled = true,
-                decoderType = DecoderType.INJECTION_TIMING_128,
-                formulaDisplay = "(((A * 256) + B) - 26880) / 128.0",
-                description = "Start of fuel injection timing relative to TDC",
-                priority = PollingPriority.MEDIUM
-            ),
-            PidDefinition(
                 id = "01A4",
                 service = "01",
                 pid = "A4",
@@ -507,23 +404,6 @@ object DefaultPidDefinitions {
                 priority = PollingPriority.MEDIUM
             ),
 
-            // SLOW TIER (Tank Level, Fuel Type, Ethanol, Voltage, Environment)
-            PidDefinition(
-                id = "012F",
-                service = "01",
-                pid = "2F",
-                name = "Fuel Tank Level Input",
-                shortName = "Fuel Level",
-                unit = "%",
-                canHeader = "7DF",
-                expectedRxId = "7E8",
-                defaultIntervalMs = 3000L,
-                enabled = true,
-                decoderType = DecoderType.PERCENT_255,
-                formulaDisplay = "A * 100 / 255",
-                description = "Nominal fuel tank level percentage",
-                priority = PollingPriority.SLOW
-            ),
             PidDefinition(
                 id = "0151",
                 service = "01",
@@ -729,23 +609,6 @@ object DefaultPidDefinitions {
                 isResearch = true,
                 description = "EA211 1.0 TSI Turbocharger Wastegate & Boost Control Research PID",
                 priority = PollingPriority.MEDIUM
-            ),
-            PidDefinition(
-                id = "01A6",
-                service = "01",
-                pid = "A6",
-                name = "Unknown Research PID 01A6",
-                shortName = "Research [A6]",
-                unit = "RAW",
-                canHeader = "7DF",
-                expectedRxId = "7E8",
-                defaultIntervalMs = 2000L, // was 1500 ms, below the SLOW floor (scheduler clamped it anyway)
-                enabled = true,
-                decoderType = DecoderType.RESEARCH_RAW,
-                formulaDisplay = "Raw Hex Preservation",
-                isResearch = true,
-                description = "EA211 experimental telemetry channel",
-                priority = PollingPriority.SLOW
             )
         )
     }
@@ -788,8 +651,8 @@ object StandardPidCatalog {
                 dataBytes = 1, decoderType = DecoderType.FUEL_TRIM,
                 formulaDisplay = "(A - 128) * 100 / 128",
                 description = "Long-term secondary fuel adaptation trim for bank 1",
-                priority = PollingPriority.SLOW,
-                defaultIntervalMs = 3000L
+                priority = PollingPriority.MEDIUM,
+                defaultIntervalMs = 1200L
             ),
             PidDefinition(
                 id = "0108", service = "01", pid = "08",
@@ -879,6 +742,18 @@ object StandardPidCatalog {
                 priority = PollingPriority.MEDIUM,
                 defaultIntervalMs = 500L
             ),
+            // ─── 0120 Range marker: PIDs supported [21-40] ────────────────────
+            PidDefinition(
+                id = "0120", service = "01", pid = "20",
+                name = "Mode 01 PID 20 - range marker (PIDs supported 21-40)",
+                shortName = "Range 21-40", unit = "",
+                dataBytes = 4, decoderType = DecoderType.RESEARCH_RAW,
+                isResearch = true,
+                enabled = false,
+                description = "SAE J1979 PID 20 is the 32-bit availability bitmap for PID 21 to 40. It is a capability row, never a measurement. In the owner run of 2026-09-16 the 41 00 bitmap was received during TX 0120 and correctly rejected for base 0x20, which is why the 0x20 block is UNKNOWN rather than empty - it was never decoded at all. PidDiscoveryDecoder.decodeSupportedPids excludes it from the supported list and hasNextRange reports it separately.",
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
+            ),
             PidDefinition(
                 id = "0121", service = "01", pid = "21",
                 name = "Distance Traveled With MIL On",
@@ -964,6 +839,18 @@ object StandardPidCatalog {
                 dataBytes = 2, decoderType = DecoderType.CATALYST_TEMP,
                 formulaDisplay = "((A * 256) + B) / 10 - 40",
                 description = "Cylinder bank 2 pre-catalyst bed temperature",
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
+            ),
+            // ─── 0140 Range marker: PIDs supported [41-60] ────────────────────
+            PidDefinition(
+                id = "0140", service = "01", pid = "40",
+                name = "Mode 01 PID 40 - range marker (PIDs supported 41-60)",
+                shortName = "Range 41-60", unit = "",
+                dataBytes = 4, decoderType = DecoderType.RESEARCH_RAW,
+                isResearch = true,
+                enabled = false,
+                description = "SAE J1979 PID 40 is the 32-bit availability bitmap for PID 41 to 60. It is a capability row, never a measurement. The owner run answered `41 40 FE D0 84 01` = PID 41 42 43 44 45 46 47 49 4A 4C 51 56. PidDiscoveryDecoder.decodeSupportedPids excludes it from the supported list and hasNextRange reports it separately.",
                 priority = PollingPriority.SLOW,
                 defaultIntervalMs = 3000L
             ),
@@ -1092,93 +979,106 @@ object StandardPidCatalog {
                 priority = PollingPriority.SLOW,
                 defaultIntervalMs = 3000L
             ),
-            // ─── 0155 O2 Sensor 1-1 (lambda + short trim, J1979) ───────────
+            // ─── 0155 short term secondary O2 trim, bank 1+3 ──────────────────
             PidDefinition(
                 id = "0155", service = "01", pid = "55",
-                name = "O2 Sensor 1-1 (Lambda + Short Trim)",
-                shortName = "L S1-1", unit = "lambda/%",
-                dataBytes = 4, decoderType = DecoderType.LAMBDA_STFT_PAIR,
-                formulaDisplay = "lambda = ((A * 256) + B) / 32768 ; STFT % = (C - 128) * 100 / 128",
-                description = "SAE J1979 PID 55: equivalence ratio plus short-term trim of oxygen sensor 1-1 (4 bytes). Was mislabelled as a 2-byte bank 1 fuel trim.",
+                name = "Secondary O2 Sensor Short Term Fuel Trim (Bank 1+3)",
+                shortName = "ST O2 B1+3",
+                dataBytes = 2, decoderType = DecoderType.O2_TRIM_PAIR_2B,
+                formulaDisplay = "(A - 128) * 100 / 128 % ; (B - 128) * 100 / 128 %",
+                description = "SAE J1979 PID 55 = short term secondary oxygen sensor fuel trim, bank 1+3, two bytes of (X - 128) * 100 / 128 %. It is NOT an oxygen sensor lambda/voltage channel - a revision of this audit mislabelled the whole 55-59 range that way and then invented a sensor voltage out of byte A. The owner run of 2026-09-16 answered it: `41 55 80 80` = +0.0 % / +0.0 %%, the post-cat trims of a closed-loop engine at stoichiometry.",
                 priority = PollingPriority.SLOW,
-                defaultIntervalMs = 3000L
+                defaultIntervalMs = 3000L,
+                unit = "%"
             ),
-            // ─── 0156 O2 Sensor 1-1 (lambda + voltage, J1979) ──────────────
+            // ─── 0156 long term secondary O2 trim, bank 1+3 ───────────────────
             PidDefinition(
                 id = "0156", service = "01", pid = "56",
-                name = "O2 Sensor 1-1 (Lambda + Voltage)",
-                shortName = "L S1-1 V", unit = "lambda/V",
-                dataBytes = 2, decoderType = DecoderType.LAMBDA_SENSOR_VOLTAGE,
-                formulaDisplay = "lambda = ((A * 256) + B) / 32768 ; V = A / 128",
-                description = "SAE J1979 PID 56: lambda and voltage of oxygen sensor 1-1. The owner run 2026-09-16 returned A=7F B=00, i.e. lambda 0.992 and 0.635 V at closed-loop stoichiometry, while RESEARCH_RAW printed the bare byte.",
+                name = "Secondary O2 Sensor Long Term Fuel Trim (Bank 1+3)",
+                shortName = "LT O2 B1+3",
+                dataBytes = 2, decoderType = DecoderType.O2_TRIM_PAIR_2B,
+                formulaDisplay = "(A - 128) * 100 / 128 % ; (B - 128) * 100 / 128 %",
+                description = "SAE J1979 PID 56 = long term secondary oxygen sensor fuel trim, bank 1+3, two bytes of (X - 128) * 100 / 128 %. It is NOT an oxygen sensor lambda/voltage channel - a revision of this audit mislabelled the whole 55-59 range that way and then invented a sensor voltage out of byte A. The owner run answered `41 56 7F 00` = -0.8 %%, and the second byte is the -100 %% no-sensor sentinel of the bank a 3-cylinder does not have, which the decoder suppresses instead of printing.",
                 priority = PollingPriority.SLOW,
-                defaultIntervalMs = 3000L
+                defaultIntervalMs = 3000L,
+                unit = "%"
             ),
-            // ─── 0157 O2 Sensor 1-2 (lambda + voltage, J1979) ──────────────
+            // ─── 0157 short term secondary O2 trim, bank 2+4 ──────────────────
             PidDefinition(
                 id = "0157", service = "01", pid = "57",
-                name = "O2 Sensor 1-2 (Lambda + Voltage)",
-                shortName = "L S1-2", unit = "lambda/V",
-                dataBytes = 2, decoderType = DecoderType.LAMBDA_SENSOR_VOLTAGE,
-                formulaDisplay = "lambda = ((A * 256) + B) / 32768 ; V = A / 128",
-                description = "SAE J1979 PID 57: lambda and voltage of oxygen sensor 1-2.",
+                name = "Secondary O2 Sensor Short Term Fuel Trim (Bank 2+4)",
+                shortName = "ST O2 B2+4",
+                dataBytes = 2, decoderType = DecoderType.O2_TRIM_PAIR_2B,
+                formulaDisplay = "(A - 128) * 100 / 128 % ; (B - 128) * 100 / 128 %",
+                description = "SAE J1979 PID 57 = short term secondary oxygen sensor fuel trim, bank 2+4, two bytes of (X - 128) * 100 / 128 %. It is NOT an oxygen sensor lambda/voltage channel - a revision of this audit mislabelled the whole 55-59 range that way and then invented a sensor voltage out of byte A. Not claimed by this car (bit clear in the 0140 bitmap FE D0 84 01).",
                 priority = PollingPriority.SLOW,
-                defaultIntervalMs = 3000L
+                defaultIntervalMs = 3000L,
+                unit = "%"
             ),
-            // ─── 0158 O2 Sensor 1-3 (lambda + voltage, J1979) ──────────────
+            // ─── 0158 long term secondary O2 trim, bank 2+4 ───────────────────
             PidDefinition(
                 id = "0158", service = "01", pid = "58",
-                name = "O2 Sensor 1-3 (Lambda + Voltage)",
-                shortName = "L S1-3", unit = "lambda/V",
-                dataBytes = 2, decoderType = DecoderType.LAMBDA_SENSOR_VOLTAGE,
-                formulaDisplay = "lambda = ((A * 256) + B) / 32768 ; V = A / 128",
-                description = "SAE J1979 PID 58: lambda and voltage of oxygen sensor 1-3. A 3-cylinder EA211 has ONE bank, so the old bank 2 label was wrong.",
+                name = "Secondary O2 Sensor Long Term Fuel Trim (Bank 2+4)",
+                shortName = "LT O2 B2+4",
+                dataBytes = 2, decoderType = DecoderType.O2_TRIM_PAIR_2B,
+                formulaDisplay = "(A - 128) * 100 / 128 % ; (B - 128) * 100 / 128 %",
+                description = "SAE J1979 PID 58 = long term secondary oxygen sensor fuel trim, bank 2+4, two bytes of (X - 128) * 100 / 128 %. It is NOT an oxygen sensor lambda/voltage channel - a revision of this audit mislabelled the whole 55-59 range that way and then invented a sensor voltage out of byte A. Not claimed by this car (bit clear in the 0140 bitmap FE D0 84 01).",
                 priority = PollingPriority.SLOW,
-                defaultIntervalMs = 3000L
+                defaultIntervalMs = 3000L,
+                unit = "%"
             ),
-            // ─── 0159 O2 Sensor 1-4 (lambda + voltage, J1979) ──────────────
+            // ─── 0159 long term secondary O2 trim, bank 2+4 ───────────────────
             PidDefinition(
                 id = "0159", service = "01", pid = "59",
-                name = "O2 Sensor 1-4 (Lambda + Voltage)",
-                shortName = "L S1-4", unit = "lambda/V",
-                dataBytes = 2, decoderType = DecoderType.LAMBDA_SENSOR_VOLTAGE,
-                formulaDisplay = "lambda = ((A * 256) + B) / 32768 ; V = A / 128",
-                description = "SAE J1979 PID 59: lambda and voltage of oxygen sensor 1-4.",
+                name = "Secondary O2 Sensor Long Term Fuel Trim (Bank 2+4)",
+                shortName = "LT O2 B2+4",
+                dataBytes = 2, decoderType = DecoderType.O2_TRIM_PAIR_2B,
+                formulaDisplay = "(A - 128) * 100 / 128 % ; (B - 128) * 100 / 128 %",
+                description = "SAE J1979 PID 59 = long term secondary oxygen sensor fuel trim, bank 2+4, two bytes of (X - 128) * 100 / 128 %. It is NOT an oxygen sensor lambda/voltage channel - a revision of this audit mislabelled the whole 55-59 range that way and then invented a sensor voltage out of byte A. Not claimed by this car (bit clear in the 0140 bitmap FE D0 84 01).",
                 priority = PollingPriority.SLOW,
-                defaultIntervalMs = 3000L
+                defaultIntervalMs = 3000L,
+                unit = "%"
             ),
-            // ─── 015A Engine Coolant Temperature (J1979) ───────────────────
+            // ─── 015A Relative accelerator pedal position (J1979) ─────────────
             PidDefinition(
                 id = "015A", service = "01", pid = "5A",
-                name = "Engine Coolant Temperature (PID 5A)",
-                shortName = "ECT 5A", unit = "degC",
-                dataBytes = 1, decoderType = DecoderType.TEMP_MINUS_40,
-                formulaDisplay = "A - 40",
-                description = "SAE J1979 PID 5A is engine coolant temperature (A - 40). It was catalogued as Generator Speed decoded in kPa, an invented channel that would have displayed coolant degrees as alternator RPM.",
+                name = "Relative Accelerator Pedal Position",
+                shortName = "Pedal Rel",
+                dataBytes = 1, decoderType = DecoderType.PERCENT_255,
+                formulaDisplay = "A * 100 / 255",
+                description = "SAE J1979 PID 5A = RELATIVE accelerator pedal position, A * 100 / 255 %%. This entry has now been wrong twice: first as 'Generator Speed (Alternator RPM)' decoded in kPa, then as a second engine coolant temperature decoded A - 40. Neither meaning exists in J1979. The bit is clear in this car's 0140 bitmap, so no frame has ever validated it - the spec name is recorded and the entry stays disabled until the car answers.",
                 priority = PollingPriority.SLOW,
-                defaultIntervalMs = 3000L
+                defaultIntervalMs = 3000L,
+                unit = "%",
+                enabled = false
             ),
-            // ─── 015B Vendor-specific, no J1979 definition ─────────────────
+            // ─── 015B Hybrid battery pack life (disabled: no pack) ────────────
             PidDefinition(
                 id = "015B", service = "01", pid = "5B",
-                name = "Vendor-Specific [5B] (not in J1979)",
-                shortName = "Vendor [5B]", unit = "RAW",
-                dataBytes = 1, decoderType = DecoderType.RESEARCH_RAW,
-                isResearch = true,
+                name = "Hybrid Battery Pack Remaining Life",
+                shortName = "Hyb Batt",
+                dataBytes = 1, decoderType = DecoderType.PERCENT_255,
+                isResearch = false,
                 enabled = false,
-                description = "PID 5B has no SAE J1979 definition in the tables this project cites. It was catalogued as a tertiary coolant temperature decoded A - 40, which is an invented meaning, so it is now disabled research raw and can never publish a made-up number.",
+                description = "SAE J1979 PID 5B = remaining life of a hybrid battery pack, A * 100 / 255 %%. It was catalogued here as a third engine coolant temperature decoded A - 40, and then as 'vendor specific, not in J1979' - both wrong. The Kylaq 1.0 TSI has no hybrid pack and the bit is clear in the 0140 bitmap, so the entry stays disabled: a petrol car must never show a hybrid-battery number.",
                 priority = PollingPriority.SLOW,
-                defaultIntervalMs = 3000L
+                defaultIntervalMs = 3000L,
+                unit = "%",
+                formulaDisplay = "A * 100 / 255"
             ),
-            // ─── 015F Engine Oil Life Remaining ──────────────────────────
+            // ─── 015F Emission requirements enum (NOT oil life) ───────────────
             PidDefinition(
                 id = "015F", service = "01", pid = "5F",
-                name = "Engine Oil Life Remaining",
-                shortName = "Oil Life", unit = "%",
-                dataBytes = 1, decoderType = DecoderType.PERCENT_255,
-                description = "Remaining useful oil life percentage (0-100%)",
+                name = "Emission Requirements (Design Standard)",
+                shortName = "Emiss Std",
+                dataBytes = 1, decoderType = DecoderType.RESEARCH_RAW,
+                description = "SAE J1979 PID 5F = an ENUM of the emission standard the vehicle was designed to meet, not a percentage. It was catalogued as 'Engine Oil Life Remaining' decoded A * 100 / 255 %%, which would have printed the standard code as a fake oil-life number. This car DOES claim the PID (bit set in the 0140 bitmap FE D0 84 01), so the enum table has to be written and unit-tested before it is enabled; until then it is disabled research raw.",
                 priority = PollingPriority.SLOW,
-                defaultIntervalMs = 3000L
+                defaultIntervalMs = 3000L,
+                unit = "",
+                formulaDisplay = "enum: 1=OBD-II(CARB) 2=OBD 3=OBD+OBD-II 4=OBD-I 5=not compliant 6=EOBD 7=OBD-II+EOBD",
+                isResearch = true,
+                enabled = false
             ),
             // ─── 0164 Engine Reference Torque (extended) ────────────────
             PidDefinition(
@@ -1190,16 +1090,19 @@ object StandardPidCatalog {
                 priority = PollingPriority.MEDIUM,
                 defaultIntervalMs = 500L
             ),
-            // ─── 0165 Turbocharger Boost Pressure ────────────────────────
+            // ─── 0165 Auxiliary input/output bitmap (boost claim withdrawn) ───
             PidDefinition(
                 id = "0165", service = "01", pid = "65",
-                name = "Turbocharger Boost Pressure",
-                shortName = "Boost", unit = "kPa",
-                dataBytes = 1, decoderType = DecoderType.RAW_A_KPA,
-                formulaDisplay = "A (kPa)",
-                description = "SAE J1979 PID 65: turbocharger boost pressure, ONE byte in kPa. Catalogued with dataBytes = 2 plus RESEARCH_RAW, so the owner run 2026-09-16 displayed the raw pair 10 10 instead of 16 kPa and a FAST-priority turbo channel produced nothing usable.",
-                priority = PollingPriority.FAST,
-                defaultIntervalMs = 150L
+                name = "Auxiliary Input / Output Status",
+                shortName = "Aux IO",
+                dataBytes = 2, decoderType = DecoderType.RESEARCH_RAW,
+                formulaDisplay = "bitmap - layout not established",
+                description = "SAE J1979 PID 65 = 'auxiliary input / output supported', a two-byte bitmap. It is NOT turbocharger boost pressure and not one byte of kPa. The owner run answered `41 65 10 10`; read as boost that is 16 kPa, plausible for a warm-idle manifold but resting on a name the standard does not use, so nothing is published until a load sweep proves the layout. The real pressure channels on this car stay PID 0B (MAP) and PID 6F/70 (compressor inlet / boost control). Before this pass it was dataBytes = 2 + RESEARCH_RAW at FAST priority, polling an unknown bitmap 6 times a second.",
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L,
+                unit = "",
+                isResearch = true,
+                enabled = false
             ),
             // ─── 0166 Charge Air Cooler Temperature ───────────────────────
             PidDefinition(
@@ -1380,27 +1283,31 @@ object StandardPidCatalog {
                 priority = PollingPriority.SLOW,
                 defaultIntervalMs = 3000L
             ),
-            // ─── 017A PM Sensor (J1979) ────────────────────────────────────
+            // ─── 017A DPF temperature (diesel block, unproven here) ───────────
             PidDefinition(
                 id = "017A", service = "01", pid = "7A",
-                name = "Particulate Matter (PM) Sensor [7A]",
-                shortName = "PM [7A]", unit = "RAW",
+                name = "DPF Temperature [7A]",
+                shortName = "DPF T",
                 dataBytes = 9, decoderType = DecoderType.RESEARCH_RAW,
                 isResearch = true,
-                description = "SAE J1979 PID 7A is the particulate-matter sensor block (9 bytes), not an O2 sensor on bank 4 - a 3-cylinder engine has one bank. The owner run returned 7 bytes (07 00 0E 00 0B 00 00), which matches neither definition, so it stays research raw until validated on the car.",
+                description = "J1979 lists PID 7A as a diesel particulate filter temperature block (9 bytes). The owner run returned 7 bytes (07 00 0E 00 0B 00 00) from a PETROL car with a three-way catalyst, so neither the byte count nor the meaning is established. Research raw, nothing published, entry disabled. Previously catalogued as an O2 sensor on bank 4 - a 3-cylinder engine has one bank.",
                 priority = PollingPriority.SLOW,
-                defaultIntervalMs = 3000L
+                defaultIntervalMs = 3000L,
+                unit = "degC",
+                enabled = false
             ),
-            // ─── 017B PM Sensor 2 (J1979) ──────────────────────────────────
+            // ─── 017B DPF pressure (diesel block, never claimed) ──────────────
             PidDefinition(
                 id = "017B", service = "01", pid = "7B",
-                name = "Particulate Matter (PM) Sensor [7B]",
-                shortName = "PM [7B]", unit = "RAW",
+                name = "DPF Pressure [7B]",
+                shortName = "DPF P",
                 dataBytes = 9, decoderType = DecoderType.RESEARCH_RAW,
                 isResearch = true,
-                description = "SAE J1979 PID 7B is a second particulate-matter sensor block, not an O2 sensor on bank 4. Research raw until a validated response defines the layout.",
+                description = "J1979 lists PID 7B as a diesel particulate filter pressure block (9 bytes) - not an O2 sensor on bank 4 and not a PM soot/ash loading. This petrol car never claimed the bit. Research raw until a validated response defines the layout.",
                 priority = PollingPriority.SLOW,
-                defaultIntervalMs = 3000L
+                defaultIntervalMs = 3000L,
+                unit = "kPa",
+                enabled = false
             ),
             // ─── 017C EGR Temperature ─────────────────────────────────────
             PidDefinition(
@@ -1513,37 +1420,66 @@ object StandardPidCatalog {
                 priority = PollingPriority.SLOW,
                 defaultIntervalMs = 3000L
             ),
-            // ─── 0186 PM Sensor (J1979) - bitmap-supported on this car ─────
+            // ─── 0186 PM sensor (J1979, never claimed by this car) ────────────
             PidDefinition(
                 id = "0186", service = "01", pid = "86",
                 name = "Particulate Matter (PM) Sensor [86]",
                 shortName = "PM [86]", unit = "RAW",
-                dataBytes = 9, decoderType = DecoderType.RESEARCH_RAW,
+                dataBytes = 5, decoderType = DecoderType.RESEARCH_RAW,
                 isResearch = true,
-                description = "SAE J1979 PID 86 = particulate-matter sensor (9 bytes), not an estimated fuel filament degradation - no such standard PID exists. Claimed by the real 0180 bitmap of this car (GPF monitoring on a BS6 Phase 2 petrol); never validated because of the lagged-bitmap bug.",
+                description = "SAE J1979 PID 86 = particulate-matter sensor (5 bytes), not an estimated fuel filament degradation - no such standard PID exists. NOT claimed by this car: the real 0180 bitmap of the 2026-09-16 run is `00 24 00 0D`, which sets PID 8B, 8E, 9D and 9E only. An earlier revision of this audit mis-decoded that bitmap BY HAND as 83/85/86 and reported three NOx/PM channels as 'hidden by a bug'; that claim is withdrawn - the car never claimed them.",
                 priority = PollingPriority.SLOW,
-                defaultIntervalMs = 3000L
+                defaultIntervalMs = 3000L,
+                enabled = false
             ),
-            // ─── 0187 Intake MAP (J1979, duplicate of 010B) ────────────────
+            // ─── 0187 Intake MAP (answered by the car, bitmap silent) ─────────
             PidDefinition(
                 id = "0187", service = "01", pid = "87",
                 name = "Intake Manifold Absolute Pressure [87]",
                 shortName = "MAP [87]", unit = "kPa",
-                dataBytes = 1, decoderType = DecoderType.RAW_A_KPA,
+                dataBytes = 5, decoderType = DecoderType.RAW_A_KPA,
                 formulaDisplay = "A (kPa)",
                 enabled = false,
-                description = "SAE J1979 PID 87 = intake manifold absolute pressure (1 byte, kPa), not an estimated fuel injector correction. It duplicates PID 0B, so it stays disabled to keep the poll cycle lean. Not claimed by the bitmap of this car.",
+                description = "SAE J1979 PID 87 = intake manifold absolute pressure (a 5-byte block in the extended tables), not an estimated fuel injector correction. This car does NOT claim it (bit clear in the 0180 bitmap `00 24 00 0D`) and the 2026-09-16 run never validated it, so no frame exists to define the layout. The MAP channel this car does use is PID 0B, claimed by the 0x00 bitmap. Kept catalogued with the standard's name and disabled: no number is published until the car speaks.",
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L,
+                isResearch = true
+            ),
+            // ─── 018A Run time for AECD #16-#20 (J1979) ───────────────────────
+            PidDefinition(
+                id = "018A", service = "01", pid = "8A",
+                name = "Engine Run Time for AECD #16-#20",
+                shortName = "AECD 16-20",
+                dataBytes = 21, decoderType = DecoderType.RESEARCH_RAW,
+                isResearch = true,
+                description = "SAE J1979 PID 8A = engine run time for auxiliary emission control devices #16 to #20 (21 bytes). It was catalogued here as a vendor-specific 'actual fuel injection quantity per stroke (mm3)' polled at MEDIUM priority / 500 ms - an invented meaning requested twice a second. Not claimed by this car.",
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L,
+                unit = "s",
+                formulaDisplay = "21-byte AECD run time block",
+                enabled = false
+            ),
+            // ─── 0188 SCR induce system (J1979, diesel-only) ──────────────
+            PidDefinition(
+                id = "0188", service = "01", pid = "88",
+                name = "SCR Induce System [88]",
+                shortName = "SCR Induce", unit = "",
+                dataBytes = 13, decoderType = DecoderType.RESEARCH_RAW,
+                isResearch = true,
+                enabled = false,
+                description = "SAE J1979 PID 88 = selective catalytic reduction induce system (13 bytes), a diesel/AdBlue channel. Not claimed by this petrol car.",
                 priority = PollingPriority.SLOW,
                 defaultIntervalMs = 3000L
             ),
-            // ─── 018A Vendor-specific, no J1979 definition ─────────────────
+            // ─── 018E Engine friction percent torque - CLAIMED by this car ───
             PidDefinition(
-                id = "018A", service = "01", pid = "8A",
-                name = "Vendor-Specific [8A] (not in J1979)",
-                shortName = "Vendor [8A]", unit = "RAW",
-                dataBytes = 2, decoderType = DecoderType.RESEARCH_RAW,
+                id = "018E", service = "01", pid = "8E",
+                name = "Engine Friction - Percent Torque",
+                shortName = "Friction %", unit = "%",
+                dataBytes = 1, decoderType = DecoderType.TORQUE_PCT,
+                formulaDisplay = "A - 125",
                 isResearch = true,
-                description = "Actual fuel injection quantity per stroke (mm³)",
+                description = "SAE J1979 PID 8E = engine friction percent torque, one byte, A - 125 %%, range -125..130. This car CLAIMS it (bit set in the 0180 bitmap `00 24 00 0D`) and the 2026-09-16 run never validated it because the catalogue had no entry for it at all, so the discovery sweep had nothing to TX. With PID 61 (driver demand) and PID 62 (actual torque) it closes the torque balance: demand - friction - accessory load = wheel torque, which is exactly what the power model needs. Highest-value gap in the catalogue as of this pass.",
                 priority = PollingPriority.MEDIUM,
                 defaultIntervalMs = 500L
             ),
@@ -1553,9 +1489,10 @@ object StandardPidCatalog {
                 name = "Fuel Pump Command",
                 shortName = "FP Cmd", unit = "%",
                 dataBytes = 1, decoderType = DecoderType.PERCENT_255,
-                description = "Fuel pump command (low pressure circuit)",
+                description = "The J1979 tables this project cites list PID 8B as 'diesel aftertreatment' (7 bytes); the value this car returns is a single byte that the export printed as 31.8 %% under A * 100 / 255. A petrol Kylaq has no diesel aftertreatment block, so the vendor meaning (fuel pump command, low-pressure circuit) is kept - but it is flagged research, because the evidence for it is a plausible number, not a specification. Claimed by the 0180 bitmap `00 24 00 0D`.",
                 priority = PollingPriority.SLOW,
-                defaultIntervalMs = 3000L
+                defaultIntervalMs = 3000L,
+                isResearch = true
             ),
             // ─── 018D Engine Start Enable ───────────────────────────────
             PidDefinition(
@@ -1669,15 +1606,65 @@ object StandardPidCatalog {
                 priority = PollingPriority.SLOW,
                 defaultIntervalMs = 3000L
             ),
-            // ─── 01A0 Transmission Sump Temp / Generic ───────────────────
+            // ─── 019A Hybrid / EV vehicle system data (J1979) ───────────────
             PidDefinition(
-                id = "01A0", service = "01", pid = "A0",
-                name = "Transmission Sump Temperature",
-                shortName = "T Sump T", unit = "°C",
-                dataBytes = 1, decoderType = DecoderType.TEMP_MINUS_40,
-                description = "Automatic transmission fluid (sump) temperature",
+                id = "019A", service = "01", pid = "9A",
+                name = "Hybrid / EV Vehicle System Data [9A]",
+                shortName = "Hybrid Data", unit = "",
+                dataBytes = 7, decoderType = DecoderType.RESEARCH_RAW,
+                isResearch = true,
+                enabled = false,
+                description = "SAE J1979 PID 9A = hybrid / EV vehicle system data (7 bytes). Not claimed by this petrol car.",
                 priority = PollingPriority.SLOW,
                 defaultIntervalMs = 3000L
+            ),
+            // ─── 019B Diesel exhaust fluid sensor data (J1979) ────────────
+            PidDefinition(
+                id = "019B", service = "01", pid = "9B",
+                name = "Diesel Exhaust Fluid Sensor Data [9B]",
+                shortName = "DEF Data", unit = "",
+                dataBytes = 7, decoderType = DecoderType.RESEARCH_RAW,
+                isResearch = true,
+                enabled = false,
+                description = "SAE J1979 PID 9B = diesel exhaust fluid (AdBlue) sensor data (7 bytes). Not claimed by this petrol car.",
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
+            ),
+            // ─── 019C O2 sensor data block (J1979, 17 bytes) ──────────────
+            PidDefinition(
+                id = "019C", service = "01", pid = "9C",
+                name = "Oxygen Sensor Data [9C]",
+                shortName = "O2 Data", unit = "",
+                dataBytes = 17, decoderType = DecoderType.RESEARCH_RAW,
+                isResearch = true,
+                enabled = false,
+                description = "J1979 lists PID 9C as a 17-byte oxygen sensor data block (multi-sensor, WWH-OBD era). Not claimed by this car's 0180 bitmap. A 17-byte block cannot be split into honest per-sensor values without a validated frame, so it stays disabled research raw.",
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
+            ),
+            // ─── 019E Engine exhaust flow rate - CLAIMED and ANSWERED ───────
+            PidDefinition(
+                id = "019E", service = "01", pid = "9E",
+                name = "Engine Exhaust Flow Rate",
+                shortName = "Exh Flow", unit = "kg/h",
+                dataBytes = 5, decoderType = DecoderType.RESEARCH_RAW,
+                isResearch = true,
+                description = "SAE J1979 PID 9E = engine exhaust flow rate in kg/h (5-byte block). This car CLAIMS it (bit set in the 0180 bitmap `00 24 00 0D`) and ANSWERED it in the 2026-09-16 run with `41 9E 00 20`. The scaling of those bytes is not defined in the tables this project cites, so the raw pair is recorded and NO number is published - an earlier revision of this audit guessed '32/255 = 25.6 % load', which is exactly the kind of invented value the no-fake-values rule forbids. Needs one validated frame, or a load sweep against MAF, before it gets a decoder.",
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L
+            ),
+            // ─── 01A0 Range marker: PIDs supported [A1-C0] ────────────────────
+            PidDefinition(
+                id = "01A0", service = "01", pid = "A0",
+                name = "Mode 01 PID A0 - range marker (PIDs supported A1-C0)",
+                shortName = "Range A1-C0",
+                dataBytes = 4, decoderType = DecoderType.RESEARCH_RAW,
+                description = "SAE J1979 PID A0 is the availability bitmap for PID A1 to C0 - the same kind of row as PID 00/20/40/60/80. It is NOT a transmission sump temperature. Catalogued as TEMP_MINUS_40 it printed '-20 degC' in the owner export of 2026-09-16: a fabricated gearbox oil temperature from a car that never reported one. Disabled here and excluded from the discovery list by PidDiscoveryDecoder.decodeSupportedPids.",
+                priority = PollingPriority.SLOW,
+                defaultIntervalMs = 3000L,
+                unit = "",
+                isResearch = true,
+                enabled = false
             ),
             // ─── 01A1 Clutch Status / PRNDL ────────────────────────────
             PidDefinition(
@@ -1722,12 +1709,16 @@ object StandardPidCatalog {
             // ─── 01A6 OBD Vehicle Identification Number ────────────────
             PidDefinition(
                 id = "01A6", service = "01", pid = "A6",
-                name = "Vehicle Identification Number",
-                shortName = "VIN", unit = "",
-                dataBytes = 4, decoderType = DecoderType.RESEARCH_RAW,
-                description = "Vehicle identification number (partial / encoded)",
+                name = "Odometer",
+                shortName = "Odo",
+                dataBytes = 4, decoderType = DecoderType.ODOMETER_4B,
+                description = "SAE J1979 PID A6 = the ODOMETER in km at 0.1 km resolution. The owner run of 2026-09-16 recorded `41 A6 00 00 86 EB` and the app printed 'Unknown Research PID 01A6'; the frame is 34539 / 10 = 10279.5 km. The car claims it in the 01A0 bitmap `14 00 00 00` (which sets A4 and A6 only), so this is a live channel, not research. The VIN is not in Mode 01 at all - it is Mode 09 PID 0902 - and a duplicate catalogue entry used to mislabel this PID as a partial VIN.",
                 priority = PollingPriority.SLOW,
-                defaultIntervalMs = 3000L
+                defaultIntervalMs = 3000L,
+                unit = "km",
+                formulaDisplay = "((A * 2^24) + (B * 2^16) + (C * 2^8) + D) / 10",
+                isResearch = false,
+                enabled = true
             ),
             // ─── 01A7 OBD Vehicle ID / Calibration ──────────────────────
             PidDefinition(

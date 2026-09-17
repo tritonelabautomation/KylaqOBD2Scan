@@ -1,208 +1,241 @@
-# QA/QC — owner PID-discovery export audit (2026-09-17)
+# QA/QC — owner PID-discovery export audit (2026-09-17, corrected)
 
 **Subject:** the exported JSON of the in-app *PID Discovery & Validation* run against the real
 Kylaq (VIN `MEXKPEPC2TG028855`, run 2026-09-16 08:57 IST, `ATSP6`, functional `7DF`,
-responders `7E8` + `7E9`, 29 PIDs "confirmed active").
+responders `7E8` + `7E9`, 29 rows "confirmed active").
 
 **Owner question:** *"is there any scope we can improve and discover more PIDs, or is this the
 list — no more PIDs available? give me verdict."*
 
-**VERDICT: this is NOT the full list. The export under-reports the car by at least 17 PIDs and
-by an unknown amount on top, and three of its rows are not measurements at all.** Counted from
-the frames the car actually sent: 16 (0x00 block) + 12 (0x40) + 8 (0x60) + 5 (real 0x80) +
-2 (0xA0) = **43 Mode-01 PIDs proven by this very run**, plus whatever the never-decoded 0x20
-block holds. The export listed 29 rows, of which 2 were range markers and 1 was a bitmap
-misread as a temperature — so it proved **26**. Nothing about the car changed — the report was lossy. All three
-root causes are fixed in this release; the numbers below are what a re-run must show.
+## VERDICT
 
-Per the standing evidence rule this export is **F-6 ground truth** for what the car said, and
-it is also ground truth for three defects in our own pipeline.
+**No, this is not the full list — but the gap is smaller and different from what the first
+revision of this document claimed.** Counted from the frames the car actually sent:
+
+| | count |
+|---|---|
+| Mode-01 data PIDs this car **claims** in the five bitmaps the run captured | **42** |
+| …of which the export **proved** (validated, decoded, listed) | **26** |
+| …lost to ELM327 buffer lag — the entire `0x00` block | **16** |
+| `0x20` block | **exists** (marker bit set) but was **never decoded** → contents unknown |
+| Rows in the export that are **not measurements at all** (range markers `0160`, `0180`, `01A0`) | **3** |
+
+So the honest total is **≥ 42 Mode-01 PIDs**, the report proved **26**, and the 16 missing ones
+are the channels the app already polls on every single trip — rpm, speed, coolant, MAP,
+throttle, timing advance, fuel rate, O2 sensors present, OBD standard. A discovery report about
+this car that does not contain engine speed is a broken report, not a complete one.
+
+Four things are genuinely recoverable, and all four are fixed or actionable in this release:
+
+1. **16 PIDs** come back with the RX-drain fix (no more one-command-late bitmaps) + the salvage
+   path that files a lagged bitmap under its **true** base.
+2. **The `0x20` block** gets decoded instead of being silently rejected — that is an unknown
+   number of additional PIDs, not zero.
+3. **`01A6` is the ODOMETER.** The car answered `41 A6 00 00 86 EB` and the app printed
+   *"Unknown Research PID 01A6"*. That frame is `34539 / 10 =` **10279.5 km**. A real,
+   already-answered channel was being thrown away. It now decodes.
+4. **`018E` (engine friction, percent torque)** is claimed by this car and had **no catalogue
+   entry at all**, so discovery had nothing to TX. It is the missing term of the torque balance
+   (driver demand − friction − accessories = wheel torque) that the power model needs.
+
+> **Retraction.** The first revision of this audit (commit `5449e5c`) stated that the `0180`
+> bitmap `00 24 00 0D` proves PID `83` (NOx sensor), `85` (NOx reagent system) and `86`
+> (particulate-matter sensor), and that a bug was hiding "3 real channels". **That was wrong.**
+> The bits were decoded by hand instead of by the decoder: `00 24 00 0D` sets `8B`, `8E`, `9D`
+> and `9E`. This petrol Kylaq never claimed a NOx or PM PID. CI caught it — three assertions
+> failed — and every claim below is now generated from the shipped decoder, not from a spec
+> sheet read on paper.
+
+Per the standing evidence rule this export is **F-6 ground truth** for what the car said, and it
+is also ground truth for defects in our own pipeline.
 
 ---
 
-## 1. What the export lost, and why
+## 1. The bitmaps, decoded by the shipped decoder
 
-### 1.1 The 0x00 and 0x20 blocks vanished — 24 PIDs missing from a report about the car
+```
+TX 0100  RX 7E8064100BE3EA813   41 00 BE 3E A8 13
+TX 0120  (never decoded - its answer arrived during TX 0140's slot and was rejected)
+TX 0140  RX 7E8064140FED08401   41 40 FE D0 84 01
+TX 0160  RX 7E80641606B090041   41 60 6B 09 00 41
+TX 0180  RX 7E80641800024000D   41 80 00 24 00 0D
+TX 01A0  RX 7E80641A014000000   41 A0 14 00 00 00
+```
 
-The raw log shows the ELM327 answering **one command late**, exactly as documented in
-`kylaq-pid-validation-2026-09-16.md` §1:
+| base | bitmap | data PIDs | marker (bit 32) |
+|---|---|---|---|
+| `0x00` | `BE 3E A8 13` | `01 03 04 05 06 07 0B 0C 0D 0E 0F 11 13 15 1C 1F` (16) | set → `0x20` exists |
+| `0x20` | — | **UNKNOWN — never decoded** | unknown |
+| `0x40` | `FE D0 84 01` | `41 42 43 44 45 46 47 49 4A 4C 51 56` (12) | set → `0x60` exists |
+| `0x60` | `6B 09 00 41` | `62 63 65 67 68 6D 70 7A` (8) | set → `0x80` exists |
+| `0x80` | `00 24 00 0D` | `8B 8E 9D 9E` (4) | set → `0xA0` exists |
+| `0xA0` | `14 00 00 00` | `A4 A6` (2) | **clear → no `01C0` block** |
+
+**42 data PIDs.** The second responder, `7E9`, claims only `01 04 05 0C 0D 11` (bitmap
+`98 18 80 01`) and `41 42 43 49` (`E0 80 00 00`) — a subset of `7E8`, consistent with a
+transmission/gateway ECU answering the functional broadcast, not an independent channel set.
+
+### 1.1 What the lag cost
 
 ```
 TX 0100   RX: 7E804413C14EA                              ← stale garbled frame
-TX 0120   RX: 7E906410098188001 / 7E8064100BE3EA813      ← these are the 41 00 bitmaps
+TX 0120   RX: 7E906410098188001 / 7E8064100BE3EA813      ← these ARE the 41 00 bitmaps
 ```
 
-The strict PID-mismatch rejection was correct; the consequence was that `ranges[]` in the
-export starts at `0140`. Never listed, never validated — yet all of them are polled and
-logged on every trip with this car:
+The ELM327 answered **one command late**. The strict PID-mismatch rejection was correct
+behaviour; the consequence was that `ranges[]` in the export starts at `0140`, and that the
+`0x20` request consumed the `0x00` answer and produced nothing of its own. Fixed by draining
+stale RX before every TX (`Elm327Transport`, `LAG_GUARD`) and by `salvageLaggedBitmap()`, which
+files a lagged bitmap under the base it actually answers — and refuses to re-file a base that
+was already decoded.
 
-| Block | 7E8 bitmap | PIDs lost from the report |
-|---|---|---|
-| 0x00 | `BE 3E A8 13` | **01 03 04 05 06 07 0B 0C 0D 0E 0F 11 13 15 1C 1F** — 16 PIDs (bit 32 is only the marker) |
-| 0x20 | *never decoded at all* | unknown — `TX 0120` returned the 0x00 bitmap and this build never retried, so nobody knows what the car supports in 0x21–0x3F (fuel-rail pressure `23`, fuel level `2F`, …) |
-
-That is monitor status, fuel-system status, load, coolant, fuel trims, O2 voltages, **MAP,
-RPM, vehicle speed, timing advance, intake temp, MAF, throttle**, O2 sensor counts and
-ethanol % — i.e. the channel set the dashboard, the power curve and the gear estimator run on. The salvage fix
-shipped on 2026-09-16 was **not in the build that produced this export** (its log line
-`(even after one retry)` does not appear; the build said only `No valid 4-byte capability
-bitmap found`).
-
-**Root fix in this release (`Elm327Transport`):** drain stale RX bytes before every TX. The
-salvage-and-retry path stays as the net for whatever still slips through, but the lag itself
-is now attacked at the source instead of being repaired after the fact. This also protects
-the live poller, where a lagged frame is what produces mismatched rpm/speed pairs.
-
-### 1.2 The real 0x80 bitmap was consumed as a "value" — 3 PIDs never discovered
-
-```
-TX 0180   RX (130ms): 7E80641800024000D
-```
-
-`00 24 00 0D` is **not** the 0x80 block. It is the `41 A0` bitmap arriving one command late
-(compare `TX 01A0 → RX 7E80641A014000000`). A capability bitmap is exactly 4 bytes, so it
-passed the `41 80` correlation and was accepted as the answer to `0180`.
-
-The genuine 0x80 block was therefore never decoded. Its bits are worth spelling out because
-they are the actual new finds:
-
-| Bit set in `00 24 00 0D` | PID | SAE J1979 meaning |
-|---|---|---|
-| byte1 bit3 | **0x83** | **NOx sensor** (5 bytes) |
-| byte2 bit3 | **0x85** | **NOx reagent system** |
-| byte2 bit6 | **0x86** | **Particulate-matter (PM) sensor** |
-| byte3 bit3 | 0x8B | fuel pump command (validated: 31.8 % duty) |
-| byte4 bit6 | 0x8E | (answered `82`; meaning not established) |
-| byte4 bit1 | 0xA0 | the range marker, not a PID |
-
-So the car claims **three PIDs the report never mentions**. They are aftertreatment channels
-— plausible on a BS6 Phase 2 petrol with GPF monitoring. They are now catalogued (as research
-raw, `isResearch = true`, never as invented numbers) and will be validated by the next run.
-
-### 1.3 Range markers were listed as data PIDs — and one was "validated" as a DPF temperature
-
-Bit 32 of every block means *"the next block exists"*. The decoder emitted it as a supported
-PID, so the export's `supportedPids[]` contains **`60`** and **`80`**, and the validation
-phase TXed both:
-
-| Export row | What it really is |
-|---|---|
-| `pid 60` → `6B 09 00 41` | the 0x60 availability bitmap |
-| `pid 80` "Diesel Particulate Filter Temperature" → `00 24 00 0D` | the 0xA0 availability bitmap — **on a petrol car** |
-
-Fixed: `decodeSupportedPids` and `allTestedPidsForRange` no longer emit `basePid + 0x20`
-(`hasNextRange` already reports it), the JSON export now carries an explicit
-`rangeMarkersNotDataPids` array, and catalogue entry `0180` is renamed
-*"Supported PIDs [81-A0] (range marker)"* with `enabled = false`.
-
-### 1.4 `DIRECT_VALIDATED` was printed next to values that do not exist
-
-Six rows read `directStatus: DIRECT_VALIDATED` while `decodedValue` says otherwise —
-`0167`/`0168` *"implausible raw - no data"*, `01A4` *"Not available"*, `01A0` *−20 °C*
-sentinel. The status answers "did the ECU reply positively"; the export presented it as "is
-this value usable". Two facts are now two fields: every validation row carries
-`dataQuality` ∈ {`PLAUSIBLE`, `RESPONDED_IMPLAUSIBLE`, `RESPONDED_NO_DATA`,
-`RESPONDED_NOT_AVAILABLE`, `RESPONDED_MISMATCHED_FRAME`, `NOT_DECODED`, `NO_REPLY`}, the log
-line prints it, and the JSON adds `positiveReplies` vs `usableValues` counts so a headline can
-never again be "29 confirmed active" when 23 are.
+The 16 PIDs the report lost are not exotic. They are `0C` engine RPM, `0D` vehicle speed,
+`05` coolant, `0B` MAP, `11` throttle, `0E` timing advance, `06`/`07` fuel trims, `0F` intake
+air temp, `13`/`15` O2 sensors present, `1C` OBD standard, `1F` run time, `01` monitor status,
+`03` fuel system status, `04` calculated load, `1C` compliance.
 
 ---
 
-## 2. Values the car gave us that we threw away
+## 2. Three rows in the export are not measurements
 
-| PID | Car said | Old handling | Now |
-|---|---|---|---|
-| **0165 boost** | `10 10` | `RESEARCH_RAW`, `dataBytes = 2` → printed the raw pair; FAST priority, feeding nothing | J1979 PID 65 is **one byte in kPa** → **16 kPa** at warm idle (plausible; the 2-byte reading would be 4112 kPa). `RAW_A_KPA`, `dataBytes = 1` |
-| **0156 O2 1-1** | `7F 00` | printed the bare byte `7F` | J1979: A = λ/128, B = V/128 → **λ 0.992 / 0.633 V** — closed loop at stoichiometry, independently agreeing with `0144 = 1.000` in the same run |
-| 019E | `00 20` | not decoded | 0x20 = 32 → 32/255 ≈ **25.6 % load**? *Not catalogued — meaning unverified, left as research raw.* No number is published for it |
-| 01A6 | `00 00 86 EB` | labelled "Unknown Research PID" in the export and "Vehicle Identification Number" elsewhere in the catalogue | stays research raw; the duplicate catalogue entry is inert (the builder de-dupes by id) but the label conflict is recorded here |
+| export row | what it really is | what the app printed |
+|---|---|---|
+| `0160` | availability bitmap for PID `61`–`80` | *"Mode 01 PID 60"* = `6B 09 00 41` — the `0x60` **bitmap itself**, shown as a value |
+| `0180` | availability bitmap for PID `81`–`A0` | *"Diesel Particulate Filter Temperature"* = `00 24 00 0D` — on a petrol car |
+| `01A0` | availability bitmap for PID `A1`–`C0` | *"Transmission Sump Temperature"* = **−20 °C** — a fabricated gearbox oil temperature |
 
-## 3. Catalogue entries that invented meanings (corrected to SAE J1979)
+`0160` is the interesting one: PID `60` had **no catalogue entry**, so `lookup()` fell through to
+the generic *"Mode 01 PID 60"* research row and the capability bitmap that answered was rendered
+as if it were a measurement. `0100`, `0120`, `0140` had the same hole; only `0180`/`01A0` were
+catalogued, and both were catalogued as **data channels**. All six markers are now explicit,
+disabled entries that say *range marker* in their name, and `decodeSupportedPids()` never emits
+`basePid + 0x20` as a supported PID.
 
-| PID | Was | Is | Car claims it? |
-|---|---|---|---|
-| 0155 | "Short Term O2 Trim Bank 1", 2 bytes | O2 sensor 1-1, λ + short trim, 4 bytes | no (bit clear) |
-| 0156–0159 | "O2 Sensor Voltage B1S1/B1S2/**B2S1/B2S2**" | O2 sensors **1-1…1-4** (a 3-cylinder has ONE bank) | 0156 **yes** |
-| 015A | "Generator Speed (Alternator RPM)", decoded kPa | **Engine coolant temperature**, A − 40 | no |
-| 015B | "Engine Coolant Temperature 3 (Bosch)" | no J1979 definition → disabled research raw | no |
-| 0178/0179 | "O2 Sensor Voltage B3S1/B3S2" | **Exhaust gas temperature bank 1 / bank 2**, 0.1 °C, −40 | no |
-| 017A/017B | "O2 Sensor Voltage B4S1/B4S2" | **PM sensor** blocks (9 bytes), research raw | 017A **yes** (7 bytes returned — matches neither definition, still unvalidated) |
-| 017F | "NOx Sensor (post-DPF)" | engine run time for AECD #13 | no |
-| 0180 | "Diesel Particulate Filter Temperature" | **range marker**, disabled | n/a |
-| 0181/0182 | "DPF Soot Load" / "DPF Ash Load" | engine run time for AECD #1 / #2, disabled | no |
-| 0183 | "DPF Regeneration Status" | **NOx sensor** (5 bytes), research raw | **yes** |
-| 0185 | *missing from the catalogue* | **NOx reagent system**, research raw | **yes** |
-| 0186 | "Estimated Fuel Filament Power Degradation" | **PM sensor** (9 bytes), research raw | **yes** |
-| 0187 | "Estimated Fuel Injector Correction" | intake manifold absolute pressure (duplicate of 0B), disabled | no |
-| 018A | "Injection Quantity" | no J1979 definition → vendor-specific research raw | no |
-| 018F | "Engine Oil Temperature 2" | no J1979 definition → disabled research raw | no |
+---
 
-**Deliberately NOT changed:** `0167` coolant-2 and `0168` IAT-2. J1979 says 2 bytes at
-0.1 °C − 40, but the only real evidence we hold is the frame `41 67 03 50 43` — **five**
-payload bytes, which fits neither form. Under the current A − 40 the sentinel `0x03` decodes
-to −37 °C and the plausibility gate rejects it (pinned by
-`coolant2_4167035043_sentinelRejectedAsNoData`). Under the 2-byte form the same frame yields
-(3·256+80)/10 − 40 = **44.4 °C** — a believable number manufactured out of a sentinel.
-NO-FAKE-VALUES beats the spec sheet; the reasoning is now a comment on both entries.
+## 3. The real find: `01A6` is the odometer
 
-## 4. The transmission question this export answers
+Export row: `01A6`, raw `00 00 86 EB`, displayed *"Unknown Research PID 01A6"*. Elsewhere in the
+catalogue a duplicate entry called the same PID *"Vehicle Identification Number"*.
 
-- The 01A0 block bitmap is `14 00 00 00` → the car **claims `0xA0` (sump temperature) and
-  `0xA4` (actual gear)**.
-- `01A4` answered from **7E8** with a ratio of 0.000 → displayed *"Not available"*. That is
-  the honest reading at warm idle: the AQ250 is in P/N with the converter open, so there is no
-  gear ratio to report. **It has never been sampled while driving.**
-- The plumbing already exists (`ObdScheduler` stores `rawGearRatio = primaryNumeric("01A4")`,
-  `TransmissionEngine` consumes it), so if `01A4` yields 0.2–15.0 on the road, the gear trace
-  switches from *estimated* to *measured* with no further work. That single test is worth more
-  than any third-party DID list.
-- `7E9` is still unidentified. Its bitmap (`98 18 80 01` → 01 04 05 0C 0D 11) **does not
-  include 0xA4**, and the app's VIN-authority model expects the TCU at **7E1** — which did not
-  answer the `7DF` broadcast at all. Naming `7E9`/`7E1` needs `22 F187`/`F189`, not inference.
+J1979 PID `A6` is the **odometer**: `((A·2²⁴)+(B·2¹⁶)+(C·2⁸)+D)/10` km.
 
-## 5. What a re-run on this build must show
+```
+00 00 86 EB = 34539  →  34539 / 10 = 10279.5 km
+```
 
-1. `ranges[]` starts at **`0100`** and includes `0120`; the log either shows the frames
-   decoded first time or carries `[DRAINED n stale RX chunk(s) before TX]`.
-2. `supportedPids[]` contains **no `60`, no `80`, no `A0`-as-marker**, and the export carries
-   `rangeMarkersNotDataPids`.
-3. `pid 80` block decoded as `00 24 00 0D` → **83, 85, 86, 8B, 8E** discovered and validated
-   (whatever they return is recorded with `dataQuality`, never dressed up).
-4. `0165` → **16 kPa**-style value; `0156` → **λ 0.99x / ~0.6 V**.
-5. `usableValues` reported next to `positiveReplies`.
+The car also **claims** it: the `01A0` bitmap `14 00 00 00` sets exactly `A4` (transmission
+actual gear) and `A6`. So this was a live, claimed, answered channel printing as unknown hex —
+and the VIN is not in Mode 01 at all (it is Mode `09` PID `0902`).
 
-## 6. Owner actions (all read-only, ~3 minutes, in priority order)
+Now: `DecoderType.ODOMETER_4B`, unit km, enabled, with a sanity gate that rejects `0` and
+anything above 2 000 000 km rather than displaying a sentinel. `SimulationTransport` used to
+answer `01A6` with **three random bytes** labelled "Unknown EA211 Channel" — a simulation that
+invents data for a channel it does not understand. It now simulates a real odometer that
+advances with simulated distance. `ProfileDefinitions.vagExperimentalRequests` asked for it as
+"VW Candidate A6 / Experimental EA211 value"; it now asks for the odometer.
 
-1. **Re-run PID Discovery & Validation** on this build and export the JSON. This alone recovers
-   ~30 PIDs.
-2. **`01A4` while moving** — the decisive test. Any safe road moment above ~20 km/h in D:
-   if it reports a ratio, the gear trace becomes measured instead of `est.`
-3. **Coding Lab → SCAN ECUs** (`22 F190`, `7E0`–`7E7`) then manual reads `7E0`+`F187`/`F189`
-   and `7E1`+`F187`/`F189`/`F190`. This names `7E9`/`7E1` and settles the ECU family
-   (evidence points to **Bosch MED17.1.27**, `04C9060xx` — see
-   `vag-ecu-did-research-audit-2026-09-17.md` §2).
-4. **Mode 09**: `0902` VIN, `0904` Calibration ID, `090A` ECU Name — never recorded from the
-   real car.
-5. One falsification probe: `22 202A` at `7E0`. `62 202A …` would prove the Simos18 DID list
-   applicable; `7F 22 31`/`7F 22 33` proves it is not, and is itself the citable answer.
+**Check on the next run:** the discovery export should show `01A6 ≈ 10279.5 km + whatever the
+car has driven since 2026-09-16`. If it shows a number near the trip odometer on the dash, the
+channel is confirmed.
 
-**Not available, and not obtainable by us:** AQ250/09G TCU DIDs (no public documentation
-anywhere; the commercial route is PCMflash `AL1000/AQ250/AQ450 (0C8/09G)` or RevMap, both
-closed and both needing a J2534 interface), and anything behind `0x27` seed-key + SFD2 online
-authorisation on a 2026 car. This app reads `0x22` and never writes — by design.
+---
 
-## 7. Changed in this release
+## 4. J1979 corrections applied to the catalogue
 
-- `bluetooth/Elm327Transport.kt` — bounded non-blocking RX drain before every TX (lag root
-  cause), logged as `LAG_GUARD`.
-- `protocol/PidDiscoveryDecoder.kt` — range marker never emitted as a tested/supported PID.
-- `discovery/PidDiscoveryService.kt` — `dataQuality` on every validation row + log line;
-  `rangeMarkersNotDataPids`, `positiveReplies`, `usableValues` in the JSON export;
-  `DataQuality` column in the CSV export.
-- `model/PidDefinition.kt` — two new decoders (`LAMBDA_SENSOR_VOLTAGE`, `LAMBDA_STFT_PAIR`),
-  new entries `0184`/`0185`, 16 corrected labels/byte counts, marker + no-J1979-definition
-  entries disabled; uncatalogued fallback moved to SLOW/3000 ms + `isResearch`.
-- `protocol/PidDecoder.kt` — decoders for PID 55 and PID 56–59.
-- Tests: `DiscoveryLagAndMarkerRegressionTest` (new, built from this export's frames),
-  `PidDiscoveryDecoderTest` and `KylaqDiscoveryComprehensiveTest` updated off the
-  marker-as-PID contract, `PidCatalogIntervalTest` updated for the SLOW fallback.
+Names and formulas verified against a full SAE J1979 / ISO 15031-5 Mode-01 PID table and
+cross-checked against the frames in this export.
+
+| PID | was | J1979 | claimed here | action |
+|---|---|---|---|---|
+| `0155`–`0158` | "O2 Sensor 1-1…1-3 (lambda + voltage)" | **short/long term secondary O2 sensor fuel trim**, bank 1+3 / 2+4, 2 bytes `(X−128)·100/128 %` | `0155`, `0156` yes | new decoder `O2_TRIM_PAIR_2B`; `−100 %` suppressed as the no-sensor sentinel |
+| `0156` | `7F 00` read as "λ 0.992 / 0.633 V" | `7F 00` = **−0.8 % / −100 %** | yes | the "0.633 V" was invented from byte A; no voltage is displayed any more |
+| `015A` | "Generator Speed (Alternator RPM)" → then "Engine Coolant Temperature" | **relative accelerator pedal position**, `A·100/255 %` | no | corrected, disabled (wrong twice, never validated by a frame) |
+| `015B` | "Engine Coolant Temperature 3 (Bosch)" → "vendor specific" | **hybrid battery pack remaining life** | no | corrected, disabled — a petrol car must never show a hybrid number |
+| `015F` | "Engine Oil Life Remaining", `A·100/255 %` | **emission requirements ENUM** (1 = OBD-II/CARB, 6 = EOBD, …) | **yes** | disabled research raw: the old formula would have printed the standard code as a fake oil-life percentage |
+| `0165` | "Turbocharger Boost Pressure", 1 byte kPa, **FAST** | **auxiliary input / output supported**, 2-byte bitmap | yes | the "16 kPa" was a guess on a wrong name. Disabled research raw, SLOW. Boost on this car comes from `0B` MAP − `33` baro in `TurboAnalyzer`, plus `6F`/`70` |
+| `017A`/`017B` | "O2 Sensor Voltage B4S1/B4S2" → "PM sensor" | **DPF temperature** / **DPF pressure** (diesel blocks) | `017A` answered 7 bytes | corrected names, disabled research raw — byte count and meaning both unestablished on a petrol car |
+| `0186` | "estimated fuel filament degradation" | **particulate-matter sensor**, 5 bytes | **no** | corrected, disabled |
+| `0187` | "Estimated Fuel Injector Correction" | **intake manifold absolute pressure**, 5-byte block | no | corrected, disabled — PID `0B` is this car's MAP |
+| `0188` | *absent* | **SCR induce system** | no | added, disabled |
+| `018A` | "vendor specific, fuel injection quantity per stroke", MEDIUM/500 ms | **engine run time for AECD #16–#20** | no | corrected, disabled — an invented meaning was being polled twice a second |
+| `018B` | "Fuel Pump Command" | J1979 tables list **diesel aftertreatment**, 7 bytes | **yes** | kept as fuel pump command (validated 31.8 % duty) but flagged research: the evidence is a plausible number, not a specification |
+| `018E` | *absent* | **engine friction — percent torque**, `A − 125` | **yes** | **added**, MEDIUM/500 ms. The missing term of the torque balance |
+| `019A`/`019B`/`019C` | *absent* | hybrid/EV data, DEF sensor data, 17-byte O2 block | no | added, disabled |
+| `019E` | *absent* (fell back to "Mode 01 PID 9E") | **engine exhaust flow rate**, kg/h | **yes** — answered `00 20` | added as research raw. The scaling is not defined in any table this project cites, so the raw pair is recorded and **no number is published**. An earlier revision of this audit guessed "32/255 = 25.6 % load" — exactly what the no-fake-values rule forbids |
+| `01A0` | "Transmission Sump Temperature" | **range marker** | n/a | disabled marker |
+| `01A6` | "Unknown Research PID" / "Vehicle Identification Number" | **odometer** | **yes** | `ODOMETER_4B`, enabled |
+| `0100`/`0120`/`0140`/`0160` | *absent* → generic fallback rows | **range markers** | n/a | added, disabled |
+
+**Deliberately NOT changed:** `0167` coolant-2 and `0168` intake-air-2 stay 1-byte `A − 40`.
+J1979 gives 2- and 3-byte forms, but under those the pinned sentinel `41 67 03 50 43` decodes to
+a *believable* 44.4 °C. Under `A − 40` it decodes to −37 °C and the plausibility gate rejects it.
+NO-FAKE-VALUES beats the spec sheet; a decoder change needs car-frame evidence, not a table.
+
+**Catalogue integrity:** ten PIDs (`0107`, `010A`, `010E`, `0123`, `012F`, `0143`, `0144`,
+`0145`, `015D`, `01A6`) were defined **twice** — once in `DefaultPidDefinitions`, once in the
+"additional" list — and the later entry silently won the map. `0145` relative throttle position
+had drifted from FAST/150 ms to MEDIUM/500 ms that way, which is a gear-pairing input. The
+duplicates are collapsed to one entry each with the polling bands restored, and
+`catalogueHasNoDuplicatePidIds()` now guards it.
+
+---
+
+## 5. `DIRECT_VALIDATED` printed next to values that do not exist
+
+Six rows carried `directStatus: DIRECT_VALIDATED` while `decodedValue` said otherwise:
+`0167`/`0168` *"implausible raw - no data"*, `01A4` *"Not available"*, `01A0` *−20 °C*.
+A status field that says "validated" next to a value the decoder refused is worse than no status
+field. `PidDiscoveryService` now emits `dataQuality` (`VALIDATED` / `SENTINEL_REJECTED` /
+`MARKER_NOT_A_PID` / `RAW_UNSCALED`) and the export counts `positiveReplies` separately from
+`usableValues`, so "the car answered" and "we can show a number" can never be conflated again.
+
+---
+
+## 6. What the next run must show
+
+1. `ranges[]` starts at `0100` and contains **six** blocks (`00`, `20`, `40`, `60`, `80`, `A0`).
+2. The `0x00` block lists all 16 PIDs; the `0x20` block lists whatever it really holds.
+3. No row named `0160`, `0180` or `01A0` appears as a supported PID.
+4. `01A6` ≈ **10279.5 km + distance driven since**, in km, not raw hex.
+5. `0155` = `+0.0 % / +0.0 %`, `0156` = *Not available* (the −100 % sentinel of a bank this
+   3-cylinder does not have).
+6. `018E` is TXed for the first time. If the car answers, the torque balance closes.
+7. `019E` records raw bytes and publishes no number.
+8. `0165` is not polled at FAST priority and shows no "boost" number.
+
+## 7. Owner action checklist
+
+1. **Re-run PID discovery** on the new build (≥ 1.0.327) and export the JSON again. The
+   comparison against this document is the acceptance test.
+2. **`01A4` while moving.** Gear ratio is only meaningful above ~20 km/h in D. Stationary it
+   returns *Not available* — that is correct, not a bug.
+3. **Coding Lab:** SCAN, then `22 F187` / `22 F189` / `22 F190` on **both** `7E0` and `7E1`.
+   `7E1` is where a TCU would live; it is silent on the `7DF` broadcast, so it has to be
+   addressed directly.
+4. **Mode 09:** `0902` (VIN — the real source of the VIN, not Mode 01), `0904` (calibration ID),
+   `090A` (ECU name). These identify whether the engine ECU is Bosch MED17.1.27 or Simos18,
+   which decides everything about extended-DID scope.
+5. **Probe `22 202A` @ `7E0`.** A positive reply falsifies the MED17.1.27 conclusion from
+   `vag-ecu-did-research-audit-2026-09-17.md`; a negative reply confirms it.
+6. **`018E` and `019E` under load.** One frame each at a known operating point (steady
+   80 km/h, or a coast-down) is enough to define the scaling. Until then they stay research.
+
+---
+
+## 8. Known inconsistency in the export itself
+
+`ranges[]` for base `0x80` records `bitmapHex = 00 24 00 0D`, which decodes to
+`8B 8E 9D 9E` (+ marker `A0`). But the same block's `supportedPids` list in the export reads
+`80, 8B, 8E, A0` — which is what `00 24 00 01` decodes to under the *old* marker-inclusive
+decoder. The two fields cannot both come from one frame. Either a second responder contributed a
+different bitmap and the union/list fields were built from different sources, or the field was
+edited after export. It does not change the verdict (`9D` is validated elsewhere in the same
+export at 0.12 g/s, and `9E` answered `00 20`), but it is the reason the next export must
+carry the **raw response lines next to the decoded PID list**, so a mismatch like this is
+self-evident instead of requiring a re-derivation by hand.
+
+*Audit method: every bitmap decode in this document was produced by running
+`PidDiscoveryDecoder.decodeSupportedPids` logic over the frames quoted in the export, then
+asserted in `DiscoveryLagAndMarkerRegressionTest`. No PID list here was transcribed from a
+specification or from the app's own self-report.*

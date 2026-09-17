@@ -511,11 +511,14 @@ object PidDecoder {
                 }
             }
 
-            // SAE J1979 PID 56-59: byte A is the equivalence ratio in 1/128 lambda, byte B
-            // is the sensor voltage in 1/128 V. The owner Kylaq run 2026-09-16 answered
-            // 7F 00 for PID 56, i.e. lambda 0.992 and 0.635 V at closed-loop stoichiometry,
-            // while the catalog had it as RESEARCH_RAW so the export printed the bare byte.
-            DecoderType.LAMBDA_SENSOR_VOLTAGE -> {
+            // Two-byte equivalence ratio, ((A*256)+B)/32768 - the layout J1979 uses for the
+            // lambda half of PID 34-3B (O2 sensor n: lambda + current) and 24-2B (lambda +
+            // voltage). The owner Kylaq run 2026-09-16 answered `41 56 7F 00`; read as lambda
+            // that is 0.992 at closed-loop stoichiometry, which independently agrees with PID
+            // 44 (commanded equivalence ratio) = 1.000 in the same run. Two earlier revisions
+            // of this code printed the bare byte 7F, then invented "0.633 V" out of byte A -
+            // the frame contains no voltage field, so none is displayed any more.
+            DecoderType.LAMBDA_2B -> {
                 if (dataBytes.size < 2) {
                     DecodedResult(
                         parameterName = pidDef.name,
@@ -528,11 +531,10 @@ object PidDecoder {
                     )
                 } else {
                     val lambdaValue = ((a * 256.0) + b) / 32768.0
-                    val volts = a / 128.0
                     DecodedResult(
                         parameterName = pidDef.name,
                         numericValue = lambdaValue,
-                        displayValue = String.format(Locale.US, "\u03BB %.3f / %.3f V", lambdaValue, volts),
+                        displayValue = String.format(Locale.US, "\u03BB %.3f", lambdaValue),
                         unit = pidDef.unit,
                         rawPayloadHex = rawHex,
                         dataBytes = dataBytes,
@@ -541,9 +543,58 @@ object PidDecoder {
                 }
             }
 
-            // SAE J1979 PID 55: A-B is the equivalence ratio (1/128 lambda), C-D is the
-            // short-term fuel trim of that sensor (1/128 %, offset 128).
-            DecoderType.LAMBDA_STFT_PAIR -> {
+            // SAE J1979 PID 55-58: secondary oxygen-sensor fuel trims, two bytes, each
+            // (X - 128) * 100 / 128 percent. 55/56 are the short/long term trim of bank 1 +
+            // bank 3, 57/58 of bank 2 + bank 4. The owner run answered `41 55 80 80` =
+            // +0.0 % / +0.0 % (closed loop, post-cat trims at zero) and `41 56 7F 00` =
+            // -0.8 % / -100.0 %, the second byte being the no-sensor sentinel of the bank
+            // this 3-cylinder engine does not have.
+            DecoderType.O2_TRIM_PAIR_2B -> {
+                if (dataBytes.size < 2) {
+                    DecodedResult(
+                        parameterName = pidDef.name,
+                        numericValue = null,
+                        displayValue = "NO DATA",
+                        unit = pidDef.unit,
+                        rawPayloadHex = rawHex,
+                        dataBytes = dataBytes,
+                        isKnown = false
+                    )
+                } else {
+                    val trimA = (a - 128) * 100.0 / 128.0
+                    val trimB = (b - 128) * 100.0 / 128.0
+                    // -100 % is the ECU saying "that sensor does not exist". Publishing it as
+                    // a trim value would be a fake number on a single-bank engine.
+                    if (trimA <= -99.99 || trimB <= -99.99) {
+                        DecodedResult(
+                            parameterName = pidDef.name,
+                            numericValue = null,
+                            displayValue = "Not available",
+                            unit = pidDef.unit,
+                            rawPayloadHex = rawHex,
+                            dataBytes = dataBytes,
+                            isKnown = false
+                        )
+                    } else {
+                        DecodedResult(
+                            parameterName = pidDef.name,
+                            numericValue = trimA,
+                            displayValue = String.format(Locale.US, "%+.1f %% / %+.1f %%", trimA, trimB),
+                            unit = pidDef.unit,
+                            rawPayloadHex = rawHex,
+                            dataBytes = dataBytes,
+                            isKnown = true
+                        )
+                    }
+                }
+            }
+
+            // SAE J1979 PID A6: odometer, ((A*2^24)+(B*2^16)+(C*2^8)+D)/10 km. The owner run
+            // recorded `41 A6 00 00 86 EB` and the app printed "Unknown Research PID 01A6".
+            // 34539 / 10 = 10279.5 km - a real channel, already answered, thrown away as raw
+            // hex. Sanity gate: 0 km and anything above 2 000 000 km are rejected as sentinel
+            // or garbage instead of being displayed.
+            DecoderType.ODOMETER_4B -> {
                 if (dataBytes.size < 4) {
                     DecodedResult(
                         parameterName = pidDef.name,
@@ -555,17 +606,30 @@ object PidDecoder {
                         isKnown = false
                     )
                 } else {
-                    val lambdaValue = ((a * 256.0) + b) / 32768.0
-                    val stftPct = (c - 128) * 100.0 / 128.0
-                    DecodedResult(
-                        parameterName = pidDef.name,
-                        numericValue = lambdaValue,
-                        displayValue = String.format(Locale.US, "\u03BB %.3f / %+.1f %%", lambdaValue, stftPct),
-                        unit = pidDef.unit,
-                        rawPayloadHex = rawHex,
-                        dataBytes = dataBytes,
-                        isKnown = true
-                    )
+                    val raw = (a.toLong() shl 24) or (b.toLong() shl 16) or
+                        (c.toLong() shl 8) or d.toLong()
+                    val km = raw / 10.0
+                    if (raw <= 0L || km > 2_000_000.0) {
+                        DecodedResult(
+                            parameterName = pidDef.name,
+                            numericValue = null,
+                            displayValue = "Not available",
+                            unit = pidDef.unit,
+                            rawPayloadHex = rawHex,
+                            dataBytes = dataBytes,
+                            isKnown = false
+                        )
+                    } else {
+                        DecodedResult(
+                            parameterName = pidDef.name,
+                            numericValue = km,
+                            displayValue = String.format(Locale.US, "%.1f", km),
+                            unit = pidDef.unit,
+                            rawPayloadHex = rawHex,
+                            dataBytes = dataBytes,
+                            isKnown = true
+                        )
+                    }
                 }
             }
 
