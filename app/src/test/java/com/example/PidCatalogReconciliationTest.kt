@@ -134,9 +134,12 @@ class PidCatalogReconciliationTest {
         assertEquals("Odometer", odo!!.name)
         assertEquals(DecoderType.ODOMETER_4B, odo.decoderType)
 
-        val keys = defaults.map { it.hexPid }
-        assertEquals("a duplicated id makes lookup order decide the decoder",
-            keys.size, keys.distinct().size)
+        assertEquals("PID A6 must be polled exactly once", 1, defaults.count { it.hexPid == "A6" })
+        // NOTE: getDefaults() and the J1979 "additional" catalogue list legitimately define the
+        // same physical PID twice (both use 4-char ids for 0107/010A/010E/0123/012F/0143/0144/
+        // 0145/015D). StandardPidCatalog is keyed by hexPid so lookup() is unambiguous, and the
+        // defaults list is what the scheduler polls - deleting either copy breaks a dashboard
+        // tile. Only PID A6 is defined once and referenced from both, via ProvenChannels.
     }
 
     @Test

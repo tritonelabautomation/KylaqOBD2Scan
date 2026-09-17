@@ -29,7 +29,7 @@ enum class DecoderType {
     TRANSMISSION_GEAR_A4, // SAE J1979 PID 01A4 Actual Gear Ratio / Status
     LAMBDA_2B,            // ((A*256)+B)/32768 lambda, two bytes - J1979 PID 24-2B / 34-3B lambda half
     O2_TRIM_PAIR_2B,      // (A-128)*100/128 % and (B-128)*100/128 % - J1979 PID 55-58 secondary O2 trims
-    ODOMETER_4B,          // ((A*2^24)+(B*2^16)+(C*2^8)+D)/10 km - J1979 PID A6 (car answered 00 00 86 EB = 10279.5 km)
+    ODOMETER_4B,          // ((A*2^24)+(B*2^16)+(C*2^8)+D)/10 km - J1979 PID A6 (car answered 00 00 86 EB = 3453.9 km)
     RESEARCH_RAW,         // Preserve raw bytes without calculation
     CUSTOM_EXPRESSION     // Custom expression if user defined
 }
@@ -174,7 +174,7 @@ object ProvenChannels {
     /**
      * J1979 PID A6 = ODOMETER, ((A*2^24)+(B*2^16)+(C*2^8)+D)/10 km.
      * The 2026-09-16 discovery run on VIN MEXKPEPC2TG028855 recorded `41 A6 00 00 86 EB`
-     * while the app printed "Unknown Research PID 01A6". 34539 / 10 = 10279.5 km, and the car
+     * while the app printed "Unknown Research PID 01A6". 34539 / 10 = 3453.9 km, and the car
      * claims the PID in its 01A0 bitmap `14 00 00 00` (which sets A4 and A6 only).
      */
     val ODOMETER = PidDefinition(
@@ -191,7 +191,7 @@ object ProvenChannels {
         formulaDisplay = "((A * 2^24) + (B * 2^16) + (C * 2^8) + D) / 10",
         isResearch = false,
         enabled = true,
-        description = "SAE J1979 PID A6 is the ODOMETER in km at 0.1 km resolution. The owner run of 2026-09-16 recorded `41 A6 00 00 86 EB` and the app printed 'Unknown Research PID 01A6'; the frame is 34539 / 10 = 10279.5 km. The car claims it in the 01A0 bitmap `14 00 00 00`, so it is a live channel, not research. The VIN is not in Mode 01 at all - it is Mode 09 PID 0902 - and a duplicate catalogue entry used to mislabel this PID as a partial VIN.",
+        description = "SAE J1979 PID A6 is the ODOMETER in km at 0.1 km resolution. The owner run of 2026-09-16 recorded `41 A6 00 00 86 EB` and the app printed 'Unknown Research PID 01A6'; the frame is 34539 / 10 = 3453.9 km. The car claims it in the 01A0 bitmap `14 00 00 00`, so it is a live channel, not research. The VIN is not in Mode 01 at all - it is Mode 09 PID 0902 - and a duplicate catalogue entry used to mislabel this PID as a partial VIN.",
         priority = PollingPriority.SLOW,
         defaultIntervalMs = 3000L
     )
@@ -200,6 +200,159 @@ object ProvenChannels {
 object DefaultPidDefinitions {
     fun getDefaults(): List<PidDefinition> {
         return listOf(
+            // Restored 2026-09-17: these nine entries were deleted in a "duplicate id"
+            // cleanup that misread the catalogue. DefaultPidDefinitions.getDefaults() is the
+            // list the scheduler polls, the dashboard fuel tiles resolve by `id` and
+            // FuelPidLineageTest asserts on; the J1979 "additional" list below happens to use
+            // the same four-character ids, so StandardPidCatalog's hexPid-keyed map lets the
+            // later entry win. That shadowing is benign and pre-existing - deleting the
+            // defaults copy was not: it removed live channels (010A and 0123 are dashboard
+            // fuel tiles, 0145 relative throttle is a gear-pairing input) and broke three
+            // tests. Kept deliberately, with the polling bands the dashboard was tuned on.
+            PidDefinition(
+                id = "0107",
+                service = "01",
+                pid = "07",
+                name = "Long Term Fuel Trim Bank 1",
+                shortName = "LTFT B1",
+                unit = "%",
+                canHeader = "7DF",
+                expectedRxId = "7E8",
+                defaultIntervalMs = 1200L,
+                enabled = true,
+                decoderType = DecoderType.FUEL_TRIM,
+                formulaDisplay = "(A - 128) * 100 / 128",
+                description = "Long term adaptive fuel correction",
+                priority = PollingPriority.MEDIUM
+            ),
+            PidDefinition(
+                id = "010E",
+                service = "01",
+                pid = "0E",
+                name = "Timing Advance",
+                shortName = "Timing",
+                unit = "\u00B0",
+                canHeader = "7DF",
+                expectedRxId = "7E8",
+                defaultIntervalMs = 500L,
+                enabled = true,
+                decoderType = DecoderType.TIMING_ADVANCE,
+                formulaDisplay = "A / 2 - 64",
+                description = "Ignition timing advance cylinder 1",
+                priority = PollingPriority.MEDIUM
+            ),
+            PidDefinition(
+                id = "0123",
+                service = "01",
+                pid = "23",
+                name = "Fuel Rail Pressure",
+                shortName = "FRP",
+                unit = "kPa",
+                canHeader = "7DF",
+                expectedRxId = "7E8",
+                defaultIntervalMs = 600L,
+                enabled = true,
+                decoderType = DecoderType.FUEL_RAIL_PRESSURE,
+                formulaDisplay = "((A * 256) + B) * 10",
+                description = "Fuel rail direct injection pressure",
+                priority = PollingPriority.MEDIUM
+            ),
+            PidDefinition(
+                id = "010A",
+                service = "01",
+                pid = "0A",
+                name = "Fuel Pressure",
+                shortName = "Fuel Press",
+                unit = "kPa",
+                canHeader = "7DF",
+                expectedRxId = "7E8",
+                defaultIntervalMs = 1000L,
+                enabled = true,
+                decoderType = DecoderType.FUEL_PRESSURE_3_KPA,
+                formulaDisplay = "A * 3",
+                description = "Low-pressure fuel supply gauge pressure",
+                priority = PollingPriority.MEDIUM
+            ),
+            PidDefinition(
+                id = "0144",
+                service = "01",
+                pid = "44",
+                name = "Commanded Equivalence Ratio",
+                shortName = "Lambda",
+                unit = "\u03BB",
+                canHeader = "7DF",
+                expectedRxId = "7E8",
+                defaultIntervalMs = 600L,
+                enabled = true,
+                decoderType = DecoderType.EQUIVALENCE_RATIO,
+                formulaDisplay = "((A * 256) + B) / 32768",
+                description = "Target air-fuel equivalence ratio (Lambda)",
+                priority = PollingPriority.MEDIUM
+            ),
+            PidDefinition(
+                id = "0143",
+                service = "01",
+                pid = "43",
+                name = "Absolute Load Value",
+                shortName = "Abs Load",
+                unit = "%",
+                canHeader = "7DF",
+                expectedRxId = "7E8",
+                defaultIntervalMs = 600L,
+                enabled = true,
+                decoderType = DecoderType.PERCENT_LOAD_255,
+                formulaDisplay = "((A * 256) + B) / 2.55",
+                description = "Normalized volumetric engine load",
+                priority = PollingPriority.MEDIUM
+            ),
+            PidDefinition(
+                id = "0145",
+                service = "01",
+                pid = "45",
+                name = "Relative Throttle Position",
+                shortName = "Rel Throttle",
+                unit = "%",
+                canHeader = "7DF",
+                expectedRxId = "7E8",
+                defaultIntervalMs = 150L,
+                enabled = true,
+                decoderType = DecoderType.PERCENT_255,
+                formulaDisplay = "A * 100 / 255",
+                description = "Relative throttle plate opening - a gear-pairing input",
+                priority = PollingPriority.FAST
+            ),
+            PidDefinition(
+                id = "015D",
+                service = "01",
+                pid = "5D",
+                name = "Engine Fuel Injection Timing",
+                shortName = "Inj Timing",
+                unit = "\u00B0",
+                canHeader = "7DF",
+                expectedRxId = "7E8",
+                defaultIntervalMs = 600L,
+                enabled = true,
+                decoderType = DecoderType.INJECTION_TIMING_128,
+                formulaDisplay = "(((A * 256) + B) - 26880) / 128.0",
+                description = "Start of fuel injection timing relative to TDC",
+                priority = PollingPriority.MEDIUM
+            ),
+            PidDefinition(
+                id = "012F",
+                service = "01",
+                pid = "2F",
+                name = "Fuel Tank Level Input",
+                shortName = "Fuel Level",
+                unit = "%",
+                canHeader = "7DF",
+                expectedRxId = "7E8",
+                defaultIntervalMs = 3000L,
+                enabled = true,
+                decoderType = DecoderType.PERCENT_255,
+                formulaDisplay = "A * 100 / 255",
+                description = "Nominal fuel tank level percentage",
+                priority = PollingPriority.SLOW
+            ),
             // ─── 0100 Range marker: PIDs supported [01-20] ────────────────────
             PidDefinition(
                 id = "0100", service = "01", pid = "00",

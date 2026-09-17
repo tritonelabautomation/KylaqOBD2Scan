@@ -33,7 +33,7 @@ Four things are genuinely recoverable, and all four are fixed or actionable in t
 2. **The `0x20` block** gets decoded instead of being silently rejected — that is an unknown
    number of additional PIDs, not zero.
 3. **`01A6` is the ODOMETER.** The car answered `41 A6 00 00 86 EB` and the app printed
-   *"Unknown Research PID 01A6"*. That frame is `34539 / 10 =` **10279.5 km**. A real,
+   *"Unknown Research PID 01A6"*. That frame is `34539 / 10 =` **3453.9 km**. A real,
    already-answered channel was being thrown away. It now decodes.
 4. **`018E` (engine friction, percent torque)** was claimed *and answered* — the log shows
    `DIRECT_VALIDATED … Decoded: 82` — but the catalogue had no entry for it, so the app printed
@@ -124,7 +124,7 @@ catalogue a duplicate entry called the same PID *"Vehicle Identification Number"
 J1979 PID `A6` is the **odometer**: `((A·2²⁴)+(B·2¹⁶)+(C·2⁸)+D)/10` km.
 
 ```
-00 00 86 EB = 34539  →  34539 / 10 = 10279.5 km
+00 00 86 EB = 34539  →  34539 / 10 = 3453.9 km
 ```
 
 The car also **claims** it: the `01A0` bitmap `14 00 00 00` sets exactly `A4` (transmission
@@ -141,7 +141,7 @@ lives once in `ProvenChannels.ODOMETER` and is **referenced** from both the ship
 (so a fresh install polls it) and the J1979 catalogue (so `lookup("A6")` resolves it) —
 copying it into both lists is exactly how the ten duplicate ids below came to exist.
 
-**Check on the next run:** the discovery export should show `01A6 ≈ 10279.5 km + whatever the
+**Check on the next run:** the discovery export should show `01A6 ≈ 3453.9 km + whatever the
 car has driven since 2026-09-16`. If it shows a number near the trip odometer on the dash, the
 channel is confirmed.
 
@@ -200,12 +200,23 @@ unproven guess back on the dashboard as a measurement. PIDs the catalogue does n
 user-added custom channels — are returned untouched. `PidCatalogReconciliationTest` pins all of
 it, including idempotence over the whole catalogue.
 
-**Catalogue integrity:** ten PIDs (`0107`, `010A`, `010E`, `0123`, `012F`, `0143`, `0144`,
-`0145`, `015D`, `01A6`) were defined **twice** — once in `DefaultPidDefinitions`, once in the
-"additional" list — and the later entry silently won the map. `0145` relative throttle position
-had drifted from FAST/150 ms to MEDIUM/500 ms that way, which is a gear-pairing input. The
-duplicates are collapsed to one entry each with the polling bands restored, and
-`catalogueHasNoDuplicatePidIds()` now guards it.
+**Catalogue structure — and a "fix" that had to be reverted.** Nine PIDs (`0107`, `010A`,
+`010E`, `0123`, `012F`, `0143`, `0144`, `0145`, `015D`) are defined twice: once in
+`DefaultPidDefinitions.getDefaults()` and once in the J1979 "additional" list. Both use the same
+four-character id, and `StandardPidCatalog` is keyed by `hexPid`, so the later entry wins the
+lookup map. That shadowing is **benign and pre-existing** — the two lists serve different
+consumers: `getDefaults()` is what the scheduler polls, what the dashboard fuel tiles resolve by
+`id`, and what `FuelPidLineageTest` asserts on; the "additional" list is the J1979 reference.
+
+The first revision of this pass treated it as a defect and **deleted the nine defaults copies**.
+That removed live channels — `010A` and `0123` are dashboard fuel tiles, `0145` relative throttle
+is a gear-pairing input — and broke three tests (`FuelPidLineageTest` ×2,
+`PowertrainEnginesTest`). Reverted, with the polling bands the dashboard was tuned on recorded
+explicitly (`0145` back to FAST/150 ms). The invariant that actually has to hold is now asserted
+instead: `lookup()` is unambiguous because the map is keyed by `hexPid`, each dashboard PID
+appears exactly once in the polled defaults list, and the one definition that genuinely should
+not be duplicated — the odometer — lives once in `ProvenChannels.ODOMETER` and is *referenced*
+from both lists.
 
 ---
 
@@ -225,7 +236,7 @@ field. `PidDiscoveryService` now emits `dataQuality` (`VALIDATED` / `SENTINEL_RE
 1. `ranges[]` starts at `0100` and contains **six** blocks (`00`, `20`, `40`, `60`, `80`, `A0`).
 2. The `0x00` block lists all 16 PIDs; the `0x20` block lists whatever it really holds.
 3. No row named `0160`, `0180` or `01A0` appears as a supported PID.
-4. `01A6` ≈ **10279.5 km + distance driven since**, in km, not raw hex.
+4. `01A6` ≈ **3453.9 km + distance driven since**, in km, not raw hex.
 5. `0155` = `+0.0 % / +0.0 %`, `0156` = *Not available* (the −100 % sentinel of a bank this
    3-cylinder does not have).
 6. `018E` decodes as **+5 %** (engine friction) instead of the raw byte `82`.

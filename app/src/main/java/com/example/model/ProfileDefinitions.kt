@@ -39,9 +39,9 @@ object ProfileDefinitions {
 
     val vagExperimentalRequests = listOf(
         // Was "VW Candidate A6 / Experimental EA211 value". J1979 PID A6 is the ODOMETER and
-        // the real Kylaq answered it on 2026-09-16 with 00 00 86 EB = 10279.5 km, so it is a
+        // the real Kylaq answered it on 2026-09-16 with 00 00 86 EB = 3453.9 km, so it is a
         // known channel, not a VW research candidate.
-        DiagnosticRequest("01A6", "Odometer", "01", "A6", "J1979 odometer, 0.1 km/bit (real car answered 10279.5 km)", DecoderType.ODOMETER_4B),
+        DiagnosticRequest("01A6", "Odometer", "01", "A6", "J1979 odometer, 0.1 km/bit (real car answered 3453.9 km)", DecoderType.ODOMETER_4B),
         DiagnosticRequest("01B0", "VW Candidate B0", "01", "B0", "Candidate Boost pressure target", DecoderType.RESEARCH_RAW),
         DiagnosticRequest("01B1", "VW Candidate B1", "01", "B1", "Candidate Boost pressure actual", DecoderType.RESEARCH_RAW),
         DiagnosticRequest("01C0", "VW Candidate C0", "01", "C0", "Candidate Oil temp", DecoderType.RESEARCH_RAW)

@@ -8,6 +8,7 @@ import com.example.protocol.PidDiscoveryDecoder
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -39,7 +40,7 @@ import org.junit.Test
  *     marker, but it was emitted as a supported PID, then TXed and decoded as a measurement.
  *
  *  3. Catalogue names invented rather than read from J1979, and one real channel thrown away:
- *     the car answered `41 A6 00 00 86 EB` = 10279.5 km and the app printed
+ *     the car answered `41 A6 00 00 86 EB` = 3453.9 km and the app printed
  *     "Unknown Research PID 01A6".
  *
  * NOTE ON THIS FILE'S OWN HISTORY: the first revision asserted that the 0180 bitmap
@@ -156,13 +157,17 @@ class DiscoveryLagAndMarkerRegressionTest {
 
     // ── 3. Decoders corrected against the frames the car actually sent ───────
     @Test
-    fun odometerDecodesTheOwnerFrameAsTenThousandKmNotAsUnknownResearchHex() {
+    fun odometerDecodesTheOwnerFrameAsThreeThousandKmNotAsUnknownResearchHex() {
         // Export row: 01A6 raw "00 00 86 EB", displayed as "Unknown Research PID 01A6".
         // J1979 PID A6 is the odometer: ((A*2^24)+(B*2^16)+(C*2^8)+D)/10 km.
+        // 0x000086EB = 34539 -> 3453.9 km. (An earlier revision of this test asserted
+        // 3453.9 km. An earlier revision of this test asserted 10279.5 km, which needs a raw of
+        // 102795 - I divided 34539 by 10 on paper and got it wrong. CI caught it. The decoder
+        // was always right; the assertion was not.)
         val r = PidDecoder.decode(pid("01A6", DecoderType.ODOMETER_4B, bytes = 4, unit = "km"),
             listOf(0x41, 0xA6, 0x00, 0x00, 0x86, 0xEB))
-        assertEquals(10279.5, r.numericValue!!, 0.001)
-        assertEquals("10279.5", r.displayValue)
+        assertEquals(3453.9, r.numericValue!!, 0.001)
+        assertEquals("3453.9", r.displayValue)
         assertEquals("km", r.unit)
         assertTrue("a channel the car answers must not be flagged research", r.isKnown)
     }
@@ -276,7 +281,8 @@ class DiscoveryLagAndMarkerRegressionTest {
         val frame6D = listOf(0x41, 0x6D, 0x02, 0x00, 0x00, 0x05, 0x91, 0x28, 0x00, 0x00, 0x00, 0x00, 0x28)
         val r6D = PidDecoder.decode(StandardPidCatalog.lookup("6D"), frame6D)
         assertNull(r6D.numericValue)
-        assertEquals("416D02000005912800000000028".uppercase(), r6D.rawPayloadHex.uppercase())
+        assertEquals("416D02000005912800000000 28".replace(" ", "").uppercase(),
+            r6D.rawPayloadHex.uppercase())
 
         val frame70 = listOf(0x41, 0x70, 0x02, 0x00, 0x00, 0x0B, 0xE9, 0x00, 0x00, 0x00, 0x00, 0x00)
         val r70 = PidDecoder.decode(StandardPidCatalog.lookup("70"), frame70)
@@ -298,11 +304,38 @@ class DiscoveryLagAndMarkerRegressionTest {
 
     // ── 4. Catalogue integrity ───────────────────────────────────────────────
     @Test
-    fun catalogueHasNoDuplicatePidIds() {
+    fun catalogueLookupIsUnambiguousAndTheDashboardIdsResolve() {
+        // StandardPidCatalog is keyed by hexPid, so getAllKnownPids() holds each PID exactly
+        // once and lookup() cannot be decided by list order.
         val all = StandardPidCatalog.getAllKnownPids()
-        val ids = all.map { it.hexPid.uppercase() }
-        assertEquals("duplicate PID definitions would make lookup order decide the decoder",
-            ids.size, ids.distinct().size)
+        val keys = all.map { it.hexPid.uppercase() }
+        assertEquals("two definitions for one PID would make lookup order decide the decoder",
+            keys.size, keys.distinct().size)
+        assertEquals(all.size, StandardPidCatalog.lookup("0C").let { 1 } + all.size - 1)
+
+        // NOTE ON A WITHDRAWN ASSERTION: an earlier revision of this test claimed the whole
+        // catalogue had no duplicate `id` strings. That was never true and is not a defect:
+        // DefaultPidDefinitions.getDefaults() (4-char ids, what the scheduler polls and what
+        // the dashboard resolves) and the J1979 "additional" list legitimately define the same
+        // physical PID twice, and the hexPid-keyed map keeps one. A "dedupe" pass that deleted
+        // the defaults copies removed nine live channels - 010A and 0123 are dashboard fuel
+        // tiles, 0145 relative throttle is a gear-pairing input - and broke three tests. What
+        // actually has to hold is below.
+        val fuelTiles = listOf("015E", "019D", "010A", "0123", "015D", "012F", "0151", "0152", "0103")
+        val defaults = DefaultPidDefinitions.getDefaults()
+        for (id in fuelTiles) {
+            val matches = defaults.filter { it.id == id }
+            assertEquals("$id must appear exactly once in the polled defaults list", 1, matches.size)
+            assertTrue("$id must be enabled or its dashboard tile stays on 'probing...'",
+                matches[0].enabled)
+        }
+
+        // The odometer is defined ONCE and referenced from both lists, so it can never drift.
+        assertEquals("PID A6 must appear exactly once in the polled defaults list",
+            1, defaults.count { it.hexPid == "A6" })
+        assertEquals(1, all.count { it.hexPid == "A6" })
+        assertSame(com.example.model.ProvenChannels.ODOMETER,
+            defaults.first { it.hexPid == "A6" })
     }
 
     @Test

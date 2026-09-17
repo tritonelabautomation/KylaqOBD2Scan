@@ -378,9 +378,9 @@ class SimulationElmTransport(
             // J1979 PID A6 - ODOMETER, ((A*2^24)+(B*2^16)+(C*2^8)+D)/10 km. This used to be
             // three RANDOM bytes labelled "Unknown EA211 Channel", which is exactly what a
             // simulation must not do: it teaches the UI to trust a channel that has no
-            // meaning. The real car answered `41 A6 00 00 86 EB` = 10279.5 km on 2026-09-16.
+            // meaning. The real car answered `41 A6 00 00 86 EB` = 3453.9 km on 2026-09-16.
             cleanCmd == "01A6" -> {
-                val km = 10279.5 + (simTimeStep * 30.0 / 3600.0) // ~30 km/h average
+                val km = 3453.9 + (simTimeStep * 30.0 / 3600.0) // ~30 km/h average
                 val raw = (km * 10.0).toLong().coerceIn(0L, 99_999_999L)
                 val b0 = ((raw shr 24) and 0xFF).toInt()
                 val b1 = ((raw shr 16) and 0xFF).toInt()

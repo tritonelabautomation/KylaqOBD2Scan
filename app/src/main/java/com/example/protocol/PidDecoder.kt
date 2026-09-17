@@ -591,7 +591,7 @@ object PidDecoder {
 
             // SAE J1979 PID A6: odometer, ((A*2^24)+(B*2^16)+(C*2^8)+D)/10 km. The owner run
             // recorded `41 A6 00 00 86 EB` and the app printed "Unknown Research PID 01A6".
-            // 34539 / 10 = 10279.5 km - a real channel, already answered, thrown away as raw
+            // 34539 / 10 = 3453.9 km - a real channel, already answered, thrown away as raw
             // hex. Sanity gate: 0 km and anything above 2 000 000 km are rejected as sentinel
             // or garbage instead of being displayed.
             DecoderType.ODOMETER_4B -> {
