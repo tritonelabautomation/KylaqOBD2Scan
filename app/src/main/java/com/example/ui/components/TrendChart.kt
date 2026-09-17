@@ -352,10 +352,22 @@ fun TrendChart(
 
             fun linePath(buckets: List<ChartSampling.Bucket>, seriesIdx: Int): Path {
                 val path = Path()
+                // Owner 2026-09-17 ("Does it makes sense for you?"): a gear HOLDs its
+                // value between observations - linear interpolation between sparse
+                // samples drew 1->2->1 hunts as triangular spikes. Discrete series use
+                // zero-order hold: horizontal at the last known gear until the next
+                // observation, then a vertical shift edge = a real square wave.
+                val disc = drawable[seriesIdx].discrete
+                var prevY = 0f
                 buckets.forEachIndexed { i, b ->
                     val x = xOf(b.ts).toFloat()
                     val y = yOf(seriesIdx, b.avg)
-                    if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                    when {
+                        i == 0 -> path.moveTo(x, y)
+                        disc -> { path.lineTo(x, prevY); path.lineTo(x, y) }
+                        else -> path.lineTo(x, y)
+                    }
+                    prevY = y
                 }
                 return path
             }
