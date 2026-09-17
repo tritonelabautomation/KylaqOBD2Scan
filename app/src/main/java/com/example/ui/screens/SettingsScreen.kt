@@ -1268,6 +1268,24 @@ fun SettingsScreen(
  * grouping the cards below it the way the platform Settings app groups its pages.
  */
 @Composable
+private fun SettingsSectionHeader(title: String) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 6.dp)
+    ) {
+        Text(
+            title,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            color = CyberCyan,
+            letterSpacing = 1.6.sp
+        )
+        Spacer(Modifier.height(4.dp))
+        Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+    }
+}
+
 /**
  * One line of the "Never lose a drive" card: a plain verdict plus what it means.
  * Green only when the protection is actually in place - an amber row that says what to do beats a
@@ -1297,24 +1315,6 @@ private fun ProtectionStatusRow(ok: Boolean, label: String, detail: String) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-    }
-}
-
-private fun SettingsSectionHeader(title: String) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 6.dp)
-    ) {
-        Text(
-            title,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-            color = CyberCyan,
-            letterSpacing = 1.6.sp
-        )
-        Spacer(Modifier.height(4.dp))
-        Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
     }
 }
 

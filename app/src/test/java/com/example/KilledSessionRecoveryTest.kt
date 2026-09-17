@@ -164,8 +164,15 @@ class KilledSessionRecoveryTest {
         assertTrue(trip.startTimeUtc.endsWith("+05:30"))
         val endStamp = trip.endTimeUtc!!
         assertTrue(endStamp.endsWith("+05:30"))
-        val window = RecordTime.parseMillis(endStamp)!! - RecordTime.parseMillis(trip.startTimeUtc)!!
-        assertEquals((frames.last().timestampMonotonic - frames.first().timestampMonotonic) / 1000L, window / 1000L)
+        // The trip window is the DATA window: the Room row's start/end epochs come from the first
+        // and last journaled frame, not from the moment the session was opened, so a recovered
+        // duration is the drive and not the drive plus the connect-to-first-response gap.
+        assertEquals(frames.first().timestampMonotonic, trip.startTimestamp)
+        assertEquals(frames.last().timestampMonotonic, trip.endTimestamp!!)
+        assertEquals(
+            (frames.last().timestampMonotonic - frames.first().timestampMonotonic) / 1000L,
+            trip.durationSeconds
+        )
     }
 
     @Test

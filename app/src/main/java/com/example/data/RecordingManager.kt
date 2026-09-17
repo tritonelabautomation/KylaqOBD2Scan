@@ -185,6 +185,9 @@ class RecordingManager(
             currentSample = SynchronizedSample(timestampUtc = "", timestampMonotonic = 0L)
         }
         if (orphanMeta != null && orphanTx.isNotEmpty()) {
+            // finalizeSession is a suspend function (Room), and startRecording is called from the
+            // main thread, so the orphan is persisted on the manager scope. The snapshot above was
+            // taken under the same lock that clears the lists, so this cannot race the new session.
             managerScope.launch {
                 runCatching { finalizeSession(orphanMeta, orphanTx, orphanSamples, null, recovered = false) }
                     .onFailure { android.util.Log.e("RecordingManager", "orphan session save failed", it) }
@@ -356,9 +359,6 @@ class RecordingManager(
             txList = effectiveTx,
             sampleList = effectiveSamples,
             rawLogFile = rawLogFile,
-            startTimestamp = sessionStartTimestamp,
-            endTimestamp = endTimestamp,
-            endStamp = endStamp,
             recovered = false
         )
         loadSavedRecordings()
@@ -379,18 +379,23 @@ class RecordingManager(
      *                  so in its adapter field instead of pretending it ended with a clean STOP.
      * @return the saved recording, or null when [txList] holds nothing worth saving.
      */
-    private fun finalizeSession(
+    private suspend fun finalizeSession(
         metadata: RecordingMetadata,
         txList: List<TransactionRecord>,
         sampleList: List<SynchronizedSample>,
         rawLogFile: File?,
-        startTimestamp: Long,
-        endTimestamp: Long,
-        endStamp: String,
         recovered: Boolean
     ): SavedRecording? {
         if (txList.isEmpty()) return null
         val sessionId = metadata.sessionId
+
+        // The trip window is the DATA window: first row to last row. Deriving it here rather than
+        // passing it in means every caller - STOP, an orphaned restart, journal recovery, raw-log
+        // recovery - reports the same thing, and no caller can hand over a window that disagrees
+        // with the rows it just handed over. Every row carries its own epoch, so this is exact.
+        val startTimestamp = txList.minOf { it.timestampMonotonic }
+        val endTimestamp = txList.maxOf { it.timestampMonotonic }
+        val endStamp = RecordTime.stamp(endTimestamp)
 
         // GPS altitude window for this trip (owner 2026-09-15 fix: altitude was captured live but
         // never persisted - the trip summary showed an honest "-- m" blank). Null only when the
@@ -458,8 +463,10 @@ class RecordingManager(
         )
     }
 
-    /** Room reductions + rows. Shared so a recovered trip and a stopped trip are stored alike. */
-    private fun persistTripToRoom(
+    /** Room reductions + rows. Shared so a recovered trip and a stopped trip are stored alike.
+     *  Suspend because the Room DAOs are: a non-suspend wrapper would have to block a thread or
+     *  fire-and-forget, and fire-and-forget is how a trip row goes missing while its files exist. */
+    private suspend fun persistTripToRoom(
         sessionId: String,
         metadata: RecordingMetadata,
         txList: List<TransactionRecord>,
@@ -665,7 +672,7 @@ class RecordingManager(
      * pure [mergeSample] the live recorder used, so the wide sample rows are identical to the ones
      * STOP would have written.
      */
-    internal fun recoverJournalSession(sessionId: String, rawLogFile: File?): RecoveryOutcome {
+    internal suspend fun recoverJournalSession(sessionId: String, rawLogFile: File?): RecoveryOutcome {
         return try {
             val txList = CsvExporter.readTransactionsFromCsv(journal.txFile(sessionId))
             if (txList.isEmpty()) return RecoveryOutcome.NothingToRecover
@@ -676,7 +683,6 @@ class RecordingManager(
             // connect-to-first-response gap to every recovered duration - and the raw-log recovery
             // path has always used the first telemetry line, so the two now agree.
             val startMs = txList.minOf { it.timestampMonotonic }
-            val endMs = txList.maxOf { it.timestampMonotonic }
             val openedMs = meta["startEpochMillis"]?.toLongOrNull()
                 ?: RecordTime.parseMillis(meta["startTime"])
                 ?: startMs
@@ -721,9 +727,6 @@ class RecordingManager(
                 txList = txList,
                 sampleList = samples,
                 rawLogFile = rawLogFile,
-                startTimestamp = startMs,
-                endTimestamp = endMs,
-                endStamp = RecordTime.stamp(endMs),
                 recovered = true
             ) ?: return RecoveryOutcome.NothingToRecover
 
@@ -906,9 +909,6 @@ class RecordingManager(
                 txList = txList,
                 sampleList = sampleList,
                 rawLogFile = file,
-                startTimestamp = startMs,
-                endTimestamp = endMs,
-                endStamp = iso(endMs),
                 recovered = true
             )
 

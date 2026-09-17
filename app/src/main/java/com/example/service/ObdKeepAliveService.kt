@@ -58,6 +58,7 @@ class ObdKeepAliveService : Service() {
         const val CHANNEL_ID = "obd_keep_alive"
         const val NOTIFICATION_ID = 9001
         const val RECOVERY_NOTIFICATION_ID = 9002
+        const val RECOVERY_CHANNEL_ID = "obd_recovery"
         const val EXTRA_RECORDING = "recording"
         private const val WAKELOCK_TAG = "KylaqOBD2Scan:obd-keep-alive"
         private const val WAKELOCK_TIMEOUT_MS = 60 * 60 * 1000L
@@ -82,7 +83,7 @@ class ObdKeepAliveService : Service() {
         fun warningText(exempted: Boolean): String? =
             if (exempted) null
             else "Battery optimisation is still ON for this app - Android may kill the session. " +
-                "Tap "Make Unrestricted" so the recording survives."
+                "Tap \"Make Unrestricted\" so the recording survives."
     }
 
     private var wakeLock: PowerManager.WakeLock? = null
@@ -92,10 +93,6 @@ class ObdKeepAliveService : Service() {
 
     /** Remembered so [onTaskRemoved] can restart the service in the same state. */
     @Volatile private var lastRecordingState: Boolean = false
-
-    private companion object {
-        const val RECOVERY_CHANNEL_ID = "obd_recovery"
-    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
