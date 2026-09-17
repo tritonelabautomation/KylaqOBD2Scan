@@ -434,8 +434,18 @@ Two more were not formatters but the same mistake:
 **Fix.** `RecordTime.format(pattern, millis)` is now public and is the only sanctioned way to turn an
 instant into text; `RecordTime.formatter(pattern)` returns an IST-pinned `SimpleDateFormat` for the
 hot paths that cannot afford to build one per value (a chart redrawing its axis every frame). All 22
-sites route through them. `tools/audit_stamp_conventions.py` (new) classifies every formatter in the
-tree and now reports **0 unpinned**; 1.0.336 reports 23.
+sites route through them. One date was not a formatter at all: `DriveBackupScreen` printed
+`java.util.Date(lastBackup).toString()` straight into a `Text`, which renders in the device zone in
+Java's own format - `Wed Sep 17 14:27:05 GMT+05:30 2026`. It was the only date in the app that was
+neither IST by construction nor readable, and a scanner looking only for `SimpleDateFormat` would
+never have found it.
+
+`tools/audit_stamp_conventions.py` (new) classifies every time-rendering site in the tree: `'Z'`
+formatters honest versus dishonest, formatters with no zone set, and bare `Date.toString()`. It now
+reports **0 / 0 / 0** for this tree; 1.0.336 reports **3 dishonest / 24 unpinned / 1 toString**. It
+skips comment lines, because a fix note that quotes the code it replaced - `// Was Date(x).toString()`
+- otherwise gets reported as the defect still being present, and a tool that cries wolf on its own
+comments gets ignored.
 
 ## 4e. The trend chart's X axis was phone uptime, not the time of the drive
 

@@ -186,7 +186,15 @@ fun DriveBackupScreen(
                                 Switch(checked = autoBackup, onCheckedChange = { settings.setAutoCloudBackup(it) })
                             }
                             Text(
-                                "Last backup: " + (if (lastBackup > 0) java.util.Date(lastBackup).toString() else "never"),
+                                // Was java.util.Date(lastBackup).toString(), which renders in the
+                                // device zone and in Java's own format ("Wed Sep 17 14:27:05
+                                // GMT+05:30 2026") - the one date in the app that was neither IST
+                                // by construction nor readable. Owner mandate 2026-09-17.
+                                "Last backup: " + (if (lastBackup > 0) {
+                                    com.example.data.RecordTime.format("yyyy-MM-dd HH:mm:ss", lastBackup)
+                                } else {
+                                    "never"
+                                }),
                                 color = TextSecondaryDark, fontSize = 10.sp
                             )
                             Row(
