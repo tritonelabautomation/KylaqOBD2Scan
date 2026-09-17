@@ -220,6 +220,71 @@ class DiscoveryLagAndMarkerRegressionTest {
     }
 
     @Test
+    fun engineFrictionDecodesTheOwnerFrameAsPlusFivePercentNotAsTheRawByte() {
+        // Log line: TX 018E -> "PID 8E Validation: status=DIRECT_VALIDATED (268ms) | Decoded: 82".
+        // The bare byte was printed because the catalogue had NO entry for PID 8E, so lookup()
+        // fell through to the generic "Mode 01 PID 8E" research row. J1979 PID 8E is engine
+        // friction percent torque, A - 125: 0x82 = 130 -> +5 % of the reference torque that the
+        // same run measured at 175 Nm (PID 63), i.e. about 8.8 Nm of friction at warm idle.
+        val r = PidDecoder.decode(pid("018E", DecoderType.TORQUE_PCT, bytes = 1),
+            listOf(0x41, 0x8E, 0x82))
+        assertEquals(5.0, r.numericValue!!, 0.001)
+        assertEquals("+5", r.displayValue)
+        assertEquals("%", r.unit)
+        assertTrue("a measured physical quantity is not research", r.isKnown)
+
+        val def = StandardPidCatalog.lookup("8E")
+        assertEquals(DecoderType.TORQUE_PCT, def.decoderType)
+        assertTrue("the car claims and answers PID 8E, so it must be polled", def.enabled)
+        assertTrue(def.name.contains("Friction"))
+    }
+
+    @Test
+    fun ambientTemperatureUsesTheJ1979OffsetAndMatchesTheOwnerFrame() {
+        // The export shows PID 46 = 31 degC. J1979 PID 46 is ambient air temperature, A - 40,
+        // so the frame carried A = 0x47 = 71 and 71 - 40 = 31 degC for a September morning run.
+        // A * 100 / 255 would have printed 27.8 from the same byte; a raw byte would have
+        // printed 71. The catalogue already had this one right - pinned so it cannot drift.
+        val def = StandardPidCatalog.lookup("46")
+        assertEquals(DecoderType.TEMP_MINUS_40, def.decoderType)
+        val r = PidDecoder.decode(def, listOf(0x41, 0x46, 0x47))
+        assertEquals(31.0, r.numericValue!!, 0.001)
+        assertEquals("31", r.displayValue)
+    }
+
+    @Test
+    fun theRangeMarkerPhantomValueIsReproducibleFromTheBitmapByte() {
+        // The export printed "Transmission Sump Temperature = -20" for PID A0. That is not a
+        // temperature: the 01A0 capability bitmap is `14 00 00 00` and 0x14 - 40 = -20. The
+        // phantom value is byte A of the bitmap, decoded by the marker's old TEMP_MINUS_40 row.
+        assertEquals(0x14 - 40, -20)
+        val marker = StandardPidCatalog.lookup("A0")
+        assertEquals(DecoderType.RESEARCH_RAW, marker.decoderType)
+        assertFalse(marker.enabled)
+        // and decoding the bitmap with the old row is no longer reachable at all
+        val r = PidDecoder.decode(marker, listOf(0x41, 0xA0, 0x14, 0x00, 0x00, 0x00))
+        assertNull("a capability bitmap must never yield a numeric value", r.numericValue)
+    }
+
+    @Test
+    fun theTwoUndecodedMultiByteFramesArePreservedByteForByte() {
+        // PID 6D returned 11 bytes and PID 70 returned 10, against J1979 blocks of 6 and 9.
+        // Both open with `02 00 00`, which reads like a record header. No scaling is asserted:
+        // 0x0BE9 = 3049 is not a plausible idle manifold pressure in kPa, and guessing is what
+        // the no-fake-values rule forbids. The raw frame must survive intact for the sweep that
+        // will define it.
+        val frame6D = listOf(0x41, 0x6D, 0x02, 0x00, 0x00, 0x05, 0x91, 0x28, 0x00, 0x00, 0x00, 0x00, 0x28)
+        val r6D = PidDecoder.decode(StandardPidCatalog.lookup("6D"), frame6D)
+        assertNull(r6D.numericValue)
+        assertEquals("416D02000005912800000000028".uppercase(), r6D.rawPayloadHex.uppercase())
+
+        val frame70 = listOf(0x41, 0x70, 0x02, 0x00, 0x00, 0x0B, 0xE9, 0x00, 0x00, 0x00, 0x00, 0x00)
+        val r70 = PidDecoder.decode(StandardPidCatalog.lookup("70"), frame70)
+        assertNull(r70.numericValue)
+        assertEquals("41700200000BE90000000000", r70.rawPayloadHex.uppercase())
+    }
+
+    @Test
     fun coolantTwoSentinelIsStillRejectedNotTurnedIntoAPlausibleNumber() {
         // Real frame from the owner run: 41 67 03 50 43. The ECU is returning a no-sensor
         // sentinel. Under A - 40 it decodes to -37 degC and the plausibility gate rejects it.

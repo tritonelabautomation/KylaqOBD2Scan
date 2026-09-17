@@ -1,7 +1,8 @@
 # QA/QC — owner PID-discovery export audit (2026-09-17, corrected)
 
 **Subject:** the exported JSON of the in-app *PID Discovery & Validation* run against the real
-Kylaq (VIN `MEXKPEPC2TG028855`, run 2026-09-16 08:57 IST, `ATSP6`, functional `7DF`,
+Kylaq (VIN `MEXKPEPC2TG028855`, run 2026-09-16 08:57 local per `rawLogs[]`, export written
+`2026-09-16T08:58:05.839Z`, `ATSP6`, ISO 15765-4 CAN 11-bit 500 kbit/s, functional `7DF`,
 responders `7E8` + `7E9`, 29 rows "confirmed active").
 
 **Owner question:** *"is there any scope we can improve and discover more PIDs, or is this the
@@ -34,9 +35,11 @@ Four things are genuinely recoverable, and all four are fixed or actionable in t
 3. **`01A6` is the ODOMETER.** The car answered `41 A6 00 00 86 EB` and the app printed
    *"Unknown Research PID 01A6"*. That frame is `34539 / 10 =` **10279.5 km**. A real,
    already-answered channel was being thrown away. It now decodes.
-4. **`018E` (engine friction, percent torque)** is claimed by this car and had **no catalogue
-   entry at all**, so discovery had nothing to TX. It is the missing term of the torque balance
-   (driver demand − friction − accessories = wheel torque) that the power model needs.
+4. **`018E` (engine friction, percent torque)** was claimed *and answered* — the log shows
+   `DIRECT_VALIDATED … Decoded: 82` — but the catalogue had no entry for it, so the app printed
+   the bare byte. `0x82 = 130`, and `A − 125` = **+5 %** of the 175 Nm reference torque the same
+   run measured: ≈ 8.8 Nm of engine friction at warm idle. A real, already-answered physical
+   quantity, discarded as raw hex (§8.3).
 
 > **Retraction.** The first revision of this audit (commit `5449e5c`) stated that the `0180`
 > bitmap `00 24 00 0D` proves PID `83` (NOx sensor), `85` (NOx reagent system) and `86`
@@ -163,7 +166,7 @@ cross-checked against the frames in this export.
 | `0188` | *absent* | **SCR induce system** | no | added, disabled |
 | `018A` | "vendor specific, fuel injection quantity per stroke", MEDIUM/500 ms | **engine run time for AECD #16–#20** | no | corrected, disabled — an invented meaning was being polled twice a second |
 | `018B` | "Fuel Pump Command" | J1979 tables list **diesel aftertreatment**, 7 bytes | **yes** | kept as fuel pump command (validated 31.8 % duty) but flagged research: the evidence is a plausible number, not a specification |
-| `018E` | *absent* | **engine friction — percent torque**, `A − 125` | **yes** | **added**, MEDIUM/500 ms. The missing term of the torque balance |
+| `018E` | *absent* → printed raw `82` | **engine friction — percent torque**, `A − 125` | **yes — and it ANSWERED** | **added**, MEDIUM/500 ms. `0x82 = 130 − 125 =` **+5 %** ≈ 8.8 Nm against the 175 Nm the same run reported. See §8.3 |
 | `019A`/`019B`/`019C` | *absent* | hybrid/EV data, DEF sensor data, 17-byte O2 block | no | added, disabled |
 | `019E` | *absent* (fell back to "Mode 01 PID 9E") | **engine exhaust flow rate**, kg/h | **yes** — answered `00 20` | added as research raw. The scaling is not defined in any table this project cites, so the raw pair is recorded and **no number is published**. An earlier revision of this audit guessed "32/255 = 25.6 % load" — exactly what the no-fake-values rule forbids |
 | `01A0` | "Transmission Sump Temperature" | **range marker** | n/a | disabled marker |
@@ -225,9 +228,15 @@ field. `PidDiscoveryService` now emits `dataQuality` (`VALIDATED` / `SENTINEL_RE
 4. `01A6` ≈ **10279.5 km + distance driven since**, in km, not raw hex.
 5. `0155` = `+0.0 % / +0.0 %`, `0156` = *Not available* (the −100 % sentinel of a bank this
    3-cylinder does not have).
-6. `018E` is TXed for the first time. If the car answers, the torque balance closes.
+6. `018E` decodes as **+5 %** (engine friction) instead of the raw byte `82`.
 7. `019E` records raw bytes and publishes no number.
 8. `0165` is not polled at FAST priority and shows no "boost" number.
+9. `016D` and `0170` still record their full 11- and 10-byte frames (§8.2) — those two are the
+   next real decoding target, and a steady-80 km/h + wide-open-throttle sweep is what defines
+   their scaling.
+10. The `LAG_GUARD` line `[DRAINED n stale RX chunk(s) before TX]` should appear in the raw log
+    if the adapter is still holding stale bytes — and no bitmap should arrive in the wrong slot
+    any more.
 
 ## 7. Owner action checklist
 
@@ -251,19 +260,100 @@ field. `PidDiscoveryService` now emits `dataQuality` (`VALIDATED` / `SENTINEL_RE
 
 ---
 
-## 8. Known inconsistency in the export itself
+## 8. Correction to this audit: the export's counts DO reconcile
 
-`ranges[]` for base `0x80` records `bitmapHex = 00 24 00 0D`, which decodes to
-`8B 8E 9D 9E` (+ marker `A0`). But the same block's `supportedPids` list in the export reads
-`80, 8B, 8E, A0` — which is what `00 24 00 01` decodes to under the *old* marker-inclusive
-decoder. The two fields cannot both come from one frame. Either a second responder contributed a
-different bitmap and the union/list fields were built from different sources, or the field was
-edited after export. It does not change the verdict (`9D` is validated elsewhere in the same
-export at 0.12 g/s, and `9E` answered `00 20`), but it is the reason the next export must
-carry the **raw response lines next to the decoded PID list**, so a mismatch like this is
-self-evident instead of requiring a re-derivation by hand.
+An earlier revision of this document claimed `ranges[]` was internally inconsistent — that
+`bitmapHex 00 24 00 0D` for base `0180` could not produce the listed PIDs. **That claim is
+withdrawn.** With the full `rawLogs[]` in hand the numbers reconcile exactly, once you account
+for the old decoder emitting the range marker as a supported PID:
+
+| base | bitmap | old count (marker included) | data PIDs (marker excluded) |
+|---|---|---|---|
+| `0140` | `FE D0 84 01` | 13 ✓ | 12 |
+| `0160` | `6B 09 00 41` | 9 ✓ | 8 |
+| `0180` | `00 24 00 0D` | 5 ✓ (`8B 8E 9D 9E` + marker `A0`) | 4 |
+| `01A0` | `14 00 00 00` | 2 ✓ (`A4 A6`) | 2 |
+
+13 + 9 + 5 + 2 = **29** = the export's headline "29 supported PIDs", and 29 − 3 markers
+(`60`, `80`, `A0`) = **26** real. The log lines agree too: `ECU 7E8 Bitmap for 0180:
+[00 24 00 0D] (5 supported)`. Nothing was edited; the export is self-consistent and the defect
+was ours.
+
+### 8.1 The exact lag mechanism, now visible in the log
+
+```
+[08:57:10.521] TX: 0100
+[08:57:10.588] RX (66ms):  7E804413C14EA                    ← stale 3-byte frame, PID 3C
+[08:57:10.591] TX: 0120                                     ← 3 ms later
+[08:57:10.749] RX (158ms): 7E906410098188001 / 7E8064100BE3EA813
+```
+
+Both `41 00` bitmaps — the one from `7E9` and the one from `7E8` — arrived during the **0120**
+slot. `TX 0100` was answered after 66 ms by a stale frame already sitting in the adapter, and
+the app fired the next command **3 ms** later, before the two real responders had been read. The
+ELM327 buffers them and hands them over on the next read. Every later request had 130–160 ms of
+slack and collected its own answers correctly — which is why only the `0x00` block was lost and
+why the loss looked random.
+
+This also explains the `01A0` phantom value exactly: the marker bitmap `14 00 00 00` was decoded
+as a temperature with `A − 40`, and `0x14 − 40 = −20`. The "−20 °C transmission sump
+temperature" in the export is the byte `0x14` of a capability bitmap.
+
+Fixes already in this release: drain stale RX before every TX (`LAG_GUARD`, logs
+`[DRAINED n stale RX chunk(s) before TX]`), salvage a lagged bitmap under its true base, and
+never emit `basePid + 0x20` as a data PID.
+
+### 8.2 Two rich frames the app recorded and never decoded
+
+| PID | bytes returned | frame | J1979 |
+|---|---|---|---|
+| `016D` | **11** | `02 00 00 05 91 28 00 00 00 00 28` | fuel pressure control system (6 bytes) |
+| `0170` | **10** | `02 00 00 0B E9 00 00 00 00 00` | boost pressure control (9 bytes) |
+
+Both are longer than the standard's block and both open with the same `02 00 00` prefix, which
+reads like a record header — record type `0x0200` followed by a payload. If that is right, the
+payloads are `05 91` = 1425 and `0B E9` = 3049, and the trailing bytes are status. **No scaling
+is asserted here**: 3049 is not a plausible idle manifold pressure in kPa, 1425 is not an
+implausible low-pressure fuel rail value in kPa, and guessing is exactly what the no-fake-values
+rule forbids. Both stay `RESEARCH_RAW` with the raw frame preserved.
+
+These are the densest unexploited channels in the whole export — 21 bytes from the two PIDs that
+matter most for a turbo petrol engine (fuel pressure and boost control). One log sweep settles
+them: hold the car at a steady 80 km/h in D, then floor it, and export both frames again. If
+`0B E9` tracks boost, the scaling falls out of two known operating points.
+
+### 8.3 `018E` answered — and it is engine friction
+
+An earlier revision of this document said PID `8E` "was never validated". **Wrong** — the log
+shows `TX: 018E` at 08:57:19.368 and `PID 8E Validation: status=DIRECT_VALIDATED (268ms) |
+Decoded: 82`. It printed the bare byte `82` only because the catalogue had no entry for it, so
+`lookup()` fell through to the generic *"Mode 01 PID 8E"* research row.
+
+`0x82 = 130`, and J1979 PID `8E` is engine friction percent torque, `A − 125`:
+
+```
+130 − 125 = +5 %  of reference torque  →  5 % × 175 Nm (PID 63) ≈ 8.8 Nm
+```
+
+That is a physically sensible friction torque for a 1.0 TSI at warm idle, and it is measured
+against the same reference torque the car reported in the same run. With `0162` actual torque
+= +6 % at that moment, the torque balance now has all three of its measured terms:
+
+| term | PID | value at 08:57 idle |
+|---|---|---|
+| actual torque | `0162` | **+6 %** |
+| engine friction | `018E` | **+5 %** ← was printed as raw `82` |
+| reference torque | `0163` | **175 Nm** (rated 178 Nm) |
+| driver demand | `0161` | not claimed by the bitmap → never TXed |
+
+`0161` is the one missing term and the `0x00`/`0x20` bitmaps do not cover it — it lives in the
+`0x60` block, where the bit is **clear**. It is worth a direct TX probe on the next run anyway:
+the bitmap has already been shown to be an incomplete description of what this ECU answers
+(`018E` printed raw, `016D`/`0170` returning 11- and 10-byte frames the standard says are 6 and
+9).
 
 *Audit method: every bitmap decode in this document was produced by running
 `PidDiscoveryDecoder.decodeSupportedPids` logic over the frames quoted in the export, then
 asserted in `DiscoveryLagAndMarkerRegressionTest`. No PID list here was transcribed from a
-specification or from the app's own self-report.*
+specification or from the app's own self-report. Two claims in earlier revisions of this file
+(the NOx/PM bitmap decode and §8 above) were hand-derived, were wrong, and are retracted here.*
