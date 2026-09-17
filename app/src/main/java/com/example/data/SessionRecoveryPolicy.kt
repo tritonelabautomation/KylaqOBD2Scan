@@ -88,6 +88,12 @@ object SessionRecoveryPolicy {
         sampleRowCount >= transactionRowCount && transactionRowCount > 0
 
     /**
+     * A raw log at or below this size holds only its session header line, so there is no frame
+     * inside to rebuild. Same floor `findUnsavedRawLogs` has always used, now named.
+     */
+    const val MIN_RAW_LOG_BYTES: Long = 64L
+
+    /**
      * A journal file at or below this size cannot hold a data row, so it is not even worth opening.
      *
      * Deliberately NOT the real test: the transactions header alone is 146 characters, so a byte

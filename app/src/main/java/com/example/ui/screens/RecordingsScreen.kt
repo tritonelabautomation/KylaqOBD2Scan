@@ -541,7 +541,7 @@ fun RecordingItemCard(
                     fontSize = 13.sp
                 )
                 Text(
-                    text = meta.startTimeUtc.take(19).replace("T", " "),
+                    text = com.example.data.RecordTime.dateTime(meta.startTimeUtc),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontFamily = FontFamily.Monospace,

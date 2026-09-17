@@ -904,7 +904,7 @@ fun ResearchPidCard(
                     fontSize = 10.sp
                 )
                 Text(
-                    text = timestamp.takeLast(12),
+                    text = com.example.data.RecordTime.timeOfDay(timestamp),
                     style = MaterialTheme.typography.bodySmall,
                     fontFamily = FontFamily.Monospace,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

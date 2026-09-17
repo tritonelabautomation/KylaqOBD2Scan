@@ -76,6 +76,35 @@ object RecordTime {
      */
     fun logStamp(millis: Long = System.currentTimeMillis()): String = format(LOG_PATTERN, millis)
 
+    /**
+     * `HH:mm:ss.SSS` in IST, for the live monitors where a full date on every row is noise.
+     *
+     * The screens used to cut this out of the stamp by hand - `timestampUtc.takeLast(12)
+     * .removeSuffix("Z")` - which is arithmetic on a string whose length and suffix just changed:
+     * applied to `2026-09-17T14:27:05.123+05:30` it prints `05.123+05:30`. Parsing the stamp and
+     * re-formatting it is correct for every shape this app has ever written, legacy `Z` included.
+     */
+    fun timeOfDay(millis: Long): String = format("HH:mm:ss.SSS", millis)
+
+    /**
+     * `HH:mm:ss.SSS` for any stamp this app has written, or [fallback] when it is missing or
+     * unparsable. The single replacement for every `takeLast(12).removeSuffix("Z")` in the UI.
+     */
+    fun timeOfDay(stamp: String?, fallback: String = "--"): String {
+        val millis = parseMillis(stamp) ?: return fallback
+        return timeOfDay(millis)
+    }
+
+    /**
+     * `yyyy-MM-dd HH:mm:ss` in IST for a stamp - the trip-card form, with milliseconds dropped.
+     * Replaces `startTimeUtc.take(19).replace("T", " ")`, which happened to survive the zone change
+     * by luck and silently dropped the fraction.
+     */
+    fun dateTime(stamp: String?, fallback: String = "--"): String {
+        val millis = parseMillis(stamp) ?: return fallback
+        return format("yyyy-MM-dd HH:mm:ss", millis)
+    }
+
     /** The zone abbreviation the stamps are written in, for headers and UI copy ("IST"). */
     fun zoneLabel(): String = recordZone.getDisplayName(false, TimeZone.SHORT, Locale.US)
 

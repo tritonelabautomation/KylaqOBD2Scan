@@ -131,6 +131,25 @@ class RecordTimeIstTest {
     }
 
     @Test
+    fun displayFormsAreCutFromTheInstantNotFromTheStringLength() {
+        // Four screens used to render a stamp with `timestampUtc.takeLast(12).removeSuffix("Z")`
+        // and one with `take(19).replace("T", " ")`. That is arithmetic on a string whose length
+        // and suffix changed with the IST mandate: against
+        // `2026-09-17T14:27:05.123+05:30` takeLast(12) prints "05.123+05:30".
+        assertEquals("14:27:05.123", RecordTime.timeOfDay(istMillis))
+        assertEquals("14:27:05.123", RecordTime.timeOfDay(RecordTime.stamp(istMillis)))
+        // The legacy UTC shape must render as the IST wall clock the owner lives in, not as the
+        // UTC digits that happen to sit in the file.
+        assertEquals("14:27:05.123", RecordTime.timeOfDay("2026-09-17T08:57:05.123Z"))
+        assertEquals("2026-09-17 14:27:05", RecordTime.dateTime(RecordTime.stamp(istMillis)))
+        assertEquals("2026-09-17 14:27:05", RecordTime.dateTime("2026-09-17T08:57:05.123Z"))
+        // Missing or unparsable: the fallback, never a slice of garbage and never 1970.
+        assertEquals("--", RecordTime.timeOfDay(null))
+        assertEquals("--", RecordTime.timeOfDay(""))
+        assertEquals("n/a", RecordTime.dateTime("not a time", "n/a"))
+    }
+
+    @Test
     fun zoneLabelSaysIst() {
         // The OFFSET is the part that carries information and it is exact; the abbreviation is
         // whatever the platform's tzdata calls Asia/Kolkata ("IST" on any current JDK,
