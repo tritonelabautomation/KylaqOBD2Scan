@@ -10,6 +10,20 @@
 > background it supposed to be service right even in background all ways it should run and record it
 > never ever loose the logs"*
 
+**Shipped.** Build **1.0.360 (versionCode 10360)**, CI run #360, commit `394764f3`, 83 suites /
+719 tests, **0 failed**. Published to the rolling release at
+`https://github.com/tritonelabautomation/KylaqOBD2Scan/releases/latest` (SHA-256
+`7c8f393c075086145ba39278c6018cde3e4c227b2dec66c35f5c089bbe41838d`). It installs in place over the
+current build, so trips, raw logs and fuel records survive. Until the owner installs it, none of
+this exists on his phone - he lost today's drive because he was still on 1.0.336, which kept the
+whole trip in RAM and wrote its first byte at STOP.
+
+Five CI rounds got here: five compile errors, then six test failures, then an unresolved constant,
+then a nullable-receiver compile error, then a deprecated `distinctUntilChanged` on a `StateFlow`
+(this build treats that deprecation as an error), and finally two `RecordTimeIstTest` assertions
+that had never executed once because every build containing them failed to compile. Rounds 3-5 are
+in §6 with the reasons.
+
 **Verdict up front.** He is right on both counts, and the first one is not bad luck — it is the
 design. The recorder kept the entire drive in two RAM lists and wrote its first byte to disk inside
 `stopRecording()`. A foreground service lowers the chance of a kill; it does not make the process
@@ -404,6 +418,33 @@ pinned the behaviour that caused today's loss. The file documents that reversal 
 3. **My own 2026-09-16 note** that the one-shot battery prompt was the right call ("ask once, never
    nag again"). One prompt for the setting that decides whether the app keeps its data is a prompt
    that gets missed, and missing it costs the logs.
+4. **"The `MIN_RAW_LOG_BYTES` rename is safe"** — it was not. Round 3 renamed it to
+   `MIN_JOURNAL_BYTES` while fixing the emptiness test, and `SessionRecoveryPolicy.chooseSource`
+   still read the old name, so the build did not compile. Two constants with different jobs
+   (a raw-log floor and a journal pre-filter) are now both present and named for what they do.
+   Rule taken: after renaming a constant, grep every reference before pushing.
+5. **"The display strings are fine"** — four screens were doing
+   `timestampUtc.takeLast(12).removeSuffix("Z")` and one was doing `take(19).replace("T", " ")`.
+   That is arithmetic on a string whose length and suffix the IST mandate changed, so against
+   `…+05:30` it printed `05.123+05:30`. All five now call `RecordTime.timeOfDay` / `dateTime`,
+   which parse the instant and format it. Rule taken: after changing a format, grep every reader
+   of that format, not just its writers.
+6. **"My Python model of the parser agreed with the Kotlin"** — twice it did not. Once I passed a
+   boolean where the frame belonged and concluded every frame was being dropped; once I "fixed"
+   only the second length guard and wrote in a comment that the first was correct because
+   `4 >= 3`. The first guard is the one that fired (§4c). The committed fix was re-derived line by
+   line against `CanFrameParser` and checked against nine real frames. Rule taken, again: a
+   simulation of code you can read is not evidence, and no physical or protocol value gets
+   hand-computed without re-deriving it from the bytes.
+7. **"The tests I added pass"** — for two of them I could not have known either way. They were
+   added in commits whose builds failed to compile, so they never executed once. Both assertions
+   were wrong: one claimed a stamp with no fraction equalled the same instant *with* `.123`, the
+   other added `19 800 000 ms` to the parsed side of an equation where the offset belonged on the
+   other side (§5, `RecordTimeIstTest`). Rule taken: a test that has never run is a claim, not a
+   check, and "CI is red for an unrelated reason" is exactly when untested assertions hide.
+8. **"Both loops live in viewModelScope" was an acceptable design** — it was written in the code's
+   own KDoc as though it were a note rather than a defect. It is the reason a foreground service was
+   keeping alive a process that did nothing (§4b).
 
 ---
 
