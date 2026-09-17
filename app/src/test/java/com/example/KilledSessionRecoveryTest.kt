@@ -109,7 +109,7 @@ class KilledSessionRecoveryTest {
 
         // ── the drive, recorded live ──
         val killed = newManager()
-        val meta = killed.startRecording()
+        val meta = killed.startRecording()!!
         frames.forEach { killed.recordTransaction(it) }
         // No stopRecording(). The process is gone: drop it and build a fresh manager over the same
         // data directory, which is all a restarted process gets.
@@ -179,7 +179,7 @@ class KilledSessionRecoveryTest {
     fun aRecoveredSessionIsNeverRecoveredTwice() = runBlocking {
         val frames = realFrames(System.currentTimeMillis() - 60_000L)
         val killed = newManager()
-        val meta = killed.startRecording()
+        val meta = killed.startRecording()!!
         frames.forEach { killed.recordTransaction(it) }
 
         val restarted = newManager()
@@ -193,20 +193,29 @@ class KilledSessionRecoveryTest {
     }
 
     @Test
-    fun restartingARecordingNoLongerThrowsThePreviousSessionAway() = runBlocking {
+    fun aSecondStartCannotReplaceOrShredTheDriveAlreadyRunning() = runBlocking {
         // startRecording() used to call clear() on both RAM lists unconditionally, so a second
         // START - auto-reconnect, screen re-entry, a retry after a dropped link - silently deleted
-        // the drive in progress.
+        // the drive in progress. Two supervisors now run the same auto-record rule (the UI one and
+        // the one inside the keep-alive service), so both can see "engine on, nothing recording" on
+        // the same tick; without a guard that cuts one city drive into two trips.
         val frames = realFrames(System.currentTimeMillis() - 120_000L)
         val manager = newManager()
-        val first = manager.startRecording()
+        val first = manager.startRecording()!!
         frames.forEach { manager.recordTransaction(it) }
 
-        val second = manager.startRecording()
-        assertTrue("a restart must open a NEW session", second.sessionId != first.sessionId)
+        // startRecording() now REFUSES to open a second live session and hands back the one already
+        // running - two supervisors (UI + service) can both see "engine on, nothing recording" on the
+        // same tick, and a second START used to orphan-save the first drive and shred it in two.
+        val second = manager.startRecording()!!
+        assertEquals("a live session must not be replaced", first.sessionId, second.sessionId)
 
-        // The orphan is persisted on a background scope; wait for it rather than racing it. The
-        // initial RECORDING row is inserted at startRecording, so what to wait on is the
+        // A STOP still closes the drive, and a later START opens a genuinely new one.
+        manager.stopRecording()
+        val third = manager.startRecording()!!
+        assertTrue("after a stop, a NEW session opens", third.sessionId != first.sessionId)
+
+        // stopRecording() writes the files and the Room rows itself, so what the wait covers is the
         // transition to COMPLETED carrying the right row count.
         val repo = TripRepository(context)
         val deadline = System.currentTimeMillis() + 10_000L
@@ -221,6 +230,38 @@ class KilledSessionRecoveryTest {
         assertEquals("COMPLETED", recoveredTrip!!.status)
         assertEquals(frames.size, recoveredTrip.sampleCount)
         assertEquals(frames.size, repo.getSamplesForTrip(first.sessionId).size)
+    }
+
+    @Test
+    fun anInterruptedSessionStillInRamIsPersistedRatherThanCleared() = runBlocking {
+        // The orphan path itself: a session left in RAM without a clean STOP is written out by the
+        // same finalization every other caller uses. Reachable when stopRecording() is abandoned
+        // part-way - its scope cancelled mid-finalization - which is one of the ways the old code
+        // lost a drive that had already been recorded perfectly.
+        val startMs = System.currentTimeMillis() - 90_000L
+        val frames = realFrames(startMs)
+        val manager = newManager()
+        val meta = manager.startRecording()!!
+        frames.forEach { manager.recordTransaction(it) }
+
+        val saved = manager.finalizeSession(
+            metadata = meta,
+            txList = frames,
+            sampleList = emptyList(),
+            rawLogFile = null,
+            recovered = false
+        )
+        assertNotNull("an interrupted session must be persisted, not dropped", saved)
+        assertEquals(frames.size, saved!!.transactionCount)
+
+        val repo = TripRepository(context)
+        val trip = repo.getTripById(meta.sessionId)
+        assertNotNull(trip)
+        assertEquals("COMPLETED", trip!!.status)
+        assertEquals(frames.size, trip.sampleCount)
+        // The samples CSV was empty here, so the wide rows are replayed from the transactions -
+        // a trip is never saved with transactions but no curves.
+        assertEquals(frames.size, repo.getSamplesForTrip(meta.sessionId).size)
     }
 
     @Test
@@ -252,7 +293,7 @@ class KilledSessionRecoveryTest {
         val startMs = System.currentTimeMillis() - 30 * 60_000L
         val frames = realFrames(startMs)
         val killed = newManager()
-        val meta = killed.startRecording()
+        val meta = killed.startRecording()!!
         frames.forEach { killed.recordTransaction(it) }
 
         newManager().recoverUnfinishedSessions()

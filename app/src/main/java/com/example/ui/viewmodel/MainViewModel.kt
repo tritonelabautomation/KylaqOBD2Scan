@@ -706,8 +706,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      *  * every 2 s, if auto-record is enabled, start a recording as soon as the engine is
      *    running (rpm > 200) and save it once the engine has been off for a minute.
      *
-     * Both loops live in viewModelScope, so they stop with the app UI; Android Auto runs its
-     * own supervisor while the car screen is visible.
+     * The record loop runs [com.example.service.AutoRecordPolicy], the SAME pure rule the
+     * keep-alive service runs, so the two supervisors can never disagree about when a drive starts
+     * or ends. `startRecording` and `stopRecording` here still do the UI-side work (ride X-ray
+     * reset, duration timer, insight persistence) that the service cannot do.
+     *
+     * These loops stop with the app UI - but the service now runs both of them for as long as the
+     * process lives, which is what makes "even in background all ways it should run and record"
+     * true rather than a claim in a comment. Android Auto runs its own supervisor while the car
+     * screen is visible.
      */
     fun startSessionAutomation() {
         viewModelScope.launch {
@@ -729,35 +736,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             while (isActive) {
                 val rpm = obdScheduler.liveNumericMap.value["010C"]
                 val recording = recordingManager.isRecording.value
-                if (settingsRepository.autoRecord.value) {
-                    if (rpm != null && rpm > 200.0) {
-                        engineOffSinceMs = 0L
-                        if (!recording && obdScheduler.isPolling.value) {
-                            startRecording()
-                        }
-                    } else if (recording) {
-                        // START-STOP FIX (owner 2026-09-15, P0): the Kylaq has Idle Start-Stop,
-                        // so at a traffic light the ECU keeps answering with rpm = 0 while the
-                        // engine is off. This watchdog used one 60 s rule for every engine-off
-                        // second, so any signal longer than a minute silently STOPPED the
-                        // recording mid-drive and the restart began a second trip - one city
-                        // drive shredded into fragments. A FRESH rpm reading <= 200 means the
-                        // link is alive and the car is awake: that is a start-stop stall and
-                        // gets a 5-minute grace. rpm == null means the stale entry was dropped
-                        // (ignition off / Bluetooth gone - liveNumericMap only serves fresh
-                        // values): that keeps the old 60 s rule.
-                        val graceMs = if (rpm != null) 300_000L else 60_000L
-                        val now = android.os.SystemClock.elapsedRealtime()
-                        if (engineOffSinceMs == 0L) {
-                            engineOffSinceMs = now
-                        } else if (now - engineOffSinceMs > graceMs) {
-                            stopRecording()
-                            engineOffSinceMs = 0L
-                        }
-                    }
-                } else if (recording) {
-                    engineOffSinceMs = 0L
+                val now = android.os.SystemClock.elapsedRealtime()
+                when (
+                    com.example.service.AutoRecordPolicy.decide(
+                        rpm = rpm,
+                        isRecording = recording,
+                        isPolling = obdScheduler.isPolling.value,
+                        autoRecordEnabled = settingsRepository.autoRecord.value,
+                        engineOffSinceMs = engineOffSinceMs,
+                        nowMs = now
+                    )
+                ) {
+                    com.example.service.AutoRecordPolicy.Decision.START_RECORDING -> startRecording()
+                    com.example.service.AutoRecordPolicy.Decision.STOP_RECORDING -> stopRecording()
+                    com.example.service.AutoRecordPolicy.Decision.NONE -> Unit
                 }
+                engineOffSinceMs = com.example.service.AutoRecordPolicy.nextEngineOffSince(
+                    rpm, recording, engineOffSinceMs, now
+                )
+                // The Idle Start-Stop rule that used to be inline here (owner 2026-09-15, P0: a
+                // fresh rpm <= 200 means the car is awake at a junction and gets a 5-minute grace,
+                // while a MISSING rpm means the link went stale and gets 60 s) now lives in
+                // AutoRecordPolicy, tested, and shared with the service supervisor. Keeping a second
+                // copy of a timing rule is how the two supervisors would eventually disagree and
+                // shred one drive into two trips.
                 delay(2_000)
             }
         }
@@ -855,10 +857,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun startRecording() {
+        // The keep-alive service runs the same auto-record rule, so it may have opened this session
+        // a tick earlier. Re-doing the UI-side reset then would wipe the ride X-ray of a drive that
+        // is already being recorded and restart the duration timer at zero.
+        if (recordingManager.isRecording.value) return
         // Fresh ride X-ray for this recording; the owner's mode tag (D/S/M) carries over.
         obdScheduler.rideRecorder.reset()
         insightsPersistedForRecording = false
-        val meta = recordingManager.startRecording(
+        recordingManager.startRecording(
             vehicleName = vehicleName.value,
             vehicleId = _activeVehicleId.value,  // FIX: Pass vehicleId for proper association
             profileName = "India-Market 1.0 TSI (EA211)",

@@ -168,7 +168,16 @@ class RecordingManager(
         profileName: String = "India-Market 1.0 TSI",
         adapterName: String = "ELM327 v1.5 Bluetooth Classic",
         protocolName: String = "ISO 15765-4 CAN 11-bit 500kbps"
-    ): RecordingMetadata {
+    ): RecordingMetadata? {
+        // Two supervisors run the auto-record rule now - MainViewModel while the UI is open and
+        // ObdKeepAliveService for as long as the process lives - so both can see "engine on, nothing
+        // recording" on the same tick. Without this guard the second START would orphan-save the
+        // first session and open a new one, shredding one drive into two trips. The session that is
+        // already open is the truth; the caller is told there was nothing to do.
+        _currentSessionMetadata.value?.let { live ->
+            if (_isRecording.value) return live
+        }
+
         // DATA-LOSS FIX 1 (owner 2026-09-17). This method used to call clear() on both RAM lists
         // unconditionally, so a second START - auto-reconnect, screen re-entry, a retry after a
         // dropped link - threw the whole previous session away without writing a byte of it. Any
@@ -185,9 +194,12 @@ class RecordingManager(
             currentSample = SynchronizedSample(timestampUtc = "", timestampMonotonic = 0L)
         }
         if (orphanMeta != null && orphanTx.isNotEmpty()) {
-            // finalizeSession is a suspend function (Room), and startRecording is called from the
-            // main thread, so the orphan is persisted on the manager scope. The snapshot above was
-            // taken under the same lock that clears the lists, so this cannot race the new session.
+            // Defence in depth. The guard above means a live session never reaches this point, so
+            // this fires only when the two state flows have diverged - a stopRecording() abandoned
+            // part-way leaves _isRecording false with the metadata and the RAM lists still set. The
+            // snapshot was taken under the same lock that clears the lists, so it cannot race the
+            // new session, and finalizeSession is suspend (Room) while startRecording is called from
+            // the main thread, so it runs on the manager scope.
             managerScope.launch {
                 runCatching { finalizeSession(orphanMeta, orphanTx, orphanSamples, null, recovered = false) }
                     .onFailure { android.util.Log.e("RecordingManager", "orphan session save failed", it) }
@@ -379,7 +391,7 @@ class RecordingManager(
      *                  so in its adapter field instead of pretending it ended with a clean STOP.
      * @return the saved recording, or null when [txList] holds nothing worth saving.
      */
-    private suspend fun finalizeSession(
+    internal suspend fun finalizeSession(
         metadata: RecordingMetadata,
         txList: List<TransactionRecord>,
         sampleList: List<SynchronizedSample>,

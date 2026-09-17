@@ -51,6 +51,13 @@ import com.example.R
  *     the notification states that plainly and carries an action that opens the exemption
  *     request. Pretending the service is bulletproof is what let a whole day of logging go
  *     missing once already.
+ *  4. **Runs the auto-connect and auto-record supervisors itself.** They used to live only in
+ *     `MainViewModel.startSessionAutomation()`, whose own comment admitted *"both loops live in
+ *     viewModelScope, so they stop with the app UI"*. That is the second half of the owner's
+ *     complaint: after a kill, or with the phone in his pocket and the UI never opened, this
+ *     service was keeping a process alive that was **doing nothing** - no reconnect, no polling, no
+ *     recording. The loops now run here for as long as the process lives, so a drive resumes
+ *     without anyone touching the phone.
  */
 class ObdKeepAliveService : Service() {
 
@@ -59,6 +66,10 @@ class ObdKeepAliveService : Service() {
         const val NOTIFICATION_ID = 9001
         const val RECOVERY_NOTIFICATION_ID = 9002
         const val RECOVERY_CHANNEL_ID = "obd_recovery"
+
+        /** Tick periods, matching what `MainViewModel.startSessionAutomation` has always used. */
+        const val AUTO_CONNECT_TICK_MS = 10_000L
+        const val AUTO_RECORD_TICK_MS = 2_000L
         const val EXTRA_RECORDING = "recording"
         private const val WAKELOCK_TAG = "KylaqOBD2Scan:obd-keep-alive"
         private const val WAKELOCK_TIMEOUT_MS = 60 * 60 * 1000L
@@ -94,13 +105,18 @@ class ObdKeepAliveService : Service() {
     /** Remembered so [onTaskRemoved] can restart the service in the same state. */
     @Volatile private var lastRecordingState: Boolean = false
 
+    private var autoConnectJob: Job? = null
+    private var autoRecordJob: Job? = null
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
         // A kill is exactly when this matters: Android restarts a START_STICKY service in a FRESH
-        // process that holds no session in RAM. Recover the drive that process died during, now.
+        // process that holds no session in RAM. Recover the drive that process died during, now -
+        // then start supervising again, so the rest of the drive is still recorded.
         recoverKilledSessions()
+        startSupervisors()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -156,6 +172,83 @@ class ObdKeepAliveService : Service() {
             startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
         } else {
             startForeground(NOTIFICATION_ID, notification)
+        }
+    }
+
+    /**
+     * Auto-connect and auto-record, owned by the service instead of by the UI.
+     *
+     * Idempotent, and deliberately tolerant of `MainViewModel` running the same two loops while the
+     * phone UI is open: every action here is guarded by the state it would change (is polling
+     * already up? is a session already open?), and `RecordingManager.startRecording` refuses to open
+     * a second session, so two supervisors cannot produce two trips.
+     *
+     * Both loops read the owner's settings on every tick, so switching auto-connect or auto-record
+     * off takes effect within seconds without a restart.
+     */
+    private fun startSupervisors() {
+        if (autoConnectJob == null) {
+            autoConnectJob = recoveryScope.launch {
+                while (isActive) {
+                    runCatching {
+                        com.example.di.AppContainer.init(applicationContext)
+                        val settings = com.example.di.AppContainer.settingsRepository
+                        val scheduler = com.example.di.AppContainer.obdScheduler
+                        if (settings.autoConnect.value && !scheduler.isPolling.value) {
+                            com.example.scheduler.ObdQuickConnect.connectPairedAdapterAndPoll(
+                                this,
+                                respectAutoConnectSetting = true
+                            ) { /* progress messages belong to the UI supervisor */ }
+                        }
+                    }.onFailure {
+                        android.util.Log.e("ObdKeepAliveService", "auto-connect tick failed", it)
+                    }
+                    kotlinx.coroutines.delay(AUTO_CONNECT_TICK_MS)
+                }
+            }
+        }
+        if (autoRecordJob == null) {
+            autoRecordJob = recoveryScope.launch {
+                var engineOffSinceMs = 0L
+                while (isActive) {
+                    runCatching {
+                        com.example.di.AppContainer.init(applicationContext)
+                        val container = com.example.di.AppContainer
+                        val rpm = container.obdScheduler.liveNumericMap.value["010C"]
+                        val recording = container.recordingManager.isRecording.value
+                        val now = android.os.SystemClock.elapsedRealtime()
+                        val decision = AutoRecordPolicy.decide(
+                            rpm = rpm,
+                            isRecording = recording,
+                            isPolling = container.obdScheduler.isPolling.value,
+                            autoRecordEnabled = container.settingsRepository.autoRecord.value,
+                            engineOffSinceMs = engineOffSinceMs,
+                            nowMs = now
+                        )
+                        when (decision) {
+                            AutoRecordPolicy.Decision.START_RECORDING -> {
+                                container.recordingManager.startRecording()
+                                container.gpsManager.startTracking()
+                                lastRecordingState = true
+                                startForegroundCompat(true)
+                            }
+                            AutoRecordPolicy.Decision.STOP_RECORDING -> {
+                                container.recordingManager.stopRecording()
+                                container.gpsManager.stopTracking()
+                                lastRecordingState = false
+                                startForegroundCompat(false)
+                            }
+                            AutoRecordPolicy.Decision.NONE -> Unit
+                        }
+                        engineOffSinceMs = AutoRecordPolicy.nextEngineOffSince(
+                            rpm, recording, engineOffSinceMs, now
+                        )
+                    }.onFailure {
+                        android.util.Log.e("ObdKeepAliveService", "auto-record tick failed", it)
+                    }
+                    kotlinx.coroutines.delay(AUTO_RECORD_TICK_MS)
+                }
+            }
         }
     }
 
@@ -266,6 +359,8 @@ class ObdKeepAliveService : Service() {
 
     override fun onDestroy() {
         refreshJob?.cancel()
+        autoConnectJob?.cancel()
+        autoRecordJob?.cancel()
         refreshScope.cancel()
         recoveryScope.cancel()
         wakeLock?.let { if (it.isHeld) it.release() }

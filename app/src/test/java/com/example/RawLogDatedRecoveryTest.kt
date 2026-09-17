@@ -120,6 +120,73 @@ class RawLogDatedRecoveryTest {
         assertEquals(95_000L, out[1].epochMillis - out[0].epochMillis)
     }
 
+    /**
+     * The invariant that was actually broken, and the reason a recovered log had rpm in it and no
+     * km/h (owner mandate 2026-09-17, *"it never ever loose the logs"*).
+     *
+     * This car's adapter writes a single-byte answer as `04 41 0D 50` - four bytes with a count byte
+     * of 04 - while ISO 15765-2 single-frame would declare 03. The live path never cared:
+     * `CanFrameParser` falls back to "everything after the PCI" when the declared length does not
+     * fit, so the dashboard showed 80 km/h the whole time. The recovery path did care, and rejected
+     * the very same bytes as a truncated line. Two parsers, one log, opposite answers: the drive was
+     * visible while it happened and gone afterwards.
+     */
+    @Test
+    fun recoveryDecodesEverySingleBytePidTheLiveParserAccepts() {
+        val day = istMillis(2026, 9, 17, 7, 41, 2)
+        // Each row as RawLogManager writes it: separated `7E8 <frame>`.
+        val rows = listOf(
+            "04410D50" to "0D",          // vehicle speed - the one the owner noticed missing
+            "04410559" to "05",          // coolant temperature
+            "04410F1E" to "0F",          // intake air temperature
+            "04411123" to "11",          // throttle position
+            "04410680" to "06",          // short-term fuel trim
+            "0441461F" to "46",          // ambient temperature
+            "03410D50" to "0D",          // the strict ISO single-frame spelling of the same answer
+            "04410C0F28" to "0C",        // engine rpm - a two-byte payload, which always worked
+            "0741A6000086EB" to "A6"     // odometer - the longest single frame on this car
+        )
+        val text = rows.mapIndexed { i, (frame, _) ->
+            "${istWall(day + i * 1_000L)} RX < 7E8 $frame"
+        }.joinToString("\n")
+
+        val out = RawLogRecovery.extractTelemetry(text, anchorMillis = day, tz = ist)
+
+        assertEquals(
+            "every row the ECU sent must come back out of the log",
+            rows.size, out.size
+        )
+        rows.forEachIndexed { i, (_, pid) ->
+            assertEquals("row $i pid", pid, out[i].pidHex2)
+            assertEquals("row $i can id", "7E8", out[i].canId)
+            assertEquals(day + i * 1_000L, out[i].epochMillis)
+        }
+        // The payload is what the live parser produces too - decoded from the bytes present, never
+        // padded out to the length the count byte claims.
+        assertEquals(listOf(0x50), out[0].payloadBytes)
+        assertEquals("410D50", out[0].responseHex)
+        assertEquals(listOf(0x0F, 0x28), out[7].payloadBytes)
+        assertEquals(listOf(0x00, 0x00, 0x86, 0xEB), out[8].payloadBytes)
+    }
+
+    @Test
+    fun framesWithoutAPidToReadAreStillRejectedRatherThanGuessedAt() {
+        val day = istMillis(2026, 9, 17, 7, 41, 2)
+        val junk = listOf(
+            "0441",         // count byte and mode echo, no pid at all
+            "04410D",       // a pid with no data byte: nothing to decode
+            "04410D5",      // odd length, so not byte-aligned hex
+            "410D50",       // ISO 9141 / K-line shape with no PCI byte
+            "10410C0F28",   // ISO-TP first frame: recovery only rebuilds single frames
+            "037F0111",     // 7F negative response - a refusal is not a reading
+            "300000"        // flow control
+        )
+        val text = junk.mapIndexed { i, frame ->
+            "${istWall(day + i * 1_000L)} RX < 7E8 $frame"
+        }.joinToString("\n")
+        assertEquals(0, RawLogRecovery.extractTelemetry(text, anchorMillis = day, tz = ist).size)
+    }
+
     @Test
     fun undatedLinesStillRecoverViaTheMtimeAnchorSoOldLogsAreNotOrphaned() {
         val day = istMillis(2026, 9, 15, 19, 33, 16, 9)
