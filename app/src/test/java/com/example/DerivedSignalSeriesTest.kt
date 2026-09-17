@@ -82,7 +82,7 @@ class DerivedSignalSeriesTest {
         // the series must pass through 2, never draw a 1->3 teleport.
         val rows = mutableListOf<Row>()
         var ts = 1_000L
-        repeat(3) { rows += Row(ts, "0D", 8.0); rows += Row(ts + 100, "0C", 862.0); ts += 1_000 }
+        repeat(3) { rows += Row(ts, "0D", 12.0); rows += Row(ts + 100, "0C", 1294.0); ts += 1_000 }
         ts += 6_000
         repeat(3) { rows += Row(ts, "0D", 45.0); rows += Row(ts + 100, "0C", 1820.0); ts += 1_000 }
         val gears = gearPoints(rows, { it.ts }, { it.pid }, { it.v }).map { it.second }
