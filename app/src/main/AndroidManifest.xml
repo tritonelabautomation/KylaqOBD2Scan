@@ -21,15 +21,24 @@
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" tools:targetApi="s" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <!-- Owner field report 2026-09-18 ("Altitude"): without this, Android 10+ hands a foreground
-         service NO location updates while the app is off-screen, so a pocketed-phone drive records
-         distance and economy off the OBD bus and zero GPS fixes - hence a blank altitude column and
-         an empty Altitude trend. Granted via the sanctioned per-level flow in
-         BackgroundLocationPolicy, never a launch popup on API 30+. -->
+    <!-- Owner field report 2026-09-18 ("Altitude"), two levers, both needed:
+         1. PRIMARY - the recording service declares foregroundServiceType location below. Android
+            treats location access made while a location-type foreground service runs as WHILE-IN-USE
+            access, so a drive with the phone in a pocket keeps getting fixes on the "Allow only while
+            using the app" grant the owner already gave. Without the location type the same service is
+            background for location purposes and Android 10+ hands it zero fixes once the screen goes
+            off - which is exactly what blanked the 93-minute pocketed drive while a 35-minute drive
+            with the app on screen recorded a full 387-440 m trace.
+         2. BELT - ACCESS_BACKGROUND_LOCATION covers the case the location type cannot: a service that
+            has to (re)start with no activity visible needs the all-the-time grant. Granted via the
+            sanctioned per-level flow in BackgroundLocationPolicy, never a launch popup on API 30+. -->
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <!-- Android 14+ requires this install-time permission to start a foreground service of type
+         location at all; without it startForeground(FOREGROUND_SERVICE_TYPE_LOCATION) throws. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
@@ -92,7 +101,7 @@
         <service
             android:name=".service.ObdKeepAliveService"
             android:exported="false"
-            android:foregroundServiceType="connectedDevice" />
+            android:foregroundServiceType="connectedDevice|location" />
 
         <service
             android:name=".auto.ObdCarAppService"

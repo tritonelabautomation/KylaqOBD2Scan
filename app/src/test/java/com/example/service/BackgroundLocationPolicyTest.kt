@@ -110,19 +110,51 @@ class BackgroundLocationPolicyTest {
     }
 
     @Test
-    fun theReasonNamesTheRealCause() {
-        // The 2026-09-18 drive: granted foreground, no background, phone in a pocket. The footnote
-        // has to say Android withheld GPS - not "recorded before 2026-09-15", which was the old
-        // guess and was false for a drive recorded that morning.
-        val reason = BackgroundLocationPolicy.altitudeBlankReason(
-            BackgroundLocationPolicy.state(33, true, false, 0L, now)
+    fun theReasonNamesTheRealCauseForTheEraOfTheTrip() {
+        val day = 86_400_000L
+        // A trip recorded BEFORE the recording service became a location-type foreground service:
+        // the cause is the old build, whatever the owner grants today, and the words must say so -
+        // no permission can bring back fixes that never arrived.
+        val oldTrip = com.example.service.BackgroundLocationPolicy.FIX_LIVE_SINCE_MS - day
+        val old = BackgroundLocationPolicy.altitudeBlankReason(
+            BackgroundLocationPolicy.State.GRANTED, oldTrip
         )
-        assertTrue("must name the OS rule: $reason", reason.contains("Allow all the time"))
-        assertTrue("must name the pocket case: $reason", reason.contains("pocket"))
+        assertTrue("must name the old build: $old", old.contains("older build"))
+        assertTrue("must name the pocket case: $old", old.contains("pocket"))
+        assertTrue("must not promise recovery: $old", old.contains("no trace"))
+        // Era wins over state: even a refused permission is not the cause of an old blank.
+        assertEquals(
+            old,
+            BackgroundLocationPolicy.altitudeBlankReason(
+                BackgroundLocationPolicy.State.NEEDS_FOREGROUND, oldTrip
+            )
+        )
 
-        val granted = BackgroundLocationPolicy.altitudeBlankReason(
-            BackgroundLocationPolicy.State.GRANTED
+        // A trip recorded by THIS build with location granted: the honest causes left are the
+        // accuracy gate and GPS being off or under cover.
+        val nowTrip = com.example.service.BackgroundLocationPolicy.FIX_LIVE_SINCE_MS + day
+        val current = BackgroundLocationPolicy.altitudeBlankReason(
+            BackgroundLocationPolicy.State.GRANTED, nowTrip
         )
-        assertTrue("granted means the gate is the remaining explanation: $granted", granted.contains("40 m"))
+        assertTrue("must name the gate: $current", current.contains("40 m"))
+
+        // This build, permission never granted at all.
+        val never = BackgroundLocationPolicy.altitudeBlankReason(
+            BackgroundLocationPolicy.State.NEEDS_FOREGROUND, nowTrip
+        )
+        assertTrue("must name the missing grant: $never", never.contains("never granted"))
+    }
+
+    @Test
+    fun aCurrentBuildReasonKeepsTheBeltHonest() {
+        // While-in-use is now enough during recording (location-type foreground service), so the
+        // reason must not tell the owner that 'Allow all the time' is a prerequisite - that sentence
+        // was true of the old build only.
+        val reason = BackgroundLocationPolicy.altitudeBlankReason(
+            BackgroundLocationPolicy.State.OFFER_VIA_SETTINGS,
+            BackgroundLocationPolicy.FIX_LIVE_SINCE_MS + 86_400_000L
+        )
+        assertTrue("must say while-in-use suffices: $reason", reason.contains("While using"))
+        assertTrue("must call all-the-time what it is: $reason", reason.contains("optional belt"))
     }
 }

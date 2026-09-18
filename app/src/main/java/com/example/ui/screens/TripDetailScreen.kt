@@ -82,7 +82,9 @@ fun TripDetailScreen(
     // hold the ViewModel, and a `val` declared in one @Composable is invisible in another.
     val bgLocationState by viewModel.backgroundLocationState.collectAsState()
     val altitudeBlankReason =
-        com.example.service.BackgroundLocationPolicy.altitudeBlankReason(bgLocationState)
+        com.example.service.BackgroundLocationPolicy.altitudeBlankReason(
+            bgLocationState, trip?.startTimestamp
+        )
 
     // "Log fuel" for this trip: fuel rate integrated over the stored samples.
     val fuelSummary = remember(samples) {
@@ -237,7 +239,9 @@ fun TripDetailScreen(
                                     com.example.analysis.TripTrendAnalyzer.PID_ALTITUDE_GPS
                                 ) && samples.none { it.altitudeM != null }
                             ) {
-                                altitudeBlankReason
+                                com.example.service.BackgroundLocationPolicy.altitudeBlankReason(
+                                    bgLocationState, samples.minOfOrNull { it.instantMs }
+                                )
                             } else {
                                 null
                             },

@@ -539,25 +539,31 @@ fun SettingsScreen(
                         label = "Location in background",
                         detail = when (bgLocationState) {
                             com.example.service.BackgroundLocationPolicy.State.GRANTED ->
-                                "'Allow all the time' is on - a pocketed phone keeps getting GPS " +
-                                    "fixes, so altitude and the map survive the drive."
+                                "'Allow all the time' is on - full belt. Recording already keeps GPS " +
+                                    "on a pocketed drive without it, because the recording service is " +
+                                    "a location-type foreground service and Android counts that as " +
+                                    "while-in-use; this only covers service restarts with the app " +
+                                    "closed."
                             com.example.service.BackgroundLocationPolicy.State.NOT_APPLICABLE ->
                                 "This Android version grants background location with the normal " +
                                     "location permission; nothing extra to allow."
                             com.example.service.BackgroundLocationPolicy.State.NEEDS_FOREGROUND ->
                                 "Location is not granted at all yet - the app asks for it at startup."
                             com.example.service.BackgroundLocationPolicy.State.COOLDOWN ->
-                                "NOT granted, and you declined recently so the app stays quiet. " +
-                                    "Android 10+ withholds GPS from a background service without " +
-                                    "'Allow all the time', so a pocketed-phone drive records no " +
-                                    "altitude and no map - distance and economy still come off the " +
-                                    "OBD bus. Change it here whenever you want."
+                                "NOT granted, and you declined recently so the app stays quiet for " +
+                                    "seven days. Recording still keeps GPS on a pocketed drive with " +
+                                    "'While using' - the recording service is a location-type " +
+                                    "foreground service - so this is optional belt for service " +
+                                    "restarts with the app closed. Change it here whenever you want."
                             else ->
-                                "NOT granted. Android 10+ withholds GPS from a background service " +
-                                    "without 'Allow all the time', so a drive with the phone in a " +
-                                    "pocket records no altitude and no map trace - distance and " +
-                                    "economy still come off the OBD bus, which is why the trip " +
-                                    "looked complete but showed '-- m'."
+                                "Optional extra, NOT required for recording: the recording service " +
+                                    "is now a location-type foreground service, so 'While using' " +
+                                    "keeps GPS - altitude and map - flowing on a pocketed drive. " +
+                                    "'Allow all the time' only adds belt for service restarts with " +
+                                    "the app closed. Trips recorded before 2026-09-18 cannot gain " +
+                                    "altitude retroactively: on those builds Android withheld GPS " +
+                                    "the moment the screen went off, and a fix that never arrived " +
+                                    "leaves no trace."
                         }
                     )
 

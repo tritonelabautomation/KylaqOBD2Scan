@@ -169,7 +169,21 @@ class ObdKeepAliveService : Service() {
         }
         val notification: Notification = builder.build()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
+            // Owner field report 2026-09-18 ("Altitude"): the location type is what keeps GPS alive
+            // on a pocketed-phone drive. Android counts location access made while a location-type
+            // foreground service runs as WHILE-IN-USE access, so the grant the owner already gave
+            // ("Allow only while using the app") covers the whole recording even with the screen
+            // off. With connectedDevice alone the service is "background" for location purposes and
+            // Android 10+ hands it zero fixes once the app leaves the screen - the 93-minute drive
+            // came back with a blank altitude column for exactly that reason, while a 35-minute
+            // drive with the app on screen recorded a full trace. The manifest declares both types
+            // and FOREGROUND_SERVICE_LOCATION, which Android 14+ requires to start this at all.
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+            )
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }

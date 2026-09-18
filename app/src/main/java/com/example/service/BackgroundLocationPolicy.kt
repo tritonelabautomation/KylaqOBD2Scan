@@ -86,14 +86,36 @@ object BackgroundLocationPolicy {
         if (sdkInt >= 29) arrayOf(android.Manifest.permission.ACCESS_BACKGROUND_LOCATION)
         else emptyArray()
 
-    /** Plain-language reason for a blank altitude column, so the UI never guesses wrong. */
-    fun altitudeBlankReason(state: State): String = when (state) {
-        State.GRANTED, State.NOT_APPLICABLE ->
-            "no accuracy-gated GPS fix reached the recorder (worse than 40 m horizontal is dropped)"
-        State.NEEDS_FOREGROUND ->
-            "location permission was never granted, so no fix could reach the recorder"
-        State.OFFER_IN_DIALOG, State.OFFER_VIA_SETTINGS, State.COOLDOWN ->
-            "Android withholds GPS from a background service without 'Allow all the time' - " +
-                "a drive with the phone in a pocket records no fixes at all"
+    /**
+     * Builds from this date onward record with a location-type foreground service, so while-in-use
+     * alone keeps GPS flowing on a pocketed drive. Trips that STARTED before it were recorded by a
+     * service Android treated as background for location - a different cause, needing different
+     * words. Parsed by the app's own IST parser, never a hand-computed epoch.
+     */
+    val FIX_LIVE_SINCE_MS: Long =
+        com.example.data.RecordTime.parseMillis("2026-09-18T00:00:00+05:30") ?: 0L
+
+    /**
+     * Plain-language reason for a blank altitude column, so the UI never guesses wrong. Era-aware:
+     * a trip that started before [FIX_LIVE_SINCE_MS] was recorded by a build whose recording service
+     * was NOT a location-type foreground service, and no permission the owner grants today can bring
+     * fixes back that never arrived.
+     */
+    fun altitudeBlankReason(state: State, tripStartMs: Long? = null): String {
+        if (tripStartMs != null && tripStartMs < FIX_LIVE_SINCE_MS) {
+            return "this trip was recorded by an older build whose recording service was not a " +
+                "location-type foreground service: the moment the screen went off, Android withheld " +
+                "GPS from it, so a drive with the phone in a pocket carries no fixes at all - only " +
+                "what the OBD bus reported. A fix that never arrived leaves no trace to recover"
+        }
+        return when (state) {
+            State.NEEDS_FOREGROUND ->
+                "location permission was never granted, so no fix could reach the recorder"
+            else ->
+                "no accuracy-gated GPS fix reached the recorder (worse than 40 m horizontal is " +
+                    "dropped) - GPS was off or under cover for the drive; 'Allow all the time' in " +
+                    "Settings is only optional belt, recording keeps GPS on 'While using' because " +
+                    "the service is a location-type foreground service"
+        }
     }
 }
