@@ -648,10 +648,14 @@ private fun RefuelTrackerCard(
             return
         }
         Row(Modifier.fillMaxWidth()) {
-            StatBlock("%.1f km".format(since.distanceKm), "Distance")
-            StatBlock("%.2f L".format(since.fuelLiters), "App fuel")
-            StatBlock(since.kmL?.let { "%.2f".format(it) } ?: "--", "km/L")
-            StatBlock("%d:%02d h".format(since.durationSec / 3600, (since.durationSec % 3600) / 60), "Time")
+            StatBlock("%.1f km".format(since.distanceKm), "Distance", Modifier.weight(1f))
+            StatBlock("%.2f L".format(since.fuelLiters), "App fuel", Modifier.weight(1f))
+            StatBlock(since.kmL?.let { "%.2f".format(it) } ?: "--", "km/L", Modifier.weight(1f))
+            StatBlock(
+                "%d:%02d h".format(since.durationSec / 3600, (since.durationSec % 3600) / 60),
+                "Time",
+                Modifier.weight(1f)
+            )
         }
         Spacer(Modifier.height(10.dp))
         events.take(4).forEach { ev ->
@@ -682,8 +686,10 @@ private fun RefuelTrackerCard(
 }
 
 @Composable
-private fun StatBlock(value: String, label: String) {
-    Column(Modifier.weight(1f)) {
+private fun StatBlock(value: String, label: String, modifier: Modifier = Modifier) {
+    // weight() is a RowScope/ColumnScope extension - it can only be applied by the PARENT row,
+    // which is why it arrives as a parameter instead of being claimed in here.
+    Column(modifier) {
         Text(value, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
         Text(label, color = Color(0xFF8E8E93), fontSize = 11.sp)
     }

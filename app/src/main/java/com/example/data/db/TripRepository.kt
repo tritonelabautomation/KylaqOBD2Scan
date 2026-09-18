@@ -5,6 +5,7 @@ import com.example.ai.AiAnalysisEngine
 import com.example.ai.CarDoctorReport
 import com.example.ai.DoctorObservation
 import com.example.ai.RuleBasedAnalysisEngine
+import com.example.data.db.dao.SampleRow
 import com.example.data.db.entities.*
 import com.example.model.TransactionRecord
 import kotlinx.coroutines.Dispatchers
