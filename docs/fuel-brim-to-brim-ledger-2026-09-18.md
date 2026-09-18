@@ -158,7 +158,7 @@ signal. Coherence, not proof, at segment scale.
   Coverage would be partial anyway (296 km driven vs the trips the app holds), so per section 5
   the pump litres could only have validated the band even with full CSV access.
 
-## 6. Standing owner-side items carried## 6. Standing owner-side items carried
+## 6. Standing owner-side items carried
 
 Receipt litres of the engine-off fill (and of the 09-09 fill if its card is not auto-cut);
 confirmation of §4's two questions in any form, including one word each in chat; re-attach of the
