@@ -1202,6 +1202,10 @@ private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summar
             // 0162 actually answered; when it never did, nothing is fabricated.
             val tMean = summary.meanTorqueNm
             val tPeak = summary.peakTorqueNm
+            // The same reference the percent channel was converted with: the ECU's own 0163 (this
+            // car answers 175 Nm there) or 0164, else the factory plateau. torqueRefNm from the
+            // trends tab is NOT in scope here, so read it off the summary like the numbers beside it.
+            val refNm = summary.torqueReferenceNm ?: com.example.engine.PowertrainModel.PEAK_TORQUE_NM
             if (tMean != null && tPeak != null) {
                 Spacer(modifier = Modifier.height(4.dp))
                 InsightBlock(
@@ -1213,7 +1217,22 @@ private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summar
                     body = "Engine torque (measured, PID 0162): mean " +
                         "${String.format(java.util.Locale.US, "%.0f", tMean)} Nm • peak " +
                         "${String.format(java.util.Locale.US, "%.0f", tPeak)} Nm while running • reference " +
-                        "${String.format(java.util.Locale.US, "%.0f", summary.torqueReferenceNm ?: 178.0)} Nm"
+                        "${String.format(java.util.Locale.US, "%.0f", refNm)} Nm" +
+                        // Owner field check 2026-09-18: a city drive peaked at 186 Nm against the
+                        // ECU's own 175 Nm reference and read, next to each other, like a
+                        // contradiction. It is not one. 0162 decodes as `A - 125` PERCENT, whose range
+                        // runs to +130%, so a momentary over-reference reading is representable and,
+                        // on a turbo engine under a transient overboost, real. Say that instead of
+                        // leaving two numbers that appear to disagree - and never clip the reading,
+                        // because a capped peak would be a fabricated one.
+                        if (tPeak > refNm) {
+                            " • peak is ${String.format(java.util.Locale.US, "%.0f", tPeak / refNm * 100.0)}" +
+                                "% of reference: 0162 is a percent-of-reference PID whose scale runs " +
+                                "past 100%, so a brief over-reference transient is a real reading, " +
+                                "not a decode error"
+                        } else {
+                            ""
+                        }
 
                 )
             }
