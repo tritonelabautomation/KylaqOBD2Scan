@@ -60,6 +60,46 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val bluetoothManager = AppContainer.bluetoothManager
     val obdScheduler = AppContainer.obdScheduler
 
+    // ── Background location (owner field report 2026-09-18: "Altitude") ────────────────────
+    //
+    // A 1 h 33 min recovered drive showed `-- m` altitude and an empty Altitude trend because
+    // Android 10+ hands a foreground service NO location updates while the app is off-screen
+    // unless ACCESS_BACKGROUND_LOCATION is granted. The phone spends a drive in a pocket, so
+    // without it every sample is recorded with altitudeM = null. The decision of WHEN to offer the
+    // permission lives in BackgroundLocationPolicy (tested); this ViewModel only observes grants and
+    // publishes the state, so the Settings card and the altitude footnote read one truth.
+    private val _bgLocationState =
+        MutableStateFlow(com.example.service.BackgroundLocationPolicy.State.NEEDS_FOREGROUND)
+    val backgroundLocationState: StateFlow<com.example.service.BackgroundLocationPolicy.State> =
+        _bgLocationState.asStateFlow()
+
+    /** Re-reads the grants. Called on resume and after any permission result. */
+    fun refreshLocationPermissionState() {
+        val fg = androidx.core.content.ContextCompat.checkSelfPermission(
+            getApplication(), android.Manifest.permission.ACCESS_FINE_LOCATION
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        val bg = androidx.core.content.ContextCompat.checkSelfPermission(
+            getApplication(), android.Manifest.permission.ACCESS_BACKGROUND_LOCATION
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        _bgLocationState.value = com.example.service.BackgroundLocationPolicy.state(
+            sdkInt = android.os.Build.VERSION.SDK_INT,
+            foregroundGranted = fg,
+            backgroundGranted = bg,
+            lastDeclinedMs = settingsRepository.lastBgLocationDeclinedMs(),
+            nowMs = System.currentTimeMillis()
+        )
+    }
+
+    /** Recorded when a request comes back with foreground granted but background refused. */
+    fun noteBackgroundLocationDeclined() {
+        settingsRepository.setLastBgLocationDeclinedMs(System.currentTimeMillis())
+        refreshLocationPermissionState()
+    }
+
+    init {
+        refreshLocationPermissionState()
+    }
+
     init {
         // A recording can now be stopped by something other than this ViewModel: the keep-alive
         // service runs the same auto-record rule, so it closes the drive when the engine has been

@@ -109,6 +109,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        // Grants can change in Settings while we were not looking; the altitude footnote and the
+        // Settings card must not argue with the OS.
+        viewModel.refreshLocationPermissionState()
         promptBatteryExemptionIfNeeded()
     }
 
@@ -183,6 +186,17 @@ fun MainApp(viewModel: MainViewModel) {
     ) { permissions ->
         val allGranted = permissions.values.all { it }
         hasBluetoothPermission = allGranted
+        // Background location (owner field report 2026-09-18: "Altitude"). On API 29 the startup
+        // dialog carries an "allow all the time" checkbox; if the foreground grant came back but the
+        // background one did not, that is a decline and the cooldown starts, so the app does not
+        // re-raise the same dialog on every launch.
+        val askedBg = permissions.keys.contains(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+        val fgNow = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true
+        if (askedBg && fgNow && permissions[Manifest.permission.ACCESS_BACKGROUND_LOCATION] != true) {
+            viewModel.noteBackgroundLocationDeclined()
+        } else {
+            viewModel.refreshLocationPermissionState()
+        }
     }
 
     val defaultBtAddress by viewModel.settingsRepository.defaultBtAddress.collectAsState()
@@ -199,7 +213,20 @@ fun MainApp(viewModel: MainViewModel) {
         val basePermissions = arrayOf(
             Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.ACCESS_COARSE_LOCATION
-        )
+        ) +
+            // Only on API 29, where the system renders it as a checkbox inside this same dialog,
+            // and only outside a decline cooldown. On API 30+ bundling it is silently ignored -
+            // that level gets the dedicated card in Settings instead.
+            if (com.example.service.BackgroundLocationPolicy.includeInStartupRequest(
+                    Build.VERSION.SDK_INT,
+                    viewModel.settingsRepository.lastBgLocationDeclinedMs(),
+                    System.currentTimeMillis()
+                )
+            ) {
+                arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+            } else {
+                emptyArray()
+            }
         val requiredPermissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             basePermissions + arrayOf(
                 Manifest.permission.BLUETOOTH_CONNECT,

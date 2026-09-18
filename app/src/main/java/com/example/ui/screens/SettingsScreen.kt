@@ -97,6 +97,15 @@ fun SettingsScreen(
     }
     val isRecordingNow by viewModel.isRecording.collectAsState()
     val connectionNow by viewModel.connectionState.collectAsState()
+    // Owner field report 2026-09-18 ("Altitude"): whether a pocketed phone still gets GPS fixes.
+    val bgLocationState by viewModel.backgroundLocationState.collectAsState()
+    val bgLocationLauncher = rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
+    ) { res ->
+        val fg = res[android.Manifest.permission.ACCESS_FINE_LOCATION] == true
+        val bg = res[android.Manifest.permission.ACCESS_BACKGROUND_LOCATION] == true
+        if (!bg && fg) viewModel.noteBackgroundLocationDeclined() else viewModel.refreshLocationPermissionState()
+    }
     val rawLogWriteFailures = viewModel.rawLogManager.writeFailureCount
     val autoRecoveryNotice by viewModel.autoRecoveryNotice.collectAsState()
     val isAutoRecovering by viewModel.isAutoRecovering.collectAsState()
@@ -521,6 +530,75 @@ fun SettingsScreen(
                             Icon(Icons.Default.BatterySaver, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text("Make battery Unrestricted")
+                        }
+                    }
+
+                    ProtectionStatusRow(
+                        ok = bgLocationState == com.example.service.BackgroundLocationPolicy.State.GRANTED ||
+                            bgLocationState == com.example.service.BackgroundLocationPolicy.State.NOT_APPLICABLE,
+                        label = "Location in background",
+                        detail = when (bgLocationState) {
+                            com.example.service.BackgroundLocationPolicy.State.GRANTED ->
+                                "'Allow all the time' is on - a pocketed phone keeps getting GPS " +
+                                    "fixes, so altitude and the map survive the drive."
+                            com.example.service.BackgroundLocationPolicy.State.NOT_APPLICABLE ->
+                                "This Android version grants background location with the normal " +
+                                    "location permission; nothing extra to allow."
+                            com.example.service.BackgroundLocationPolicy.State.NEEDS_FOREGROUND ->
+                                "Location is not granted at all yet - the app asks for it at startup."
+                            com.example.service.BackgroundLocationPolicy.State.COOLDOWN ->
+                                "NOT granted, and you declined recently so the app stays quiet. " +
+                                    "Android 10+ withholds GPS from a background service without " +
+                                    "'Allow all the time', so a pocketed-phone drive records no " +
+                                    "altitude and no map - distance and economy still come off the " +
+                                    "OBD bus. Change it here whenever you want."
+                            else ->
+                                "NOT granted. Android 10+ withholds GPS from a background service " +
+                                    "without 'Allow all the time', so a drive with the phone in a " +
+                                    "pocket records no altitude and no map trace - distance and " +
+                                    "economy still come off the OBD bus, which is why the trip " +
+                                    "looked complete but showed '-- m'."
+                        }
+                    )
+
+                    if (bgLocationState == com.example.service.BackgroundLocationPolicy.State.OFFER_IN_DIALOG ||
+                        bgLocationState == com.example.service.BackgroundLocationPolicy.State.OFFER_VIA_SETTINGS
+                    ) {
+                        Button(
+                            onClick = {
+                                // The sanctioned per-level flow: on API 29 this dialog carries the
+                                // "allow all the time" checkbox; on 30+ a request for the background
+                                // permission alone makes the system offer the Settings redirect.
+                                bgLocationLauncher.launch(
+                                    com.example.service.BackgroundLocationPolicy.requestArray(
+                                        android.os.Build.VERSION.SDK_INT
+                                    )
+                                )
+                            },
+                            modifier = Modifier.fillMaxWidth().testTag("btn_bg_location")
+                        ) {
+                            Icon(Icons.Default.LocationOn, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Allow location all the time")
+                        }
+                    }
+                    if (bgLocationState == com.example.service.BackgroundLocationPolicy.State.COOLDOWN) {
+                        OutlinedButton(
+                            onClick = {
+                                runCatching {
+                                    context.startActivity(
+                                        android.content.Intent(
+                                            android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                            android.net.Uri.parse("package:${context.packageName}")
+                                        )
+                                    )
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth().testTag("btn_bg_location_settings")
+                        ) {
+                            Icon(Icons.Default.LocationOn, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Open location settings")
                         }
                     }
 

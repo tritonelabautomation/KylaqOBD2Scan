@@ -509,7 +509,49 @@ A classifier that cannot see the qualified form over-reports exactly the defect 
 which is the worst direction to be wrong in: it would have justified a "fix" that shifted 15 correct
 writers' output by five and a half hours.
 
-## 5. Tests added / changed
+## 4h. Defect 9: altitude was blank because Android withholds GPS from a pocketed phone
+
+Owner field report 2026-09-18, one word: *"Altitude"*, with two screenshots of a 1 h 33 min recovered
+drive: `-- m` for max altitude and altitude difference on the overview, and "Not enough samples to
+draw a trend" on the Altitude (GPS) channel.
+
+The recorder and the recovery path were both cleared first. `SessionJournal` writes sample rows
+through `CsvExporter.sampleRow`, whose last column is `altitude_m`, and the reader parses it back -
+so a recovered trip does **not** lose altitude that was ever recorded. The loss happened earlier: no
+fix was ever recorded.
+
+The cause is the permission set. The manifest declared only `ACCESS_FINE_LOCATION` and
+`ACCESS_COARSE_LOCATION`. From Android 10 (API 29) onward, a foreground service with no
+`ACCESS_BACKGROUND_LOCATION` is handed **no location updates at all while the app is not on screen**.
+A drive with the phone in a pocket is exactly that, so every sample carried `altitudeM = null`, the
+trip drew an honest blank, and the Altitude trend had nothing to plot. Distance and economy survived
+because they come off the OBD bus (010D, 015E/019D), not from the sky - which is why the trip looked
+complete in every other column and made the blank look like a bug in the maths.
+
+The old footnote could not say any of this: it offered "recorded before 2026-09-15, or no
+accuracy-gated GPS fix", and for a drive recorded that morning with the permission missing, both
+were false. A footnote that cannot name the real cause sends the owner looking in the wrong place.
+
+**Fix.** `ACCESS_BACKGROUND_LOCATION` is declared, and requested by the sanctioned path per OS level,
+decided by a new tested pure object `BackgroundLocationPolicy`:
+
+  * **API < 29** - nothing to offer; the foreground grant covers a service.
+  * **API 29** - background rides in the startup dialog as the "allow all the time" checkbox.
+  * **API 30+** - bundling is silently ignored, so the Settings card carries a button that issues a
+    dedicated background request, which the system answers with the Settings redirect. No launch
+    popup, ever.
+  * A decline is recorded and cooled off for seven days: the dialog does not return on every launch,
+    but the card and its explanation stay, because changing his mind must cost one tap.
+
+The overview footnote and the Altitude trend's empty state now print the reason the policy computed,
+so a blank column states its cause instead of guessing. Nothing is invented: with the permission
+refused the column stays `-- m`, and the text says so and where to change it.
+
+This was flagged as an honest limit in §4b ("GPS may not update in the background ... that is the
+owner's decision"). The owner's one-word report is the decision; this section is the reversal of that
+limit, recorded rather than left to contradict §4b.
+
+## 5. Tests added / changed## 5. Tests added / changed
 
 | File | What it pins |
 |------|--------------|
@@ -522,7 +564,7 @@ writers' output by five and a half hours.
 | `AutoRecordPolicyTest` (new, 13 tests) | The auto-record rule as a pure function, so the two supervisors cannot drift: engine on with nothing recording starts a drive; engine on while recording changes nothing; never starts against a dead link (an empty trip looks like a drive that got 0 km); setting off means the supervisor touches nothing; **a fresh `rpm = 0` is a traffic light, not the end of the drive**, and gets the five-minute Idle Start-Stop grace; a stall longer than that still saves the trip; a MISSING reading is an ignition-off and gets one minute; the engine-off clock is armed once and not rearmed every tick; a restarted engine clears it; the 200.0 threshold is strict, so a cranking motor cannot open a trip; and `aWholeCityDriveWithSixJunctionsStaysOneTrip` runs a whole drive through the rule tick by tick and asserts one start and one stop |
 | `BatteryOptimizationPolicyTest` (rewritten, 5 tests) | The new contract, and *why* the old one was wrong: prompts when restricted; prompts with no session live so the next drive is protected; never nags once granted; stays quiet inside the 24 h interval; asks again after it while still restricted |
 
-Committed total: 84 suites, 733 tests (baseline before this task was 82 suites / 699 tests).
+Committed total: 85 suites, 740 tests (baseline before this task was 82 suites / 699 tests).
 
 Two existing assertions were deliberately changed rather than worked around, both in
 `BatteryOptimizationPolicyTest`: `neverNagsAfterTheFirstPrompt` and `silentWhenNoSessionIsLive`

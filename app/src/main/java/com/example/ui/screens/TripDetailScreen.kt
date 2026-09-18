@@ -306,12 +306,23 @@ private fun TripOverviewView(
         }
         item {
             // Replicated OBDeleven trip-detail cards (owner reference screen 2, 2026-09-13)
+            // Owner field report 2026-09-18 ("Altitude"): when the column is blank, say WHY, from
+            // the permission policy rather than from a guess. A 1 h 33 min pocketed-phone drive on
+            // Android 10+ has no GPS fixes at all without 'Allow all the time', and the old footnote
+            // could not name that cause.
+            val bgLoc by viewModel.backgroundLocationState.collectAsState()
             TrackerSummaryCards(
                 summary = summary,
                 pricePerL = pricePerL,
                 speedPoints = speedPoints,
                 maxAltitudeM = trip.maxAltitudeM,
-                minAltitudeM = trip.minAltitudeM
+                minAltitudeM = trip.minAltitudeM,
+                altitudeBlankReason =
+                    if (trip.maxAltitudeM == null) {
+                        com.example.service.BackgroundLocationPolicy.altitudeBlankReason(bgLoc)
+                    } else {
+                        null
+                    }
             )
         }
         item {
@@ -606,6 +617,16 @@ private fun TripTrendsView(
             border = androidx.compose.foundation.BorderStroke(1.dp, CyberCyan.copy(alpha = 0.2f))
         ) {
             TrendChart(
+                emptyHint =
+                    if (selectedTrendPids.contains(com.example.analysis.TripTrendAnalyzer.PID_ALTITUDE_GPS) &&
+                        samples.none { it.altitudeM != null }
+                    ) {
+                        com.example.service.BackgroundLocationPolicy.altitudeBlankReason(
+                            viewModel.backgroundLocationState.value
+                        )
+                    } else {
+                        null
+                    },
                 lines = lines,
                 modifier = Modifier.fillMaxSize().padding(10.dp)
             )

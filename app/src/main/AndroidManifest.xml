@@ -21,6 +21,12 @@
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" tools:targetApi="s" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- Owner field report 2026-09-18 ("Altitude"): without this, Android 10+ hands a foreground
+         service NO location updates while the app is off-screen, so a pocketed-phone drive records
+         distance and economy off the OBD bus and zero GPS fixes - hence a blank altitude column and
+         an empty Altitude trend. Granted via the sanctioned per-level flow in
+         BackgroundLocationPolicy, never a launch popup on API 30+. -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />

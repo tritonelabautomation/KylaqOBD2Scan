@@ -464,6 +464,16 @@ class SettingsRepository(private val context: Context) {
     fun setLastCheckInNotifiedMs(ms: Long) = prefs.edit().putLong("last_checkin_notified", ms).apply()
 
     /**
+     * When the owner last declined "Allow all the time", for [com.example.service.BackgroundLocationPolicy]'s
+     * cooldown. Zero means never asked or never declined. Persisted because a decline has to survive
+     * the process, or "stay quiet for a week" resets on every launch and becomes nagging.
+     */
+    fun lastBgLocationDeclinedMs(): Long = prefs.getLong("bg_location_last_declined", 0L)
+
+    fun setLastBgLocationDeclinedMs(ms: Long) =
+        prefs.edit().putLong("bg_location_last_declined", ms).apply()
+
+    /**
      * Throttle stamp for the automatic in-app update check (2026-09-16). A manual
      * "Check for updates" tap is never throttled - only the silent launch check is.
      */

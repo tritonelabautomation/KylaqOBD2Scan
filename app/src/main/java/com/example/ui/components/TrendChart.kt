@@ -97,13 +97,16 @@ data class TrendLine(
 fun TrendChart(
     lines: List<TrendLine>,
     modifier: Modifier = Modifier,
-    bucketTarget: Int = 180
+    bucketTarget: Int = 180,
+    /** Shown under the generic empty-state line when the caller knows WHY there is nothing to draw. */
+    emptyHint: String? = null
 ) {
     // Drop series too thin to draw; keep order (selection order = axis priority).
     val drawable = remember(lines) { lines.filter { it.points.size >= 2 } }
     if (drawable.isEmpty()) {
         Text(
-            "Not enough samples to draw a trend for the selected signal(s) yet.",
+            "Not enough samples to draw a trend for the selected signal(s) yet." +
+                (emptyHint?.let { " $it" } ?: ""),
             color = TextSecondaryDark,
             fontSize = 12.sp,
             fontWeight = FontWeight.Medium,

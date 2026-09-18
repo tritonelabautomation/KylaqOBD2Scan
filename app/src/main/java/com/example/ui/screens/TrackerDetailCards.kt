@@ -54,7 +54,16 @@ fun TrackerSummaryCards(
     speedPoints: List<Pair<Long, Double>>,
     /** GPS altitude extremes persisted per trip (owner 2026-09-15 fix). Null = no accuracy-gated GPS fix with altitude was recorded for this trip → honest blank. */
     maxAltitudeM: Double? = null,
-    minAltitudeM: Double? = null
+    minAltitudeM: Double? = null,
+    /**
+     * WHY the altitude column is blank, when it is. The old footnote offered two guesses - "recorded
+     * before 2026-09-15" or "no accuracy-gated fix" - and on the owner's 2026-09-18 drive neither was
+     * the truth: the trip was recorded with the phone in a pocket on an Android that withholds GPS
+     * from a background service unless 'Allow all the time' is granted. A footnote that cannot name
+     * the real cause sends the owner looking in the wrong place, so the caller passes the reason the
+     * permission policy computed instead of the card guessing.
+     */
+    altitudeBlankReason: String? = null
 ) {
     val analysis = remember(summary, speedPoints) {
         TripDriveAnalysis.analyse(speedPoints, summary.idleSeconds + summary.engineOffSeconds, summary.speedHistogram)
@@ -94,7 +103,10 @@ fun TrackerSummaryCards(
                 if (maxAltitudeM != null) {
                     "altitude from accuracy-gated GPS fixes (≤ 40 m) - persisted since 2026-09-15"
                 } else {
-                    "* no GPS altitude was persisted for this trip (recorded before 2026-09-15, or no accuracy-gated GPS fix) - honest blank, never invented"
+                    "* no GPS altitude was persisted for this trip - honest blank, never invented. " +
+                        (altitudeBlankReason
+                            ?: "recorded before 2026-09-15, or no accuracy-gated GPS fix") +
+                        (if (altitudeBlankReason == null) "" else ". Settings > Never lose a drive > Location in background") + """ 
                 },
                 color = TkDim,
                 fontSize = 11.sp
