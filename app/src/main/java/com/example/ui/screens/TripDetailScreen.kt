@@ -615,7 +615,7 @@ private fun TripTrendsView(
             }
         }
         Text(
-            "Tap to overlay up to 4 signals \u00b7 first picked = left axis \u00b7 second = right axis \u00b7 a 5th tap swaps the newest out \u00b7 pinch to zoom \u00b7 drag to read values",
+            "Tap to overlay up to 4 signals \u00b7 first picked = left axis \u00b7 second = right axis \u00b7 a 5th tap swaps the newest out \u00b7 pinch to zoom \u00b7 drag to read values \u00b7 each signal is polled every ~4-9 s (one loop rotates ~50 PIDs at ~11 Hz), so a crosshair bubble lists each signal's NEAREST sample - values inside one bubble can be seconds apart in time",
             color = TextSecondaryDark,
             fontSize = 12.sp
         )
