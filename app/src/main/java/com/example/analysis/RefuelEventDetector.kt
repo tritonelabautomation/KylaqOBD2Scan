@@ -83,6 +83,7 @@ class RefuelEventDetector(private val minRisePct: Double = DEFAULT_MIN_RISE_PCT)
 
     private fun closeWindow(tsMs: Long): Detected? {
         val start = windowStartMs
+        val end = windowEndMs
         val base = windowBasePct
         val max = windowMaxPct
         windowStartMs = null
@@ -91,7 +92,9 @@ class RefuelEventDetector(private val minRisePct: Double = DEFAULT_MIN_RISE_PCT)
         windowMaxPct = null
         if (start == null || base == null || max == null) return null
         if (max - base < minRisePct) return null
-        return Detected(start, windowEndMs ?: tsMs, base, max, lastOdoKm, false)
+        // end BEFORE the reset, or every event reports the closing sample's stamp instead of the
+        // last level row that proved the rise - the test that caught this expected 120, got 500.
+        return Detected(start, end ?: tsMs, base, max, lastOdoKm, false)
     }
 
     companion object {
