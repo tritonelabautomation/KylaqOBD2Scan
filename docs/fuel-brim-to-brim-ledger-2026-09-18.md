@@ -87,7 +87,78 @@ brim-to-brim proof. If coverage is partial (the likely case: 296 km driven vs th
 holds), the pump litres validate the BAND and the per-trip integrals remain validated by the
 cluster cross-check instead; saying otherwise would overclaim, which this repo does not do.
 
-## 6. Standing owner-side items carried
+## 8. Session forensics (Gemini snippet pass, 2026-09-18 evening; every hex re-derived here)
+
+The six files still have not reached the workspace. The owner ran the extraction prompt through
+Gemini, which could read only raw.txt snippets; its CSV-dependent sections came back ABSENT. What
+survived is enough to close three questions, after correcting Gemini's truncation errors.
+
+### 8.1 Frame-level re-derivation (arithmetic discipline: bytes first)
+
+* 01A6 `00 00 88 3F` = 3487.9 km; `00 00 88 88` = 3495.2 km; `00 00 89 BA` = 3525.8 km - all three
+  match Gemini. Regressing frames also confirmed: `885D` = 3490.9 and `8885/8886` = 3494.9/3495.0
+  appearing AFTER 3495.2 (see 8.5).
+* 012F `60` = 37.65 %, `EF` = 93.73 %, `66` = 40.00 % - the car DOES answer fuel level, on 7E8,
+  inside our own poll loop (TX > 012F appears in the raw).
+* 010C `0F1C` = 967 RPM and `0F44` = 977 RPM at session B start (parked, idling), `0000` = 0 RPM
+  from 12:46:07 - the key-on-engine-off window.
+
+### 8.2 Gemini's truncation errors, corrected
+
+Gemini read session A's window as 11:26:39-11:47:04 and 7.3 km. The app's own trip card for
+ce0be7ee says 11:26:39-12:02:36 and 13.1 km, so A ran ~15 minutes past Gemini's snippet and its
+final odometer is ~3487.9 + 13.1 = 3501.0, not 3495.2. Consequently the gap is 42 min 10 s, not
+57 min 42 s, and the 30.6 km gap distance splits: 5.8 km before the pump (3495.2 -> 3501.0) and
+24.8 km after it (3501.0 -> 3525.8). Gemini's TOTAL gap distance was right; its split and windows
+were not.
+
+### 8.3 The fill is identified - ledger section 4 candidate A, confirmed by arithmetic
+
+The odometer at the end of session A is ~3501.0, which is exactly the odometer on the 2026-09-17
+fill card (3,501 km, 31.13 L, JIO BP Madhapur). The decision rule in section 4 needed nothing but
+that number: the engine-off auto-cut fill IS the 09-17 card. Session B is the post-fill drive's
+arrival: idle 967 RPM parked at 12:44:46, engine off 12:46:07, ECU answering (key-on) until
+12:48:54, then key-off NO DATA until 12:50:10. The refuel itself sits in the gap, engine off at
+the pump, exactly as the owner described.
+
+### 8.4 A new independent ground truth: tank capacity from the fill
+
+Level 37.65 % at 11:46 (pre-fill, mid-drive) and 93.73 % at 12:44 (post-fill AND post the 24.8 km
+drive home). Raw rise 56.08 pts with 31.13 L pumped implies 55.5 L - a bound, biased low because
+both readings sit inside consumption. Correcting each by the fuel burnt between reading and fill
+(~0.5 L before, ~2.38 L after at the 10.4 km/L pooled truth) gives a rise of 61.8 pts for 31.13 L
+= **50.35 L against the Skoda Kylaq's 50 L spec - agreement within 0.7 %**. One pump receipt, one
+level PID and one spec sheet, three independent instruments, one tank. This validates the pump
+litres, validates 012F as real and roughly linear at fill scale, and needs no assumption about
+whether the 09-09 fill was brim.
+
+Level is NOT trustworthy below fill scale, and the ledger says so: over 7.3 km inside session A
+the level fell 6 steps (1.18 L at 50.3 L = 6.2 km/L) while over the 24.8 km post-fill drive it
+implies 2.4 L = 10.3 km/L, and the app's own integral for A is 1.5 L = 8.73 km/L. One step is
+0.197 L and a moving tank sloshes; short-segment level economics are noise, fill-scale deltas are
+signal. Coherence, not proof, at segment scale.
+
+### 8.5 Anomalies, adjudicated
+
+* Odometer frames regress inside session A (3495.2 then 3490.9 then 3494.9/3495.0). A CAN/ELM327
+  transient, not a car fault - an odometer cannot unwind. Deliberately NOT clamped: trip distance
+  integrates 010D (`TripFuelSummary.distanceKm += v0 * dt / 3600`), never odometer deltas, so no
+  owner-visible number is affected, and the journal's job is evidence - a clamp would destroy the
+  fingerprint of the transient. Revisit only at the display layer, and only if the owner ever sees
+  a dip on screen.
+* Session B's tail polls into a dead ECU (NO DATA stream after 12:48:54). That is the keep-alive
+  service holding the adapter for the next drive, by design; noted, not a defect.
+
+### 8.6 What remains open
+
+* Whether the 2026-09-09 fill (36.66 L) reached auto-cut - still unanswered, still the only thing
+  standing between "closed balance" and "band" for the 296 km interval.
+* The fuel-rate integral per session: CSVs still absent, so the app-side litre integral over the
+  brim interval remains validated by the cluster cross-check and the band, not by pump litres.
+  Coverage would be partial anyway (296 km driven vs the trips the app holds), so per section 5
+  the pump litres could only have validated the band even with full CSV access.
+
+## 6. Standing owner-side items carried## 6. Standing owner-side items carried
 
 Receipt litres of the engine-off fill (and of the 09-09 fill if its card is not auto-cut);
 confirmation of §4's two questions in any form, including one word each in chat; re-attach of the
