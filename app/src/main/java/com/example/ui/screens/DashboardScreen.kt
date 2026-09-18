@@ -451,7 +451,11 @@ fun VehicleStatusHeader(
                             fontFamily = FontFamily.Monospace,
                             color = CyberCyan
                         )
-                        if (connectionState == ConnectionState.CONNECTED && vehicleVin == null) {
+                        // A failed attempt must not hide the retry: "VIN Unavailable" with no
+                        // button left the owner with nothing to press (owner 2026-09-19).
+                        if (connectionState == ConnectionState.CONNECTED &&
+                            (vehicleVin == null || vehicleVin == "VIN Unavailable")
+                        ) {
                             Spacer(modifier = Modifier.width(8.dp))
                             TextButton(onClick = onFetchVinClick, contentPadding = PaddingValues(0.dp), modifier = Modifier.height(20.dp)) {
                                 Text("READ VIN", fontSize = 10.sp)

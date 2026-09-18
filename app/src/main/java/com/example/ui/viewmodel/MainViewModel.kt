@@ -234,6 +234,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _vinDecodeResult = MutableStateFlow<com.example.protocol.VinDecodeResult?>(null)
     val vinDecodeResult: StateFlow<com.example.protocol.VinDecodeResult?> = _vinDecodeResult.asStateFlow()
 
+    private var lastVinAttemptMs = 0L
+
+    init {
+        // The VIN resolves itself (owner 2026-09-19: "VIN is not resolved yet"). The auto-connect
+        // path never opens the scan screen - the only place that used to ask the ECU for 0902 - so
+        // a drive connected in the background could show "VIN Unavailable" forever with no button
+        // press coming. Ask once the link is up AND frame evidence says the bus is talking;
+        // throttled to one attempt per minute so a flapping verdict cannot spam mode-09 reads.
+        viewModelScope.launch {
+            kotlinx.coroutines.flow.combine(connectionState, com.example.di.AppContainer.protocolHealth) { c, h -> c to h }
+                .collect { (c, h) ->
+                    val vin = _vehicleVin.value
+                    val needsVin = vin.isNullOrBlank() || vin == "VIN Unavailable"
+                    val linkUp = c == ConnectionState.CONNECTED &&
+                        (h == com.example.model.ProtocolHealth.WORKING ||
+                            h == com.example.model.ProtocolHealth.PARTIAL)
+                    if (needsVin && linkUp && System.currentTimeMillis() - lastVinAttemptMs > 60_000L) {
+                        lastVinAttemptMs = System.currentTimeMillis()
+                        kotlinx.coroutines.delay(1200)
+                        fetchVehicleVin()
+                    }
+                }
+        }
+    }
+
     fun fetchVehicleVin() {
         val transport = activeTransport ?: return
         if (!transport.isConnected) return

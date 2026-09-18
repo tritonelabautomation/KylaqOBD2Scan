@@ -12,6 +12,7 @@ import com.example.engine.DrivingStateEngine
 import com.example.engine.EconomyEngine
 import com.example.engine.TransmissionEngine
 import com.example.model.CapabilityStatus
+import com.example.model.FRAME_EVIDENCE_THRESHOLD
 import com.example.model.Direction
 import com.example.model.DrivingState
 import com.example.model.LiveTelemetryValue
@@ -489,6 +490,16 @@ class ObdScheduler(
         }
 
         _canResponseCount.value += isoTpMessages.size
+
+        // Evidence over verdict (owner 2026-09-19): a connect-time probe can judge NO_RESPONSE
+        // while the ECU is still waking, and that verdict used to stick for the whole session -
+        // banner, grey CAN/ECU dots, "VIN Unavailable" - while thousands of frames flowed. Every
+        // 25th valid message, let the evidence upgrade the verdict.
+        if (_canResponseCount.value % FRAME_EVIDENCE_THRESHOLD.toLong() == 0L) {
+            val current = com.example.di.AppContainer.protocolHealth.value
+            val upgraded = com.example.model.healthAfterFrameEvidence(current, _canResponseCount.value)
+            if (upgraded != current) com.example.di.AppContainer.protocolHealth.value = upgraded
+        }
 
         // 4. Decode each reassembled response (prioritizing evidence-based preferred ECU)
         // FIX P0-2: Sort by evidence-based ECU selection, not hardcoded 7E8.
