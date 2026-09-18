@@ -36,6 +36,12 @@ interface TripDao {
 
 @Dao
 interface TelemetrySampleDao {
+    @Query(
+        "SELECT timestamp, pid, numericValue FROM telemetry_samples " +
+            "WHERE timestamp >= :ts AND pid IN (:pids) ORDER BY timestamp ASC"
+    )
+    suspend fun samplesSince(ts: Long, pids: List<String>): List<SampleRow>
+
     @Query("SELECT * FROM telemetry_samples WHERE tripId = :tripId ORDER BY sequence ASC")
     fun getSamplesForTripFlow(tripId: String): Flow<List<TelemetrySampleEntity>>
 
@@ -132,4 +138,22 @@ interface AiAnalysisDao {
 
     @Query("DELETE FROM ai_analyses")
     suspend fun deleteAllAnalyses()
+}
+
+/** Projection for since-refuel aggregation: only the columns the integrator reads. */
+data class SampleRow(val timestamp: Long, val pid: String, val numericValue: Double?)
+
+@Dao
+interface RefuelEventDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertRefuelEvent(e: RefuelEventEntity)
+
+    @Query("SELECT * FROM refuel_events ORDER BY tsEndMs DESC")
+    fun refuelEventsFlow(): Flow<List<RefuelEventEntity>>
+
+    @Query("SELECT * FROM refuel_events ORDER BY tsEndMs DESC")
+    suspend fun refuelEvents(): List<RefuelEventEntity>
+
+    @Query("UPDATE refuel_events SET calibratedPumpL = :pumpL WHERE idMs = :idMs")
+    suspend fun calibrate(idMs: Long, pumpL: Double)
 }

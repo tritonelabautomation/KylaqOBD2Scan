@@ -51,6 +51,13 @@ fun FuelCostsScreen(
     val entries = remember(refresh) { repo.entries() }
     val stats = remember(refresh) { repo.stats() }
     var showAdd by remember { mutableStateOf(false) }
+
+    // Since-refuel tracking (owner 2026-09-19): detected level-rise events and the app's own
+    // consumption since the newest one - the cluster's SINCE REFUEL tab, plus what the cluster
+    // cannot show: the pump-litre calibration of the app's estimate.
+    val refuelEvents by viewModel.refuelEventsFlow().collectAsState(initial = emptyList())
+    var sinceRefuel by remember { mutableStateOf<com.example.analysis.SinceRefuelStats.Stats?>(null) }
+    LaunchedEffect(refresh, refuelEvents) { sinceRefuel = viewModel.sinceRefuelStats() }
     var editTarget by remember { mutableStateOf<FuelLogCodec.FuelEntry?>(null) }
     val cur by viewModel.settingsRepository.currencySymbol.collectAsState()
 
@@ -81,6 +88,8 @@ fun FuelCostsScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = PaddingValues(vertical = 12.dp)
         ) {
+            item { RefuelTrackerCard(refuelEvents, sinceRefuel) }
+
             // ── REPLICATED from owner reference screen 3 (OBDeleven Fuel expense tracker) ──
             item {
                 Column(Modifier.fillMaxWidth().background(Color(0xFF1C1C1E), RoundedCornerShape(14.dp)).padding(14.dp)) {
@@ -370,6 +379,9 @@ fun FuelCostsScreen(
                         partial = partial
                     )
                 )
+                // The pump's own litres, matched to the detected event by odometer, calibrate the
+                // level-rise estimate and re-derive the tank capacity (brim-to-brim loop).
+                viewModel.calibrateAfterFuelEntry(liters, odo, partial)
                 viewModel.triggerCloudBackupIfEnabled()
                 if (grade != FuelLogCodec.GRADE_UNKNOWN) viewModel.tagFuelGrade(grade)
                 odo?.let { viewModel.maintenanceRepository.setCurrentOdometerKm(it) }
@@ -603,4 +615,76 @@ private fun RefuelDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
+}
+
+/**
+ * Since-refuel card (owner 2026-09-19): the event list and the app's consumption since the newest
+ * event. Estimated litres are labelled EST until a logged fill supplies pump litres for that
+ * event, after which the row shows both and the ratio - the brim-to-brim loop closing in the UI.
+ */
+@Composable
+private fun RefuelTrackerCard(
+    events: List<com.example.data.db.entities.RefuelEventEntity>,
+    since: com.example.analysis.SinceRefuelStats.Stats?
+) {
+    Column(
+        Modifier.fillMaxWidth().background(Color(0xFF1C1C1E), RoundedCornerShape(14.dp)).padding(14.dp)
+    ) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.LocalGasStation, null, tint = Color(0xFF8E8E93), modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("Since refuel", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        }
+        Spacer(Modifier.height(10.dp))
+        val latest = events.firstOrNull()
+        if (latest == null || since == null) {
+            Text(
+                "No refuel detected yet. The app watches the tank level PID (012F) for a rise of " +
+                    "4 % or more across a stop or a session gap - your auto-cut fills, engine off " +
+                    "at the pump, are exactly that event. Drive once after a fill and this card " +
+                    "starts tracking distance, litres and km/L since it.",
+                color = Color(0xFF8E8E93), fontSize = 12.sp
+            )
+            return
+        }
+        Row(Modifier.fillMaxWidth()) {
+            StatBlock("%.1f km".format(since.distanceKm), "Distance")
+            StatBlock("%.2f L".format(since.fuelLiters), "App fuel")
+            StatBlock(since.kmL?.let { "%.2f".format(it) } ?: "--", "km/L")
+            StatBlock("%d:%02d h".format(since.durationSec / 3600, (since.durationSec % 3600) / 60), "Time")
+        }
+        Spacer(Modifier.height(10.dp))
+        events.take(4).forEach { ev ->
+            val when_ = com.example.data.RecordTime.display(ev.tsEndMs)
+            val pump = ev.calibratedPumpL
+            Row(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+                Text(when_, color = Color(0xFF8E8E93), fontSize = 12.sp, modifier = Modifier.weight(1f))
+                Text(
+                    pump?.let { "+%.2f L pump".format(it) } ?: "+%.1f L est".format(ev.estLitres),
+                    color = if (pump != null) Color(0xFF34C759) else Color(0xFFFFAB91),
+                    fontSize = 12.sp, fontWeight = FontWeight.SemiBold
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    ev.odoKm?.let { "%.0f km".format(it) } ?: "-- km",
+                    color = Color(0xFF8E8E93), fontSize = 12.sp
+                )
+            }
+            if (pump != null && ev.estLitres > 0.05) {
+                Text(
+                    "app estimate was %.2f L - ratio %.3f (level rise %.1f pts)"
+                        .format(ev.estLitres, ev.estLitres / pump, ev.levelAfterPct - ev.levelBeforePct),
+                    color = Color(0xFF8E8E93), fontSize = 11.sp
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatBlock(value: String, label: String) {
+    Column(Modifier.weight(1f)) {
+        Text(value, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+        Text(label, color = Color(0xFF8E8E93), fontSize = 11.sp)
+    }
 }

@@ -91,6 +91,43 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /** Recorded when a request comes back with foreground granted but background refused. */
+    /** Detected refuel events, newest first (owner 2026-09-19 since-refuel tracking). */
+    fun refuelEventsFlow() = recordingManager.tripRepository.refuelEventsFlow()
+
+    /** Consumption since the newest detected refuel, from the app's own rows. Null if none yet. */
+    suspend fun sinceRefuelStats(): com.example.analysis.SinceRefuelStats.Stats? {
+        val repo = recordingManager.tripRepository
+        val ev = repo.refuelEvents().firstOrNull() ?: return null
+        val rows = repo.samplesSince(ev.tsEndMs, listOf("010D", "019D", "015E", "01A6"))
+        return com.example.analysis.SinceRefuelStats.summarize(
+            rows.map { com.example.analysis.SinceRefuelStats.Row(it.timestamp, it.pid, it.numericValue) }
+        )
+    }
+
+    /**
+     * Closes the brim-to-brim loop: a fuel-log entry whose odometer matches an uncalibrated refuel
+     * event supplies the pump's litres. The implied tank capacity (pump L over level rise) then
+     * re-derives the estimate constant, clamped to a sane tank so one bad receipt cannot poison it.
+     */
+    fun calibrateAfterFuelEntry(litres: Double, odoKm: Double?, partial: Boolean) {
+        if (partial || odoKm == null || litres <= 0.0) return
+        viewModelScope.launch {
+            val repo = recordingManager.tripRepository
+            val match = repo.refuelEvents().firstOrNull {
+                it.calibratedPumpL == null && it.odoKm != null &&
+                    kotlin.math.abs(it.odoKm - odoKm) <= 3.0
+            } ?: return@launch
+            repo.calibrateRefuelEvent(match.idMs, litres)
+            val rise = match.levelAfterPct - match.levelBeforePct
+            if (rise >= 4.0) {
+                val implied = litres / (rise / 100.0)
+                if (implied in 30.0..80.0) {
+                    com.example.di.AppContainer.settingsRepository.setTankCapacityL(implied)
+                }
+            }
+        }
+    }
+
     fun noteBackgroundLocationDeclined() {
         settingsRepository.setLastBgLocationDeclinedMs(System.currentTimeMillis())
         refreshLocationPermissionState()

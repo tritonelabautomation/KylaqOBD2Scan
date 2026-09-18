@@ -180,3 +180,27 @@ data class AiAnalysisEntity(
  */
 val TelemetrySampleEntity.instantMs: Long
     get() = com.example.data.RecordTime.instantOf(timestamp, timestampUtc) ?: timestamp
+
+/**
+ * A detected refuel event (owner 2026-09-19: event-driven since-refuel tracking off PID 012F).
+ * Written by [com.example.data.RecordingManager] when [com.example.analysis.RefuelEventDetector]
+ * emits, either from a stationary window inside a session or from the level jump across a session
+ * gap. `calibratedPumpL` arrives later, when a fuel-log entry whose odometer matches this event
+ * supplies the pump's own litres - at which point the implied tank capacity is re-derived and the
+ * next event's litre estimate improves. Estimate, never measurement, until that match happens.
+ */
+@Entity(tableName = "refuel_events")
+data class RefuelEventEntity(
+    @PrimaryKey
+    val idMs: Long,
+    val tsStartMs: Long,
+    val tsEndMs: Long,
+    val levelBeforePct: Double,
+    val levelAfterPct: Double,
+    val odoKm: Double?,
+    val estLitres: Double,
+    /** 0/1: the level rise happened across a session gap (engine off at the pump), not on screen. */
+    val betweenSessions: Int,
+    val calibratedPumpL: Double? = null,
+    val capacityL: Double
+)

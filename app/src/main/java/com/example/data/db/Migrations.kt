@@ -259,3 +259,24 @@ val MIGRATION_11_12 = object : Migration(11, 12) {
         db.execSQL("ALTER TABLE `telemetry_samples` ADD COLUMN `altitudeM` REAL DEFAULT NULL")
     }
 }
+
+val MIGRATION_12_13 = object : Migration(12, 13) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        // Event-driven since-refuel tracking (owner 2026-09-19): detected refuel events, with the
+        // pump-litre calibration column left NULL until a matching fuel-log entry supplies it.
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `refuel_events` (" +
+                "`idMs` INTEGER NOT NULL, " +
+                "`tsStartMs` INTEGER NOT NULL, " +
+                "`tsEndMs` INTEGER NOT NULL, " +
+                "`levelBeforePct` REAL NOT NULL, " +
+                "`levelAfterPct` REAL NOT NULL, " +
+                "`odoKm` REAL, " +
+                "`estLitres` REAL NOT NULL, " +
+                "`betweenSessions` INTEGER NOT NULL, " +
+                "`calibratedPumpL` REAL, " +
+                "`capacityL` REAL NOT NULL, " +
+                "PRIMARY KEY(`idMs`))"
+        )
+    }
+}

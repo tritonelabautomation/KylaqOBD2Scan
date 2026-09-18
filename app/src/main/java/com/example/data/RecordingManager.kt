@@ -559,9 +559,77 @@ class RecordingManager(
             )
         }.onFailure { android.util.Log.e("RecordingManager", "sample insert failed for $sessionId", it) }
 
+        // Event-driven refuel detection (owner 2026-09-19): the tank level PID's rise across a
+        // stationary window - or across the session gap, engine off at the pump - is the event.
+        // Runs at finalize so recovered sessions detect their refuels through the same rows.
+        runCatching { detectRefuelEvents(txList) }
+            .onFailure { android.util.Log.e("RecordingManager", "refuel detection failed", it) }
+
         // Auto-run local AI Doctor analysis
         runCatching { tripRepository.runAiCarDoctorAnalysis(sessionId) }
             .onFailure { android.util.Log.e("RecordingManager", "AI doctor failed for $sessionId", it) }
+    }
+
+    /**
+     * Feeds a finalized session's decoded rows through [com.example.analysis.RefuelEventDetector]
+     * and persists what it emits. The previous session's last level stamp supplies the gap event:
+     * the owner's 09-17 fill rose 37.6 -> 93.7 % entirely between sessions, because auto-record
+     * stops with the engine and the pump cut off at 12:05:06 with the key off.
+     */
+    private suspend fun detectRefuelEvents(txList: List<TransactionRecord>) {
+        val settings = com.example.di.AppContainer.settingsRepository
+        val capacity = settings.tankCapacityL()
+        val detector = com.example.analysis.RefuelEventDetector()
+        val events = mutableListOf<com.example.analysis.RefuelEventDetector.Detected>()
+        var firstLevel: Pair<Long, Double>? = null
+        var firstOdo: Double? = null
+        var lastLevel: Triple<Long, Double, Double?>? = null
+        var lastOdo: Double? = null
+        var lastTs: Long? = null
+        for (tx in txList) {
+            val ts = com.example.data.RecordTime.instantOf(tx.timestampMonotonic, tx.timestampUtc)
+                ?: tx.timestampMonotonic
+            lastTs = ts
+            val v = tx.decodedValue
+            when (tx.pid) {
+                "012F" -> if (v != null) {
+                    if (firstLevel == null) firstLevel = ts to v
+                    lastLevel = Triple(ts, v, lastOdo)
+                }
+                "01A6" -> if (v != null) {
+                    if (firstOdo == null) firstOdo = v
+                    lastOdo = v
+                }
+            }
+            detector.onSample(com.example.analysis.RefuelEventDetector.Sample(ts, tx.pid, v))
+                ?.let { events += it }
+        }
+        lastTs?.let { end -> detector.onSessionEnd(end)?.let { events += it } }
+        settings.lastLevelStamp()?.let { stamp ->
+            firstLevel?.let { fl ->
+                com.example.analysis.RefuelEventDetector.crossSession(
+                    stamp.first, stamp.second, stamp.third, fl.first, fl.second, firstOdo
+                )?.let { events += it }
+            }
+        }
+        lastLevel?.let { settings.setLastLevelStamp(it.first, it.second, it.third) }
+        for (ev in events) {
+            tripRepository.insertRefuelEvent(
+                com.example.data.db.entities.RefuelEventEntity(
+                    idMs = ev.windowEndMs,
+                    tsStartMs = ev.windowStartMs,
+                    tsEndMs = ev.windowEndMs,
+                    levelBeforePct = ev.levelBeforePct,
+                    levelAfterPct = ev.levelAfterPct,
+                    odoKm = ev.odoKm,
+                    // An ESTIMATE until a pump-litre calibration replaces it; labelled as such
+                    // in the UI, never presented as a measurement (no-fake-values rule).
+                    estLitres = ev.risePct / 100.0 * capacity,
+                    betweenSessions = if (ev.betweenSessions) 1 else 0,
+                    capacityL = capacity
+                )
+            )
+        }
     }
 
     // ── AUTOMATIC recovery of killed sessions (owner 2026-09-17) ───────────────────────

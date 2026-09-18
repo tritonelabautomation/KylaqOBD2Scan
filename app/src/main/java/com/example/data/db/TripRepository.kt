@@ -114,6 +114,25 @@ class TripRepository(context: Context) {
         tripDao.updateTrip(trip)
     }
 
+    private val refuelDao = db.refuelEventDao()
+
+    suspend fun insertRefuelEvent(e: RefuelEventEntity) = withContext(Dispatchers.IO) {
+        refuelDao.insertRefuelEvent(e)
+    }
+
+    fun refuelEventsFlow(): Flow<List<RefuelEventEntity>> = refuelDao.refuelEventsFlow()
+
+    suspend fun refuelEvents(): List<RefuelEventEntity> = withContext(Dispatchers.IO) {
+        refuelDao.refuelEvents()
+    }
+
+    suspend fun calibrateRefuelEvent(idMs: Long, pumpL: Double) = withContext(Dispatchers.IO) {
+        refuelDao.calibrate(idMs, pumpL)
+    }
+
+    suspend fun samplesSince(ts: Long, pids: List<String>): List<SampleRow> =
+        withContext(Dispatchers.IO) { sampleDao.samplesSince(ts, pids) }
+
     suspend fun insertSamples(samples: List<TelemetrySampleEntity>) = withContext(Dispatchers.IO) {
         if (samples.isNotEmpty()) {
             sampleDao.insertSamples(samples)

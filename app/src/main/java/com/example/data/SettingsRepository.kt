@@ -474,6 +474,33 @@ class SettingsRepository(private val context: Context) {
         prefs.edit().putLong("bg_location_last_declined", ms).apply()
 
     /**
+     * Usable tank capacity in litres, for turning a 012F percentage rise into estimated litres at a
+     * detected refuel. Boots at the Kylaq spec (50 L) and is re-derived from every pump-litre
+     * calibration - the owner's 09-17 fill already implies 50.35 L from a 61.8 pt rise, so the
+     * default is the spec and the calibration is the measurement.
+     */
+    fun tankCapacityL(): Double = prefs.getFloat("tank_capacity_l", 50.0f).toDouble()
+
+    fun setTankCapacityL(litres: Double) =
+        prefs.edit().putFloat("tank_capacity_l", litres.toFloat()).apply()
+
+    /**
+     * Last tank-level stamp of the previous session: "ts|levelPct|odoKmOrNull". The other half of a
+     * between-sessions refuel event - the level rise itself happens while auto-record is off
+     * (engine off at the pump), so only the two stamps either side of the gap can witness it.
+     */
+    fun lastLevelStamp(): Triple<Long, Double, Double?>? =
+        prefs.getString("last_level_stamp", null)?.split("|")?.takeIf { it.size == 3 }?.let {
+            val ts = it[0].toLongOrNull() ?: return@let null
+            val lvl = it[1].toDoubleOrNull() ?: return@let null
+            val odo = it[2].toDoubleOrNull()
+            Triple(ts, lvl, odo)
+        }
+
+    fun setLastLevelStamp(tsMs: Long, levelPct: Double, odoKm: Double?) =
+        prefs.edit().putString("last_level_stamp", "$tsMs|$levelPct|${odoKm ?: ""}").apply()
+
+    /**
      * Throttle stamp for the automatic in-app update check (2026-09-16). A manual
      * "Check for updates" tap is never throttled - only the silent launch check is.
      */

@@ -158,6 +158,46 @@ signal. Coherence, not proof, at segment scale.
   Coverage would be partial anyway (296 km driven vs the trips the app holds), so per section 5
   the pump litres could only have validated the band even with full CSV access.
 
+## 9. The loop closes: receipt, standing rule, cluster cross-check, and the since-refuel feature
+
+Owner follow-up (2026-09-19): the JIO BP receipt for the 09-17 fill is 31.12 L at 12:05:06 -
+inside the gap exactly as section 8.3 reconstructed it (session A ends 12:02:36 at ~3501.0 km,
+session B opens 12:44:46 at 3525.8 km). And a standing rule that removes the last open question
+of section 4: "I never ever do a partial fill, always auto cut." Every fill in section 1 is
+therefore brim, every interval a closed balance, and the 09-09 question is moot.
+
+### 9.1 Cluster cross-check number two (photos of 2026-08-24 18:02, at the IOCL pump)
+
+* SINCE REFUEL: 9.6 km/l over 364 km, 17:54 h, 20 km/h avg. Brim truth for that interval:
+  366 km / 36.89 L = 9.92 km/l. The cluster reads 3.2 % BELOW pump truth.
+* LONG-TERM: 10.2 km/l over 632 km, 22 km/h avg - a mix of the 10.99 and 9.92 intervals plus
+  266 km before them; consistent, not independently checkable.
+* SINCE START: 10.4 km/l over 13 km - the 44-minute drive into the pump.
+* The 2026-09-18 field validation showed the app matching the cluster exactly (8.1 km/l both).
+  If the cluster itself sits ~3 % below pump truth, the app inherits that bias on that trip:
+  true economy there was likely ~8.35 km/l. One closed interval cannot prove a constant bias -
+  it can only flag the direction - so this stays a hypothesis with its single data point, and the
+  since-refuel tracker below is what turns it into a measured ratio at every future fill.
+
+### 9.2 Feature shipped: event-driven since-refuel tracking off PID 012F
+
+Owner mandate, verbatim: "create an event driven mechanism to track since refueling ... you will
+see change in tank fuel level PID 012F %". Shipped as `RefuelEventDetector` (pure, tested),
+`refuel_events` table (migration 12->13), detection at session finalize (so recovered sessions
+detect their refuels through the same rows), and a Since-refuel card on the fuel screen.
+
+Detection rules, and why they are the rules: a rise of >= 4 pts (~2 L in 50 L) is accepted only
+ACROSS A STOP or ACROSS A SESSION GAP. Moving level rows only update the stamp - measured slosh on
+this car is +/-1-2 pts, so driving wiggle cannot emit an event; and the owner's own fill rose
+37.6 -> 93.7 % entirely between sessions because auto-record stops with the engine and the receipt
+printed at 12:05:06 with the key off, which is exactly the gap mode. Estimated litres are
+rise% x tank capacity and are labelled EST in the UI until a logged fill whose odometer matches the
+event supplies pump litres; that match also re-derives the capacity (31.12 L over the corrected
+61.8 pt rise implies 50.3 L against the 50 L spec) and clamps it to 30-80 L so one bad receipt
+cannot poison the constant. Since-refuel distance uses the monotonic odometer max because raw 01A6
+frames regress on CAN transients (8.5); fuel integrates 019D/015E with the same 0.745 kg/L constant
+as TripFuelSummary so the two can never disagree about a litre.
+
 ## 6. Standing owner-side items carried
 
 Receipt litres of the engine-off fill (and of the 09-09 fill if its card is not auto-cut);
