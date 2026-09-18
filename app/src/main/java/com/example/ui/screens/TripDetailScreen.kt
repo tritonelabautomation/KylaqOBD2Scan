@@ -77,6 +77,13 @@ fun TripDetailScreen(
     // first picked owns the left axis, second the right axis, 3rd/4th are scaled to fit.
     var selectedTrendPids by remember { mutableStateOf(listOf("010C")) }
 
+    // Owner field report 2026-09-18 ("Altitude"): WHY a blank altitude column, from the permission
+    // policy rather than from a guess. Collected here and passed down - the sub-views below do not
+    // hold the ViewModel, and a `val` declared in one @Composable is invisible in another.
+    val bgLocationState by viewModel.backgroundLocationState.collectAsState()
+    val altitudeBlankReason =
+        com.example.service.BackgroundLocationPolicy.altitudeBlankReason(bgLocationState)
+
     // "Log fuel" for this trip: fuel rate integrated over the stored samples.
     val fuelSummary = remember(samples) {
         com.example.analysis.TripFuelSummary.summarize(
@@ -214,7 +221,8 @@ fun TripDetailScreen(
                             summary = fuelSummary,
                             pricePerL = viewModel.fuelLogRepository.entries().maxByOrNull { it.idMs }?.pricePerL ?: 0.0,
                             speedPoints = samples.filter { it.pid.takeLast(2) == "0D" }
-                                .map { it.instantMs to (it.numericValue ?: 0.0) }
+                                .map { it.instantMs to (it.numericValue ?: 0.0) },
+                            altitudeBlankReason = altitudeBlankReason
                         )
                     }
                 }
@@ -222,6 +230,17 @@ fun TripDetailScreen(
                     TripTrendsView(
                         samples = samples,
                         selectedPids = selectedTrendPids,
+                        // Only the Altitude channel gets the permission explanation: naming it while
+                        // the owner is looking at torque or coolant would be a lie about that series.
+                        altitudeEmptyHint =
+                            if (selectedTrendPids.contains(
+                                    com.example.analysis.TripTrendAnalyzer.PID_ALTITUDE_GPS
+                                ) && samples.none { it.altitudeM != null }
+                            ) {
+                                altitudeBlankReason
+                            } else {
+                                null
+                            },
                         onTogglePid = { pid ->
                             selectedTrendPids = when {
                                 pid in selectedTrendPids ->
@@ -285,7 +304,9 @@ private fun TripOverviewView(
     analysis: AiAnalysisEntity?,
     summary: com.example.analysis.TripFuelSummary.Summary,
     pricePerL: Double,
-    speedPoints: List<Pair<Long, Double>>
+    speedPoints: List<Pair<Long, Double>>,
+    /** Why the altitude column is blank, when it is. Computed by the caller from the location grants. */
+    altitudeBlankReason: String? = null
 ) {
     if (trip == null) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -306,23 +327,16 @@ private fun TripOverviewView(
         }
         item {
             // Replicated OBDeleven trip-detail cards (owner reference screen 2, 2026-09-13)
-            // Owner field report 2026-09-18 ("Altitude"): when the column is blank, say WHY, from
-            // the permission policy rather than from a guess. A 1 h 33 min pocketed-phone drive on
+            // Owner field report 2026-09-18 ("Altitude"): a 1 h 33 min pocketed-phone drive on
             // Android 10+ has no GPS fixes at all without 'Allow all the time', and the old footnote
-            // could not name that cause.
-            val bgLoc by viewModel.backgroundLocationState.collectAsState()
+            // could not name that cause. The reason arrives from the caller, which owns the grants.
             TrackerSummaryCards(
                 summary = summary,
                 pricePerL = pricePerL,
                 speedPoints = speedPoints,
                 maxAltitudeM = trip.maxAltitudeM,
                 minAltitudeM = trip.minAltitudeM,
-                altitudeBlankReason =
-                    if (trip.maxAltitudeM == null) {
-                        com.example.service.BackgroundLocationPolicy.altitudeBlankReason(bgLoc)
-                    } else {
-                        null
-                    }
+                altitudeBlankReason = if (trip.maxAltitudeM == null) altitudeBlankReason else null
             )
         }
         item {
@@ -480,7 +494,9 @@ private data class TrendChannel(
 private fun TripTrendsView(
     samples: List<TelemetrySampleEntity>,
     selectedPids: List<String>,
-    onTogglePid: (String) -> Unit
+    onTogglePid: (String) -> Unit,
+    /** Shown under the empty chart only when the Altitude channel is the one with nothing to draw. */
+    altitudeEmptyHint: String? = null
 ) {
     // Pipeline task 1 (owner 2026-09-16: "let me add multiple signals the same trend see
     // the behaviour w.r.t other signal"): chips now TOGGLE (up to 4 at once) and every
@@ -617,16 +633,7 @@ private fun TripTrendsView(
             border = androidx.compose.foundation.BorderStroke(1.dp, CyberCyan.copy(alpha = 0.2f))
         ) {
             TrendChart(
-                emptyHint =
-                    if (selectedTrendPids.contains(com.example.analysis.TripTrendAnalyzer.PID_ALTITUDE_GPS) &&
-                        samples.none { it.altitudeM != null }
-                    ) {
-                        com.example.service.BackgroundLocationPolicy.altitudeBlankReason(
-                            viewModel.backgroundLocationState.value
-                        )
-                    } else {
-                        null
-                    },
+                emptyHint = altitudeEmptyHint,
                 lines = lines,
                 modifier = Modifier.fillMaxSize().padding(10.dp)
             )

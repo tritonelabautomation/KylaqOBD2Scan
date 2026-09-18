@@ -106,7 +106,11 @@ fun TrackerSummaryCards(
                     "* no GPS altitude was persisted for this trip - honest blank, never invented. " +
                         (altitudeBlankReason
                             ?: "recorded before 2026-09-15, or no accuracy-gated GPS fix") +
-                        (if (altitudeBlankReason == null) "" else ". Settings > Never lose a drive > Location in background") + """ 
+                        if (altitudeBlankReason == null) {
+                            ""
+                        } else {
+                            " Settings > Never lose a drive > Location in background says what to change."
+                        }
                 },
                 color = TkDim,
                 fontSize = 11.sp
