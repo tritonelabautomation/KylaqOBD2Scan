@@ -551,7 +551,55 @@ This was flagged as an honest limit in §4b ("GPS may not update in the backgrou
 owner's decision"). The owner's one-word report is the decision; this section is the reversal of that
 limit, recorded rather than left to contradict §4b.
 
-## 5. Tests added / changed## 5. Tests added / changed
+## 4i. Defect 9, corrected: the control trip and the real lever
+
+After §4h shipped, the owner sent two screenshots of a trip from 2026-09-17 11:26 (session ce0be7ee,
+35 min 57 s) with a FULL altitude trace - 24,267 altitude stamps, MIN 387.4 m, AVG 409.8 m,
+MAX 440.4 m, continuous from 11:26:39 to 12:02:36 - recorded by a build that had neither the
+background permission nor any fix from §4h. §4h as written could not explain that trip: if the
+missing background permission alone withheld every off-screen fix, no pre-fix trip should carry
+altitude at all. One of the two drives had a different app state, and the code showed which.
+
+The lever §4h missed is the foreground service type. `ObdKeepAliveService` - the service that owns
+auto-record and calls `gpsManager.startTracking()` - declared
+`foregroundServiceType="connectedDevice"` only. Android counts location access made while a
+LOCATION-type foreground service runs as WHILE-IN-USE access; a service without that type is
+"background" for location purposes, and Android 10+ hands it zero fixes once no activity is visible.
+So the discriminator between the two trips is app state during the drive, exactly as the OS rule
+predicts:
+
+  * 35-min drive: app in use (screen on / mounted), while-in-use applied, fixes flowed at ~1 Hz and
+    each fix's altitude was stamped onto every ~11 Hz OBD sample - hence 24,267 altitude points.
+  * 93-min pocketed drive: no visible activity, service not a location type, no background permission
+    - zero fixes reached the recorder, so the journal had nothing to replay and recovery was never
+    at fault.
+
+The fix makes the location type the PRIMARY lever and demotes the background permission to belt:
+
+  * manifest: `foregroundServiceType="connectedDevice|location"`, plus
+    `FOREGROUND_SERVICE_LOCATION` (install-time; Android 14+ throws at startForeground without it);
+  * `startForeground` now passes `CONNECTED_DEVICE or LOCATION`;
+  * the service is only ever started from `MainActivity` while an activity is visible, and restarts
+    itself from within, so the while-in-use extension always applies - the owner's EXISTING "Allow
+    only while using the app" grant is now sufficient for pocketed recording, with no new prompt;
+  * `ACCESS_BACKGROUND_LOCATION` (added in §4h) stays for the one case the location type cannot
+    cover - a service that must (re)start with no activity visible - and the Settings row, its
+    button and the 7-day decline cooldown stay, repositioned in wording as optional belt.
+
+Wording was corrected with it. `BackgroundLocationPolicy.altitudeBlankReason` is now era-aware via
+`FIX_LIVE_SINCE_MS` (parsed by the app's own IST parser, not a hand-computed epoch): a trip that
+started before the fix gets "recorded by an older build whose recording service was not a
+location-type foreground service ... a fix that never arrived leaves no trace to recover", whatever
+the owner grants today; a current-build blank falls back to the accuracy gate or a missing grant.
+The old §4h sentence "Android withholds GPS from a background service without 'Allow all the time'"
+was true of the old service configuration and is no longer told to the owner as a prerequisite,
+because it is not one any more.
+
+Guarded by `ManifestLocationGuardTest`, which reads the manifest and the service as text: a
+manifest attribute is invisible to every behavioural test in the suite, and this attribute IS the
+defect.
+
+## 5. Tests added / changed
 
 | File | What it pins |
 |------|--------------|
@@ -564,7 +612,7 @@ limit, recorded rather than left to contradict §4b.
 | `AutoRecordPolicyTest` (new, 13 tests) | The auto-record rule as a pure function, so the two supervisors cannot drift: engine on with nothing recording starts a drive; engine on while recording changes nothing; never starts against a dead link (an empty trip looks like a drive that got 0 km); setting off means the supervisor touches nothing; **a fresh `rpm = 0` is a traffic light, not the end of the drive**, and gets the five-minute Idle Start-Stop grace; a stall longer than that still saves the trip; a MISSING reading is an ignition-off and gets one minute; the engine-off clock is armed once and not rearmed every tick; a restarted engine clears it; the 200.0 threshold is strict, so a cranking motor cannot open a trip; and `aWholeCityDriveWithSixJunctionsStaysOneTrip` runs a whole drive through the rule tick by tick and asserts one start and one stop |
 | `BatteryOptimizationPolicyTest` (rewritten, 5 tests) | The new contract, and *why* the old one was wrong: prompts when restricted; prompts with no session live so the next drive is protected; never nags once granted; stays quiet inside the 24 h interval; asks again after it while still restricted |
 
-Committed total: 85 suites, 740 tests (baseline before this task was 82 suites / 699 tests).
+Committed total: 86 suites, 745 tests (baseline before this task was 82 suites / 699 tests).
 
 Two existing assertions were deliberately changed rather than worked around, both in
 `BatteryOptimizationPolicyTest`: `neverNagsAfterTheFirstPrompt` and `silentWhenNoSessionIsLive`
