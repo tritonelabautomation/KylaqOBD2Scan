@@ -237,6 +237,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var lastVinAttemptMs = 0L
 
     init {
+        // Replay trips finalized before the refuel detector shipped, once, on first launch
+        // (owner 2026-09-19: "does the current logic detect the fuel refill automatically?").
+        viewModelScope.launch { recordingManager.backfillRefuelEvents() }
+    }
+
+    init {
         // The VIN resolves itself (owner 2026-09-19: "VIN is not resolved yet"). The auto-connect
         // path never opens the scan screen - the only place that used to ask the ECU for 0902 - so
         // a drive connected in the background could show "VIN Unavailable" forever with no button

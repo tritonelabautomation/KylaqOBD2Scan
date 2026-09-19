@@ -134,6 +134,13 @@ class TripRepository(context: Context) {
     suspend fun samplesSince(ts: Long, pids: List<String>): List<SampleRow> =
         withContext(Dispatchers.IO) { sampleDao.samplesSince(ts, pids) }
 
+    suspend fun samplesForTripPids(tripId: String, pids: List<String>): List<SampleRow> =
+        withContext(Dispatchers.IO) { sampleDao.samplesForTripPids(tripId, pids) }
+
+    suspend fun allTripsChronological(): List<TripEntity> = withContext(Dispatchers.IO) {
+        tripDao.getAllTrips().reversed()
+    }
+
     suspend fun insertSamples(samples: List<TelemetrySampleEntity>) = withContext(Dispatchers.IO) {
         if (samples.isNotEmpty()) {
             sampleDao.insertSamples(samples)

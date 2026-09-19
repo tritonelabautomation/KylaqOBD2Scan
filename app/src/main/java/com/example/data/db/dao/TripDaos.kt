@@ -42,6 +42,12 @@ interface TelemetrySampleDao {
     )
     suspend fun samplesSince(ts: Long, pids: List<String>): List<SampleRow>
 
+    @Query(
+        "SELECT timestamp, pid, numericValue FROM telemetry_samples " +
+            "WHERE tripId = :tripId AND pid IN (:pids) ORDER BY timestamp ASC"
+    )
+    suspend fun samplesForTripPids(tripId: String, pids: List<String>): List<SampleRow>
+
     @Query("SELECT * FROM telemetry_samples WHERE tripId = :tripId ORDER BY sequence ASC")
     fun getSamplesForTripFlow(tripId: String): Flow<List<TelemetrySampleEntity>>
 

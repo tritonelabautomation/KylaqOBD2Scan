@@ -578,41 +578,59 @@ class RecordingManager(
      */
     private suspend fun detectRefuelEvents(txList: List<TransactionRecord>) {
         val settings = com.example.di.AppContainer.settingsRepository
-        val capacity = settings.tankCapacityL()
-        val detector = com.example.analysis.RefuelEventDetector()
-        val events = mutableListOf<com.example.analysis.RefuelEventDetector.Detected>()
-        var firstLevel: Pair<Long, Double>? = null
-        var firstOdo: Double? = null
-        var lastLevel: Triple<Long, Double, Double?>? = null
-        var lastOdo: Double? = null
-        var lastTs: Long? = null
-        for (tx in txList) {
-            val ts = com.example.data.RecordTime.instantOf(tx.timestampMonotonic, tx.timestampUtc)
-                ?: tx.timestampMonotonic
-            lastTs = ts
-            val v = tx.decodedValue
-            when (tx.pid) {
-                "012F" -> if (v != null) {
-                    if (firstLevel == null) firstLevel = ts to v
-                    lastLevel = Triple(ts, v, lastOdo)
-                }
-                "01A6" -> if (v != null) {
-                    if (firstOdo == null) firstOdo = v
-                    lastOdo = v
-                }
-            }
-            detector.onSample(com.example.analysis.RefuelEventDetector.Sample(ts, tx.pid, v))
-                ?.let { events += it }
+        val rows = txList.map { tx ->
+            com.example.analysis.SinceRefuelStats.Row(
+                com.example.data.RecordTime.instantOf(tx.timestampMonotonic, tx.timestampUtc)
+                    ?: tx.timestampMonotonic,
+                tx.pid,
+                tx.decodedValue
+            )
         }
-        lastTs?.let { end -> detector.onSessionEnd(end)?.let { events += it } }
+        persistRefuelEvents(com.example.analysis.RefuelSessionScan.scan(rows), settings)
+    }
+
+    /**
+     * One-time backfill (owner 2026-09-19: "does the current logic detect the fuel refill
+     * automatically?"): sessions finalized BEFORE the detector shipped were never scanned, so the
+     * first launch on a build that has it replays every saved trip chronologically through the
+     * same scanner - which is also how the 2026-09-17 fill (37.6 % at the end of one trip, 93.7 %
+     * at the start of the next) becomes a visible event without re-driving anything. Idempotent:
+     * event ids REPLACE, and the pref guard runs the pass exactly once.
+     */
+    suspend fun backfillRefuelEvents() = withContext(Dispatchers.IO) {
+        val settings = com.example.di.AppContainer.settingsRepository
+        if (settings.refuelBackfillDone()) return@withContext
+        runCatching {
+            for (trip in tripRepository.allTripsChronological()) {
+                val rows = tripRepository.samplesForTripPids(
+                    trip.id,
+                    listOf(
+                        com.example.analysis.RefuelEventDetector.PID_LEVEL,
+                        com.example.analysis.RefuelEventDetector.PID_SPEED,
+                        com.example.analysis.RefuelEventDetector.PID_ODO
+                    )
+                )
+                if (rows.isEmpty()) continue
+                persistRefuelEvents(com.example.analysis.RefuelSessionScan.scan(rows), settings)
+            }
+            settings.setRefuelBackfillDone()
+        }.onFailure { android.util.Log.e("RecordingManager", "refuel backfill failed", it) }
+    }
+
+    private suspend fun persistRefuelEvents(
+        scan: com.example.analysis.RefuelSessionScan.Result,
+        settings: com.example.data.SettingsRepository
+    ) {
+        val capacity = settings.tankCapacityL()
+        val events = scan.events.toMutableList()
         settings.lastLevelStamp()?.let { stamp ->
-            firstLevel?.let { fl ->
+            scan.firstLevel?.let { fl ->
                 com.example.analysis.RefuelEventDetector.crossSession(
-                    stamp.first, stamp.second, stamp.third, fl.first, fl.second, firstOdo
+                    stamp.first, stamp.second, stamp.third, fl.first, fl.second, scan.firstOdo
                 )?.let { events += it }
             }
         }
-        lastLevel?.let { settings.setLastLevelStamp(it.first, it.second, it.third) }
+        scan.lastLevel?.let { settings.setLastLevelStamp(it.first, it.second, it.third) }
         for (ev in events) {
             tripRepository.insertRefuelEvent(
                 com.example.data.db.entities.RefuelEventEntity(

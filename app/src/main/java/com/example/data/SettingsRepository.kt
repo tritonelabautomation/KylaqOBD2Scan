@@ -500,6 +500,11 @@ class SettingsRepository(private val context: Context) {
     fun setLastLevelStamp(tsMs: Long, levelPct: Double, odoKm: Double?) =
         prefs.edit().putString("last_level_stamp", "$tsMs|$levelPct|${odoKm ?: ""}").apply()
 
+    /** Guard for the one-time refuel backfill pass over trips finalized before the detector. */
+    fun refuelBackfillDone(): Boolean = prefs.getBoolean("refuel_backfill_done", false)
+
+    fun setRefuelBackfillDone() = prefs.edit().putBoolean("refuel_backfill_done", true).apply()
+
     /**
      * Throttle stamp for the automatic in-app update check (2026-09-16). A manual
      * "Check for updates" tap is never throttled - only the silent launch check is.

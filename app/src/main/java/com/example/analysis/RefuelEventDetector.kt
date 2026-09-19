@@ -137,6 +137,48 @@ class RefuelEventDetector(private val minRisePct: Double = DEFAULT_MIN_RISE_PCT)
  * cannot unwind), fuel from the rate PID integrated over its own timeline, exactly as
  * [TripFuelSummary] does it so the two never disagree about a litre.
  */
+/**
+ * One session's rows through the detector, plus the stamps the cross-session jump needs from it
+ * (first and last level row, first odometer). Shared by live finalize and by the one-time backfill
+ * so both paths can never disagree about what a refuel looks like.
+ */
+object RefuelSessionScan {
+
+    data class Result(
+        val events: List<RefuelEventDetector.Detected>,
+        val firstLevel: Pair<Long, Double>?,
+        val lastLevel: Triple<Long, Double, Double?>?,
+        val firstOdo: Double?
+    )
+
+    fun scan(rows: List<SinceRefuelStats.Row>): Result {
+        val detector = RefuelEventDetector()
+        val events = mutableListOf<RefuelEventDetector.Detected>()
+        var firstLevel: Pair<Long, Double>? = null
+        var lastLevel: Triple<Long, Double, Double?>? = null
+        var lastOdo: Double? = null
+        var firstOdo: Double? = null
+        var lastTs: Long? = null
+        for (r in rows.sortedBy { it.tsMs }) {
+            lastTs = r.tsMs
+            val v = r.value
+            when (r.pid) {
+                RefuelEventDetector.PID_LEVEL -> if (v != null) {
+                    if (firstLevel == null) firstLevel = r.tsMs to v
+                    lastLevel = Triple(r.tsMs, v, lastOdo)
+                }
+                RefuelEventDetector.PID_ODO -> if (v != null) {
+                    if (firstOdo == null) firstOdo = v
+                    lastOdo = v
+                }
+            }
+            detector.onSample(RefuelEventDetector.Sample(r.tsMs, r.pid, v))?.let { events += it }
+        }
+        lastTs?.let { end -> detector.onSessionEnd(end)?.let { events += it } }
+        return Result(events, firstLevel, lastLevel, firstOdo)
+    }
+}
+
 object SinceRefuelStats {
 
     data class Row(val tsMs: Long, val pid: String, val value: Double?)

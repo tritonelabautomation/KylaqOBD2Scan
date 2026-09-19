@@ -187,3 +187,49 @@ class SinceRefuelStatsTest {
         assertNull(stats.kmL)
     }
 }
+
+/**
+ * The shared session scanner: live finalize and the one-time backfill both run through it, so a
+ * refuel looks identical whether it is detected on a fresh stop or replayed from a trip saved
+ * before the detector existed.
+ */
+class RefuelSessionScanTest {
+
+    private fun row(ts: Long, pid: String, v: Double?) = SinceRefuelStats.Row(ts, pid, v)
+
+    @Test
+    fun scansEventsAndStampsRegardlessOfRowOrder() {
+        val res = RefuelSessionScan.scan(
+            listOf(
+                row(120, "012F", 88.0),
+                row(0, "012F", 40.0),
+                row(500, "010D", 12.0),
+                row(10, "010D", 45.0),
+                row(100, "010D", 0.0),
+                row(5, "01A6", 3501.0),
+                row(400, "01A6", 3502.2)
+            )
+        )
+        assertEquals(1, res.events.size)
+        assertEquals(40.0, res.events[0].levelBeforePct, 1e-9)
+        assertEquals(88.0, res.events[0].levelAfterPct, 1e-9)
+        assertEquals(0L to 40.0, res.firstLevel)
+        assertEquals(Triple(120L, 88.0, 3501.0), res.lastLevel)
+        assertEquals(3501.0, res.firstOdo!!, 1e-9)
+    }
+
+    @Test
+    fun aDriveWithNoStopYieldsStampsButNoEvent() {
+        val res = RefuelSessionScan.scan(
+            listOf(
+                row(0, "012F", 90.0),
+                row(10, "010D", 60.0),
+                row(20, "012F", 87.5),
+                row(30, "010D", 55.0)
+            )
+        )
+        assertTrue(res.events.isEmpty())
+        assertEquals(0L to 90.0, res.firstLevel)
+        assertEquals(Triple(20L, 87.5, null), res.lastLevel)
+    }
+}
