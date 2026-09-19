@@ -2,6 +2,7 @@ package com.example
 
 import com.example.backup.CloudBackupManager
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -30,5 +31,16 @@ class GoogleSignInFlowTest {
             "Switch Google account",
             CloudBackupManager.continueButtonLabel("jay.tritone@gmail.com")
         )
+    }
+
+    @Test
+    fun theZeroSetupChooserPathIsWiredInTheManifest() {
+        // Owner 2026-09-20, after hitting the OAuth-client wall: "Connection with Google doesn't
+        // work." The fallback path lists the phone's Google accounts through the SYSTEM chooser,
+        // which needs GET_ACCOUNTS in the manifest and the google account type - pin both so the
+        // path cannot be deleted silently.
+        val manifest = java.io.File("src/main/AndroidManifest.xml").readText()
+        assertTrue(manifest.contains("android.permission.GET_ACCOUNTS"))
+        assertEquals("com.google", CloudBackupManager.GOOGLE_ACCOUNT_TYPE)
     }
 }

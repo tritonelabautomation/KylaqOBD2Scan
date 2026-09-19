@@ -502,6 +502,9 @@ class CloudBackupManager(
         fun continueButtonLabel(signedInEmail: String?): String =
             if (signedInEmail.isNullOrBlank()) "Continue with Google" else "Switch Google account"
 
+        /** Account type the system chooser lists: the Google accounts on the phone. */
+        const val GOOGLE_ACCOUNT_TYPE = "com.google"
+
         private const val CHANNEL_BACKUP = "backup_sync"
         private const val NOTIFICATION_BACKUP_ID = 9002
 

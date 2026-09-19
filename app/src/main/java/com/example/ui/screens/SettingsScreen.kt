@@ -123,6 +123,28 @@ fun SettingsScreen(
     val pollingMode by viewModel.pollingMode.collectAsState()
 
     val settingsRepo = viewModel.settingsRepository
+    // Zero-setup Google connection (owner 2026-09-20, after "Connection with Google doesn't
+    // work"): the system account chooser lists the phone's Google accounts - his choice of which
+    // account, exactly as he asked - then the Drive folder picker completes the connection. No
+    // OAuth client, no Console, nothing to register: this path cannot hit Google's
+    // DEVELOPER_ERROR wall. The Credential Manager sheet remains for builds that DO carry a
+    // registered Web Client ID.
+    val accountChooser = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { res ->
+        if (res.resultCode == Activity.RESULT_OK) {
+            val email = res.data?.getStringExtra(android.accounts.AccountManager.KEY_ACCOUNT_NAME)
+            if (!email.isNullOrBlank()) {
+                settingsRepo.setGoogleAccountEmail(email)
+                Toast.makeText(
+                    context,
+                    "Google account chosen: $email - now pick the Drive folder for backups.",
+                    Toast.LENGTH_LONG
+                ).show()
+                onOpenDriveBackup()
+            }
+        }
+    }
     val cloudManager = viewModel.cloudBackupManager
     val googleEmail by settingsRepo.googleAccountEmail.collectAsState()
     val googleAccountName by settingsRepo.googleAccountName.collectAsState()
@@ -978,6 +1000,22 @@ fun SettingsScreen(
 
                         Button(
                             onClick = {
+                                if (!signInConfigured) {
+                                    // The path that works tonight: system Google account list,
+                                    // then the Drive folder picker. Firmware without a chooser
+                                    // falls straight through to the Drive picker.
+                                    runCatching {
+                                        accountChooser.launch(
+                                            android.accounts.AccountManager.newChooseAccountIntent(
+                                                null,
+                                                null,
+                                                arrayOf(com.example.backup.CloudBackupManager.GOOGLE_ACCOUNT_TYPE),
+                                                null, null, null, null, null
+                                            )
+                                        )
+                                    }.onFailure { onOpenDriveBackup() }
+                                    return@Button
+                                }
                                 if (activity == null) {
                                     Toast.makeText(context, "Cannot sign in: Activity not available.", Toast.LENGTH_LONG).show()
                                     return@Button
@@ -1021,12 +1059,11 @@ fun SettingsScreen(
 
                         if (!signInConfigured) {
                             Text(
-                                text = "First tap of \u201CContinue with Google\u201D opens the setup card above: Google " +
-                                    "shows its account sheet only to apps registered with an OAuth Web Client ID " +
-                                    "(one-time, 5 minutes, steps 1-3 in the card - package and SHA-1 are copyable). " +
-                                    "After that this button opens Google's own sheet listing every account on the " +
-                                    "phone, exactly like the flow you sent. The green button above needs none of " +
-                                    "this: it opens the system Drive picker where you choose account and folder now.",
+                                text = "\u201CContinue with Google\u201D now works with no setup: it opens the phone's own " +
+                                    "Google account list - you pick the account - and then the Drive folder picker " +
+                                    "for backups. The setup card above is only for the optional Google sign-in sheet " +
+                                    "(Credential Manager), which Google shows solely to apps registered with an OAuth " +
+                                    "Web Client ID (steps 1-3, package and SHA-1 copyable).",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = ElectricAmber,
                                 fontSize = 11.sp,

@@ -45,6 +45,10 @@
          while a journal may still be half-written. BOOT_COMPLETED is an explicit Android 12+
          exemption for starting a foreground service from the background. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Zero-setup Google connection (owner 2026-09-20: "Connection with Google doesn't work"):
+         lets the system account chooser offer the phone's Google accounts to this app, so
+         "Continue with Google" works with no OAuth client registered anywhere. -->
+    <uses-permission android:name="android.permission.GET_ACCOUNTS" />
 
     <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
 
