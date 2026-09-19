@@ -142,6 +142,51 @@ fun ReportsScreen(
                     } else Text("Log fill-ups with odometer readings.", color = TextSecondaryDark, fontSize = 11.sp)
                 }
             }
+            // Car-pool monthly roll-up (owner 2026-09-19): earned vs effective cost per IST
+            // month, newest first. Effective below zero prints as surplus - the ride paid for
+            // itself - never as a negative cost.
+            var monthlyPool by remember {
+                mutableStateOf<List<com.example.data.CarpoolCodec.MonthRow>>(emptyList())
+            }
+            LaunchedEffect(Unit) { monthlyPool = viewModel.monthlyCarpool() }
+            if (monthlyPool.isNotEmpty()) {
+                Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                    Column(Modifier.padding(12.dp)) {
+                        Text("Car pool (monthly)", color = TextSecondaryDark, fontSize = 12.sp)
+                        monthlyPool.reversed().take(6).forEach { r ->
+                            Spacer(Modifier.height(6.dp))
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text(
+                                    "${r.month} · ${r.trips} trip(s) · " +
+                                        String.format(java.util.Locale.US, "%.0f", r.distanceKm) + " km",
+                                    color = TextPrimaryDark, fontSize = 12.sp
+                                )
+                                Text(
+                                    "earned " + String.format(java.util.Locale.US, "₹%.0f", r.earned),
+                                    color = NeonEmerald, fontWeight = FontWeight.SemiBold, fontSize = 12.sp
+                                )
+                            }
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text(
+                                    r.fuelCost?.let {
+                                        "fuel " + String.format(java.util.Locale.US, "₹%.0f", it)
+                                    } ?: "fuel --",
+                                    color = TextSecondaryDark, fontSize = 11.sp
+                                )
+                                r.effective?.let { eff ->
+                                    Text(
+                                        if (eff > 0) "effective " + String.format(java.util.Locale.US, "₹%.0f", eff)
+                                        else "surplus " + String.format(java.util.Locale.US, "+₹%.0f", -eff),
+                                        color = if (eff > 0) ElectricAmber else NeonEmerald,
+                                        fontWeight = FontWeight.Bold, fontSize = 12.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+            }
             Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                 Column(Modifier.padding(12.dp)) {
                     Text("Budget vs actual (this month)", color = TextSecondaryDark, fontSize = 12.sp)

@@ -251,6 +251,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Pump cost of one trip: its integrated fuel litres x the latest logged price per litre.
+     * Null when the trip has no integratable rate rows or no price exists yet - the car-pool
+     * maths then shows earned without a fabricated cost (no-fake-values rule).
+     */
+    suspend fun tripFuelCost(tripId: String): Double? {
+        val price = fuelLogRepository.entries().maxByOrNull { it.idMs }?.pricePerL ?: return null
+        if (price <= 0.0) return null
+        val rows = recordingManager.tripRepository.samplesForTripPids(tripId, listOf("019D", "015E"))
+        if (rows.isEmpty()) return null
+        val s = com.example.analysis.TripFuelSummary.summarize(
+            rows.map {
+                com.example.analysis.TripFuelSummary.SamplePoint(it.pid, it.timestamp, it.numericValue)
+            }
+        )
+        return if (s.fuelLiters > 0.01) s.fuelLiters * price else null
+    }
+
+    /** Car-pool monthly roll-up (owner 2026-09-19): earned vs effective cost per IST month. */
+    suspend fun monthlyCarpool(): List<com.example.data.CarpoolCodec.MonthRow> =
+        com.example.data.CarpoolCodec.monthly(carpoolRepository.entries()) { e ->
+            e.tripId?.let { tripFuelCost(it) }
+        }
+
     fun noteBackgroundLocationDeclined() {
         settingsRepository.setLastBgLocationDeclinedMs(System.currentTimeMillis())
         refreshLocationPermissionState()
@@ -1595,6 +1619,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     val fuelLogRepository = AppContainer.fuelLogRepository
+    val carpoolRepository = AppContainer.carpoolRepository
     val maintenanceRepository = AppContainer.maintenanceRepository
     val expenseRepository = AppContainer.expenseRepository
     val documentRepository = AppContainer.documentRepository

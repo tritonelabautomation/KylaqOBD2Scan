@@ -62,6 +62,7 @@ object AppContainer {
     lateinit var cloudBackupManager: com.example.backup.CloudBackupManager
     lateinit var catalogRepository: CatalogRepository
     lateinit var fuelLogRepository: FuelLogRepository
+    lateinit var carpoolRepository: CarpoolRepository
     lateinit var maintenanceRepository: MaintenanceRepository
     lateinit var expenseRepository: ExpenseRepository
     lateinit var documentRepository: DocumentRepository
@@ -100,6 +101,7 @@ object AppContainer {
             pidDiscoveryService = com.example.discovery.PidDiscoveryService(obdScheduler.capabilityManager)
             cloudBackupManager = com.example.backup.CloudBackupManager(appContext, settingsRepository, recordingManager)
             fuelLogRepository = FuelLogRepository(appContext)
+            carpoolRepository = CarpoolRepository(appContext)
             maintenanceRepository = MaintenanceRepository(appContext)
             expenseRepository = ExpenseRepository(appContext)
             documentRepository = DocumentRepository(appContext)
