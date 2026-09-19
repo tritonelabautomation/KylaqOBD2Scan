@@ -113,6 +113,7 @@ class AppDataSnapshotTest {
     fun `every owner data store is on the covered list`() {
         val stores = AppDataSnapshot.PREF_STORES
         assertTrue(stores.contains("fuel_log_prefs"))       // fuel ledger
+        assertTrue(stores.contains("carpool_prefs"))        // car-pool ledger (owner 2026-09-20: nothing should be lost)
         assertTrue(stores.contains("obd_research_prefs"))   // settings + insight logs
         assertTrue(stores.contains("expense_prefs"))
         assertTrue(stores.contains("document_prefs"))
@@ -137,5 +138,20 @@ class AppDataSnapshotTest {
     @Test
     fun `the snapshot file name matches the layout classifier`() {
         assertEquals("app_data_snapshot.json", AppDataSnapshot.FILE_NAME)
+    }
+
+    @Test
+    fun theCarpoolLedgerSurvivesTheSnapshotRoundTrip() {
+        // Owner 2026-09-20: "my car pool, all trips, & fuel logs everything should be backup to
+        // Google drive ... nothing should be lost". The car-pool ledger lives in carpool_prefs;
+        // before this test's store list gained it, a reinstall or phone move lost every ride.
+        val log = "1758312780000|tripA|2026-09-20T01:33:00.000+05:30|30.0|Rohit\u001F192.0"
+        val json = AppDataSnapshot.build(
+            "2026-09-20T01:40:00.000+05:30",
+            mapOf("carpool_prefs" to AppDataSnapshot.Store.fromRaw(mapOf("carpool_log" to log)))
+        )
+        val parsed = AppDataSnapshot.parse(json)!!
+        assertEquals(log, parsed.stores["carpool_prefs"]!!.strings["carpool_log"])
+        assertTrue(AppDataSnapshot.isRestorable("carpool_prefs", "carpool_log"))
     }
 }

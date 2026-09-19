@@ -343,6 +343,24 @@ class CloudBackupManager(
                 )
             }
 
+            // Owner 2026-09-20: "my car pool, all trips, & fuel logs everything should be backup
+            // to Google drive with the signin nothing should be lost". When a Drive folder is
+            // linked (the zero-setup chooser flow), THIS is the backup: one archive holding every
+            // trip, the raw logs, and the prefs snapshot - fuel ledger, car-pool ledger,
+            // expenses, documents, reminders, plans, settings. The local folder below remains
+            // only as the honest fallback for builds with no folder linked yet.
+            settingsRepository.driveTreeUri()?.let { tree ->
+                val name = com.example.backup.DriveBackupClient.sendBackup(
+                    context, android.net.Uri.parse(tree), recordingManager
+                )
+                val now = System.currentTimeMillis()
+                settingsRepository.setLastBackupTimestamp(now)
+                val msg = "Full backup in Google Drive: $name - all trips, raw logs, fuel ledger, " +
+                    "car pool, expenses and settings for $account."
+                _syncStatusMessage.value = msg
+                return@withContext BackupSyncResult(success = true, backedUpCount = 1, message = msg)
+            }
+
             val recordingsDir = File(context.filesDir, "recordings")
             val cloudFolder = File(context.filesDir, "cloud_drive_backup").apply { mkdirs() }
 

@@ -683,3 +683,14 @@ pinned the behaviour that caused today's loss. The file documents that reversal 
 5. After any drive where the app was killed, expect a notification: *"Killed session recovered — logs
    saved"*. If you ever see *"Could not recover…"*, send the text — it names the session and the
    reason, and that is a bug I want to hear about.
+
+## Backup completeness (owner 2026-09-20: "everything should be backup to Google drive ... nothing should be lost")
+
+Audit of what the Drive archive actually carried found ONE gap: the prefs snapshot listed the
+fuel ledger but not `carpool_prefs`, so a reinstall or phone move lost every car-pool ride while
+trips, raw logs, fuel, expenses and settings survived. `carpool_prefs` is now a first-class store
+in `AppDataSnapshot.PREF_STORES` (round-trip tested), and `performBackupNow` / the automatic
+after-session sync are Drive-FIRST: with a folder linked through the zero-setup account chooser,
+they send the single full archive (all trips + raw logs + snapshot incl. car pool) to that Drive
+folder instead of the local staging folder, which remains only as the honest fallback when no
+folder is linked. Restore merges as before; car-pool rows reappear on the next screen load.

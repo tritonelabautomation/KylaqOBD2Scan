@@ -28,6 +28,7 @@ object AppDataSnapshot {
     val PREF_STORES = listOf(
         "obd_research_prefs",   // settings + ride / coast / tank insight logs
         "fuel_log_prefs",       // fuel ledger (tank-to-tank entries)
+        "carpool_prefs",        // car-pool ledger (rides, riders, amounts, trip links)
         "expense_prefs",        // expenses
         "document_prefs",       // documents
         "reminder_prefs",       // reminders
