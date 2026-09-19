@@ -834,4 +834,33 @@ class ObdScheduler(
      * existing backup use that key.
      */
     private fun getNowStamp(): String = com.example.data.RecordTime.stamp()
+
+    /**
+     * What the link ACTUALLY achieves per request (owner 2026-09-19: "ISO 15765-4 CAN 11-bit
+     * 500kbps vs current sampling period ... any issues with current hardware ELM327
+     * capabilities?"): the mean of the per-PID observed gaps. The polling mode only sets each
+     * PID's DUE interval and the inter-command delay; the serial round trip over Bluetooth is
+     * the real governor, and this is its measurement - null until something has been queried.
+     */
+    fun observedGapMs(): Long? = PollCadence.meanGapMs(queryGapEwmaMs.values)
+
+    /** Enabled PIDs that pass the validated-live rule: the length of one round-robin cycle. */
+    fun liveEligiblePidCount(): Int =
+        settingsRepository.pidDefinitions.value.count {
+            it.enabled && capabilityManager.isLiveEligible(it.id)
+        }
+}
+
+/**
+ * Pure cadence math for the polling card: the mode's promise vs the link's reality. Extracted
+ * from the scheduler so the arithmetic is unit-testable without a transport.
+ */
+object PollCadence {
+    fun meanGapMs(gaps: Collection<Long>): Long? =
+        if (gaps.isEmpty()) null else gaps.sum() / gaps.size
+
+    fun reqPerSec(gapMs: Long): Double = if (gapMs <= 0L) 0.0 else 1000.0 / gapMs
+
+    /** One full round-robin pass: every live PID queried once, serially, on one serial link. */
+    fun cycleSeconds(gapMs: Long, livePids: Int): Double = gapMs * livePids / 1000.0
 }

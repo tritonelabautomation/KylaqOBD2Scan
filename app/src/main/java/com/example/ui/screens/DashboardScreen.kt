@@ -53,6 +53,18 @@ fun DashboardScreen(
     val connectionState by viewModel.connectionState.collectAsState()
     val connectedDeviceName by viewModel.connectedDeviceName.collectAsState()
     val isPolling by viewModel.isPolling.collectAsState()
+
+    // Observed link reality for the polling card (owner 2026-09-19): the mode label promises a
+    // per-command interval; this is what the ELM327's serial round trip actually sustains.
+    var observedGap by remember { mutableStateOf<Long?>(null) }
+    var livePids by remember { mutableStateOf(0) }
+    LaunchedEffect(isPolling, pollingMode) {
+        while (true) {
+            observedGap = viewModel.obdScheduler.observedGapMs()
+            livePids = viewModel.obdScheduler.liveEligiblePidCount()
+            kotlinx.coroutines.delay(3_000)
+        }
+    }
     val autoStopNotice by viewModel.autoStopNotice.collectAsState()
     // What the automatic crash recovery did on this launch (owner 2026-09-17: "today logs not
     // saved unable to recover it"). Shown on the landing screen because a rescued trip that
@@ -262,7 +274,9 @@ fun DashboardScreen(
         // Polling Mode Selector (Safe / Normal / Fast)
         PollingModeSelector(
             currentMode = pollingMode,
-            onModeSelected = { viewModel.setPollingSpeedMode(it) }
+            onModeSelected = { viewModel.setPollingSpeedMode(it) },
+            observedGapMs = observedGap,
+            livePids = livePids
         )
 
         Spacer(modifier = Modifier.height(18.dp))
@@ -699,7 +713,9 @@ fun MetricCounter(label: String, value: String, isError: Boolean = false, isSucc
 @Composable
 fun PollingModeSelector(
     currentMode: PollingSpeedMode,
-    onModeSelected: (PollingSpeedMode) -> Unit
+    onModeSelected: (PollingSpeedMode) -> Unit,
+    observedGapMs: Long? = null,
+    livePids: Int = 0
 ) {
     Card(
         modifier = Modifier
@@ -749,6 +765,31 @@ fun PollingModeSelector(
                     )
                 }
             }
+
+            Spacer(modifier = Modifier.height(8.dp))
+            // The honest layer under the promise: 125/250/500 ms is the per-COMMAND target; the
+            // serial round trip over Bluetooth governs what each tile actually gets. One full
+            // cycle = every live PID once, serially - that is the real per-signal refresh rate.
+            Text(
+                text = if (observedGapMs == null || livePids == 0) {
+                    "Observed: not connected yet. Once the link is live this shows what YOUR " +
+                        "adapter sustains per request - the number that decides how often each " +
+                        "tile refreshes, not the mode label."
+                } else {
+                    "Observed on this link: ~%d ms per request (%.1f req/s). One full cycle over " +
+                        "%d live PIDs ≈ %.1f s - that is how often each signal refreshes. The CAN " +
+                        "bus (500 kbit/s) is never the limit; the ELM327 serial round trip is."
+                        .format(
+                            observedGapMs,
+                            com.example.scheduler.PollCadence.reqPerSec(observedGapMs),
+                            livePids,
+                            com.example.scheduler.PollCadence.cycleSeconds(observedGapMs, livePids)
+                        )
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 10.sp
+            )
         }
     }
 }
