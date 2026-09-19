@@ -1233,6 +1233,11 @@ class RecordingManager(
         val result = ZipImporter.importTripZip(context, uri, recordingsDir, tripRepository)
         if (result.success) {
             loadSavedRecordings()
+            // A RESTORED trip is a recovered trip: car-pool rides logged standalone while it was
+            // missing must re-check their time windows against it (owner's v2 acceptance: links
+            // appear "when a recovered trip covers the ride"). finalizeSession does this for live
+            // sessions; a Drive/ZIP restore must do exactly the same or the restore looks broken.
+            runCatching { relinkCarpoolEntries() }
         }
         return result
     }
@@ -1247,6 +1252,7 @@ class RecordingManager(
             results.add(res)
         }
         loadSavedRecordings()
+        if (results.any { it.success }) runCatching { relinkCarpoolEntries() }
         return results
     }
 }
