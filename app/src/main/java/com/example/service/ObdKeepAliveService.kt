@@ -123,7 +123,7 @@ class ObdKeepAliveService : Service() {
         // Live threshold alerts (owner 2026-09-19): the service outlives the UI, so an over-temp
         // or a dying alternator reaches him with the screen off and the phone pocketed.
         refreshScope.launch {
-            while (kotlinx.coroutines.isActive) {
+            while (isActive) {
                 kotlinx.coroutines.delay(5_000)
                 checkVehicleAlerts()
             }
