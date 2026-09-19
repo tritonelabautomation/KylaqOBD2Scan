@@ -362,6 +362,63 @@ fun SettingsScreen(
                 }
             }
 
+            // Live threshold alerts (owner 2026-09-19): what the keep-alive service watches
+            // while driving, and the limits it notifies on. Editable, persisted, on by default.
+            var alertsOn by remember { mutableStateOf(viewModel.settingsRepository.alertsEnabled()) }
+            val alertDefaults = remember { viewModel.settingsRepository.alertThresholds() }
+            var coolantStr by remember { mutableStateOf("%.0f".format(alertDefaults.coolantC)) }
+            var voltLowStr by remember { mutableStateOf("%.1f".format(alertDefaults.voltageLowV)) }
+            var voltHighStr by remember { mutableStateOf("%.1f".format(alertDefaults.voltageHighV)) }
+            var fuelStr by remember { mutableStateOf("%.0f".format(alertDefaults.fuelPct)) }
+            var rpmStr by remember { mutableStateOf("%.0f".format(alertDefaults.rpm)) }
+            val saveAlertThresholds = {
+                viewModel.settingsRepository.setAlertThresholds(
+                    com.example.analysis.AlertRules.Thresholds(
+                        coolantC = coolantStr.toDoubleOrNull() ?: 105.0,
+                        voltageLowV = voltLowStr.toDoubleOrNull() ?: 12.5,
+                        voltageHighV = voltHighStr.toDoubleOrNull() ?: 15.5,
+                        fuelPct = fuelStr.toDoubleOrNull() ?: 12.0,
+                        rpm = rpmStr.toDoubleOrNull() ?: 5500.0
+                    )
+                )
+            }
+            SettingsSectionHeader("SAFETY ALERTS")
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF161B22))
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                "Live vehicle alerts",
+                                fontWeight = FontWeight.SemiBold, fontSize = 15.sp,
+                                color = Color(0xFFE6EDF3)
+                            )
+                            Text(
+                                "Notifications while driving - coolant, charging voltage, low " +
+                                    "fuel, over-rev. Fired by the keep-alive service, screen off " +
+                                    "included; each alert repeats at most once per 2 minutes. A " +
+                                    "PID the car is not answering stays silent.",
+                                fontSize = 11.sp, color = Color(0xFF9AA7B4)
+                            )
+                        }
+                        Switch(
+                            checked = alertsOn,
+                            onCheckedChange = {
+                                alertsOn = it
+                                viewModel.settingsRepository.setAlertsEnabled(it)
+                            }
+                        )
+                    }
+                    ThresholdRow("Coolant warn at (C)", coolantStr) { coolantStr = it; saveAlertThresholds() }
+                    ThresholdRow("Voltage low (V, engine running)", voltLowStr) { voltLowStr = it; saveAlertThresholds() }
+                    ThresholdRow("Voltage high (V)", voltHighStr) { voltHighStr = it; saveAlertThresholds() }
+                    ThresholdRow("Fuel low (%)", fuelStr) { fuelStr = it; saveAlertThresholds() }
+                    ThresholdRow("Over-rev (rpm)", rpmStr) { rpmStr = it; saveAlertThresholds() }
+                }
+            }
+
             SettingsSectionHeader("APPEARANCE & UNITS")
             val unitsMetric by viewModel.settingsRepository.unitsMetric.collectAsState()
             val currencySymbol by viewModel.settingsRepository.currencySymbol.collectAsState()
@@ -1605,5 +1662,22 @@ private fun SimpleNavCard(
                 )
             }
         }
+    }
+}
+
+/** One editable alert limit: label plus a narrow single-line number field. */
+@Composable
+private fun ThresholdRow(label: String, value: String, onChange: (String) -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.padding(vertical = 3.dp)
+    ) {
+        Text(label, fontSize = 13.sp, color = Color(0xFF9AA7B4), modifier = Modifier.weight(1f))
+        OutlinedTextField(
+            value = value,
+            onValueChange = onChange,
+            modifier = Modifier.width(90.dp),
+            singleLine = true
+        )
     }
 }

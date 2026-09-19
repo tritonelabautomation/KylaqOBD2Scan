@@ -515,6 +515,28 @@ class SettingsRepository(private val context: Context) {
     fun setRestartRefuelDismissedMs(idMs: Long) =
         prefs.edit().putLong("restart_refuel_dismissed_ms", idMs).apply()
 
+    /** Live threshold alerts (owner 2026-09-19): on by default with conservative EA211 limits. */
+    fun alertsEnabled(): Boolean = prefs.getBoolean("live_alerts_enabled", true)
+
+    fun setAlertsEnabled(on: Boolean) = prefs.edit().putBoolean("live_alerts_enabled", on).apply()
+
+    fun alertThresholds(): com.example.analysis.AlertRules.Thresholds =
+        com.example.analysis.AlertRules.Thresholds(
+            coolantC = prefs.getFloat("alert_coolant_c", 105f).toDouble(),
+            voltageLowV = prefs.getFloat("alert_voltage_low", 12.5f).toDouble(),
+            voltageHighV = prefs.getFloat("alert_voltage_high", 15.5f).toDouble(),
+            fuelPct = prefs.getFloat("alert_fuel_pct", 12f).toDouble(),
+            rpm = prefs.getFloat("alert_rpm", 5500f).toDouble()
+        )
+
+    fun setAlertThresholds(t: com.example.analysis.AlertRules.Thresholds) = prefs.edit()
+        .putFloat("alert_coolant_c", t.coolantC.toFloat())
+        .putFloat("alert_voltage_low", t.voltageLowV.toFloat())
+        .putFloat("alert_voltage_high", t.voltageHighV.toFloat())
+        .putFloat("alert_fuel_pct", t.fuelPct.toFloat())
+        .putFloat("alert_rpm", t.rpm.toFloat())
+        .apply()
+
     /**
      * Throttle stamp for the automatic in-app update check (2026-09-16). A manual
      * "Check for updates" tap is never throttled - only the silent launch check is.

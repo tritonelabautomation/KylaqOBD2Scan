@@ -67,6 +67,9 @@ class ObdKeepAliveService : Service() {
         const val RECOVERY_NOTIFICATION_ID = 9002
         const val RECOVERY_CHANNEL_ID = "obd_recovery"
 
+        /** Live threshold alerts land here at HIGH importance: they mean stop-and-look. */
+        const val ALERT_CHANNEL_ID = "vehicle_alerts"
+
         /** Tick periods, matching what `MainViewModel.startSessionAutomation` has always used. */
         const val AUTO_CONNECT_TICK_MS = 10_000L
         const val AUTO_RECORD_TICK_MS = 2_000L
@@ -117,6 +120,14 @@ class ObdKeepAliveService : Service() {
         // then start supervising again, so the rest of the drive is still recorded.
         recoverKilledSessions()
         startSupervisors()
+        // Live threshold alerts (owner 2026-09-19): the service outlives the UI, so an over-temp
+        // or a dying alternator reaches him with the screen off and the phone pocketed.
+        refreshScope.launch {
+            while (kotlinx.coroutines.isActive) {
+                kotlinx.coroutines.delay(5_000)
+                checkVehicleAlerts()
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -200,6 +211,47 @@ class ObdKeepAliveService : Service() {
      * Both loops read the owner's settings on every tick, so switching auto-connect or auto-record
      * off takes effect within seconds without a restart.
      */
+    /** Per-metric cooldown so a breached limit notifies once per two minutes, not once per tick. */
+    private val alertCooldownMs = mutableMapOf<String, Long>()
+
+    private fun checkVehicleAlerts() {
+        runCatching {
+            com.example.di.AppContainer.init(applicationContext)
+            val settings = com.example.di.AppContainer.settingsRepository
+            if (!settings.alertsEnabled()) return
+            val scheduler = com.example.di.AppContainer.obdScheduler
+            if (!scheduler.isPolling.value) return
+            val alerts = com.example.analysis.AlertRules.evaluate(
+                scheduler.liveNumericMap.value, settings.alertThresholds()
+            )
+            if (alerts.isEmpty()) return
+            val nm = getSystemService(NotificationManager::class.java) ?: return
+            if (nm.getNotificationChannel(ALERT_CHANNEL_ID) == null) {
+                nm.createNotificationChannel(
+                    NotificationChannel(
+                        ALERT_CHANNEL_ID, "Vehicle alerts", NotificationManager.IMPORTANCE_HIGH
+                    )
+                )
+            }
+            val now = System.currentTimeMillis()
+            for (a in alerts) {
+                val last = alertCooldownMs[a.metric] ?: 0L
+                if (now - last < 120_000L) continue
+                alertCooldownMs[a.metric] = now
+                nm.notify(
+                    7000 + kotlin.math.abs(a.metric.hashCode()) % 64,
+                    NotificationCompat.Builder(this, ALERT_CHANNEL_ID)
+                        .setSmallIcon(R.drawable.ic_stat_kylaq)
+                        .setContentTitle("Vehicle alert: " + a.metric)
+                        .setContentText(a.message)
+                        .setStyle(NotificationCompat.BigTextStyle().bigText(a.message))
+                        .setAutoCancel(true)
+                        .build()
+                )
+            }
+        }.onFailure { android.util.Log.e("ObdKeepAliveService", "alert check failed", it) }
+    }
+
     private fun startSupervisors() {
         if (autoConnectJob == null) {
             autoConnectJob = recoveryScope.launch {
