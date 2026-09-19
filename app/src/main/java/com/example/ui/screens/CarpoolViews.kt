@@ -24,6 +24,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -170,14 +171,20 @@ fun CarpoolDialog(
     var timeStr by remember {
         mutableStateOf(com.example.data.RecordTime.format("HH:mm", baseMs))
     }
-    var riderNames by remember {
-        mutableStateOf((existing?.riders?.map { it.name } ?: listOf("")).toMutableList())
+    // BUGFIX 2026-09-19 (owner: "unable to type rider 1 & ₹ place it's not taking any input
+    // from keyboard"): these were mutableStateOf(MutableList) updated by MUTATING the list and
+    // re-assigning the SAME instance - Compose compares old and new value, sees the identical
+    // reference, treats the write as a no-op and never recomposes: every keystroke vanished and
+    // "+ Add rider" silently added nothing. A SnapshotStateList tracks element writes itself, so
+    // typing works the way the owner expects.
+    val riderNames = remember {
+        mutableStateListOf<String>().apply { addAll(existing?.riders?.map { it.name } ?: listOf("")) }
     }
-    var riderAmounts by remember {
-        mutableStateOf(
-            (existing?.riders?.map { String.format(java.util.Locale.US, "%.0f", it.amount) } ?: listOf(""))
-                .toMutableList()
-        )
+    val riderAmounts = remember {
+        mutableStateListOf<String>().apply {
+            addAll(existing?.riders?.map { String.format(java.util.Locale.US, "%.0f", it.amount) }
+                ?: listOf(""))
+        }
     }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -212,30 +219,30 @@ fun CarpoolDialog(
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         OutlinedTextField(
                             value = name,
-                            onValueChange = { v -> riderNames = riderNames.also { it[i] = v } },
+                            onValueChange = { v -> riderNames[i] = v },
                             label = { Text("Rider ${i + 1}") },
                             singleLine = true,
                             modifier = Modifier.weight(1f)
                         )
                         OutlinedTextField(
                             value = riderAmounts[i],
-                            onValueChange = { v -> riderAmounts = riderAmounts.also { it[i] = v } },
+                            onValueChange = { v -> riderAmounts[i] = v },
                             label = { Text("₹") },
                             singleLine = true,
                             modifier = Modifier.weight(0.7f)
                         )
                         if (riderNames.size > 1) {
                             IconButton(onClick = {
-                                riderNames = riderNames.also { it.removeAt(i) }
-                                riderAmounts = riderAmounts.also { it.removeAt(i) }
+                                riderNames.removeAt(i)
+                                riderAmounts.removeAt(i)
                             }) { Icon(Icons.Default.Close, "Remove rider") }
                         }
                     }
                 }
                 if (riderNames.size < com.example.data.CarpoolCodec.MAX_RIDERS) {
                     TextButton(onClick = {
-                        riderNames = riderNames.also { it.add("") }
-                        riderAmounts = riderAmounts.also { it.add("") }
+                        riderNames.add("")
+                        riderAmounts.add("")
                     }) { Text("+ Add rider") }
                 } else {
                     Text(

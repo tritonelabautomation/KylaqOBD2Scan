@@ -67,3 +67,17 @@ background. But my car pool already a passenger in so."*
   whether or not the recorder survived; the ledger now remembers that.
 - The trip-detail card now shares its views with the screen (`CarpoolViews.kt`) and prefills the
   dialog's date-time from the trip's own start.
+
+## Field bug 1, same night (owner screenshot 23:41 IST): rider fields swallowed keystrokes
+
+Owner: *"unable to type rider 1 & ₹ place it's not taking any input from keyboard."*
+
+Cause: the rider name/amount lists were `mutableStateOf(MutableList)` updated by mutating the
+list and re-assigning the SAME instance (`riderNames = riderNames.also { it[i] = v }`). Compose
+compares old and new state value, sees the identical reference, treats the write as a no-op and
+never recomposes - so every keystroke vanished, and "+ Add rider" added nothing visible. The
+date/time/distance fields worked because Strings are immutable: each keystroke IS a new value.
+
+Fix: `mutableStateListOf` (SnapshotStateList) whose element writes are tracked individually -
+`riderNames[i] = v`. Date/time/distance untouched. Swept the whole app for the same
+mutate-and-reassign pattern: no other occurrence.
