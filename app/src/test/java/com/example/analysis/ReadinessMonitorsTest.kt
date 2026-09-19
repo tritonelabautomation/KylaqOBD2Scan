@@ -17,7 +17,7 @@ class ReadinessMonitorsTest {
     @Test
     fun aFullyRunCarIsReadyAndCountsItsFittedMonitors() {
         // misfire/fuel/components + catalyst/heated-cat/evap/O2S + O2-heater/EGR fitted, all done.
-        val s = ReadinessMonitors.decode(0x00, 0x77, 0xFF, 0x89)
+        val s = ReadinessMonitors.decode(0x00, 0x77, 0xFF, 0x99)
         assertFalse(s.milOn)
         assertEquals(0, s.confirmedDtcCount)
         assertTrue(s.ready)
@@ -38,7 +38,7 @@ class ReadinessMonitorsTest {
 
     @Test
     fun milAndDtcCountComeFromByteA() {
-        val s = ReadinessMonitors.decode(0x03, 0x77, 0xFF, 0x89)
+        val s = ReadinessMonitors.decode(0x03, 0x77, 0xFF, 0x99)
         assertTrue(s.milOn)
         assertEquals(1, s.confirmedDtcCount)
         assertFalse(s.ready) // MIL on is never "ready", whatever the monitors say
@@ -46,10 +46,10 @@ class ReadinessMonitorsTest {
 
     @Test
     fun responseLinesParseOnlyWhenTheyAreMonitorAnswers() {
-        val s = ReadinessMonitors.fromResponseLine("41 41 00 77 FF 89", "41")
+        val s = ReadinessMonitors.fromResponseLine("41 41 00 77 FF 99", "41")
         assertEquals(9, s!!.supportedCount)
         assertNull(ReadinessMonitors.fromResponseLine("NO DATA", "41"))
-        assertNull(ReadinessMonitors.fromResponseLine("41 01 00 77 FF 89", "41"))
+        assertNull(ReadinessMonitors.fromResponseLine("41 01 00 77 FF 99", "41"))
         assertNull(ReadinessMonitors.fromResponseLine("41 41 00 77 FF", "41"))
     }
 }
