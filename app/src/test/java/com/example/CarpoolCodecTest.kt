@@ -117,4 +117,23 @@ class CarpoolCodecTest {
         assertEquals(-2534.0, zero.effective!!, 0.001) // earned beat fuel spend: a saving
         assertEquals(2534.0, zero.earned, 0.001)
     }
+
+    @Test
+    fun aBackDatedRideBelongsToTheMonthItHappenedNotTheMonthItWasSaved() {
+        // Owner 2026-09-20: the August header read "1 ride(s) - 0 km - earned 0" above a
+        // 30 km / 235 ride, because monthly() keyed by the SAVE instant. Saved 2026-09-09,
+        // rode 2026-08-18: the row must be August's, with the ride's own km and money.
+        val e = CarpoolEntry(
+            idMs = RecordTime.parseStamp("2026-09-09T01:29:00.000+05:30")!!,
+            tripId = null,
+            dateUtc = "2026-08-18T00:41:00.000+05:30",
+            distanceKm = 30.0,
+            riders = listOf(Rider("Akash", 235.0))
+        )
+        val rows = CarpoolCodec.monthly(listOf(e)) { null }
+        assertEquals(1, rows.size)
+        assertEquals("2026-08", rows[0].month)
+        assertEquals(30.0, rows[0].distanceKm, 0.001)
+        assertEquals(235.0, rows[0].earned, 0.001)
+    }
 }

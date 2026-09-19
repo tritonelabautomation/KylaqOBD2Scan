@@ -113,7 +113,14 @@ object CarpoolCodec {
      * ride logged at 00:20 IST on the 1st belongs to the new month, not the UTC previous one.
      */
     fun monthly(entries: List<CarpoolEntry>, fuelCost: (CarpoolEntry) -> Double?): List<MonthRow> =
-        entries.groupBy { RecordTime.format("yyyy-MM", it.idMs) }
+        // BUGFIX 2026-09-20 (owner, screenshot: "Another BUG for you august"): this keyed months
+        // by idMs - the SAVE instant - while the ride cards, the screen's month grouping and the
+        // trip linking all use the ride's own IST instant (dateUtc, idMs only as fallback). A
+        // back-dated ride (saved in September for an 18-Aug drive) therefore landed in the
+        // September row, and the August header found no row at all and fell back to
+        // "1 ride(s) - 0 km - earned 0 - fuel --" right above a 30 km / 235 ride. One key rule
+        // everywhere: the ride's instant.
+        entries.groupBy { RecordTime.format("yyyy-MM", whenMs(it) ?: it.idMs) }
             .map { (month, es) ->
                 val costs = es.map { fuelCost(it) }
                 val fc = if (costs.all { it != null }) costs.sumOf { it!! } else null
