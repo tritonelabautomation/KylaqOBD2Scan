@@ -611,7 +611,14 @@ class RecordingManager(
                     )
                 )
                 if (rows.isEmpty()) continue
-                persistRefuelEvents(com.example.analysis.RefuelSessionScan.scan(rows), settings)
+                persistRefuelEvents(
+                    com.example.analysis.RefuelSessionScan.scan(
+                        rows.map {
+                            com.example.analysis.SinceRefuelStats.Row(it.timestamp, it.pid, it.numericValue)
+                        }
+                    ),
+                    settings
+                )
             }
             settings.setRefuelBackfillDone()
         }.onFailure { android.util.Log.e("RecordingManager", "refuel backfill failed", it) }
