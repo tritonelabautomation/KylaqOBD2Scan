@@ -612,7 +612,7 @@ defect.
 | `AutoRecordPolicyTest` (new, 13 tests) | The auto-record rule as a pure function, so the two supervisors cannot drift: engine on with nothing recording starts a drive; engine on while recording changes nothing; never starts against a dead link (an empty trip looks like a drive that got 0 km); setting off means the supervisor touches nothing; **a fresh `rpm = 0` is a traffic light, not the end of the drive**, and gets the five-minute Idle Start-Stop grace; a stall longer than that still saves the trip; a MISSING reading is an ignition-off and gets one minute; the engine-off clock is armed once and not rearmed every tick; a restarted engine clears it; the 200.0 threshold is strict, so a cranking motor cannot open a trip; and `aWholeCityDriveWithSixJunctionsStaysOneTrip` runs a whole drive through the rule tick by tick and asserts one start and one stop |
 | `BatteryOptimizationPolicyTest` (rewritten, 5 tests) | The new contract, and *why* the old one was wrong: prompts when restricted; prompts with no session live so the next drive is protected; never nags once granted; stays quiet inside the 24 h interval; asks again after it while still restricted |
 
-Committed total: 97 suites, 790 tests (baseline before this task was 82 suites / 699 tests).
+Committed total: 98 suites, 792 tests (baseline before this task was 82 suites / 699 tests).
 
 Two existing assertions were deliberately changed rather than worked around, both in
 `BatteryOptimizationPolicyTest`: `neverNagsAfterTheFirstPrompt` and `silentWhenNoSessionIsLive`
