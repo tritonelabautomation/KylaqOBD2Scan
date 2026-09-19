@@ -178,6 +178,10 @@ object RecordTime {
     /** Canonical record stamp for an instant, in IST with its offset. */
     fun stamp(millis: Long): String = format(STAMP_PATTERN, millis)
 
+    /** Inverse of [stamp]: an IST record stamp back to epoch millis; null on garbage. */
+    fun parseStamp(s: String): Long? =
+        runCatching { formatter(STAMP_PATTERN).parse(s)?.time }.getOrNull()
+
     /** Human stamp for "now": `2026-09-17 14:27`. */
     fun display(): String = display(System.currentTimeMillis())
 

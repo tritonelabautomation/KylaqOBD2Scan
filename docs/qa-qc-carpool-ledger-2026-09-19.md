@@ -44,3 +44,26 @@ show monthly earnings or car pool & effective cost for me."*
 - Rider amounts are what he enters (cash/UPI reality), not derived from distance.
 - No backup-snapshot inclusion yet: car-pool lines live in prefs like the fuel journal; if he
   wants them in the Drive backup set, that is a follow-up.
+
+## Rework after owner field feedback (same day, build 2)
+
+Owner: *"I don't see option of car pool ... give me an separate option for car pool logging.
+Based on date & time input in car pool logging trip can fetch at exact time if any car pool
+exist it can link to trip. Because we have seen some trips not logged properly abruptly stop in
+background. But my car pool already a passenger in so."*
+
+- **Standalone Car Pool screen** in the nav drawer (between Fuel & Costs and Save Fuel): this-
+  month header (rides, km, earned, effective/surplus), previous months, "+ Log car pool", and
+  every ride as a card with its IST date-time, riders, earned, and link state. Edit and delete
+  per ride.
+- **Date and time are first-class inputs** in the dialog (IST calendar math, same rule as the
+  fuel log): the ride's instant is the linking key, stored as the entry's IST stamp.
+- **Auto-link by time window** (`CarpoolCodec.tripLinkFor`, pure and tested): a ride joins the
+  saved trip whose [start, end] covers its instant - latest-starting window wins, open end
+  (still recording) covers onward. An explicit tripId from a trip's own card always wins.
+- **Recovered trips relink orphans**: every session finalize (normal stop, orphan save, journal
+  recovery, raw-log recovery) runs `relinkCarpoolEntries()` - rides logged during a session that
+  died abruptly join it the moment the recovery recreates it. The passengers were aboard
+  whether or not the recorder survived; the ledger now remembers that.
+- The trip-detail card now shares its views with the screen (`CarpoolViews.kt`) and prefills the
+  dialog's date-time from the trip's own start.

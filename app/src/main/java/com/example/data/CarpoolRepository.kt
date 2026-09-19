@@ -74,6 +74,22 @@ object CarpoolCodec {
         }
     }
 
+    data class TripWindow(val tripId: String, val startMs: Long, val endMs: Long?)
+
+    /**
+     * The trip whose recorded window covers an instant - how a ride logged by date and time
+     * joins its drive EVEN WHEN the trip materialises later: abruptly-stopped sessions are
+     * recovered after the fact, and the owner's passengers were aboard whether or not the
+     * recorder survived. Latest-starting covering window wins; a null end (still recording)
+     * covers everything after its start. Pure, so the rule is unit-testable.
+     */
+    fun tripLinkFor(ms: Long, windows: List<TripWindow>): String? =
+        windows.filter { it.startMs <= ms && (it.endMs == null || it.endMs >= ms) }
+            .maxByOrNull { it.startMs }?.tripId
+
+    /** The entry's own date and time back in millis from its IST stamp; null on garbage. */
+    fun whenMs(e: CarpoolEntry): Long? = RecordTime.parseStamp(e.dateUtc)
+
     /**
      * Monthly roll-up, pure: the caller supplies each entry's pump cost (trip fuel litres x
      * latest logged price), because that needs the sample store. Months are IST keys, so a

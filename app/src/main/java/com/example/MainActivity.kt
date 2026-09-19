@@ -88,6 +88,7 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector)
     object RevTheater : Screen("rev_theater", "Rev Theater", Icons.Default.MusicNote)
     object Profiles : Screen("profiles", "Profiles", Icons.Default.VerifiedUser)
     object FuelCosts : Screen("fuel_costs", "Fuel & Costs", Icons.Default.LocalGasStation)
+    object Carpool : Screen("carpool", "Car Pool", Icons.Default.Groups)
     object FuelSavings : Screen("fuel_savings", "Save Fuel", Icons.Default.Savings)
     object Maintenance : Screen("maintenance", "Maintenance", Icons.Default.Build)
     object DriveBackup : Screen("drive_backup", "Drive Backup", Icons.Default.CloudUpload)
@@ -343,7 +344,7 @@ fun MainApp(viewModel: MainViewModel) {
         )
     }
     val drawerItems = bottomNavItems + listOf(
-        Screen.FuelCosts, Screen.FuelSavings, Screen.Maintenance, Screen.Expenses, Screen.Reports,
+        Screen.FuelCosts, Screen.Carpool, Screen.FuelSavings, Screen.Maintenance, Screen.Expenses, Screen.Reports,
         Screen.CoachChat, Screen.Trips, Screen.TripsOverview, Screen.Reminders, Screen.Documents, Screen.OwnerManual, Screen.DriveBackup,
         Screen.PidScanner, Screen.CodingLab, Screen.RevTheater, Screen.Settings, Screen.About
     )
@@ -707,6 +708,12 @@ fun MainApp(viewModel: MainViewModel) {
 
             composable(Screen.FuelCosts.route) {
                 FuelCostsScreen(
+                    viewModel = viewModel,
+                    onBack = { navController.popBackStack() }
+                )
+            }
+            composable(Screen.Carpool.route) {
+                CarpoolScreen(
                     viewModel = viewModel,
                     onBack = { navController.popBackStack() }
                 )

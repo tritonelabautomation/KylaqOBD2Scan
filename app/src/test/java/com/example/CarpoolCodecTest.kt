@@ -3,6 +3,7 @@ package com.example
 import com.example.data.CarpoolCodec
 import com.example.data.CarpoolCodec.CarpoolEntry
 import com.example.data.CarpoolCodec.Rider
+import com.example.data.RecordTime
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import org.junit.Assert.assertEquals
@@ -69,5 +70,27 @@ class CarpoolCodecTest {
         assertEquals(150.0, rows[1].earned, 1e-9)
         assertNull(rows[1].effective) // fuel cost unknown => no fabricated effective
         assertTrue(rows[1].fuelCost == null)
+    }
+
+    @Test
+    fun ridesLinkToTheTripWhoseWindowCoversThem() {
+        val w = listOf(
+            CarpoolCodec.TripWindow("t1", 1_000, 2_000),
+            CarpoolCodec.TripWindow("t2", 5_000, null) // still recording: open end covers onward
+        )
+        assertEquals("t1", CarpoolCodec.tripLinkFor(1_500, w))
+        assertEquals("t1", CarpoolCodec.tripLinkFor(2_000, w)) // window end inclusive
+        assertEquals("t2", CarpoolCodec.tripLinkFor(9_000, w))
+        // The gap between two trips is exactly the owner's abruptly-stopped case: no trip
+        // covers it, the ride stays standalone until a recovery replays the session.
+        assertNull(CarpoolCodec.tripLinkFor(3_000, w))
+    }
+
+    @Test
+    fun whenMsRoundTripsTheIstStamp() {
+        val ist = ZoneId.of("Asia/Kolkata")
+        val ms = ZonedDateTime.of(2026, 9, 19, 22, 21, 0, 0, ist).toInstant().toEpochMilli()
+        val e = CarpoolEntry(1L, null, RecordTime.stamp(ms), 10.0, listOf(Rider("A", 50.0)))
+        assertEquals(ms, CarpoolCodec.whenMs(e))
     }
 }

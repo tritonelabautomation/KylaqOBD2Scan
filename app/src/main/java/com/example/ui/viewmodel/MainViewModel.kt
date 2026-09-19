@@ -269,6 +269,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return if (s.fuelLiters > 0.01) s.fuelLiters * price else null
     }
 
+    fun carpoolEntries(): List<com.example.data.CarpoolCodec.CarpoolEntry> =
+        carpoolRepository.entries()
+
+    suspend fun tripTitleMap(): Map<String, String> =
+        recordingManager.tripRepository.allTripsChronological().associate { it.id to it.title }
+
+    /**
+     * Save a car-pool ride, auto-linking it to whichever saved trip's time window covers the
+     * ride's own date and time (owner 2026-09-19: "based on date & time input in car pool logging
+     * trip can fetch at exact time if any car pool exist it can link to trip"). An explicit
+     * tripId (saved from a trip's own card) always wins.
+     */
+    suspend fun saveCarpool(e: com.example.data.CarpoolCodec.CarpoolEntry) {
+        val linked = e.tripId ?: com.example.data.CarpoolCodec.whenMs(e)?.let { ms ->
+            com.example.data.CarpoolCodec.tripLinkFor(
+                ms,
+                recordingManager.tripRepository.allTripsChronological().map {
+                    com.example.data.CarpoolCodec.TripWindow(it.id, it.startTimestamp, it.endTimestamp)
+                }
+            )
+        }
+        carpoolRepository.save(e.copy(tripId = linked))
+    }
+
     /**
      * Car-pool monthly roll-up (owner 2026-09-19): earned vs effective cost per IST month.
      * Pump costs are resolved BEFORE the pure grouping: the codec's cost lambda is deliberately

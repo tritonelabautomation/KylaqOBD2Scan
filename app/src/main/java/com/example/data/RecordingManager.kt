@@ -601,6 +601,11 @@ class RecordingManager(
         // stationary window - or across the session gap, engine off at the pump - is the event.
         // Runs at finalize so recovered sessions detect their refuels through the same rows.
         runCatching { detectRefuelEvents(txList) }
+        // Car-pool orphan linking (owner 2026-09-19): rides logged by date and time while this
+        // session was driving - including sessions that died abruptly and were recovered only
+        // now - join the trip whose window covers them, the moment the trip exists.
+        runCatching { relinkCarpoolEntries() }
+            .onFailure { android.util.Log.e("RecordingManager", "carpool relink failed", it) }
             .onFailure { android.util.Log.e("RecordingManager", "refuel detection failed", it) }
 
         // Auto-run local AI Doctor analysis
@@ -677,6 +682,22 @@ class RecordingManager(
         }
         scan.lastLevel?.let { settings.setLastLevelStamp(it.first, it.second, it.third) }
         for (ev in events) insertEventCarryCalibration(ev, capacity)
+    }
+
+    private suspend fun relinkCarpoolEntries() {
+        val carpool = com.example.di.AppContainer.carpoolRepository
+        val orphans = carpool.entries().filter { it.tripId == null }
+        if (orphans.isEmpty()) return
+        val windows = tripRepository.allTripsChronological().map {
+            com.example.data.CarpoolCodec.TripWindow(it.id, it.startTimestamp, it.endTimestamp)
+        }
+        orphans.forEach { o ->
+            com.example.data.CarpoolCodec.whenMs(o)?.let { ms ->
+                com.example.data.CarpoolCodec.tripLinkFor(ms, windows)?.let { link ->
+                    carpool.save(o.copy(tripId = link))
+                }
+            }
+        }
     }
 
     /**
