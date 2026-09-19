@@ -216,4 +216,18 @@ class RecordTimeIstTest {
         val newEnd = RecordTime.stamp(legacyStartMs + 3_600_000L)
         assertEquals(3_600L, SessionTime.durationSeconds(legacyStart, newEnd))
     }
+
+    @Test
+    fun pickerResultsAreAlwaysZeroPaddedAndParseable() {
+        // Owner 2026-09-20: calendar/clock pickers replaced typed dates. A picker result like
+        // 2026-9-5 would fail the dialog's parse - the formatters must pad, and the round trip
+        // through parseStamp must land on the exact instant the owner dialled in, in IST.
+        assertEquals("2026-09-05", RecordTime.pickedDate(2026, 9, 5))
+        assertEquals("00:07", RecordTime.pickedTime(0, 7))
+        assertEquals("23:59", RecordTime.pickedTime(23, 59))
+        val stamp = RecordTime.stamp(
+            RecordTime.parseStamp(RecordTime.pickedDate(2026, 9, 20) + "T00:44:00.000+05:30")!!
+        )
+        assertTrue(stamp.startsWith("2026-09-20T00:44"))
+    }
 }

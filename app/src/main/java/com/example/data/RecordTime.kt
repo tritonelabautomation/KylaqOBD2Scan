@@ -178,6 +178,18 @@ object RecordTime {
     /** Canonical record stamp for an instant, in IST with its offset. */
     fun stamp(millis: Long): String = format(STAMP_PATTERN, millis)
 
+    /**
+     * Zero-padded `yyyy-MM-dd` from a calendar-picker result (month 1-based): the format the
+     * car-pool dialog stores and parses. Owner 2026-09-20: pickers replaced typed dates, and a
+     * picker result must never land as `2026-9-5` - the parse side expects two digits everywhere.
+     */
+    fun pickedDate(year: Int, month1: Int, day: Int): String =
+        String.format(java.util.Locale.US, "%04d-%02d-%02d", year, month1, day)
+
+    /** Zero-padded 24-hour `HH:mm` from a time-picker result, same rule as [pickedDate]. */
+    fun pickedTime(hour: Int, minute: Int): String =
+        String.format(java.util.Locale.US, "%02d:%02d", hour, minute)
+
     /** Inverse of [stamp]: an IST record stamp back to epoch millis; null on garbage. */
     fun parseStamp(s: String): Long? =
         runCatching { formatter(STAMP_PATTERN).parse(s)?.time }.getOrNull()

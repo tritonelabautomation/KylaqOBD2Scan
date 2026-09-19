@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material3.AlertDialog
@@ -29,6 +31,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -85,6 +88,38 @@ fun CarpoolCard(
                 Spacer(Modifier.height(4.dp))
                 TextButton(onClick = onAdd) { Text("Edit") }
             }
+        }
+    }
+}
+
+/**
+ * A tappable field that LOOKS like an input but opens a picker (owner 2026-09-20: "showing
+ * calender to select ... give time option to select time"). Read-only by design: the value can
+ * only change through the system calendar/clock, so it can never hold an unparseable string.
+ */
+@Composable
+private fun PickerField(
+    label: String,
+    value: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    androidx.compose.material3.OutlinedButton(
+        onClick = onClick,
+        modifier = modifier.height(56.dp),
+        shape = RoundedCornerShape(8.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(label, fontSize = 10.sp, color = TextSecondaryDark)
+                Text(value, fontSize = 14.sp, color = TextPrimaryDark, fontWeight = FontWeight.SemiBold)
+            }
+            Icon(icon, null, tint = TextSecondaryDark, modifier = Modifier.size(18.dp))
         }
     }
 }
@@ -171,6 +206,36 @@ fun CarpoolDialog(
     var timeStr by remember {
         mutableStateOf(com.example.data.RecordTime.format("HH:mm", baseMs))
     }
+    // Owner 2026-09-20, with five reference screenshots (system clock dial, Fuelio calendar):
+    // "you are asking me to type date year month date instead of showing calender to select ...
+    // same goes for the time". The two fields are now tappable and open the SYSTEM date and time
+    // pickers - the same calendar grid and clock dial every other app on the phone shows. The
+    // typed-format strings stay the source of truth so the save path and the IST math are
+    // untouched; the pickers write back through RecordTime.pickedDate/pickedTime (zero-padded).
+    val pickerContext = LocalContext.current
+    fun openDatePicker() {
+        val parts = dateStr.split('-')
+        val now = java.util.Calendar.getInstance()
+        val y = parts.getOrNull(0)?.toIntOrNull() ?: now.get(java.util.Calendar.YEAR)
+        val mo = (parts.getOrNull(1)?.toIntOrNull() ?: (now.get(java.util.Calendar.MONTH) + 1)) - 1
+        val d = parts.getOrNull(2)?.toIntOrNull() ?: now.get(java.util.Calendar.DAY_OF_MONTH)
+        android.app.DatePickerDialog(
+            pickerContext,
+            { _, yy, mm, dd -> dateStr = com.example.data.RecordTime.pickedDate(yy, mm + 1, dd) },
+            y, mo, d
+        ).show()
+    }
+    fun openTimePicker() {
+        val parts = timeStr.split(':')
+        val now = java.util.Calendar.getInstance()
+        val h = parts.getOrNull(0)?.toIntOrNull() ?: now.get(java.util.Calendar.HOUR_OF_DAY)
+        val mi = parts.getOrNull(1)?.toIntOrNull() ?: now.get(java.util.Calendar.MINUTE)
+        android.app.TimePickerDialog(
+            pickerContext,
+            { _, hh, mm -> timeStr = com.example.data.RecordTime.pickedTime(hh, mm) },
+            h, mi, true
+        ).show()
+    }
     // BUGFIX 2026-09-19 (owner: "unable to type rider 1 & ₹ place it's not taking any input
     // from keyboard"): these were mutableStateOf(MutableList) updated by MUTATING the list and
     // re-assigning the SAME instance - Compose compares old and new value, sees the identical
@@ -192,19 +257,19 @@ fun CarpoolDialog(
         text = {
             Column {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    OutlinedTextField(
+                    PickerField(
+                        label = "Date (IST)",
                         value = dateStr,
-                        onValueChange = { dateStr = it },
-                        label = { Text("Date (IST)") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1.2f)
+                        icon = Icons.Default.CalendarMonth,
+                        modifier = Modifier.weight(1.2f),
+                        onClick = ::openDatePicker
                     )
-                    OutlinedTextField(
+                    PickerField(
+                        label = "Time",
                         value = timeStr,
-                        onValueChange = { timeStr = it },
-                        label = { Text("Time") },
-                        singleLine = true,
-                        modifier = Modifier.weight(0.8f)
+                        icon = Icons.Default.Schedule,
+                        modifier = Modifier.weight(0.8f),
+                        onClick = ::openTimePicker
                     )
                 }
                 Spacer(Modifier.height(6.dp))

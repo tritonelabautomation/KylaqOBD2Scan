@@ -81,3 +81,15 @@ date/time/distance fields worked because Strings are immutable: each keystroke I
 Fix: `mutableStateListOf` (SnapshotStateList) whose element writes are tracked individually -
 `riderNames[i] = v`. Date/time/distance untouched. Swept the whole app for the same
 mutate-and-reassign pattern: no other occurrence.
+
+## Field bug 2, same night (owner, five reference screenshots): typed date/time instead of pickers
+
+Owner: *"Another BUG you are asking me to type date year month date instead of showing calender
+to select. Same goes for the time ... I have attached screenshots where select date and time
+options how good they're."* (system clock dial + Fuelio calendar/dial).
+
+Fix: the dialog's Date (IST) and Time fields are now tappable boxes (calendar and clock icons)
+that open the SYSTEM `DatePickerDialog` / `TimePickerDialog` - the same calendar grid and 24-hour
+clock dial every other app on the phone shows, including the two he sent. The pickers write back
+through `RecordTime.pickedDate` / `pickedTime` (zero-padded, unit-tested), so the stored strings
+and the IST save math are unchanged; a value can no longer be an unparseable typed string at all.
