@@ -183,6 +183,16 @@ object SinceRefuelStats {
 
     data class Row(val tsMs: Long, val pid: String, val value: Double?)
 
+    /**
+     * Drivable-range ESTIMATE for the cluster's range readout: tank content from the level PID
+     * and the (calibrated) capacity, at the selected tab's km/L. An estimate by construction -
+     * level % is a sender curve, not a dipstick - so the UI labels it est everywhere.
+     */
+    fun rangeKm(levelPct: Double?, capacityL: Double, kmPerL: Double?): Double? {
+        if (levelPct == null || kmPerL == null || kmPerL <= 0.0) return null
+        return levelPct / 100.0 * capacityL * kmPerL
+    }
+
     data class Stats(
         val distanceKm: Double,
         val fuelLiters: Double,

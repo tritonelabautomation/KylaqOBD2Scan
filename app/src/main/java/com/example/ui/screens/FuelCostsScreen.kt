@@ -58,6 +58,31 @@ fun FuelCostsScreen(
     val refuelEvents by viewModel.refuelEventsFlow().collectAsState(initial = emptyList())
     var sinceRefuel by remember { mutableStateOf<com.example.analysis.SinceRefuelStats.Stats?>(null) }
     LaunchedEffect(refresh, refuelEvents) { sinceRefuel = viewModel.sinceRefuelStats() }
+
+    // Driving Data, the cluster's three tabs (owner 2026-09-19, infotainment photo): SINCE START
+    // is the live session, SINCE REFUEL the detected-event window, LONG-TERM everything recorded.
+    var ddTab by remember { mutableStateOf(1) }
+    var sinceStart by remember { mutableStateOf<com.example.analysis.SinceRefuelStats.Stats?>(null) }
+    var longTerm by remember { mutableStateOf<com.example.analysis.SinceRefuelStats.Stats?>(null) }
+    var odoNow by remember { mutableStateOf<Double?>(null) }
+    var levelNow by remember { mutableStateOf<Double?>(null) }
+    var capacityL by remember { mutableStateOf(50.0) }
+    LaunchedEffect(refresh, refuelEvents, ddTab) {
+        if (ddTab == 0) sinceStart = viewModel.sinceStartStats()
+        if (ddTab == 2) longTerm = viewModel.longTermStats()
+        odoNow = viewModel.currentOdoKm()
+        levelNow = viewModel.currentLevelPct()
+        capacityL = viewModel.tankCapacityL()
+    }
+    // SINCE START is live: while that tab is open the tiles re-read the in-RAM session rows.
+    LaunchedEffect(ddTab) {
+        while (ddTab == 0) {
+            sinceStart = viewModel.sinceStartStats()
+            odoNow = viewModel.currentOdoKm()
+            levelNow = viewModel.currentLevelPct()
+            kotlinx.coroutines.delay(5_000)
+        }
+    }
     var editTarget by remember { mutableStateOf<FuelLogCodec.FuelEntry?>(null) }
 
     // Restart-refuel popup answer: open the entry dialog with the detected estimate prefilled.
@@ -99,7 +124,19 @@ fun FuelCostsScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = PaddingValues(vertical = 12.dp)
         ) {
-            item { RefuelTrackerCard(refuelEvents, sinceRefuel) }
+            item {
+                RefuelTrackerCard(
+                    events = refuelEvents,
+                    since = sinceRefuel,
+                    sinceStart = sinceStart,
+                    longTerm = longTerm,
+                    odoKm = odoNow,
+                    levelPct = levelNow,
+                    capacityL = capacityL,
+                    tab = ddTab,
+                    onTab = { ddTab = it }
+                )
+            }
 
             // ── REPLICATED from owner reference screen 3 (OBDeleven Fuel expense tracker) ──
             item {
@@ -647,14 +684,23 @@ private fun RefuelDialog(
 }
 
 /**
- * Since-refuel card (owner 2026-09-19): the event list and the app's consumption since the newest
- * event. Estimated litres are labelled EST until a logged fill supplies pump litres for that
- * event, after which the row shows both and the ratio - the brim-to-brim loop closing in the UI.
+ * Driving Data card (owner 2026-09-19, infotainment photo): the cluster's three tabs -
+ * SINCE START / SINCE REFUEL / LONG-TERM - with its four tiles (consumption, time, trip,
+ * avg speed), plus two the cluster cannot show: the current odometer from PID 01A6 and an
+ * EST range (level x capacity x the selected tab's km/L). All tabs share one integrator, so
+ * they never disagree about a litre; the detected-refuel list stays under the tiles.
  */
 @Composable
 private fun RefuelTrackerCard(
     events: List<com.example.data.db.entities.RefuelEventEntity>,
-    since: com.example.analysis.SinceRefuelStats.Stats?
+    since: com.example.analysis.SinceRefuelStats.Stats?,
+    sinceStart: com.example.analysis.SinceRefuelStats.Stats?,
+    longTerm: com.example.analysis.SinceRefuelStats.Stats?,
+    odoKm: Double?,
+    levelPct: Double?,
+    capacityL: Double,
+    tab: Int,
+    onTab: (Int) -> Unit
 ) {
     Column(
         Modifier.fillMaxWidth().background(Color(0xFF1C1C1E), RoundedCornerShape(14.dp)).padding(14.dp)
@@ -662,56 +708,92 @@ private fun RefuelTrackerCard(
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Default.LocalGasStation, null, tint = Color(0xFF8E8E93), modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
-            Text("Since refuel", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text("Driving data", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
         }
         Spacer(Modifier.height(10.dp))
-        val latest = events.firstOrNull()
-        if (latest == null || since == null) {
+        Row(Modifier.fillMaxWidth().background(Color(0xFF2C2C2E), RoundedCornerShape(8.dp))) {
+            listOf("SINCE START", "SINCE REFUEL", "LONG-TERM").forEachIndexed { i, label ->
+                val selected = tab == i
+                Text(
+                    label,
+                    color = if (selected) Color.White else Color(0xFF8E8E93),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { onTab(i) }
+                        .background(
+                            if (selected) Color(0xFFE8384F) else Color.Transparent,
+                            RoundedCornerShape(8.dp)
+                        )
+                        .padding(vertical = 6.dp)
+                )
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        val shown = when (tab) { 0 -> sinceStart; 1 -> since; else -> longTerm }
+        if (tab == 1 && (events.firstOrNull() == null || since == null)) {
             Text(
                 "No refuel detected yet. The app watches the tank level PID (012F) for a rise of " +
                     "4 % or more across a stop or a session gap - your auto-cut fills, engine off " +
-                    "at the pump, are exactly that event. Drive once after a fill and this card " +
+                    "at the pump, are exactly that event. Drive once after a fill and this tab " +
                     "starts tracking distance, litres and km/L since it.",
                 color = Color(0xFF8E8E93), fontSize = 12.sp
             )
-            return
-        }
-        Row(Modifier.fillMaxWidth()) {
-            StatBlock("%.1f km".format(since.distanceKm), "Distance", Modifier.weight(1f))
-            StatBlock("%.2f L".format(since.fuelLiters), "App fuel", Modifier.weight(1f))
-            StatBlock(since.kmL?.let { "%.2f".format(it) } ?: "--", "km/L", Modifier.weight(1f))
-            StatBlock(
-                "%d:%02d h".format(since.durationSec / 3600, (since.durationSec % 3600) / 60),
-                "Time",
-                Modifier.weight(1f)
-            )
-        }
-        Spacer(Modifier.height(10.dp))
-        events.take(4).forEach { ev ->
-            val when_ = com.example.data.RecordTime.display(ev.tsEndMs)
-            val pump = ev.calibratedPumpL
-            Row(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
-                Text(when_, color = Color(0xFF8E8E93), fontSize = 12.sp, modifier = Modifier.weight(1f))
-                Text(
-                    pump?.let { "+%.2f L pump".format(it) } ?: "+%.1f L est".format(ev.estLitres),
-                    color = if (pump != null) Color(0xFF34C759) else Color(0xFFFFAB91),
-                    fontSize = 12.sp, fontWeight = FontWeight.SemiBold
-                )
-                Spacer(Modifier.width(10.dp))
-                Text(
-                    ev.odoKm?.let { "%.0f km".format(it) } ?: "-- km",
-                    color = Color(0xFF8E8E93), fontSize = 12.sp
+        } else {
+            Row(Modifier.fillMaxWidth()) {
+                StatBlock(shown?.kmL?.let { "%.1f km/l".format(it) } ?: "--", "Consumption", Modifier.weight(1f))
+                StatBlock(drivingDataTime(shown), "Time", Modifier.weight(1f))
+                StatBlock(shown?.let { "%.0f km".format(it.distanceKm) } ?: "--", "Trip", Modifier.weight(1f))
+                StatBlock(shown?.avgSpeedKmh?.let { "%.0f km/h".format(it) } ?: "--", "Avg speed", Modifier.weight(1f))
+            }
+            Spacer(Modifier.height(10.dp))
+            Row(Modifier.fillMaxWidth()) {
+                StatBlock(odoKm?.let { "%.1f km".format(it) } ?: "--", "Odo now", Modifier.weight(1f))
+                StatBlock(
+                    com.example.analysis.SinceRefuelStats.rangeKm(levelPct, capacityL, shown?.kmL)
+                        ?.let { "%.0f km".format(it) } ?: "--",
+                    "Range (est)",
+                    Modifier.weight(1f)
                 )
             }
-            if (pump != null && ev.estLitres > 0.05) {
-                Text(
-                    "app estimate was %.2f L - ratio %.3f (level rise %.1f pts)"
-                        .format(ev.estLitres, ev.estLitres / pump, ev.levelAfterPct - ev.levelBeforePct),
-                    color = Color(0xFF8E8E93), fontSize = 11.sp
-                )
+        }
+        if (events.isNotEmpty()) {
+            Spacer(Modifier.height(10.dp))
+            events.take(4).forEach { ev ->
+                val when_ = com.example.data.RecordTime.display(ev.tsEndMs)
+                val pump = ev.calibratedPumpL
+                Row(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+                    Text(when_, color = Color(0xFF8E8E93), fontSize = 12.sp, modifier = Modifier.weight(1f))
+                    Text(
+                        pump?.let { "+%.2f L pump".format(it) } ?: "+%.1f L est".format(ev.estLitres),
+                        color = if (pump != null) Color(0xFF34C759) else Color(0xFFFFAB91),
+                        fontSize = 12.sp, fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        ev.odoKm?.let { "%.0f km".format(it) } ?: "-- km",
+                        color = Color(0xFF8E8E93), fontSize = 12.sp
+                    )
+                }
+                if (pump != null && ev.estLitres > 0.05) {
+                    Text(
+                        "app estimate was %.2f L - ratio %.3f (level rise %.1f pts)"
+                            .format(ev.estLitres, ev.estLitres / pump, ev.levelAfterPct - ev.levelBeforePct),
+                        color = Color(0xFF8E8E93), fontSize = 11.sp
+                    )
+                }
             }
         }
     }
+}
+
+/** Cluster wording: whole days above a day ("1 Days"), otherwise "17:54 h". */
+private fun drivingDataTime(s: com.example.analysis.SinceRefuelStats.Stats?): String {
+    val sec = s?.durationSec ?: return "--"
+    return if (sec >= 86_400) "%d Days".format(sec / 86_400)
+    else "%d:%02d h".format(sec / 3600, (sec % 3600) / 60)
 }
 
 @Composable

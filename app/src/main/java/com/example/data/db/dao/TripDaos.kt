@@ -48,6 +48,13 @@ interface TelemetrySampleDao {
     )
     suspend fun samplesForTripPids(tripId: String, pids: List<String>): List<SampleRow>
 
+    /** Newest stored value of one PID: the odometer/level readout when no session is live. */
+    @Query(
+        "SELECT numericValue FROM telemetry_samples WHERE pid = :pid AND numericValue IS NOT NULL " +
+            "ORDER BY timestamp DESC LIMIT 1"
+    )
+    suspend fun latestNumericFor(pid: String): Double?
+
     @Query("SELECT * FROM telemetry_samples WHERE tripId = :tripId ORDER BY sequence ASC")
     fun getSamplesForTripFlow(tripId: String): Flow<List<TelemetrySampleEntity>>
 

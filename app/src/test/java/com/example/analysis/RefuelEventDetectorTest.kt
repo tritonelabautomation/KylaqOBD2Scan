@@ -276,3 +276,24 @@ class RestartRefuelIdempotenceTest {
         assertEquals(56.1, atRestart.risePct, 1e-9)
     }
 }
+
+/**
+ * The cluster's range readout, as an estimate: tank content from the level sender and the
+ * calibrated capacity, at the selected tab's km/L. Null in, null out - the UI then shows "--"
+ * rather than a fabricated distance (no-fake-values rule).
+ */
+class SinceRefuelRangeTest {
+
+    @Test
+    fun rangeIsTankContentTimesEfficiency() {
+        assertEquals(250.0, SinceRefuelStats.rangeKm(50.0, 50.0, 10.0)!!, 1e-9)
+        assertEquals(0.0, SinceRefuelStats.rangeKm(0.0, 50.0, 10.0)!!, 1e-9)
+    }
+
+    @Test
+    fun rangeIsHonestWhenInputsAreMissing() {
+        assertNull(SinceRefuelStats.rangeKm(null, 50.0, 10.0))
+        assertNull(SinceRefuelStats.rangeKm(50.0, 50.0, null))
+        assertNull(SinceRefuelStats.rangeKm(50.0, 50.0, 0.0))
+    }
+}

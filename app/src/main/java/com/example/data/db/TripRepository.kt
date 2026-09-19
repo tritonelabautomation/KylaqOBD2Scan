@@ -138,6 +138,10 @@ class TripRepository(context: Context) {
     suspend fun samplesSince(ts: Long, pids: List<String>): List<SampleRow> =
         withContext(Dispatchers.IO) { sampleDao.samplesSince(ts, pids) }
 
+    suspend fun latestNumericFor(pid: String): Double? = withContext(Dispatchers.IO) {
+        sampleDao.latestNumericFor(pid)
+    }
+
     suspend fun samplesForTripPids(tripId: String, pids: List<String>): List<SampleRow> =
         withContext(Dispatchers.IO) { sampleDao.samplesForTripPids(tripId, pids) }
 

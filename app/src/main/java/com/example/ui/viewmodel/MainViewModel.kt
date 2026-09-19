@@ -94,15 +94,77 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** Detected refuel events, newest first (owner 2026-09-19 since-refuel tracking). */
     fun refuelEventsFlow() = recordingManager.tripRepository.refuelEventsFlow()
 
+    /** The four PIDs every Driving-Data tab integrates: speed, two fuel rates, odometer. */
+    private val summaryPids = listOf("010D", "019D", "015E", "01A6")
+
     /** Consumption since the newest detected refuel, from the app's own rows. Null if none yet. */
     suspend fun sinceRefuelStats(): com.example.analysis.SinceRefuelStats.Stats? {
         val repo = recordingManager.tripRepository
         val ev = repo.refuelEvents().firstOrNull() ?: return null
-        val rows = repo.samplesSince(ev.tsEndMs, listOf("010D", "019D", "015E", "01A6"))
+        val rows = repo.samplesSince(ev.tsEndMs, summaryPids)
         return com.example.analysis.SinceRefuelStats.summarize(
             rows.map { com.example.analysis.SinceRefuelStats.Row(it.timestamp, it.pid, it.numericValue) }
         )
     }
+
+    /**
+     * Cluster LONG-TERM tab: everything the app has ever recorded, through the SAME integrator
+     * as since-refuel - one code path, so the tabs can never disagree about a litre.
+     */
+    suspend fun longTermStats(): com.example.analysis.SinceRefuelStats.Stats? {
+        val rows = recordingManager.tripRepository.samplesSince(0L, summaryPids)
+        if (rows.isEmpty()) return null
+        return com.example.analysis.SinceRefuelStats.summarize(
+            rows.map { com.example.analysis.SinceRefuelStats.Row(it.timestamp, it.pid, it.numericValue) }
+        )
+    }
+
+    /**
+     * Cluster SINCE START tab: the live session while recording (rows straight from RAM), else
+     * the last COMPLETED trip from its stored samples - the cluster resets at ignition, the app
+     * keeps showing the finished drive until the next one starts.
+     */
+    suspend fun sinceStartStats(): com.example.analysis.SinceRefuelStats.Stats? {
+        val repo = recordingManager.tripRepository
+        val rows: List<com.example.analysis.SinceRefuelStats.Row> =
+            if (recordingManager.isRecording.value) {
+                recordingManager.currentTransactions.value.map { tx ->
+                    com.example.analysis.SinceRefuelStats.Row(
+                        com.example.data.RecordTime.instantOf(tx.timestampMonotonic, tx.timestampUtc)
+                            ?: tx.timestampMonotonic,
+                        tx.pid,
+                        tx.decodedValue
+                    )
+                }
+            } else {
+                val trip = repo.allTripsChronological().lastOrNull { it.status == "COMPLETED" }
+                    ?: return null
+                repo.samplesForTripPids(trip.id, summaryPids).map {
+                    com.example.analysis.SinceRefuelStats.Row(it.timestamp, it.pid, it.numericValue)
+                }
+            }
+        if (rows.isEmpty()) return null
+        return com.example.analysis.SinceRefuelStats.summarize(rows)
+    }
+
+    /** Current odometer, PID 01A6: newest row of the live session, else newest stored row. */
+    suspend fun currentOdoKm(): Double? = currentPidValue("01A6")
+
+    /** Current tank level, PID 012F: newest live row, else the previous session's last stamp. */
+    suspend fun currentLevelPct(): Double? =
+        currentPidValue("012F")
+            ?: com.example.di.AppContainer.settingsRepository.lastLevelStamp()?.second
+
+    private suspend fun currentPidValue(pid: String): Double? =
+        if (recordingManager.isRecording.value) {
+            recordingManager.currentTransactions.value
+                .lastOrNull { it.pid == pid && it.decodedValue != null }?.decodedValue
+        } else {
+            recordingManager.tripRepository.latestNumericFor(pid)
+        }
+
+    /** Calibrated tank capacity for the range estimate (Settings holds it, prefs-backed). */
+    fun tankCapacityL(): Double = com.example.di.AppContainer.settingsRepository.tankCapacityL()
 
     /**
      * Closes the brim-to-brim loop: a fuel-log entry whose odometer matches an uncalibrated refuel
