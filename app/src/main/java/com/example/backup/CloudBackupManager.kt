@@ -491,6 +491,17 @@ class CloudBackupManager(
     }
 
     companion object {
+        /**
+         * The one button the owner asked for (2026-09-20, with a reference screenshot of another
+         * app: "I asked for such a continue with google then choose which Google account I want
+         * to login"). Wording is the Google-standard "Continue with Google"; once an account is
+         * connected the same button becomes the way to SWITCH accounts, because tapping it signs
+         * out first so the system sheet lists every Google account on the phone again instead of
+         * silently reusing the stored one.
+         */
+        fun continueButtonLabel(signedInEmail: String?): String =
+            if (signedInEmail.isNullOrBlank()) "Continue with Google" else "Switch Google account"
+
         private const val CHANNEL_BACKUP = "backup_sync"
         private const val NOTIFICATION_BACKUP_ID = 9002
 

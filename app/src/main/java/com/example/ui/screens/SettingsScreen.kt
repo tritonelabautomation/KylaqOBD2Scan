@@ -983,6 +983,10 @@ fun SettingsScreen(
                                     return@Button
                                 }
                                 coroutineScope.launch {
+                                    // Owner 2026-09-20: "choose which Google account I want to login".
+                                    // A stored account would otherwise be reused silently, so switching
+                                    // signs out first and the Google sheet lists every account again.
+                                    if (googleEmail != null) cloudManager.signOut()
                                     val result = cloudManager.signInWithGoogle(activity)
                                     result.onFailure { err ->
                                         // FIX: a dismissed account chooser is not an error, and a
@@ -1005,24 +1009,24 @@ fun SettingsScreen(
                             },
                             modifier = Modifier.fillMaxWidth().testTag("btn_google_sign_in"),
                             shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = CyberCyanDark),
-                            enabled = signInConfigured || showSignInSetup
+                            colors = ButtonDefaults.buttonColors(containerColor = CyberCyanDark)
                         ) {
                             Icon(Icons.Default.AccountCircle, contentDescription = null)
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                if (signInConfigured) "Sign in with Google (legacy auto-sync)"
-                                else "Legacy sign-in (needs Console key) - use the green button above",
+                                com.example.backup.CloudBackupManager.continueButtonLabel(googleEmail),
                                 fontWeight = FontWeight.Bold
                             )
                         }
 
                         if (!signInConfigured) {
                             Text(
-                                text = "Optional: legacy Credential Manager sign-in stays disabled until an OAuth Web " +
-                                    "Client ID from Google Cloud Console is pasted above (Google requires a registered " +
-                                    "client for that API). Your Drive backup does NOT need it - the green button opens " +
-                                    "the system picker where you choose your Google account and folder.",
+                                text = "First tap of \u201CContinue with Google\u201D opens the setup card above: Google " +
+                                    "shows its account sheet only to apps registered with an OAuth Web Client ID " +
+                                    "(one-time, 5 minutes, steps 1-3 in the card - package and SHA-1 are copyable). " +
+                                    "After that this button opens Google's own sheet listing every account on the " +
+                                    "phone, exactly like the flow you sent. The green button above needs none of " +
+                                    "this: it opens the system Drive picker where you choose account and folder now.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = ElectricAmber,
                                 fontSize = 11.sp,
