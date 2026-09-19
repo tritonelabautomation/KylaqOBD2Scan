@@ -93,3 +93,16 @@ that open the SYSTEM `DatePickerDialog` / `TimePickerDialog` - the same calendar
 clock dial every other app on the phone shows, including the two he sent. The pickers write back
 through `RecordTime.pickedDate` / `pickedTime` (zero-padded, unit-tested), so the stored strings
 and the IST save math are unchanged; a value can no longer be an unparseable typed string at all.
+
+## Field change 3 (owner 2026-09-20, with screen photos): month-wise sections, not one top total
+
+Owner: *"its showing overall earning can't we have an month wise earning not in the top in
+between trip segregate to that month the log and show that month earning and fuel refill cost
+saving or net fuel cost for that month."*
+
+The Car Pool screen no longer opens with a single "This month" card plus a previous-months list.
+Rides are grouped by their IST month and every month that holds rides gets a header card directly
+above its own rides: month key, ride count and km, **earned**, the **fuel cost** of that month's
+linked trips ("--" when nothing linked has fuel), and the month's **net fuel cost** - or
+**saving over fuel** in green when earnings exceed it. Same `CarpoolCodec.monthly` rows the
+Reports card uses, so the numbers cannot disagree between screens.

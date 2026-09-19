@@ -89,75 +89,6 @@ fun CarpoolScreen(
         Column(
             Modifier.padding(pad).fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)
         ) {
-            monthly.lastOrNull()?.let { m ->
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surface
-                    )
-                ) {
-                    Column(Modifier.padding(12.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Groups, null, tint = NeonEmerald, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                "This month (${m.month})",
-                                color = TextPrimaryDark, fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                        Spacer(Modifier.height(6.dp))
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text(
-                                "${m.trips} ride(s) · " +
-                                    String.format(java.util.Locale.US, "%.0f", m.distanceKm) + " km",
-                                color = TextSecondaryDark, fontSize = 12.sp
-                            )
-                            Text(
-                                "earned " + String.format(java.util.Locale.US, "₹%.0f", m.earned),
-                                color = NeonEmerald, fontWeight = FontWeight.Bold, fontSize = 14.sp
-                            )
-                        }
-                        m.effective?.let { eff ->
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text(
-                                    m.fuelCost?.let {
-                                        "fuel " + String.format(java.util.Locale.US, "₹%.0f", it)
-                                    } ?: "fuel --",
-                                    color = TextSecondaryDark, fontSize = 11.sp
-                                )
-                                Text(
-                                    if (eff > 0) "effective " + String.format(java.util.Locale.US, "₹%.0f", eff)
-                                    else "surplus " + String.format(java.util.Locale.US, "+₹%.0f", -eff),
-                                    color = if (eff > 0) ElectricAmber else NeonEmerald,
-                                    fontWeight = FontWeight.Bold, fontSize = 12.sp
-                                )
-                            }
-                        }
-                    }
-                }
-                Spacer(Modifier.height(10.dp))
-            }
-            if (monthly.size > 1) {
-                monthly.reversed().drop(1).take(6).forEach { m ->
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(
-                            "${m.month} · ${m.trips} ride(s) · earned " +
-                                String.format(java.util.Locale.US, "₹%.0f", m.earned),
-                            color = TextSecondaryDark, fontSize = 12.sp
-                        )
-                        m.effective?.let { eff ->
-                            Text(
-                                if (eff > 0) String.format(java.util.Locale.US, "₹%.0f", eff)
-                                else String.format(java.util.Locale.US, "+₹%.0f", -eff),
-                                color = if (eff > 0) ElectricAmber else NeonEmerald,
-                                fontWeight = FontWeight.SemiBold, fontSize = 12.sp
-                            )
-                        }
-                    }
-                }
-                Spacer(Modifier.height(10.dp))
-            }
             Button(onClick = { showAdd = true }, modifier = Modifier.fillMaxWidth()) {
                 Text("+ Log car pool")
             }
@@ -170,7 +101,65 @@ fun CarpoolScreen(
                     color = TextSecondaryDark, fontSize = 12.sp
                 )
             }
-            entries.forEach { e ->
+            // Owner 2026-09-20: "month wise earning ... not in the top in between trip segregate
+            // to that month the log and show that month earning and fuel refill cost saving or
+            // net fuel cost for that month". The single top summary is gone: every IST month that
+            // holds rides gets its own header card directly above its rides, carrying that
+            // month's earned, the fuel cost of its linked trips, and the net fuel cost (or the
+            // saving when earnings beat fuel) - the same tested numbers the Reports card shows.
+            val monthTotals = monthly.associateBy { it.month }
+            entries.groupBy {
+                com.example.data.RecordTime.format("yyyy-MM", CarpoolCodec.whenMs(it) ?: it.idMs)
+            }.toSortedMap(compareByDescending { it }).forEach { (monthKey, monthEntries) ->
+                val tot = monthTotals[monthKey]
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant
+                    )
+                ) {
+                    Column(Modifier.padding(10.dp)) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(
+                                monthKey,
+                                color = TextPrimaryDark, fontWeight = FontWeight.Bold, fontSize = 14.sp
+                            )
+                            Text(
+                                "earned " + String.format(java.util.Locale.US, "₹%.0f", tot?.earned ?: 0.0),
+                                color = NeonEmerald, fontWeight = FontWeight.Bold, fontSize = 13.sp
+                            )
+                        }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(
+                                "${tot?.trips ?: monthEntries.size} ride(s) · " +
+                                    String.format(java.util.Locale.US, "%.0f", tot?.distanceKm ?: 0.0) + " km",
+                                color = TextSecondaryDark, fontSize = 11.sp
+                            )
+                            tot?.fuelCost?.let { fc ->
+                                Text(
+                                    "fuel " + String.format(java.util.Locale.US, "₹%.0f", fc),
+                                    color = TextSecondaryDark, fontSize = 11.sp
+                                )
+                            } ?: Text("fuel --", color = TextSecondaryDark, fontSize = 11.sp)
+                        }
+                        tot?.effective?.let { eff ->
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text(
+                                    if (eff > 0) "net fuel cost" else "saving over fuel",
+                                    color = TextSecondaryDark, fontSize = 11.sp
+                                )
+                                Text(
+                                    if (eff > 0) String.format(java.util.Locale.US, "₹%.0f", eff)
+                                    else String.format(java.util.Locale.US, "+₹%.0f", -eff),
+                                    color = if (eff > 0) ElectricAmber else NeonEmerald,
+                                    fontWeight = FontWeight.Bold, fontSize = 12.sp
+                                )
+                            }
+                        }
+                    }
+                }
+                monthEntries.forEach { e ->
                 val ms = CarpoolCodec.whenMs(e) ?: e.idMs
                 Card(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
@@ -215,6 +204,8 @@ fun CarpoolScreen(
                         }
                     }
                 }
+                }
+                Spacer(Modifier.height(8.dp))
             }
         }
     }
