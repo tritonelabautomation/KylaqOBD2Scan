@@ -53,18 +53,6 @@ fun DashboardScreen(
     val connectionState by viewModel.connectionState.collectAsState()
     val connectedDeviceName by viewModel.connectedDeviceName.collectAsState()
     val isPolling by viewModel.isPolling.collectAsState()
-
-    // Observed link reality for the polling card (owner 2026-09-19): the mode label promises a
-    // per-command interval; this is what the ELM327's serial round trip actually sustains.
-    var observedGap by remember { mutableStateOf<Long?>(null) }
-    var livePids by remember { mutableStateOf(0) }
-    LaunchedEffect(isPolling, pollingMode) {
-        while (true) {
-            observedGap = viewModel.obdScheduler.observedGapMs()
-            livePids = viewModel.obdScheduler.liveEligiblePidCount()
-            kotlinx.coroutines.delay(3_000)
-        }
-    }
     val autoStopNotice by viewModel.autoStopNotice.collectAsState()
     // What the automatic crash recovery did on this launch (owner 2026-09-17: "today logs not
     // saved unable to recover it"). Shown on the landing screen because a rescued trip that
@@ -83,6 +71,18 @@ fun DashboardScreen(
     val isRecording by viewModel.isRecording.collectAsState()
     val recordingDurationSeconds by viewModel.recordingDurationSeconds.collectAsState()
     val pollingMode by viewModel.pollingMode.collectAsState()
+
+    // Observed link reality for the polling card (owner 2026-09-19): the mode label promises a
+    // per-command interval; this is what the ELM327's serial round trip actually sustains.
+    var observedGap by remember { mutableStateOf<Long?>(null) }
+    var livePids by remember { mutableStateOf(0) }
+    LaunchedEffect(isPolling, pollingMode) {
+        while (true) {
+            observedGap = viewModel.obdScheduler.observedGapMs()
+            livePids = viewModel.obdScheduler.liveEligiblePidCount()
+            kotlinx.coroutines.delay(3_000)
+        }
+    }
     val vehicleName by viewModel.vehicleName.collectAsState()
     val vehicleVin by viewModel.vehicleVin.collectAsState()
     val savedRecordings by viewModel.savedRecordings.collectAsState()
