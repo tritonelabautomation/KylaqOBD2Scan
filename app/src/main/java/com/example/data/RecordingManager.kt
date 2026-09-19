@@ -127,7 +127,12 @@ class RecordingManager(
     val recoveryRunning: StateFlow<Boolean> = _recoveryRunning.asStateFlow()
 
     init {
-        loadSavedRecordings()
+        // KILL-AUDIT FIX C: this constructor runs inside AppContainer.init, which MainViewModel
+        // triggers on the MAIN thread - and loadSavedRecordings() walks every session directory
+        // parsing JSON. As trips pile up that is seconds of disk IO on the UI thread, and Android
+        // kills even a foreground process for an ANR. Load on the manager's IO scope instead; the
+        // trip list is a StateFlow, so the UI simply receives it a moment later.
+        managerScope.launch { loadSavedRecordings() }
     }
 
     companion object {
@@ -391,7 +396,14 @@ class RecordingManager(
         } else emptyList()
         val effectiveTx = SessionRecoveryPolicy.preferLonger(txList, journalTx)
         val effectiveSamples = SessionRecoveryPolicy.preferLonger(sampleList, journalSamples)
-        journal.markFinished(metadata.sessionId, endTimestamp)
+        // KILL-AUDIT FIX A (owner 2026-09-19: "find hidden mechanism which could kill app during
+        // trip and lose a trip data"): the `.finished` marker used to be written HERE - before
+        // finalizeSession spends seconds writing the CSVs, the ZIP, the Room rows and the
+        // analyses. A kill inside that window left a journal that CLAIMED a clean stop while the
+        // trip did not exist, and recovery filters finished journals out: the drive was lost with
+        // a clean-stop alibi. The writer handles close now (every row was already flushed
+        // line-by-line), but the marker moves to AFTER the trip is really persisted - a kill
+        // anywhere before that leaves the journal unfinished and recovery rebuilds it.
         journal.close()
 
         val journalFailures = journal.writeFailures
@@ -411,6 +423,12 @@ class RecordingManager(
             rawLogFile = rawLogFile,
             recovered = false
         )
+        // KILL-AUDIT FIX A: the marker is earned by the persisted trip, never by the intention to
+        // persist one. finalizeSession throwing skips it too - the journal stays unfinished and
+        // the next recovery pass rebuilds the drive instead of trusting a lie.
+        if (SessionRecoveryPolicy.finishedMarkerAllowed(saved != null)) {
+            journal.markFinished(metadata.sessionId, endTimestamp)
+        }
         loadSavedRecordings()
         saved
     }
@@ -450,7 +468,16 @@ class RecordingManager(
         // GPS altitude window for this trip (owner 2026-09-15 fix: altitude was captured live but
         // never persisted - the trip summary showed an honest "-- m" blank). Null only when the
         // recording never had an accuracy-gated GPS fix with altitude; never 0.0, never invented.
-        val altStats = com.example.di.AppContainer.tripAltitudeStats()
+        // KILL-AUDIT FIX B: the live GPS accumulator is RAM - a kill empties it, so a RECOVERED
+        // trip used to show "-- m" even though every journaled sample row carries its altitude_m.
+        // Fall back to reducing the persisted rows through the same plausibility gate; null only
+        // when no row ever held an altitude. Never invented, never lost.
+        val liveAlt = com.example.di.AppContainer.tripAltitudeStats()
+        val altStats = if (liveAlt != null && liveAlt.sampleCount > 0) {
+            liveAlt
+        } else {
+            com.example.analysis.AltitudeStats.reduce(sampleList.mapNotNull { it.altitudeM })
+        }
         // Battery voltage extremes (owner pipeline task 3, 2026-09-16), reduced from the real 0142
         // samples exactly like the altitude window.
         val voltStats = com.example.analysis.VoltageStats.extremes(
@@ -807,6 +834,11 @@ class RecordingManager(
         if (_recoveryRunning.value) return@withContext _journalRecovery.value
         _recoveryRunning.value = true
         val summary = try {
+            // KILL-AUDIT FIX C2: the dedup below trusts _savedRecordings, whose first load is now
+            // asynchronous (FIX C). Reload synchronously here - inside this IO context it is
+            // cheap - so `savedIds` is complete before any journal is touched and a restart can
+            // never rebuild a trip that already exists.
+            loadSavedRecordings()
             var recovered = 0
             var transactions = 0
             val ids = mutableListOf<String>()

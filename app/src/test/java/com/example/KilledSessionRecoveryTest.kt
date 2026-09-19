@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.RawLogManager
 import com.example.data.RecordTime
+import com.example.data.SessionRecoveryPolicy
 import com.example.data.RecordingManager
 import com.example.data.db.TripRepository
 import com.example.model.Direction
@@ -11,6 +12,7 @@ import com.example.model.ResponseStatus
 import com.example.model.TransactionRecord
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -308,5 +310,25 @@ class KilledSessionRecoveryTest {
             )
             assertEquals(frames[i].timestampMonotonic, RecordTime.parseMillis(rows[i].timestampUtc))
         }
+    }
+
+    @Test
+    fun aStopThatPersistedNothingWritesNoFinishedMarker() = runBlocking {
+        // KILL-AUDIT FIX A (owner 2026-09-19: "find hidden mechanism which could kill app during
+        // trip and lose a trip data"): the `.finished` marker is EARNED by the persisted trip. A
+        // stop whose finalize persisted nothing must leave the journal unfinished, so recovery
+        // still sees it - never a clean-stop alibi over a missing trip.
+        val manager = newManager()
+        val meta = manager.startRecording()
+        assertNotNull(meta)
+        val saved = manager.stopRecording() // no frames: nothing to persist
+        assertTrue("an empty drive saves no trip", saved == null)
+        assertFalse(
+            "no finished marker without a persisted trip",
+            manager.journal.finishedFile(meta!!.sessionId).exists()
+        )
+        // The pure rule the stop path obeys.
+        assertFalse(SessionRecoveryPolicy.finishedMarkerAllowed(saved != null))
+        assertTrue(SessionRecoveryPolicy.finishedMarkerAllowed(true))
     }
 }

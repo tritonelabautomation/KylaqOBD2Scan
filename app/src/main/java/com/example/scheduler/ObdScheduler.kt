@@ -214,6 +214,7 @@ class ObdScheduler(
             val lastPollTimeMap = mutableMapOf<String, Long>()
             val lastProbeTimeMap = mutableMapOf<String, Long>()
 
+            try {
             while (isActive && transport.isConnected) {
                 val activePids = settingsRepository.pidDefinitions.value.filter { it.enabled }
                 val speedMode = settingsRepository.pollingMode.value
@@ -295,7 +296,14 @@ class ObdScheduler(
 
                 delay(10)
             }
-            _isPolling.value = false
+            } finally {
+                // KILL-AUDIT FIX E (2026-09-19): an exception escaping one poll iteration kills
+                // this job - and `_isPolling` used to stay TRUE forever: a zombie. The
+                // auto-connect supervisor trusts the flag and never reconnects, the auto-stop
+                // watchdog silently ends the recording, and the trip stops growing mid-drive with
+                // nothing logged to say why. `finally` makes the stuck flag unconstructable.
+                _isPolling.value = false
+            }
         }
     }
 

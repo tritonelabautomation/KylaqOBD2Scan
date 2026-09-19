@@ -25,6 +25,17 @@ object SessionRecoveryPolicy {
     }
 
     /**
+     * When the `.finished` marker may be written (KILL-AUDIT FIX A, owner 2026-09-19: "find hidden
+     * mechanism which could kill app during trip and lose a trip data").
+     *
+     * ONLY after the trip itself is persisted. A marker written before finalization is a lie the
+     * recovery pass believes - it filters finished journals out, so a kill inside the finalize
+     * window (CSVs, ZIP, Room rows, analyses: seconds of work) lost the whole drive with a
+     * clean-stop alibi. No persisted trip -> no marker -> journal stays unfinished -> recovered.
+     */
+    fun finishedMarkerAllowed(tripPersisted: Boolean): Boolean = tripPersisted
+
+    /**
      * A journal with no `.finished` marker is a session the process died during.
      *
      * The marker is written only by a clean `stopRecording()`, so its absence is the signal - there

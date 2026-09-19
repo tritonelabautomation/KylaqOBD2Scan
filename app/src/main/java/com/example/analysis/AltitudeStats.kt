@@ -20,6 +20,21 @@ class AltitudeStats {
     companion object {
         const val MIN_PLAUSIBLE_M = -500.0
         const val MAX_PLAUSIBLE_M = 9500.0
+
+        /**
+         * Reduces persisted per-row altitudes (journal/CSV sample rows) into a stats window.
+         *
+         * KILL-AUDIT FIX B (2026-09-19): a recovered trip's LIVE accumulator is empty RAM - the
+         * persisted rows are the only altitude the drive has left. Same [record] plausibility
+         * gate as the live path; null when no plausible point exists, so the trip shows an honest
+         * "-- m" rather than an invented window.
+         */
+        fun reduce(points: List<Double>): AltitudeStats? {
+            if (points.isEmpty()) return null
+            val s = AltitudeStats()
+            points.forEach { s.record(it) }
+            return if (s.sampleCount > 0) s else null
+        }
     }
 
     var minAltitudeM: Double? = null

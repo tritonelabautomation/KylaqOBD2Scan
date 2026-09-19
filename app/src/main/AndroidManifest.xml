@@ -40,6 +40,11 @@
          location at all; without it startForeground(FOREGROUND_SERVICE_TYPE_LOCATION) throws. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- KILL-AUDIT FIX D (2026-09-19): lets KeepAliveBootReceiver revive the keep-alive service
+         after a device reboot or an in-app update install - the two events that kill the process
+         while a journal may still be half-written. BOOT_COMPLETED is an explicit Android 12+
+         exemption for starting a foreground service from the background. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
 
@@ -124,6 +129,19 @@
         <meta-data
             android:name="com.google.android.gms.car.application"
             android:resource="@xml/automotive_app_desc" />
+
+        <!-- KILL-AUDIT FIX D: a reboot mid-drive or an update installed over a running app used
+             to leave the cut-off journal waiting for the owner to open the app by hand. This
+             receiver restarts the service instead: it recovers the journal and resumes the
+             auto-connect/auto-record supervisors without anyone touching the phone. -->
+        <receiver
+            android:name=".service.KeepAliveBootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
         <provider
             android:name="androidx.core.content.FileProvider"

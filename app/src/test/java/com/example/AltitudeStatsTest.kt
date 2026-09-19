@@ -3,6 +3,7 @@ package com.example
 import com.example.analysis.AltitudeStats
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertNotNull
 import org.junit.Test
 
 /**
@@ -62,5 +63,29 @@ class AltitudeStatsTest {
         assertNull(s.maxAltitudeM)
         assertNull(s.rangeM)
         assertEquals(0, s.sampleCount)
+    }
+
+    @Test
+    fun `reduce rebuilds the window from persisted rows after a kill`() {
+        // KILL-AUDIT FIX B: a recovered trip's LIVE accumulator is empty RAM, but every journaled
+        // sample row carries its altitude_m - reducing the rows must give the same window STOP
+        // would have written.
+        val s = AltitudeStats.reduce(listOf(120.5, 98.0, 143.25, 110.0))
+        assertNotNull(s)
+        assertEquals(98.0, s!!.minAltitudeM!!, 0.001)
+        assertEquals(143.25, s.maxAltitudeM!!, 0.001)
+        assertEquals(45.25, s.rangeM!!, 0.001)
+        assertEquals(4, s.sampleCount)
+    }
+
+    @Test
+    fun `reduce of nothing or only glitches stays honestly null`() {
+        assertNull(AltitudeStats.reduce(emptyList()))
+        // Same plausibility gate as the live path: glitches alone must not invent a window.
+        assertNull(AltitudeStats.reduce(listOf(-1200.0, 31_000.0)))
+        val mixed = AltitudeStats.reduce(listOf(-1200.0, 540.0, 31_000.0))
+        assertNotNull(mixed)
+        assertEquals(540.0, mixed!!.minAltitudeM!!, 0.001)
+        assertEquals(540.0, mixed.maxAltitudeM!!, 0.001)
     }
 }
