@@ -301,7 +301,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     suspend fun monthlyCarpool(): List<com.example.data.CarpoolCodec.MonthRow> {
         val entries = carpoolRepository.entries()
         val costs = entries.associate { e -> e.idMs to (e.tripId?.let { tripFuelCost(it) }) }
-        return com.example.data.CarpoolCodec.monthly(entries) { e -> costs[e.idMs] }
+        val rows = com.example.data.CarpoolCodec.monthly(entries) { e -> costs[e.idMs] }
+        // Cash-basis fuel: what the fuel ledger says he spent at the pump each IST month.
+        val refuelByMonth = fuelLogRepository.entries()
+            .groupBy { com.example.data.RecordTime.format("yyyy-MM", it.idMs) }
+            .mapValues { (_, monthEntries) -> monthEntries.sumOf { it.totalCost } }
+        return com.example.data.CarpoolCodec.withRefuelFuel(rows, refuelByMonth)
     }
 
     fun noteBackgroundLocationDeclined() {

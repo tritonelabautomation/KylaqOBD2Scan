@@ -106,3 +106,16 @@ above its own rides: month key, ride count and km, **earned**, the **fuel cost**
 linked trips ("--" when nothing linked has fuel), and the month's **net fuel cost** - or
 **saving over fuel** in green when earnings exceed it. Same `CarpoolCodec.monthly` rows the
 Reports card uses, so the numbers cannot disagree between screens.
+
+## Field change 4 (owner 2026-09-20, fuel-screen photos): one list, and real fuel money
+
+Two reports in one message. (1) "See fuel expense tracker same thing showing two times one as
+weeks ago another one month date etc" - the screen rendered all 14 fill-ups twice: a relative
+timeline ("3 weeks ago") and the month-grouped FILL-UP LOG. The timeline is gone; its two unique
+affordances moved into the month cards (absolute odometer on the date row, pencil Edit beside
+Delete), so nothing is lost and every fill-up appears exactly once. (2) "its not fetching the fuel
+to cost fetch the price and show the effective cost" - month headers showed `fuel --` because fuel
+came only from LINKED trips, and his rides are standalone. `CarpoolCodec.withRefuelFuel` (pure,
+tested) now prices each IST month from his REFUEL ledger - the same sum his own "MONTH ₹" chip
+computes - falling back to trip-derived fuel, then to cash-zero; `effective` recomputes as
+fuel - earned, so every month shows net fuel cost or saving over fuel.

@@ -179,53 +179,6 @@ fun FuelCostsScreen(
                     }
                 }
             }
-            item { Text("Log history", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 6.dp)) }
-            entries.sortedByDescending { it.idMs }.forEach { entry ->
-                item {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(10.dp).border(1.5.dp, Color(0xFF636366), CircleShape))
-                        Spacer(Modifier.width(8.dp))
-                        Text(relativeLabel(entry.idMs), color = Color(0xFF8E8E93), fontSize = 11.sp, modifier = Modifier.weight(1f))
-                        Text(com.example.data.RecordTime.format("MMM d, HH:mm", entry.idMs), color = Color(0xFF8E8E93), fontSize = 11.sp)
-                    }
-                    Row(Modifier.padding(start = 4.dp, top = 6.dp, bottom = 10.dp)) {
-                        Box(Modifier.width(1.dp).height(92.dp).background(Color(0xFF2C2C2E)))
-                        Spacer(Modifier.width(14.dp))
-                        Column(Modifier.weight(1f).background(Color(0xFF1C1C1E), RoundedCornerShape(14.dp)).padding(12.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.LocalGasStation, null, tint = Color(0xFF8E8E93), modifier = Modifier.size(14.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text(
-                                    entry.odometerKm?.let { java.text.DecimalFormat("#,###").format(it) + " km" }
-                                        ?: "odometer not logged",
-                                    color = Color.White, fontSize = 13.sp
-                                )
-                            }
-                            Spacer(Modifier.height(10.dp))
-                            Row {
-                                Column(Modifier.weight(1f)) {
-                                    Text("%.1f l".format(entry.liters), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                                    Text("Amount", color = Color(0xFF8E8E93), fontSize = 10.sp)
-                                }
-                                Column(Modifier.weight(1f)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text("%.2f".format(entry.liters * entry.pricePerL), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                                        Spacer(Modifier.width(4.dp))
-                                        Icon(Icons.Default.Payments, null, tint = Color(0xFF8E8E93), modifier = Modifier.size(12.dp))
-                                    }
-                                    Text("Price", color = Color(0xFF8E8E93), fontSize = 10.sp)
-                                }
-                            }
-                        }
-                        Spacer(Modifier.width(10.dp))
-                        Box(
-                            Modifier.size(40.dp).background(Color(0xFF2C2C2E), RoundedCornerShape(10.dp))
-                                .clickable { editTarget = entry; showAdd = true },
-                            contentAlignment = Alignment.Center
-                        ) { Icon(Icons.Default.Edit, "Edit entry", tint = Color.White, modifier = Modifier.size(16.dp)) }
-                    }
-                }
-            }
             item { Text("MORE ANALYTICS (Kylaq extras)", color = TextSecondaryDark, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 6.dp)) }
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -355,6 +308,17 @@ fun FuelCostsScreen(
                             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                 Row {
                                     Text(entry.dateUtc.take(10), color = Color.White, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                                    // The duplicate timeline used to be the only place showing the
+                                    // absolute odometer; the month card now carries it too, so
+                                    // removing the twin list costs no information (owner 2026-09-20:
+                                    // "same thing showing two times").
+                                    entry.odometerKm?.let {
+                                        Text(
+                                            java.text.DecimalFormat("#,###").format(it) + " km",
+                                            color = TextSecondaryDark, fontSize = 10.sp,
+                                            modifier = Modifier.padding(end = 8.dp)
+                                        )
+                                    }
                                     val prev = prevOdoById[entry.idMs]
                                     if (entry.odometerKm != null && prev != null && entry.odometerKm > prev) {
                                         Text(String.format(java.util.Locale.US, "+%.0f km", entry.odometerKm - prev), color = TextSecondaryDark, fontSize = 10.sp)
@@ -389,6 +353,9 @@ fun FuelCostsScreen(
                                         }
                                     }
                                 }
+                            }
+                            IconButton(onClick = { editTarget = entry; showAdd = true }) {
+                                Icon(Icons.Default.Edit, contentDescription = "Edit entry", tint = TextSecondaryDark, modifier = Modifier.size(18.dp))
                             }
                             IconButton(onClick = { repo.delete(entry.idMs); refresh++ }) {
                                 Icon(Icons.Default.Delete, contentDescription = "Delete", tint = WarningRed, modifier = Modifier.size(18.dp))
@@ -440,18 +407,6 @@ fun FuelCostsScreen(
                 receiptPrefill = null
             }
         )
-    }
-}
-
-/** "2 days ago / A week ago / 3 weeks ago" like the reference timeline. */
-private fun relativeLabel(idMs: Long): String {
-    val days = ((System.currentTimeMillis() - idMs) / 86_400_000L).toInt()
-    return when {
-        days <= 0 -> "Today"
-        days == 1 -> "1 day ago"
-        days < 7 -> "$days days ago"
-        days < 14 -> "A week ago"
-        else -> "${days / 7} weeks ago"
     }
 }
 

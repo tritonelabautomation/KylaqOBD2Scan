@@ -34,6 +34,23 @@ object CarpoolCodec {
         val earned: Double get() = riders.sumOf { it.amount }
     }
 
+    /**
+     * Cash-basis fuel for the month cards (owner 2026-09-20: "its not fetching the fuel to cost
+     * fetch the price and show the effective cost"): the month's REFUEL spend from the fuel
+     * ledger replaces the trip-derived pump cost, because that is the money that actually left
+     * his wallet that month - his own "MONTH ₹" chip computes the same sum. A month with no
+     * refuel keeps the trip-derived cost when rides linked to trips have one, otherwise zero
+     * (cash truth, not a guess), and `effective` is recomputed as fuel - earned so the card can
+     * always show net cost or saving.
+     */
+    fun withRefuelFuel(
+        rows: List<MonthRow>,
+        refuelSpendByMonth: Map<String, Double>
+    ): List<MonthRow> = rows.map { r ->
+        val fuel = refuelSpendByMonth[r.month] ?: r.fuelCost ?: 0.0
+        r.copy(fuelCost = fuel, effective = fuel - r.earned)
+    }
+
     data class MonthRow(
         val month: String,
         val trips: Int,

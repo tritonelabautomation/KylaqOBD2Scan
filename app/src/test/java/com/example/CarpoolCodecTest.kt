@@ -93,4 +93,28 @@ class CarpoolCodecTest {
         val e = CarpoolEntry(1L, null, RecordTime.stamp(ms), 10.0, listOf(Rider("A", 50.0)))
         assertEquals(ms, CarpoolCodec.whenMs(e))
     }
+
+    @Test
+    fun monthCardsTakeTheirFuelFromTheRefuelLedger() {
+        // Owner 2026-09-20: "its not fetching the fuel to cost fetch the price and show the
+        // effective cost". The month's pump money is what the fuel ledger says he spent that
+        // month; effective recomputes as fuel - earned so the card always shows net or saving.
+        val rows = listOf(
+            CarpoolCodec.MonthRow("2026-08", 1, 30.0, 235.0, null, null),
+            CarpoolCodec.MonthRow("2026-07", 2, 60.0, 500.0, 400.0, -100.0)
+        )
+        val merged = CarpoolCodec.withRefuelFuel(rows, mapOf("2026-08" to 1296.0))
+        assertEquals(1296.0, merged[0].fuelCost!!, 0.001)
+        assertEquals(1061.0, merged[0].effective!!, 0.001) // 1296 - 235, still out of pocket
+        // No refuel that month: the trip-derived cost survives...
+        assertEquals(400.0, merged[1].fuelCost!!, 0.001)
+        assertEquals(-100.0, merged[1].effective!!, 0.001)
+        // ...and a month with neither refuel nor trip fuel is cash-zero, not a guess:
+        val zero = CarpoolCodec.withRefuelFuel(
+            listOf(CarpoolCodec.MonthRow("2026-09", 13, 338.0, 2534.0, null, null)), emptyMap()
+        )[0]
+        assertEquals(0.0, zero.fuelCost!!, 0.001)
+        assertEquals(-2534.0, zero.effective!!, 0.001) // earned beat fuel spend: a saving
+        assertEquals(2534.0, zero.earned, 0.001)
+    }
 }
