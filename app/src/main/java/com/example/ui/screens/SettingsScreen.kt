@@ -1006,11 +1006,14 @@ fun SettingsScreen(
                                     // falls straight through to the Drive picker.
                                     runCatching {
                                         accountChooser.launch(
+                                            // The 7-arg API 23+ overload. (The 8-arg one is
+                                            // deprecated and takes a primitive boolean at
+                                            // position 4 - CI caught a null handed to it.)
                                             android.accounts.AccountManager.newChooseAccountIntent(
                                                 null,
                                                 null,
                                                 arrayOf(com.example.backup.CloudBackupManager.GOOGLE_ACCOUNT_TYPE),
-                                                null, null, null, null, null
+                                                null, null, null, null
                                             )
                                         )
                                     }.onFailure { onOpenDriveBackup() }
