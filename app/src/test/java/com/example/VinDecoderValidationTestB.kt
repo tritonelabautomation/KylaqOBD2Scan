@@ -43,10 +43,24 @@ class VinDecoderValidationTestB {
 
     @Test
     fun testDifferentCanIds_NotCombined() {
+        // The consecutive frame belongs to 7E9 while the first/last frames belong to 7E8,
+        // so no complete 20-byte VIN may ever be reconstructed.
+        //
+        // FIX: this assertion used to demand exactly one complete 20-byte message (and then
+        // called .first() on the result), which is the opposite of the test's own intent and
+        // threw NoSuchElementException because the parser correctly produces none.
         val rawLines = listOf("7E8 10 14 49 02 01 4D 45 58","7E9 21 4B 50 45 50 43 32 54","7E8 22 47 30 32 38 38 35 35")
-        val msgs = IsoTpParser.reassembleLines(rawLines).filter { it.isComplete && it.reconstructedBytes.size == 20 }
-        assertEquals(1, msgs.size)
-        assertEquals("7E8", msgs.first().canId)
+        val all = IsoTpParser.reassembleLines(rawLines)
+        val completeVins = all.filter { it.isComplete && !it.isMalformed && it.reconstructedBytes.size == 20 }
+        assertTrue("Frames from different CAN ids must never be stitched into a VIN", completeVins.isEmpty())
+
+        // The 7E8 stream is reported, but explicitly flagged as broken.
+        val partial7E8 = all.filter { it.canId == "7E8" }
+        assertEquals(1, partial7E8.size)
+        assertTrue("Partial 7E8 message must be flagged malformed", partial7E8.first().isMalformed)
+
+        // The orphan 7E9 consecutive frame is reported separately, never merged.
+        assertTrue(all.any { it.canId == "7E9" && it.isMalformed })
     }
 
     @Test

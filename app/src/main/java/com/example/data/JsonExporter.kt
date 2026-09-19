@@ -26,10 +26,33 @@ object JsonExporter {
             put("adapter", metadata.adapter)
             put("protocol", metadata.protocol)
             put("canBitrate", metadata.canBitrate)
-            put("startTimeUtc", metadata.startTimeUtc)
-            put("endTimeUtc", metadata.endTimeUtc ?: "")
+            // Keys keep their historical "utc" names; the VALUES are IST with their offset stated
+            // (owner mandate 2026-09-17: "For all records use IST time only no UTC"). Renaming the
+            // keys would make every trip JSON and backup written before 1.0.337 unreadable.
+            // Values are re-stated in IST on the way out; the KEYS keep their `Utc` names so every
+            // file written before the mandate stays readable. See RecordTime.normalizeToIst.
+            put(
+                "startTimeUtc",
+                com.example.data.RecordTime.normalizeToIst(null, metadata.startTimeUtc)
+                    ?: metadata.startTimeUtc
+            )
+            put(
+                "endTimeUtc",
+                metadata.endTimeUtc?.let {
+                    com.example.data.RecordTime.normalizeToIst(null, it) ?: it
+                } ?: ""
+            )
             put("appVersion", metadata.appVersion)
             put("totalTransactions", transactions.size)
+            // GPS altitude window of the trip (owner 2026-09-15). Written as an explicit
+            // JSON null when it was never captured, so an import can tell "no GPS altitude"
+            // apart from "0 m above sea level".
+            put("maxAltitudeM", metadata.maxAltitudeM ?: JSONObject.NULL)
+            put("minAltitudeM", metadata.minAltitudeM ?: JSONObject.NULL)
+            // Battery voltage extremes (owner pipeline task 3): explicit JSON null when the
+            // trip had no voltage samples - an import must tell "never measured" from 0 V.
+            put("minVoltageV", metadata.minVoltageV ?: JSONObject.NULL)
+            put("maxVoltageV", metadata.maxVoltageV ?: JSONObject.NULL)
         }
         root.put("sessionMetadata", metaObj)
 
@@ -38,7 +61,11 @@ object JsonExporter {
         for (tx in transactions) {
             val txObj = JSONObject().apply {
                 put("id", tx.id)
-                put("timestampUtc", tx.timestampUtc)
+                put(
+                    "timestampUtc",
+                    com.example.data.RecordTime.normalizeToIst(tx.timestampMonotonic, tx.timestampUtc)
+                        ?: tx.timestampUtc
+                )
                 put("timestampMonotonic", tx.timestampMonotonic)
                 put("direction", tx.direction.name)
                 put("elmCommand", tx.elmCommand)
@@ -65,4 +92,16 @@ object JsonExporter {
             writer.write(root.toString(2))
         }
     }
+
+    /**
+     * Reads an optional measurement without coercing "absent", JSON null or NaN into 0.0.
+     * The import path uses this for altitude: a fabricated 0 m would show up as a real
+     * measurement in the trip summary (no-fake-values rule).
+     */
+    fun nullableDouble(obj: JSONObject, key: String): Double? =
+        if (obj.has(key) && !obj.isNull(key)) {
+            obj.optDouble(key).takeIf { !it.isNaN() }
+        } else {
+            null
+        }
 }

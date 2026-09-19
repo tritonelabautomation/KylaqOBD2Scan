@@ -5,6 +5,7 @@ import com.example.ai.AiAnalysisEngine
 import com.example.ai.CarDoctorReport
 import com.example.ai.DoctorObservation
 import com.example.ai.RuleBasedAnalysisEngine
+import com.example.data.db.dao.SampleRow
 import com.example.data.db.entities.*
 import com.example.model.TransactionRecord
 import kotlinx.coroutines.Dispatchers
@@ -36,6 +37,10 @@ class TripRepository(context: Context) {
 
     suspend fun insertVehicle(vehicle: VehicleEntity) = withContext(Dispatchers.IO) {
         newEntitiesDao.insertVehicle(vehicle)
+    }
+
+    suspend fun deleteVehicle(vehicleId: String) = withContext(Dispatchers.IO) {
+        newEntitiesDao.deleteVehicleById(vehicleId)
     }
 
     suspend fun insertProtocolTestResult(result: ProtocolTestResultEntity) = withContext(Dispatchers.IO) {
@@ -70,6 +75,22 @@ class TripRepository(context: Context) {
         tripDao.getTripById(tripId)
     }
 
+    suspend fun recentTrips(limit: Int): List<TripEntity> = withContext(Dispatchers.IO) {
+        tripDao.getAllTrips().take(limit)
+    }
+
+    suspend fun trendSamples(tripIds: List<String>): List<TelemetrySampleEntity> = withContext(Dispatchers.IO) {
+        if (tripIds.isEmpty()) {
+            emptyList()
+        } else {
+            sampleDao.getSamplesForTrips(
+                tripIds,
+                // Both stored pid forms (4-hex + 2-hex) - see TripTrendAnalyzer.TREND_PROJECTION_PIDS.
+                com.example.analysis.TripTrendAnalyzer.TREND_PROJECTION_PIDS
+            )
+        }
+    }
+
     suspend fun getSamplesForTrip(tripId: String): List<TelemetrySampleEntity> = withContext(Dispatchers.IO) {
         sampleDao.getSamplesForTrip(tripId)
     }
@@ -92,6 +113,40 @@ class TripRepository(context: Context) {
 
     suspend fun updateTrip(trip: TripEntity) = withContext(Dispatchers.IO) {
         tripDao.updateTrip(trip)
+    }
+
+    private val refuelDao = db.refuelEventDao()
+
+    suspend fun insertRefuelEvent(e: RefuelEventEntity) = withContext(Dispatchers.IO) {
+        refuelDao.insertRefuelEvent(e)
+    }
+
+    fun refuelEventsFlow(): Flow<List<RefuelEventEntity>> = refuelDao.refuelEventsFlow()
+
+    suspend fun refuelEvents(): List<RefuelEventEntity> = withContext(Dispatchers.IO) {
+        refuelDao.refuelEvents()
+    }
+
+    suspend fun calibrateRefuelEvent(idMs: Long, pumpL: Double) = withContext(Dispatchers.IO) {
+        refuelDao.calibrate(idMs, pumpL)
+    }
+
+    suspend fun calibratedPumpFor(idMs: Long): Double? = withContext(Dispatchers.IO) {
+        refuelDao.calibratedPumpFor(idMs)
+    }
+
+    suspend fun samplesSince(ts: Long, pids: List<String>): List<SampleRow> =
+        withContext(Dispatchers.IO) { sampleDao.samplesSince(ts, pids) }
+
+    suspend fun latestNumericFor(pid: String): Double? = withContext(Dispatchers.IO) {
+        sampleDao.latestNumericFor(pid)
+    }
+
+    suspend fun samplesForTripPids(tripId: String, pids: List<String>): List<SampleRow> =
+        withContext(Dispatchers.IO) { sampleDao.samplesForTripPids(tripId, pids) }
+
+    suspend fun allTripsChronological(): List<TripEntity> = withContext(Dispatchers.IO) {
+        tripDao.getAllTrips().reversed()
     }
 
     suspend fun insertSamples(samples: List<TelemetrySampleEntity>) = withContext(Dispatchers.IO) {
@@ -118,7 +173,10 @@ class TripRepository(context: Context) {
         val report = ruleBasedEngine.analyzeTrip(trip, samples, events)
 
         // Store analysis in Room database
-        val nowUtc = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).format(Date())
+        // IST with its offset (owner mandate 2026-09-17). This used to be a literal 'Z' with no
+        // timeZone set, i.e. device-local wall time LABELLED as UTC - a stamp that lied about its
+        // own zone by five and a half hours.
+        val nowUtc = com.example.data.RecordTime.stamp()
         val obsArray = JSONArray()
         report.observations.forEach { obs ->
             val obj = JSONObject().apply {

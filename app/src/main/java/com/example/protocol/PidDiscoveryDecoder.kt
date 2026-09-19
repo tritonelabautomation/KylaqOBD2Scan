@@ -33,8 +33,17 @@ object PidDiscoveryDecoder {
         if (bitmap.size < 4) return emptyList()
         val supported = mutableListOf<Int>()
 
+        // Bit 32 of a block (basePid + 0x20) is the "next 32 PIDs are supported" MARKER, not a
+        // parameter - hasNextRange() reports it separately. Emitting it as a supported PID made
+        // the owner's 2026-09-16 export list PID 60 and PID 80 as data channels, TX them during
+        // validation, and decode the capability bitmap that answered as if it were a measurement
+        // ("Mode 01 PID 60 = 6B 09 00 41", "DPF Temperature = 00 24 00 0D" on a petrol car). It
+        // also burned the real 0180 answer, so PID 83/85/86 were never discovered at all.
+        val continuationPid = if (basePid < 0xE0) basePid + 0x20 else -1
+
         for (i in 0 until 32) {
             val pidNum = basePid + (i + 1)
+            if (pidNum == continuationPid) continue
             // Strict check: Valid conventional PID space is 01–FF. Never generate PID 100 (256)
             if (pidNum > 0xFF) continue
 
@@ -53,9 +62,10 @@ object PidDiscoveryDecoder {
      * For base 0xE0, returns E1..FF (31 PIDs), strictly omitting PID 100.
      */
     fun allTestedPidsForRange(basePid: Int): List<Int> {
+        val continuationPid = if (basePid < 0xE0) basePid + 0x20 else -1
         return (1..32).mapNotNull { offset ->
             val pidNum = basePid + offset
-            if (pidNum <= 0xFF) pidNum else null
+            if (pidNum <= 0xFF && pidNum != continuationPid) pidNum else null
         }
     }
 
@@ -150,6 +160,27 @@ object PidDiscoveryDecoder {
     }
 
     /**
+     * ELM327 buffer-lag salvage (owner's Kylaq discovery 2026-09-16): responses can arrive
+     * ONE COMMAND LATE - TX 0120 received the 41 00 bitmap that belonged to TX 0100, and
+     * the strictly-correct PID-mismatch rejection dropped the entire base block from the
+     * report. A lagged frame is still true car data: when the frame for [requestedBase]
+     * did not arrive, check whether the lines carry a valid bitmap for ANOTHER standard
+     * base not yet decoded in this run, and return it under its true base.
+     */
+    fun salvageLaggedBitmap(
+        requestedBase: Int,
+        responseLines: List<String>,
+        alreadyDecodedBases: Set<Int>
+    ): DiscoveryRangeResult? {
+        for (alt in intArrayOf(0x00, 0x20, 0x40, 0x60, 0x80, 0xA0, 0xC0, 0xE0)) {
+            if (alt == requestedBase || alt in alreadyDecodedBases) continue
+            val result = decodeFromRawResponse(alt, responseLines)
+            if (result != null) return result
+        }
+        return null
+    }
+
+    /**
      * Extracts all bitmaps returned by multiple ECUs in a multi-ECU broadcast response.
      *
      * @return Map of CAN ID (e.g. "7E8", "7E9") to 4-byte bitmap ByteArray.
@@ -160,10 +191,13 @@ object PidDiscoveryDecoder {
 
         for (line in responseLines) {
             val trimmed = line.trim().uppercase()
-            // Skip negative response lines entirely for this PID's bitmap extraction
-            // - Negative responses (7F 01 NRC) belong to a different transaction context
-            // - They would corrupt capability data if uncorrelated to the requested PID
-            if (trimmed.contains("7F")) {
+            // FIX (silently dropped ECUs): this used to be `if (trimmed.contains("7F")) continue`.
+            // 0x7F is perfectly legal *bitmap data* — e.g. the real Kylaq response
+            // "7E8 06 41 00 BF BF 7F 00" was discarded wholesale, so the ECU disappeared
+            // from capability discovery and every one of its PIDs stayed NOT_TESTED.
+            // A negative response is structural, not a substring: the ISO-TP payload must
+            // START with 7F <service> <NRC>. isNegativeResponseLine() enforces exactly that.
+            if (isNegativeResponseLine(trimmed)) {
                 continue
             }
             val extracted = extractBitmapFromLine(basePid, line) ?: continue
@@ -174,6 +208,25 @@ object PidDiscoveryDecoder {
             }
         }
         return results
+    }
+
+    /**
+     * Structural negative-response test (ISO 14229 / SAE J1979): the decoded ISO-TP
+     * payload must begin with 0x7F, followed by the rejected service id and an NRC.
+     *
+     * Returns false for frames that merely contain 0x7F somewhere in the data bytes.
+     */
+    fun isNegativeResponseLine(line: String): Boolean {
+        val trimmed = line.trim().uppercase()
+        if (trimmed.isEmpty()) return false
+        val frame = CanFrameParser.parseFrame(trimmed)
+        val bytes = frame.payloadBytes.ifEmpty { frame.dataBytes }
+        if (bytes.size < 2) return false
+        if ((bytes[0] and 0xFF) != 0x7F) return false
+        // 7F must be followed by a plausible service id (0x01..0x0F covers the OBD modes
+        // this app is allowed to send, plus 0x22/0x3E style UDS services).
+        val service = bytes[1] and 0xFF
+        return service in 0x01..0x0F || service == 0x22 || service == 0x3E
     }
 
     /**
@@ -192,14 +245,20 @@ object PidDiscoveryDecoder {
 
         for (line in responseLines) {
             val trimmed = line.trim().uppercase()
-            // Check for negative response pattern: 7F followed by service 01 and a PID
-            // We need to correlate this with the current basePid transaction
-            if (trimmed.startsWith("7F")) {
-                // Extract potential PID from the line to correlate with basePid
-                // For simplicity, we'll track negative responses per CAN ID
-                // This is an approximation - in production you'd want better correlation
+            // FIX: `startsWith("7F")` never matched real traffic, because ATH1 prefixes
+            // every line with the CAN id ("7E8 03 7F 01 11"). And when it did match it
+            // blamed *every* ECU that had produced a bitmap — i.e. exactly the ECUs that
+            // answered positively. Negative responses are now detected structurally
+            // (payload starts with 7F <service> <NRC>) and attributed to the CAN id that
+            // actually sent them.
+            if (!isNegativeResponseLine(trimmed)) continue
+            val ecu = CanFrameParser.parseFrame(trimmed).canId?.uppercase()
+            if (ecu != null) {
+                hasNegativeResponsePerCanId[ecu] = true
+            } else {
+                // No header on the frame: it cannot be attributed to a specific ECU, so
+                // keep the previous (narrowed) behaviour of flagging this transaction.
                 for (canId in bitmapsByCanId.keys) {
-                    // Mark negative response per CAN ID for this PID range
                     hasNegativeResponsePerCanId[canId] = true
                 }
             }

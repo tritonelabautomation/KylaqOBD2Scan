@@ -42,6 +42,22 @@ object PidDecoder {
             )
         }
 
+        // FIX: a negative response (7F <service> <NRC>) is never telemetry — not even for
+        // research PIDs. The permissive research path below used to accept it and render
+        // "7F 01 11" as if it were a live raw value, which the dashboard then displayed
+        // as data. Reject it before any decoding strategy runs.
+        if ((payloadBytes[0] and 0xFF) == 0x7F) {
+            return DecodedResult(
+                parameterName = pidDef.name,
+                numericValue = null,
+                displayValue = "INVALID_RESPONSE",
+                unit = pidDef.unit,
+                rawPayloadHex = rawHex,
+                dataBytes = emptyList(),
+                isKnown = false
+            )
+        }
+
         // Standard OBD response check: First byte is (service + 0x40), second byte is PID
         val expectedServiceAck = (pidDef.service.toIntOrNull(16) ?: 1) + 0x40
         val expectedPid = pidDef.pid.toIntOrNull(16) ?: 0
@@ -128,11 +144,15 @@ object PidDecoder {
             }
 
             DecoderType.TEMP_MINUS_40 -> {
-                val value = (a - 40).toDouble()
+                // Plausibility gate (2026-09-13, owner screenshot showed -37 C coolant-2):
+                // an uninitialised ECU raw must surface as NO DATA, never as a fake number.
+                val computed = (a - 40).toDouble()
+                val plausible = computed in -30.0..210.0
+                val value = if (plausible) computed else null
                 DecodedResult(
                     parameterName = pidDef.name,
                     numericValue = value,
-                    displayValue = String.format(Locale.US, "%.0f", value),
+                    displayValue = if (plausible) String.format(Locale.US, "%.0f", computed) else "implausible raw - no data",
                     unit = "°C",
                     rawPayloadHex = rawHex,
                     dataBytes = dataBytes,
@@ -245,11 +265,16 @@ object PidDecoder {
             }
 
             DecoderType.EQUIVALENCE_RATIO -> {
-                val value = ((a * 256.0) + b) / 32768.0
+                // J1979 error indicator: 0xFFFF on ratio PIDs means NOT AVAILABLE.
+                // Unguarded it decodes to a plausible-looking lambda 2.000 - a fake
+                // reading (2026-09-14 sweep: "issues you forgot to test").
+                val raw = (a * 256) + b
+                val available = raw != 0xFFFF
+                val value = if (available) raw / 32768.0 else null
                 DecodedResult(
                     parameterName = pidDef.name,
                     numericValue = value,
-                    displayValue = String.format(Locale.US, "%.3f", value),
+                    displayValue = if (available) String.format(Locale.US, "%.3f", raw / 32768.0) else "no data (J1979 0xFFFF)",
                     unit = "λ",
                     rawPayloadHex = rawHex,
                     dataBytes = dataBytes,
@@ -258,11 +283,13 @@ object PidDecoder {
             }
 
             DecoderType.CATALYST_TEMP -> {
-                val value = (((a * 256.0) + b) / 10.0) - 40.0
+                val computed = (((a * 256.0) + b) / 10.0) - 40.0
+                val plausible = computed in -30.0..1200.0
+                val value = if (plausible) computed else null
                 DecodedResult(
                     parameterName = pidDef.name,
                     numericValue = value,
-                    displayValue = String.format(Locale.US, "%.1f", value),
+                    displayValue = if (plausible) String.format(Locale.US, "%.1f", computed) else "implausible raw - no data",
                     unit = "°C",
                     rawPayloadHex = rawHex,
                     dataBytes = dataBytes,
@@ -378,13 +405,28 @@ object PidDecoder {
                 )
             }
 
-            DecoderType.FUEL_RATE_MASS_10 -> {
-                val value = ((a * 256.0) + b) / 10.0
+            DecoderType.FUEL_RATE_MASS_50 -> {
+                // REAL-CAR CALIBRATION 2026-09-13 (owner live telemetry, Kylaq EA211): secondary
+                // spec mirrors said /10 g/s, but that yields 3.9-6.8 L/h at warm idle - physically
+                // impossible. Stoichiometric speed-density cross-check (MAP 37 kPa, 978 rpm,
+                // IAT 30 C, lambda 1.000 => ~0.15-0.19 g/s) matches raw counts 8-14 ONLY at
+                // /50 (0.02 g/s per count, == 0.1 L/h). See docs/qa-qc-fuel-pids-dashboard F-6.
+                val value = ((a * 256.0) + b) / 50.0
+                // 2026-09-15 owner: "why g/s when all other units are litres?" - J1979 019D IS
+                // a mass flow (g/s) and the volume PID 015E is refused by this ECU, so every
+                // litre figure in the app is derived from this mass rate. Show the conversion
+                // inline (745 g/L petrol density) so the row reads in the same units as the
+                // rest of the dashboard instead of looking like a foreign/gallon unit.
+                val lh = value * 3600.0 / com.example.engine.PowertrainModel.FUEL_DENSITY_G_PER_L
                 DecodedResult(
                     parameterName = pidDef.name,
                     numericValue = value,
-                    displayValue = String.format(Locale.US, "%.2f", value),
-                    unit = "g/s",
+                    displayValue = String.format(Locale.US, "%.2f g/s ≈ %.2f L/h", value, lh),
+                    // Unit travels inside displayValue now (mass + litre-equivalent); the
+                    // store joins displayValue+unit, so an extra "g/s" here would read
+                    // "0.20 g/s ≈ 0.97 L/h g/s". The PID-definition sublabel still shows
+                    // the J1979 unit (g/s) under the row name.
+                    unit = "",
                     rawPayloadHex = rawHex,
                     dataBytes = dataBytes,
                     isKnown = true
@@ -466,6 +508,128 @@ object PidDecoder {
                         dataBytes = dataBytes,
                         isKnown = false
                     )
+                }
+            }
+
+            // Two-byte equivalence ratio, ((A*256)+B)/32768 - the layout J1979 uses for the
+            // lambda half of PID 34-3B (O2 sensor n: lambda + current) and 24-2B (lambda +
+            // voltage). The owner Kylaq run 2026-09-16 answered `41 56 7F 00`; read as lambda
+            // that is 0.992 at closed-loop stoichiometry, which independently agrees with PID
+            // 44 (commanded equivalence ratio) = 1.000 in the same run. Two earlier revisions
+            // of this code printed the bare byte 7F, then invented "0.633 V" out of byte A -
+            // the frame contains no voltage field, so none is displayed any more.
+            DecoderType.LAMBDA_2B -> {
+                if (dataBytes.size < 2) {
+                    DecodedResult(
+                        parameterName = pidDef.name,
+                        numericValue = null,
+                        displayValue = "NO DATA",
+                        unit = pidDef.unit,
+                        rawPayloadHex = rawHex,
+                        dataBytes = dataBytes,
+                        isKnown = false
+                    )
+                } else {
+                    val lambdaValue = ((a * 256.0) + b) / 32768.0
+                    DecodedResult(
+                        parameterName = pidDef.name,
+                        numericValue = lambdaValue,
+                        displayValue = String.format(Locale.US, "\u03BB %.3f", lambdaValue),
+                        unit = pidDef.unit,
+                        rawPayloadHex = rawHex,
+                        dataBytes = dataBytes,
+                        isKnown = true
+                    )
+                }
+            }
+
+            // SAE J1979 PID 55-58: secondary oxygen-sensor fuel trims, two bytes, each
+            // (X - 128) * 100 / 128 percent. 55/56 are the short/long term trim of bank 1 +
+            // bank 3, 57/58 of bank 2 + bank 4. The owner run answered `41 55 80 80` =
+            // +0.0 % / +0.0 % (closed loop, post-cat trims at zero) and `41 56 7F 00` =
+            // -0.8 % / -100.0 %, the second byte being the no-sensor sentinel of the bank
+            // this 3-cylinder engine does not have.
+            DecoderType.O2_TRIM_PAIR_2B -> {
+                if (dataBytes.size < 2) {
+                    DecodedResult(
+                        parameterName = pidDef.name,
+                        numericValue = null,
+                        displayValue = "NO DATA",
+                        unit = pidDef.unit,
+                        rawPayloadHex = rawHex,
+                        dataBytes = dataBytes,
+                        isKnown = false
+                    )
+                } else {
+                    val trimA = (a - 128) * 100.0 / 128.0
+                    val trimB = (b - 128) * 100.0 / 128.0
+                    // -100 % is the ECU saying "that sensor does not exist". Publishing it as
+                    // a trim value would be a fake number on a single-bank engine.
+                    if (trimA <= -99.99 || trimB <= -99.99) {
+                        DecodedResult(
+                            parameterName = pidDef.name,
+                            numericValue = null,
+                            displayValue = "Not available",
+                            unit = pidDef.unit,
+                            rawPayloadHex = rawHex,
+                            dataBytes = dataBytes,
+                            isKnown = false
+                        )
+                    } else {
+                        DecodedResult(
+                            parameterName = pidDef.name,
+                            numericValue = trimA,
+                            displayValue = String.format(Locale.US, "%+.1f %% / %+.1f %%", trimA, trimB),
+                            unit = pidDef.unit,
+                            rawPayloadHex = rawHex,
+                            dataBytes = dataBytes,
+                            isKnown = true
+                        )
+                    }
+                }
+            }
+
+            // SAE J1979 PID A6: odometer, ((A*2^24)+(B*2^16)+(C*2^8)+D)/10 km. The owner run
+            // recorded `41 A6 00 00 86 EB` and the app printed "Unknown Research PID 01A6".
+            // 34539 / 10 = 3453.9 km - a real channel, already answered, thrown away as raw
+            // hex. Sanity gate: 0 km and anything above 2 000 000 km are rejected as sentinel
+            // or garbage instead of being displayed.
+            DecoderType.ODOMETER_4B -> {
+                if (dataBytes.size < 4) {
+                    DecodedResult(
+                        parameterName = pidDef.name,
+                        numericValue = null,
+                        displayValue = "NO DATA",
+                        unit = pidDef.unit,
+                        rawPayloadHex = rawHex,
+                        dataBytes = dataBytes,
+                        isKnown = false
+                    )
+                } else {
+                    val raw = (a.toLong() shl 24) or (b.toLong() shl 16) or
+                        (c.toLong() shl 8) or d.toLong()
+                    val km = raw / 10.0
+                    if (raw <= 0L || km > 2_000_000.0) {
+                        DecodedResult(
+                            parameterName = pidDef.name,
+                            numericValue = null,
+                            displayValue = "Not available",
+                            unit = pidDef.unit,
+                            rawPayloadHex = rawHex,
+                            dataBytes = dataBytes,
+                            isKnown = false
+                        )
+                    } else {
+                        DecodedResult(
+                            parameterName = pidDef.name,
+                            numericValue = km,
+                            displayValue = String.format(Locale.US, "%.1f", km),
+                            unit = pidDef.unit,
+                            rawPayloadHex = rawHex,
+                            dataBytes = dataBytes,
+                            isKnown = true
+                        )
+                    }
                 }
             }
 

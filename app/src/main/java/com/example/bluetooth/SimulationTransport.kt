@@ -256,7 +256,7 @@ class SimulationElmTransport(
                     0.65 + (engineRpm / 1000.0) * (loadPct / 100.0) * 1.5
                 }
                 val rateMassGs = (rateLh * 745.0) / 3600.0
-                val rawVal = (rateMassGs * 10.0).toInt().coerceIn(0, 65535)
+                val rawVal = (rateMassGs * 50.0).toInt().coerceIn(0, 65535) // 0.02 g/s per count (F-6 calibration)
                 val a = (rawVal ushr 8) and 0xFF
                 val b = rawVal and 0xFF
                 lines.add("7E8 04 41 9D %02X %02X".format(a, b))
@@ -375,12 +375,18 @@ class SimulationElmTransport(
                 lines.add("7E8 07 41 70 %02X %02X %02X %02X %02X".format(b0, b1, b2, b3, b4))
             }
 
-            // Research PID 01A6 - Unknown EA211 Channel
+            // J1979 PID A6 - ODOMETER, ((A*2^24)+(B*2^16)+(C*2^8)+D)/10 km. This used to be
+            // three RANDOM bytes labelled "Unknown EA211 Channel", which is exactly what a
+            // simulation must not do: it teaches the UI to trust a channel that has no
+            // meaning. The real car answered `41 A6 00 00 86 EB` = 3453.9 km on 2026-09-16.
             cleanCmd == "01A6" -> {
-                val b0 = Random.nextInt(0, 255)
-                val b1 = Random.nextInt(0, 255)
-                val b2 = 0x1A
-                lines.add("7E8 05 41 A6 %02X %02X %02X".format(b0, b1, b2))
+                val km = 3453.9 + (simTimeStep * 30.0 / 3600.0) // ~30 km/h average
+                val raw = (km * 10.0).toLong().coerceIn(0L, 99_999_999L)
+                val b0 = ((raw shr 24) and 0xFF).toInt()
+                val b1 = ((raw shr 16) and 0xFF).toInt()
+                val b2 = ((raw shr 8) and 0xFF).toInt()
+                val b3 = (raw and 0xFF).toInt()
+                lines.add("7E8 06 41 A6 %02X %02X %02X %02X".format(b0, b1, b2, b3))
             }
 
             // Additional standard PIDs
@@ -486,9 +492,8 @@ class SimulationElmTransport(
     }
 
     private fun logRaw(isTx: Boolean, canId: String?, text: String, status: String) {
-        val nowUtc = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
-            timeZone = TimeZone.getTimeZone("UTC")
-        }.format(Date())
+        // IST with offset (owner 2026-09-17: records use IST only, never UTC).
+        val nowUtc = com.example.data.RecordTime.stamp()
         rawLogListener?.onRawLog(
             timestampUtc = nowUtc,
             timestampMonotonic = SystemClock.elapsedRealtime(),

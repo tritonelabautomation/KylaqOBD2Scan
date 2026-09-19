@@ -49,7 +49,7 @@ fun ProtocolDiagnosticsDialog(
                     Column(modifier = Modifier.padding(12.dp)) {
                         Text("App Version: ${result.appVersion} (Build ${result.buildNumber})", style = MaterialTheme.typography.labelSmall)
                         Text("Commit: ${result.commitHash}", style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace)
-                        Text("Tested: ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date(result.timestamp))}", style = MaterialTheme.typography.labelSmall)
+                        Text("Tested: ${com.example.data.RecordTime.format("yyyy-MM-dd HH:mm:ss", result.timestamp)}", style = MaterialTheme.typography.labelSmall)
                     }
                 }
 

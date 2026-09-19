@@ -36,7 +36,13 @@ data class TripEntity(
     val avgVoltageV: Double = 0.0,
     val detectedEcus: String = "7E8", // Comma-separated CAN IDs e.g. "7E8, 7E9"
     val healthScore: Int = 100, // 0-100 score
-    val notes: String = ""
+    val notes: String = "",
+    /** GPS altitude extremes for this trip (accuracy-gated fixes only). Null = never captured (pre-v10 trips or no GPS fix) → UI shows an honest blank. Added 2026-09-15 (MIGRATION_9_10). */
+    val maxAltitudeM: Double? = null,
+    val minAltitudeM: Double? = null,
+    /** Battery voltage extremes measured from stored 0142 samples at trip end. Null = never captured (pre-v11 trips or no voltage samples) -> UI derives from samples or stays blank. Added 2026-09-16 (MIGRATION_10_11, owner pipeline task 3). */
+    val minVoltageV: Double? = null,
+    val maxVoltageV: Double? = null
 )
 
 /**
@@ -65,7 +71,10 @@ data class TelemetrySampleEntity(
     val displayValue: String,
     val unit: String,
     val quality: String = "VALID", // "VALID", "STALE", "OUT_OF_RANGE", "INVALID"
-    val sequence: Long = 0L
+    val sequence: Long = 0L,
+    // GPS altitude stamp per sample row (owner 2026-09-16). NULL for rows recorded
+    // before MIGRATION_11_12 and for OBD-only recovered trips - honest blank.
+    val altitudeM: Double? = null
 )
 
 /**
@@ -147,4 +156,51 @@ data class AiAnalysisEntity(
     val recommendedChecks: String,
     val confidence: String = "HIGH", // "LOW", "MEDIUM", "HIGH"
     val privacyMode: String = "LOCAL_ONLY"
+)
+
+/**
+ * When this sample happened, as an epoch instant - the value a chart axis, a fuel integrator or a
+ * trend comparison actually needs.
+ *
+ * The `timestamp` column cannot be trusted on its own. `RecordingManager` filled it from
+ * `TransactionRecord.timestampMonotonic`, which the live transport and scheduler set to
+ * `SystemClock.elapsedRealtime()` - milliseconds since boot, not a moment in time. Every trip
+ * recorded before that was fixed therefore holds uptime in this column, and the rows are already on
+ * the owner's phone: a migration would have to rewrite his whole history, so the repair happens on
+ * read instead. `RecordTime.instantOf` rejects a value that cannot be an epoch instant and falls
+ * back to the `timestampUtc` stamp beside it, which always stated the truth.
+ *
+ * Rows written since the fix store a real instant, so for them this returns `timestamp` unchanged.
+ * The fallback to `timestamp` at the end is for a row whose stamp is also unreadable: an implausible
+ * number still sorts correctly, which is better than dropping the sample and silently shortening a
+ * curve.
+ *
+ * Owner mandate 2026-09-17: *"All logs, trends everything should be IST even the old logs should be
+ * IST by default."* An axis drawn from uptime is not a time in any zone.
+ */
+val TelemetrySampleEntity.instantMs: Long
+    get() = com.example.data.RecordTime.instantOf(timestamp, timestampUtc) ?: timestamp
+
+/**
+ * A detected refuel event (owner 2026-09-19: event-driven since-refuel tracking off PID 012F).
+ * Written by [com.example.data.RecordingManager] when [com.example.analysis.RefuelEventDetector]
+ * emits, either from a stationary window inside a session or from the level jump across a session
+ * gap. `calibratedPumpL` arrives later, when a fuel-log entry whose odometer matches this event
+ * supplies the pump's own litres - at which point the implied tank capacity is re-derived and the
+ * next event's litre estimate improves. Estimate, never measurement, until that match happens.
+ */
+@Entity(tableName = "refuel_events")
+data class RefuelEventEntity(
+    @PrimaryKey
+    val idMs: Long,
+    val tsStartMs: Long,
+    val tsEndMs: Long,
+    val levelBeforePct: Double,
+    val levelAfterPct: Double,
+    val odoKm: Double?,
+    val estLitres: Double,
+    /** 0/1: the level rise happened across a session gap (engine off at the pump), not on screen. */
+    val betweenSessions: Int,
+    val calibratedPumpL: Double? = null,
+    val capacityL: Double
 )

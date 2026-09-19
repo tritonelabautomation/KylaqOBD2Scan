@@ -181,6 +181,11 @@ class KylaqRealWorldTraceIntegrationTest {
     @Test
     fun testIsoTpVinFirstFrameNotDuplicated() {
         // P0-1 regression: First Frame payload must be appended exactly ONCE.
+        //
+        // FIX: the expected hex here was wrong (21 bytes, with "43 54 32 54" instead of the
+        // real "43 32 54"), so the assertion could never pass even with a correct parser.
+        // The truth is the captured trace: FF announces 0x14 = 20 bytes and carries 6 of
+        // them, then CF1/CF2 carry 7 + 7 = 14 more -> exactly 20 bytes.
         val rawLines = listOf(
             "7E8 10 14 49 02 01 4D 45 58",
             "7E8 21 4B 50 45 50 43 32 54",
@@ -188,8 +193,12 @@ class KylaqRealWorldTraceIntegrationTest {
         )
         val msg = IsoTpParser.reassembleLines(rawLines).first()
         val hex = msg.reconstructedBytes.joinToString("") { "%02X".format(it) }
-        assertEquals("4902014D45584B5045504354325447303238383535", hex)
+        assertEquals(20, msg.reconstructedBytes.size)
+        assertEquals("4902014D45584B50455043325447303238383535", hex)
         assertFalse("FF must not be duplicated", hex.contains("4902014D4558490201"))
+
+        val vin = msg.reconstructedBytes.drop(3).joinToString("") { (it and 0xFF).toChar().toString() }
+        assertEquals("MEXKPEPC2TG028855", vin)
     }
 
     @Test

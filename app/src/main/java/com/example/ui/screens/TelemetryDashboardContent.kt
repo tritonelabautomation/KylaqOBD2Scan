@@ -3,6 +3,7 @@ package com.example.ui.screens
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.runtime.*
@@ -25,26 +26,49 @@ fun TelemetryDashboardContent(
     tripEconomy: TripEconomyStats? = null,
     drivingState: DrivingStateEngine.DrivingStateResult? = null,
     transmissionState: TransmissionState? = null,
+    capabilityStatuses: Map<String, com.example.model.CapabilityStatus> = emptyMap(),
     onPidClick: (String) -> Unit = {}
 ) {
-    var expandedDriving by remember { mutableStateOf(true) }
-    var expandedEconomy by remember { mutableStateOf(true) }
-    var expandedEngine by remember { mutableStateOf(true) }
-    var expandedFuel by remember { mutableStateOf(true) }
-    var expandedCombustion by remember { mutableStateOf(false) }
-    var expandedTemp by remember { mutableStateOf(false) }
-    var expandedAir by remember { mutableStateOf(false) }
-    var expandedGps by remember { mutableStateOf(false) }
+    // LINEAGE FIX 2026-09-12: a missing live value must SAY why - "NOT SUPPORTED BY ECU"
+    // when capability probing got a refusal, "probing..." while the scheduler's progressive
+    // auto-probe has not reached the PID yet. Silent "Not available" is how this bug hid.
+    val effectiveLive = remember(liveMap, capabilityStatuses) {
+        val m = liveMap.toMutableMap()
+        for ((rawPid, st) in capabilityStatuses) {
+            val key4 = ("01" + rawPid.uppercase().removePrefix("01")).takeLast(4)
+            val cur = m[key4]
+            if (cur == null || cur == "Not available") {
+                m[key4] = when (st) {
+                    com.example.model.CapabilityStatus.NOT_SUPPORTED -> "NOT SUPPORTED BY ECU"
+                    com.example.model.CapabilityStatus.TIMEOUT -> "no answer (timeout)"
+                    // QA/QC fuel audit 2026-09-13 (F-4): a VALIDATED pid whose live query hits a
+                    // transient NO_DATA / CAN error used to fall into the else branch and keep the
+                    // silent "Not available" - failure states must be loud (Batch-17 doctrine).
+                    com.example.model.CapabilityStatus.NO_DATA -> "no data from ECU"
+                    com.example.model.CapabilityStatus.CAN_ERROR -> "CAN bus error"
+                    else -> cur ?: "probing..."
+                }
+            }
+        }
+        for (key in m.keys.toList()) {
+            if (m[key] == null) m[key] = "probing..."
+        }
+        m
+    }
 
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        // 2026-09-15 owner screenshot: the quick-add FAB floated over the last telemetry
+        // rows (GPS value hidden behind it at end-of-scroll). Extra bottom padding lets
+        // every row clear the FAB.
+        modifier = Modifier.fillMaxWidth().padding(bottom = 96.dp)
+    ) {
 
         // 1. Driving State & Transmission (Škoda Kylaq 6-Speed AT - No DSG)
         TelemetrySectionCard(
             title = "DRIVING & TRANSMISSION (6-AT)",
             icon = Icons.Default.DirectionsCar,
             color = CyberCyan,
-            isExpanded = expandedDriving,
-            onToggle = { expandedDriving = !expandedDriving }
         ) {
             val stateName = drivingState?.state?.name ?: "UNKNOWN"
             val stateColor = when (drivingState?.state?.name) {
@@ -96,8 +120,6 @@ fun TelemetryDashboardContent(
             title = "POWERTRAIN FUEL ECONOMY",
             icon = Icons.Default.LocalGasStation,
             color = NeonEmerald,
-            isExpanded = expandedEconomy,
-            onToggle = { expandedEconomy = !expandedEconomy }
         ) {
             if (realtimeEconomy?.isIdle == true) {
                 val idleVal = realtimeEconomy.idleConsumptionLh?.let { String.format(Locale.US, "%.2f L/h", it) } ?: "—"
@@ -154,15 +176,13 @@ fun TelemetryDashboardContent(
             title = "ENGINE DYNAMICS",
             icon = Icons.Default.Speed,
             color = CyberCyan,
-            isExpanded = expandedEngine,
-            onToggle = { expandedEngine = !expandedEngine }
         ) {
-            MetricRowWithSource("Engine RPM", formatLiveValue(liveMap, "010C"), isLiveError(liveMap, "010C"), source = "PID 010C (STANDARD)")
-            MetricRowWithSource("Vehicle Speed", formatLiveValue(liveMap, "010D"), isLiveError(liveMap, "010D"), source = "PID 010D (STANDARD)")
-            MetricRowWithSource("Engine Load", formatLiveValue(liveMap, "0104"), isLiveError(liveMap, "0104"), source = "PID 0104 (STANDARD)")
-            MetricRowWithSource("Actual Engine Torque", formatLiveValue(liveMap, "0162"), isLiveError(liveMap, "0162"), source = "PID 0162 (STANDARD)")
-            MetricRowWithSource("Driver Demand Torque", formatLiveValue(liveMap, "0161"), isLiveError(liveMap, "0161"), source = "PID 0161 (STANDARD)")
-            MetricRowWithSource("Reference Torque", formatLiveValue(liveMap, "0163"), isLiveError(liveMap, "0163"), source = "PID 0163 (STANDARD)")
+            MetricRowWithSource("Engine RPM", formatLiveValue(effectiveLive, "010C"), isLiveError(effectiveLive, "010C"), source = "PID 010C (STANDARD)")
+            MetricRowWithSource("Vehicle Speed", formatLiveValue(effectiveLive, "010D"), isLiveError(effectiveLive, "010D"), source = "PID 010D (STANDARD)")
+            MetricRowWithSource("Engine Load", formatLiveValue(effectiveLive, "0104"), isLiveError(effectiveLive, "0104"), source = "PID 0104 (STANDARD)")
+            MetricRowWithSource("Actual Engine Torque", formatLiveValue(effectiveLive, "0162"), isLiveError(effectiveLive, "0162"), source = "PID 0162 (STANDARD)")
+            MetricRowWithSource("Driver Demand Torque", formatLiveValue(effectiveLive, "0161"), isLiveError(effectiveLive, "0161"), source = "PID 0161 (STANDARD)")
+            MetricRowWithSource("Reference Torque", formatLiveValue(effectiveLive, "0163"), isLiveError(effectiveLive, "0163"), source = "PID 0163 (STANDARD)")
         }
 
         // 4. Fuel & Direct Injection (EA211 1.0 TSI)
@@ -170,18 +190,16 @@ fun TelemetryDashboardContent(
             title = "FUEL & INJECTION",
             icon = Icons.Default.EvStation,
             color = ElectricAmber,
-            isExpanded = expandedFuel,
-            onToggle = { expandedFuel = !expandedFuel }
         ) {
-            MetricRowWithSource("Engine Fuel Rate (Volume)", formatLiveValue(liveMap, "015E"), isLiveError(liveMap, "015E"), source = "PID 015E (L/h)")
-            MetricRowWithSource("Engine Fuel Rate (Mass)", formatLiveValue(liveMap, "019D"), isLiveError(liveMap, "019D"), source = "PID 019D (g/s)")
-            MetricRowWithSource("Fuel Pressure (Low Gauge)", formatLiveValue(liveMap, "010A"), isLiveError(liveMap, "010A"), source = "PID 010A (kPa)")
-            MetricRowWithSource("Fuel Rail Pressure (Direct Inj)", formatLiveValue(liveMap, "0123"), isLiveError(liveMap, "0123"), source = "PID 0123 (kPa)")
-            MetricRowWithSource("Fuel Injection Timing", formatLiveValue(liveMap, "015D"), isLiveError(liveMap, "015D"), source = "PID 015D (°)")
-            MetricRowWithSource("Fuel Tank Level", formatLiveValue(liveMap, "012F"), isLiveError(liveMap, "012F"), source = "PID 012F (%)")
-            MetricRowWithSource("Fuel Type", formatLiveValue(liveMap, "0151"), isLiveError(liveMap, "0151"), source = "PID 0151")
-            MetricRowWithSource("Ethanol Fuel %", formatLiveValue(liveMap, "0152"), isLiveError(liveMap, "0152"), source = "PID 0152 (%)")
-            MetricRowWithSource("Fuel System Status", formatLiveValue(liveMap, "0103"), isLiveError(liveMap, "0103"), source = "PID 0103")
+            MetricRowWithSource("Engine Fuel Rate (Volume)", formatLiveValue(effectiveLive, "015E"), isLiveError(effectiveLive, "015E"), source = "PID 015E (L/h)")
+            MetricRowWithSource("Engine Fuel Rate (Mass)", formatLiveValue(effectiveLive, "019D"), isLiveError(effectiveLive, "019D"), source = "PID 019D (g/s)")
+            MetricRowWithSource("Fuel Pressure (Low Gauge)", formatLiveValue(effectiveLive, "010A"), isLiveError(effectiveLive, "010A"), source = "PID 010A (kPa)")
+            MetricRowWithSource("Fuel Rail Pressure (Direct Inj)", formatLiveValue(effectiveLive, "0123"), isLiveError(effectiveLive, "0123"), source = "PID 0123 (kPa)")
+            MetricRowWithSource("Fuel Injection Timing", formatLiveValue(effectiveLive, "015D"), isLiveError(effectiveLive, "015D"), source = "PID 015D (°)")
+            MetricRowWithSource("Fuel Tank Level", formatLiveValue(effectiveLive, "012F"), isLiveError(effectiveLive, "012F"), source = "PID 012F (%)")
+            MetricRowWithSource("Fuel Type", formatLiveValue(effectiveLive, "0151"), isLiveError(effectiveLive, "0151"), source = "PID 0151")
+            MetricRowWithSource("Ethanol Fuel %", formatLiveValue(effectiveLive, "0152"), isLiveError(effectiveLive, "0152"), source = "PID 0152 (%)")
+            MetricRowWithSource("Fuel System Status", formatLiveValue(effectiveLive, "0103"), isLiveError(effectiveLive, "0103"), source = "PID 0103")
         }
 
         // 5. Combustion & Trim
@@ -189,13 +207,11 @@ fun TelemetryDashboardContent(
             title = "COMBUSTION & TRIM",
             icon = Icons.Default.Tune,
             color = ElectricAmber,
-            isExpanded = expandedCombustion,
-            onToggle = { expandedCombustion = !expandedCombustion }
         ) {
-            MetricRowWithSource("Short Term Fuel Trim B1", formatLiveValue(liveMap, "0106"), isLiveError(liveMap, "0106"), source = "PID 0106")
-            MetricRowWithSource("Long Term Fuel Trim B1", formatLiveValue(liveMap, "0107"), isLiveError(liveMap, "0107"), source = "PID 0107")
-            MetricRowWithSource("Equivalence Ratio (Lambda)", formatLiveValue(liveMap, "0144"), isLiveError(liveMap, "0144"), source = "PID 0144")
-            MetricRowWithSource("Timing Advance Cyl 1", formatLiveValue(liveMap, "010E"), isLiveError(liveMap, "010E"), source = "PID 010E")
+            MetricRowWithSource("Short Term Fuel Trim B1", formatLiveValue(effectiveLive, "0106"), isLiveError(effectiveLive, "0106"), source = "PID 0106")
+            MetricRowWithSource("Long Term Fuel Trim B1", formatLiveValue(effectiveLive, "0107"), isLiveError(effectiveLive, "0107"), source = "PID 0107")
+            MetricRowWithSource("Equivalence Ratio (Lambda)", formatLiveValue(effectiveLive, "0144"), isLiveError(effectiveLive, "0144"), source = "PID 0144")
+            MetricRowWithSource("Timing Advance Cyl 1", formatLiveValue(effectiveLive, "010E"), isLiveError(effectiveLive, "010E"), source = "PID 010E")
         }
 
         // 6. Thermal Management
@@ -203,14 +219,12 @@ fun TelemetryDashboardContent(
             title = "TEMPERATURES",
             icon = Icons.Default.DeviceThermostat,
             color = WarningRed,
-            isExpanded = expandedTemp,
-            onToggle = { expandedTemp = !expandedTemp }
         ) {
-            MetricRowWithSource("Engine Coolant Temp", formatLiveValue(liveMap, "0105"), isLiveError(liveMap, "0105"), source = "PID 0105 (°C)")
-            MetricRowWithSource("Intake Air Temp", formatLiveValue(liveMap, "010F"), isLiveError(liveMap, "010F"), source = "PID 010F (°C)")
-            MetricRowWithSource("Ambient Air Temp", formatLiveValue(liveMap, "0146"), isLiveError(liveMap, "0146"), source = "PID 0146 (°C)")
-            MetricRowWithSource("Catalyst Temp B1S1", formatLiveValue(liveMap, "013C"), isLiveError(liveMap, "013C"), source = "PID 013C (°C)")
-            MetricRowWithSource("Coolant Temp 2 (Radiator)", formatLiveValue(liveMap, "0167"), isLiveError(liveMap, "0167"), source = "PID 0167 (°C)")
+            MetricRowWithSource("Engine Coolant Temp", formatLiveValue(effectiveLive, "0105"), isLiveError(effectiveLive, "0105"), source = "PID 0105 (°C)")
+            MetricRowWithSource("Intake Air Temp", formatLiveValue(effectiveLive, "010F"), isLiveError(effectiveLive, "010F"), source = "PID 010F (°C)")
+            MetricRowWithSource("Ambient Air Temp", formatLiveValue(effectiveLive, "0146"), isLiveError(effectiveLive, "0146"), source = "PID 0146 (°C)")
+            MetricRowWithSource("Catalyst Temp B1S1", formatLiveValue(effectiveLive, "013C"), isLiveError(effectiveLive, "013C"), source = "PID 013C (°C)")
+            MetricRowWithSource("Coolant Temp 2 (Radiator)", formatLiveValue(effectiveLive, "0167"), isLiveError(effectiveLive, "0167"), source = "PID 0167 (°C)")
         }
 
         // 7. Air & Boost (Turbocharged EA211)
@@ -218,17 +232,15 @@ fun TelemetryDashboardContent(
             title = "AIR & TURBO BOOST",
             icon = Icons.Default.Compress,
             color = Color(0xFF81D4FA),
-            isExpanded = expandedAir,
-            onToggle = { expandedAir = !expandedAir }
         ) {
-            MetricRowWithSource("Intake MAP (Boost)", formatLiveValue(liveMap, "010B"), isLiveError(liveMap, "010B"), source = "PID 010B (kPa)")
-            MetricRowWithSource("MAF Air Flow", formatLiveValue(liveMap, "0110"), isLiveError(liveMap, "0110"), source = "PID 0110 (g/s)")
-            MetricRowWithSource("Barometric Pressure", formatLiveValue(liveMap, "0133"), isLiveError(liveMap, "0133"), source = "PID 0133 (kPa)")
-            MetricRowWithSource("Absolute Load", formatLiveValue(liveMap, "0143"), isLiveError(liveMap, "0143"), source = "PID 0143 (%)")
-            MetricRowWithSource("Throttle Position", formatLiveValue(liveMap, "0111"), isLiveError(liveMap, "0111"), source = "PID 0111 (%)")
-            MetricRowWithSource("Accelerator Pedal D", formatLiveValue(liveMap, "0149"), isLiveError(liveMap, "0149"), source = "PID 0149 (%)")
-            MetricRowWithSource("Accelerator Pedal E", formatLiveValue(liveMap, "014A"), isLiveError(liveMap, "014A"), source = "PID 014A (%)")
-            MetricRowWithSource("Commanded Throttle Actuator", formatLiveValue(liveMap, "014C"), isLiveError(liveMap, "014C"), source = "PID 014C (%)")
+            MetricRowWithSource("Intake MAP (Boost)", formatLiveValue(effectiveLive, "010B"), isLiveError(effectiveLive, "010B"), source = "PID 010B (kPa)")
+            MetricRowWithSource("MAF Air Flow", formatLiveValue(effectiveLive, "0110"), isLiveError(effectiveLive, "0110"), source = "PID 0110 (g/s)")
+            MetricRowWithSource("Barometric Pressure", formatLiveValue(effectiveLive, "0133"), isLiveError(effectiveLive, "0133"), source = "PID 0133 (kPa)")
+            MetricRowWithSource("Absolute Load", formatLiveValue(effectiveLive, "0143"), isLiveError(effectiveLive, "0143"), source = "PID 0143 (%)")
+            MetricRowWithSource("Throttle Position", formatLiveValue(effectiveLive, "0111"), isLiveError(effectiveLive, "0111"), source = "PID 0111 (%)")
+            MetricRowWithSource("Accelerator Pedal D", formatLiveValue(effectiveLive, "0149"), isLiveError(effectiveLive, "0149"), source = "PID 0149 (%)")
+            MetricRowWithSource("Accelerator Pedal E", formatLiveValue(effectiveLive, "014A"), isLiveError(effectiveLive, "014A"), source = "PID 014A (%)")
+            MetricRowWithSource("Commanded Throttle Actuator", formatLiveValue(effectiveLive, "014C"), isLiveError(effectiveLive, "014C"), source = "PID 014C (%)")
         }
 
         // 8. GPS & Route
@@ -236,12 +248,16 @@ fun TelemetryDashboardContent(
             title = "GPS & TELEMETRY",
             icon = Icons.Default.GpsFixed,
             color = Color(0xFFB39DDB),
-            isExpanded = expandedGps,
-            onToggle = { expandedGps = !expandedGps }
         ) {
             if (gpsData.isAvailable) {
                 MetricRowWithSource("GPS Speed", String.format(Locale.US, "%.1f km/h", gpsData.speedKmh), source = "HARDWARE GPS")
-                MetricRowWithSource("Altitude", String.format(Locale.US, "%.0f m", gpsData.altitudeMeters), source = "HARDWARE GPS")
+                MetricRowWithSource(
+                    "Altitude",
+                    // A fix without altitude carries the meaningless 0.0 default: show the
+                    // honest blank instead of claiming sea level (no-fake-values rule).
+                    if (gpsData.hasAltitude) String.format(Locale.US, "%.0f m", gpsData.altitudeMeters) else "-- m",
+                    source = "HARDWARE GPS"
+                )
                 MetricRowWithSource("Distance Traveled", String.format(Locale.US, "%.2f km", gpsData.distanceTraveledMeters / 1000f), source = "HARDWARE GPS")
                 MetricRowWithSource("GPS Accuracy", String.format(Locale.US, "%.0f m", gpsData.accuracyMeters), source = "HARDWARE GPS")
             } else {
