@@ -162,4 +162,8 @@ interface RefuelEventDao {
 
     @Query("UPDATE refuel_events SET calibratedPumpL = :pumpL WHERE idMs = :idMs")
     suspend fun calibrate(idMs: Long, pumpL: Double)
+
+    /** Pump litres a receipt already matched to this event: a rewrite must never drop them. */
+    @Query("SELECT calibratedPumpL FROM refuel_events WHERE idMs = :idMs")
+    suspend fun calibratedPumpFor(idMs: Long): Double?
 }

@@ -131,6 +131,10 @@ class TripRepository(context: Context) {
         refuelDao.calibrate(idMs, pumpL)
     }
 
+    suspend fun calibratedPumpFor(idMs: Long): Double? = withContext(Dispatchers.IO) {
+        refuelDao.calibratedPumpFor(idMs)
+    }
+
     suspend fun samplesSince(ts: Long, pids: List<String>): List<SampleRow> =
         withContext(Dispatchers.IO) { sampleDao.samplesSince(ts, pids) }
 

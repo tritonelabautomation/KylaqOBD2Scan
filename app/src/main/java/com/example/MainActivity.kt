@@ -797,6 +797,38 @@ fun MainApp(viewModel: MainViewModel) {
     }
     }
 
+    // Restart-refuel popup (owner 2026-09-19): the level rise that happened engine-off at the
+    // pump is proven by the first fuel-level row after the restart. Hosted above the NavHost so
+    // it reaches the owner on whatever screen he lands on - once per event, both answers end it.
+    val restartRefuel by viewModel.restartRefuel.collectAsState()
+    restartRefuel?.let { c ->
+        AlertDialog(
+            onDismissRequest = { viewModel.answerRestartRefuel(addReceipt = false) },
+            title = { Text("Fuel change detected") },
+            text = {
+                Text(
+                    "Tank went from " +
+                        String.format(java.util.Locale.US, "%.1f", c.levelBeforePct) + "% to " +
+                        String.format(java.util.Locale.US, "%.1f", c.levelAfterPct) +
+                        "% while the engine was off - about " +
+                        String.format(java.util.Locale.US, "%.1f", c.estLitres) +
+                        " L (estimated from the level rise, not measured). Add the pump receipt?"
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.answerRestartRefuel(addReceipt = true)
+                    navController.navigate(Screen.FuelCosts.route)
+                }) { Text("Add Receipt") }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.answerRestartRefuel(addReceipt = false) }) {
+                    Text("Not Now")
+                }
+            }
+        )
+    }
+
     if (showQuickAdd) {
         AlertDialog(
             onDismissRequest = { showQuickAdd = false },

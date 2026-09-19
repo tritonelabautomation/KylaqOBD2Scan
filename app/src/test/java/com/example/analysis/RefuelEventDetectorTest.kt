@@ -233,3 +233,46 @@ class RefuelSessionScanTest {
         assertEquals(Triple(20L, 87.5, null), res.lastLevel)
     }
 }
+
+/**
+ * The restart popup (owner 2026-09-19: "when restart my car after refuel obviously you can scan
+ * what is fuel % before start and after start") writes the between-sessions event the moment the
+ * first level row arrives; the finalize pass writes it again from the same stamps. These prove
+ * the two writes are the SAME event: same id (window end), so the REPLACE insert upgrades the
+ * row - with the session's own first odometer, which the restart copy could not know - instead
+ * of duplicating it or dropping a receipt calibration matched in between.
+ */
+class RestartRefuelIdempotenceTest {
+
+    @Test
+    fun restartWriteAndFinalizeWriteAreTheSameEvent() {
+        val stamp = Triple(0L, 37.6, 3500.0) // prev session: ts | level % | odo km
+        val firstLevelTs = 2_600_000L
+        val firstLevelPct = 93.7
+
+        val atRestart = RefuelEventDetector.crossSession(
+            stamp.first, stamp.second, stamp.third, firstLevelTs, firstLevelPct, null
+        )!!
+
+        val scan = RefuelSessionScan.scan(
+            listOf(
+                SinceRefuelStats.Row(firstLevelTs, "012F", firstLevelPct),
+                SinceRefuelStats.Row(firstLevelTs + 5_000, "01A6", 3501.2),
+                SinceRefuelStats.Row(firstLevelTs + 9_000, "010D", 40.0)
+            )
+        )
+        val atFinalize = RefuelEventDetector.crossSession(
+            stamp.first, stamp.second, stamp.third,
+            scan.firstLevel!!.first, scan.firstLevel!!.second, scan.firstOdo
+        )!!
+
+        assertEquals(atRestart.windowEndMs, atFinalize.windowEndMs)
+        assertEquals(firstLevelTs, atFinalize.windowEndMs)
+        // Restart falls back to the previous session's odometer; finalize upgrades it with this
+        // session's own first 01A6 row - both stay inside the +/-3 km receipt-match window.
+        assertEquals(3500.0, atRestart.odoKm!!, 1e-9)
+        assertEquals(3501.2, atFinalize.odoKm!!, 1e-9)
+        assertTrue(atRestart.betweenSessions)
+        assertEquals(56.1, atRestart.risePct, 1e-9)
+    }
+}

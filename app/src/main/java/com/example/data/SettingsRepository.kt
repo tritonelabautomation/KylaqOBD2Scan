@@ -506,6 +506,16 @@ class SettingsRepository(private val context: Context) {
     fun setRefuelBackfillDone() = prefs.edit().putBoolean("refuel_backfill_done", true).apply()
 
     /**
+     * The refuel event id whose restart popup the owner already answered ("Add Receipt" or "Not
+     * Now"). One prompt per event, never a nag on every restart: the ledger keeps the estimate
+     * either way, and Fuel & Costs matches a receipt to it later by odometer.
+     */
+    fun restartRefuelDismissedMs(): Long = prefs.getLong("restart_refuel_dismissed_ms", -1L)
+
+    fun setRestartRefuelDismissedMs(idMs: Long) =
+        prefs.edit().putLong("restart_refuel_dismissed_ms", idMs).apply()
+
+    /**
      * Throttle stamp for the automatic in-app update check (2026-09-16). A manual
      * "Check for updates" tap is never throttled - only the silent launch check is.
      */

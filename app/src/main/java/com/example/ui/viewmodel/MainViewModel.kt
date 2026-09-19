@@ -128,6 +128,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** Restart-refuel prompt from the recorder: first level row after start vs the last stamp. */
+    val restartRefuel = recordingManager.restartRefuel
+
+    /** Prefill for the Fuel & Costs receipt dialog when the owner answers the prompt. */
+    data class ReceiptPrefill(val liters: Double, val odoKm: Double?, val whenMs: Long)
+
+    private val _receiptPrefill = MutableStateFlow<ReceiptPrefill?>(null)
+    val receiptPrefill: StateFlow<ReceiptPrefill?> = _receiptPrefill
+
+    fun consumeReceiptPrefill() { _receiptPrefill.value = null }
+
+    /**
+     * Both answers end the prompt for THIS event (one popup per refuel, never a nag on every
+     * restart): "Add Receipt" carries the estimate, the odometer and the restart instant into the
+     * entry dialog; "Not Now" leaves the estimate in the ledger, where a receipt entered later
+     * still matches it by odometer.
+     */
+    fun answerRestartRefuel(addReceipt: Boolean) {
+        val c = recordingManager.restartRefuel.value ?: return
+        if (addReceipt) _receiptPrefill.value = ReceiptPrefill(c.estLitres, c.odoKm, c.idMs)
+        recordingManager.clearRestartRefuel()
+        viewModelScope.launch {
+            com.example.di.AppContainer.settingsRepository.setRestartRefuelDismissedMs(c.idMs)
+        }
+    }
+
     fun noteBackgroundLocationDeclined() {
         settingsRepository.setLastBgLocationDeclinedMs(System.currentTimeMillis())
         refreshLocationPermissionState()

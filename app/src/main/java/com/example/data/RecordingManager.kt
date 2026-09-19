@@ -84,6 +84,34 @@ class RecordingManager(
         CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
 
     /**
+     * Restart-refuel candidate (owner 2026-09-19: "when restart my car after refuel obviously you
+     * can scan what is fuel % before start and after start ... you can popup in the app fuel
+     * change detection do you want to add receipt"). The pump visit happens engine-off, between
+     * sessions; the FIRST valid fuel-level row after the restart is the "after" half against the
+     * persisted stamp - so the event is written and the receipt prompt raised the moment the car
+     * starts, not silently at session end.
+     */
+    data class RestartRefuel(
+        /** Also the event id and the restart row's own IST instant (window end). */
+        val idMs: Long,
+        val tsStartMs: Long,
+        val levelBeforePct: Double,
+        val levelAfterPct: Double,
+        /** Level-rise estimate from tank capacity - labelled estimated everywhere, never pump truth. */
+        val estLitres: Double,
+        val odoKm: Double?
+    )
+
+    private val _restartRefuel = MutableStateFlow<RestartRefuel?>(null)
+    val restartRefuel: StateFlow<RestartRefuel?> = _restartRefuel
+
+    /** Armed per session; the first level row disarms it, so the check runs exactly once. */
+    @Volatile
+    private var restartLevelCheckArmed = false
+
+    fun clearRestartRefuel() { _restartRefuel.value = null }
+
+    /**
      * The crash-proof journal (owner 2026-09-17: "it never ever loose the logs").
      * Every OBD transaction is appended here AND FLUSHED before `recordTransaction` returns, so a
      * process kill costs at most the row in flight instead of the whole drive.
@@ -230,6 +258,7 @@ class RecordingManager(
         _currentSessionMetadata.value = metadata
         _currentTransactions.value = emptyList()
         _isRecording.value = true
+        restartLevelCheckArmed = true
         _autoStopNotice.value = null
         lastRxAtMs = System.currentTimeMillis()
         watchdogJob?.cancel()
@@ -282,6 +311,15 @@ class RecordingManager(
 
     fun recordTransaction(tx: TransactionRecord) {
         if (!_isRecording.value) return
+
+        // Restart-refuel check: the first valid level row of this session, once (RestartRefuel).
+        if (restartLevelCheckArmed &&
+            tx.pid == com.example.analysis.RefuelEventDetector.PID_LEVEL &&
+            tx.decodedValue != null
+        ) {
+            restartLevelCheckArmed = false
+            maybeFlagRestartRefuel(tx)
+        }
 
         val journaled: TransactionRecord
         val row: SynchronizedSample
@@ -638,22 +676,72 @@ class RecordingManager(
             }
         }
         scan.lastLevel?.let { settings.setLastLevelStamp(it.first, it.second, it.third) }
-        for (ev in events) {
-            tripRepository.insertRefuelEvent(
-                com.example.data.db.entities.RefuelEventEntity(
-                    idMs = ev.windowEndMs,
-                    tsStartMs = ev.windowStartMs,
-                    tsEndMs = ev.windowEndMs,
-                    levelBeforePct = ev.levelBeforePct,
-                    levelAfterPct = ev.levelAfterPct,
-                    odoKm = ev.odoKm,
-                    // An ESTIMATE until a pump-litre calibration replaces it; labelled as such
-                    // in the UI, never presented as a measurement (no-fake-values rule).
-                    estLitres = ev.risePct / 100.0 * capacity,
-                    betweenSessions = if (ev.betweenSessions) 1 else 0,
-                    capacityL = capacity
-                )
+        for (ev in events) insertEventCarryCalibration(ev, capacity)
+    }
+
+    /**
+     * One event to disk, REPLACE-idempotent by idMs (window end). The restart write and the
+     * finalize write of the SAME between-sessions refuel share that id, so finalize upgrades the
+     * row (with this session's own first odometer) instead of duplicating it - and a rewrite must
+     * never drop pump litres a receipt already matched, so the calibration is carried across.
+     */
+    private suspend fun insertEventCarryCalibration(
+        ev: com.example.analysis.RefuelEventDetector.Detected,
+        capacity: Double
+    ) {
+        val existingPumpL =
+            runCatching { tripRepository.calibratedPumpFor(ev.windowEndMs) }.getOrNull()
+        tripRepository.insertRefuelEvent(
+            com.example.data.db.entities.RefuelEventEntity(
+                idMs = ev.windowEndMs,
+                tsStartMs = ev.windowStartMs,
+                tsEndMs = ev.windowEndMs,
+                levelBeforePct = ev.levelBeforePct,
+                levelAfterPct = ev.levelAfterPct,
+                odoKm = ev.odoKm,
+                // An ESTIMATE until a pump-litre calibration replaces it; labelled as such
+                // in the UI, never presented as a measurement (no-fake-values rule).
+                estLitres = ev.risePct / 100.0 * capacity,
+                betweenSessions = if (ev.betweenSessions) 1 else 0,
+                calibratedPumpL = existingPumpL,
+                capacityL = capacity
             )
+        )
+    }
+
+    /**
+     * The "after" half of a between-sessions refuel, captured live: first valid 012F row of the
+     * new session against the previous session's persisted stamp. Writes the event immediately -
+     * the popup offers a receipt against an event that already exists in the ledger, and a
+     * session that dies again still keeps the detection - then raises the prompt unless the owner
+     * already answered it or a receipt already matched it.
+     */
+    private fun maybeFlagRestartRefuel(tx: TransactionRecord) {
+        val ts = RecordTime.instantOf(tx.timestampMonotonic, tx.timestampUtc)
+            ?: tx.timestampMonotonic
+        val level = tx.decodedValue ?: return
+        managerScope.launch {
+            runCatching {
+                val settings = com.example.di.AppContainer.settingsRepository
+                val stamp = settings.lastLevelStamp() ?: return@runCatching
+                val detected = com.example.analysis.RefuelEventDetector.crossSession(
+                    stamp.first, stamp.second, stamp.third, ts, level, null
+                ) ?: return@runCatching
+                val capacity = settings.tankCapacityL()
+                insertEventCarryCalibration(detected, capacity)
+                val receipted = tripRepository.calibratedPumpFor(detected.windowEndMs) != null
+                val answered = settings.restartRefuelDismissedMs() == detected.windowEndMs
+                if (!receipted && !answered) {
+                    _restartRefuel.value = RestartRefuel(
+                        idMs = detected.windowEndMs,
+                        tsStartMs = detected.windowStartMs,
+                        levelBeforePct = detected.levelBeforePct,
+                        levelAfterPct = detected.levelAfterPct,
+                        estLitres = detected.risePct / 100.0 * capacity,
+                        odoKm = detected.odoKm
+                    )
+                }
+            }.onFailure { android.util.Log.e("RecordingManager", "restart refuel check failed", it) }
         }
     }
 

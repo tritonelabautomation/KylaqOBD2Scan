@@ -59,6 +59,17 @@ fun FuelCostsScreen(
     var sinceRefuel by remember { mutableStateOf<com.example.analysis.SinceRefuelStats.Stats?>(null) }
     LaunchedEffect(refresh, refuelEvents) { sinceRefuel = viewModel.sinceRefuelStats() }
     var editTarget by remember { mutableStateOf<FuelLogCodec.FuelEntry?>(null) }
+
+    // Restart-refuel popup answer: open the entry dialog with the detected estimate prefilled.
+    var receiptPrefill by remember { mutableStateOf<MainViewModel.ReceiptPrefill?>(null) }
+    val prefillFlow by viewModel.receiptPrefill.collectAsState()
+    LaunchedEffect(prefillFlow) {
+        prefillFlow?.let {
+            receiptPrefill = it
+            showAdd = true
+            viewModel.consumeReceiptPrefill()
+        }
+    }
     val cur by viewModel.settingsRepository.currencySymbol.collectAsState()
 
     LaunchedEffect(Unit) { if (viewModel.takeQuickAdd("fuel")) showAdd = true }
@@ -354,8 +365,9 @@ fun FuelCostsScreen(
 
     if (showAdd) {
         RefuelDialog(
-            onDismiss = { showAdd = false; editTarget = null },
+            onDismiss = { showAdd = false; editTarget = null; receiptPrefill = null },
             editEntry = editTarget,
+            prefill = receiptPrefill,
             recentStations = entries.map { it.station }.filter { it.isNotBlank() }.distinct().take(4),
             onSave = { liters, price, odo, station, grade, note, partial, dateStr, timeStr ->
                 val cal = java.util.Calendar.getInstance()
@@ -388,6 +400,7 @@ fun FuelCostsScreen(
                 refresh++
                 showAdd = false
                 editTarget = null
+                receiptPrefill = null
             }
         )
     }
@@ -429,6 +442,7 @@ private fun FuelStatChip(label: String, value: String, color: Color, modifier: M
 private fun RefuelDialog(
     onDismiss: () -> Unit,
     editEntry: FuelLogCodec.FuelEntry? = null,
+    prefill: MainViewModel.ReceiptPrefill? = null,
     recentStations: List<String>,
     onSave: (Double, Double, Double?, String, String, String, Boolean, String, String) -> Unit
 ) {
@@ -465,6 +479,21 @@ private fun RefuelDialog(
             // columns of a fuel record, so a device set to another zone used to file the fill-up
             // under a different day - and a fill-up at 00:20 IST would land on the previous date.
             val local = com.example.data.RecordTime.format("yyyy-MM-dd'T'HH:mm", e.idMs)
+            val parts = local.split('T')
+            dateStr = parts[0]
+            timeStr = parts.getOrNull(1) ?: "12:00"
+        }
+    }
+
+    LaunchedEffect(prefill) {
+        if (editEntry == null && prefill != null) {
+            // Detected-refuel prefill: litres are the level-rise ESTIMATE (the owner replaces
+            // them with the pump's number - that replacement is what calibrates the event), and
+            // the form is pinned to the restart instant in IST, the closest observed time to the
+            // engine-off fill, so the receipt lands on the right day.
+            liters = String.format(Locale.US, "%.1f", prefill.liters)
+            prefill.odoKm?.let { odo = String.format(Locale.US, "%.0f", it) }
+            val local = com.example.data.RecordTime.format("yyyy-MM-dd'T'HH:mm", prefill.whenMs)
             val parts = local.split('T')
             dateStr = parts[0]
             timeStr = parts.getOrNull(1) ?: "12:00"
