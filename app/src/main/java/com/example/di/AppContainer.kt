@@ -4,6 +4,7 @@ import android.content.Context
 import com.example.bluetooth.BluetoothManager
 import com.example.data.DocumentRepository
 import com.example.data.ExpenseRepository
+import com.example.data.CarpoolRepository
 import com.example.data.FuelLogRepository
 import com.example.data.ReminderRepository
 import com.example.data.TripPlanRepository

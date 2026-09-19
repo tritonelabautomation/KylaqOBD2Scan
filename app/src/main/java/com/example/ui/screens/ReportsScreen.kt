@@ -22,6 +22,7 @@ import com.example.ui.components.XySeries
 import com.example.ui.theme.CyberCyan
 import com.example.ui.theme.ElectricAmber
 import com.example.ui.theme.NeonEmerald
+import com.example.ui.theme.TextPrimaryDark
 import com.example.ui.theme.ResearchPurple
 import com.example.ui.theme.TextSecondaryDark
 import com.example.ui.viewmodel.MainViewModel
