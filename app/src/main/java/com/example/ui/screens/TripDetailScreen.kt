@@ -252,20 +252,20 @@ fun TripDetailScreen(
                             pricePerL = viewModel.fuelLogRepository.entries().maxByOrNull { it.idMs }?.pricePerL ?: 0.0,
                             speedPoints = samples.filter { it.pid.takeLast(2) == "0D" }
                                 .map { it.instantMs to (it.numericValue ?: 0.0) },
-                            altitudeBlankReason = altitudeBlankReason
-                        )
-                    }
-                    item {
-                        CarpoolCard(
-                            entry = carpoolEntry,
-                            fuelLiters = fuelSummary.fuelLiters,
-                            pricePerL = viewModel.fuelLogRepository.entries()
-                                .maxByOrNull { it.idMs }?.pricePerL ?: 0.0,
-                            onAdd = { showCarpool = true },
-                            onDelete = {
-                                carpoolEntry?.let {
-                                    viewModel.carpoolRepository.delete(it.idMs)
-                                }
+                            altitudeBlankReason = altitudeBlankReason,
+                            carpoolSlot = {
+                                CarpoolCard(
+                                    entry = carpoolEntry,
+                                    fuelLiters = fuelSummary.fuelLiters,
+                                    pricePerL = viewModel.fuelLogRepository.entries()
+                                        .maxByOrNull { it.idMs }?.pricePerL ?: 0.0,
+                                    onAdd = { showCarpool = true },
+                                    onDelete = {
+                                        carpoolEntry?.let {
+                                            viewModel.carpoolRepository.delete(it.idMs)
+                                        }
+                                    }
+                                )
                             }
                         )
                     }
@@ -352,7 +352,10 @@ private fun TripOverviewView(
     pricePerL: Double,
     speedPoints: List<Pair<Long, Double>>,
     /** Why the altitude column is blank, when it is. Computed by the caller from the location grants. */
-    altitudeBlankReason: String? = null
+    altitudeBlankReason: String? = null,
+    /** Car-pool card slot (owner 2026-09-19): rendered as an item of THIS list so it scrolls
+     *  with everything else - the 2026-09-16 clipping fix forbids cards outside the list. */
+    carpoolSlot: (@Composable () -> Unit)? = null
 ) {
     if (trip == null) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -370,6 +373,9 @@ private fun TripOverviewView(
     ) {
         item {
             TripFuelLogCard(summary)
+        }
+        carpoolSlot?.let { slot ->
+            item { slot() }
         }
         item {
             // Replicated OBDeleven trip-detail cards (owner reference screen 2, 2026-09-13)

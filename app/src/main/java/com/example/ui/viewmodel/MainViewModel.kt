@@ -269,11 +269,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return if (s.fuelLiters > 0.01) s.fuelLiters * price else null
     }
 
-    /** Car-pool monthly roll-up (owner 2026-09-19): earned vs effective cost per IST month. */
-    suspend fun monthlyCarpool(): List<com.example.data.CarpoolCodec.MonthRow> =
-        com.example.data.CarpoolCodec.monthly(carpoolRepository.entries()) { e ->
-            e.tripId?.let { tripFuelCost(it) }
-        }
+    /**
+     * Car-pool monthly roll-up (owner 2026-09-19): earned vs effective cost per IST month.
+     * Pump costs are resolved BEFORE the pure grouping: the codec's cost lambda is deliberately
+     * non-suspend so the month math stays JVM-testable without a coroutine harness.
+     */
+    suspend fun monthlyCarpool(): List<com.example.data.CarpoolCodec.MonthRow> {
+        val entries = carpoolRepository.entries()
+        val costs = entries.associate { e -> e.idMs to (e.tripId?.let { tripFuelCost(it) }) }
+        return com.example.data.CarpoolCodec.monthly(entries) { e -> costs[e.idMs] }
+    }
 
     fun noteBackgroundLocationDeclined() {
         settingsRepository.setLastBgLocationDeclinedMs(System.currentTimeMillis())
