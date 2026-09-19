@@ -5,8 +5,8 @@
 [![Build Android APK](https://github.com/tritonelabautomation/KylaqOBD2Scan/actions/workflows/build-apk.yml/badge.svg)](https://github.com/tritonelabautomation/KylaqOBD2Scan/actions/workflows/build-apk.yml)
 ![minSdk](https://img.shields.io/badge/minSdk-24-3DDC84)
 ![targetSdk](https://img.shields.io/badge/targetSdk-36-3DDC84)
-![tests](https://img.shields.io/badge/unit%20tests-290%20passing-brightgreen)
-![suites](https://img.shields.io/badge/test%20suites-29-blue)
+![tests](https://img.shields.io/badge/unit%20tests-770%20passing-brightgreen)
+![suites](https://img.shields.io/badge/test%20suites-93-blue)
 ![license](https://img.shields.io/badge/license-all%20rights%20reserved-lightgrey)
 
 Built in Kotlin + Jetpack Compose (Material 3, dark "cyber" theme), Room, and coroutines. Every physical claim in the app (torque curves, gear ratios, converter slip, fuel energy) is traced back to an official source or to a captured live trace from the owner's own car — see [References](#references--sources).

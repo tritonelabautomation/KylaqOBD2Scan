@@ -216,6 +216,41 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * I/M readiness report (owner gap analysis 2026-09-19): what an inspection scan tool reads.
+     * 0141 = this drive cycle, 0101 = since codes cleared; both on-demand through the live link,
+     * never polled, so a car that answers slowly costs nothing while driving.
+     */
+    data class ReadinessReport(
+        val cycle: com.example.analysis.ReadinessMonitors.Status?,
+        val sinceCleared: com.example.analysis.ReadinessMonitors.Status?,
+        val error: String? = null
+    )
+
+    private val _readinessReport = MutableStateFlow<ReadinessReport?>(null)
+    val readinessReport: StateFlow<ReadinessReport?> = _readinessReport
+
+    fun fetchReadiness() {
+        val transport = activeTransport ?: return
+        if (!transport.isConnected) return
+        viewModelScope.launch {
+            val r41 = transport.sendCommand("0141", 3000L)
+            val r01 = transport.sendCommand("0101", 3000L)
+            val cycle = r41.lines.firstOrNull()
+                ?.let { com.example.analysis.ReadinessMonitors.fromResponseLine(it, "41") }
+            val since = r01.lines.firstOrNull()
+                ?.let { com.example.analysis.ReadinessMonitors.fromResponseLine(it, "01") }
+            _readinessReport.value = ReadinessReport(
+                cycle = cycle,
+                sinceCleared = since,
+                error = if (cycle == null && since == null) {
+                    "No readable monitor frame from the ECU (NO DATA or unsupported) - not a " +
+                        "fault verdict, just no answer to show."
+                } else null
+            )
+        }
+    }
+
     fun noteBackgroundLocationDeclined() {
         settingsRepository.setLastBgLocationDeclinedMs(System.currentTimeMillis())
         refreshLocationPermissionState()
