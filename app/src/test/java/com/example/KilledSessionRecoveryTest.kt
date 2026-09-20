@@ -234,7 +234,8 @@ class KilledSessionRecoveryTest {
         val read = com.example.data.SessionJsonReader.readMetadata(json.reader())
         assertNotNull(read)
         assertEquals(meta.sessionId, read!!.sessionId)
-        assertEquals(meta.sessionName, read.sessionName)
+        // Recovery renames honestly: the live name plus the "(recovered)" marker.
+        assertEquals("${meta.sessionName} (recovered)", read.sessionName)
         assertTrue(read.startTimeUtc.endsWith("+05:30"))
         assertEquals(frames.size, com.example.data.SessionJsonReader.countTransactionRows(txCsv))
 
