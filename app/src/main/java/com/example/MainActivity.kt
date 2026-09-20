@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.app.ForegroundServiceStartNotAllowedException
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.lifecycleScope
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import android.content.Intent
 import androidx.compose.ui.platform.LocalContext
@@ -177,7 +178,7 @@ class MainActivity : ComponentActivity() {
      * build so no trip, log or permission is touched.
      */
     private fun safeModeUpdate(onState: (String) -> Unit) {
-        androidx.lifecycle.lifecycleScope.launch {
+        lifecycleScope.launch {
             onState("Checking for a newer build...")
             val manager = com.example.update.UpdateManager(this@MainActivity)
             val info = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
