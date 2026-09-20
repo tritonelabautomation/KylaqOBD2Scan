@@ -215,6 +215,42 @@ class KilledSessionRecoveryTest {
     }
 
     @Test
+    fun sessionJsonIsStreamedNotMaterialisedAndRenameSurvives() = runBlocking {
+        // Owner crash log 2026-09-20: OOM at the 256 MB heap while the dashboard
+        // recomposed - loadSavedRecordings used to readText()+JSONObject EVERY session's
+        // full transactions array at every start. The streamed path must see identical
+        // metadata and counts without ever holding a drive in RAM.
+        val frames = realFrames(System.currentTimeMillis() - 60_000L)
+        val killed = newManager()
+        val meta = killed.startRecording()!!
+        frames.forEach { killed.recordTransaction(it) }
+        val restarted = newManager()
+        restarted.recoverUnfinishedSessions()
+
+        val dir = java.io.File(context.filesDir, "recordings/session_${meta.sessionId}")
+        val json = java.io.File(dir, "${meta.sessionId}.json")
+        val txCsv = java.io.File(dir, "${meta.sessionId}_transactions.csv")
+
+        val read = com.example.data.SessionJsonReader.readMetadata(json.reader())
+        assertNotNull(read)
+        assertEquals(meta.sessionId, read!!.sessionId)
+        assertEquals(meta.sessionName, read.sessionName)
+        assertTrue(read.startTimeUtc.endsWith("+05:30"))
+        assertEquals(frames.size, com.example.data.SessionJsonReader.countTransactionRows(txCsv))
+
+        // The trip-list loader - the path that used to eat the heap - agrees on the count.
+        restarted.loadSavedRecordings()
+        val saved = restarted.savedRecordings.value.single { it.metadata.sessionId == meta.sessionId }
+        assertEquals(frames.size, saved.transactionCount)
+
+        // Rename streams too: new name in, every transaction still on disk after.
+        restarted.renameRecording(meta.sessionId, "Renamed Run")
+        val renamed = com.example.data.SessionJsonReader.readMetadata(json.reader())
+        assertEquals("Renamed Run", renamed!!.sessionName)
+        assertEquals(frames.size, com.example.data.SessionJsonReader.countTransactionRows(txCsv))
+    }
+
+    @Test
     fun aRecoveredSessionIsNeverRecoveredTwice() = runBlocking {
         val frames = realFrames(System.currentTimeMillis() - 60_000L)
         val killed = newManager()

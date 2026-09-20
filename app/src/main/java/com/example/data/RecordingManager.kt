@@ -1020,35 +1020,27 @@ class RecordingManager(
 
             if (jsonFile.exists()) {
                 try {
-                    val jsonStr = jsonFile.readText()
-                    val root = JSONObject(jsonStr)
-                    val metaObj = root.getJSONObject("sessionMetadata")
-                    val txArray = root.getJSONArray("transactions")
-
-                    val meta = RecordingMetadata(
-                        sessionId = metaObj.getString("sessionId"),
-                        sessionName = metaObj.optString("sessionName", "Session $sessionId"),
-                        vehicle = metaObj.optString("vehicle", "Škoda Kylaq 1.0 TSI"),
-                        profile = metaObj.optString("profile", "India-Market 1.0 TSI"),
-                        adapter = metaObj.optString("adapter", "ELM327 v1.5"),
-                        protocol = metaObj.optString("protocol", "ISO 15765-4"),
-                        canBitrate = metaObj.optString("canBitrate", "500 kbps"),
-                        startTimeUtc = metaObj.getString("startTimeUtc"),
-                        endTimeUtc = metaObj.optString("endTimeUtc", null),
-                        appVersion = metaObj.optString("appVersion", "1.0")
-                    )
-
-                    result.add(
-                        SavedRecording(
-                            metadata = meta,
-                            transactionCount = txArray.length(),
-                            transactionCsvFile = txCsv,
-                            samplesCsvFile = sampleCsv,
-                            jsonFile = jsonFile,
-                            rawLogFile = if (rawFile.exists()) rawFile else null,
-                            zipFile = if (zipFile.exists()) zipFile else null
+                    // STREAM, never materialise (owner crash log 2026-09-20: OOM at the
+                    // 256 MB heap, thrown on the UI thread mid-recomposition). The old
+                    // readText()+JSONObject built the ENTIRE drive - every journaled OBD
+                    // row of every session - in RAM on each app start; once trips piled
+                    // up that alone filled the heap and the next Compose allocation died.
+                    // The metadata is streamed field by field, the transactions array is
+                    // skipped, and the count comes from the CSV's data rows.
+                    val meta = SessionJsonReader.readMetadata(jsonFile.reader())
+                    if (meta != null) {
+                        result.add(
+                            SavedRecording(
+                                metadata = meta,
+                                transactionCount = SessionJsonReader.countTransactionRows(txCsv),
+                                transactionCsvFile = txCsv,
+                                samplesCsvFile = sampleCsv,
+                                jsonFile = jsonFile,
+                                rawLogFile = if (rawFile.exists()) rawFile else null,
+                                zipFile = if (zipFile.exists()) zipFile else null
+                            )
                         )
-                    )
+                    }
                 } catch (e: Exception) {
                     e.printStackTrace()
                 }
@@ -1203,11 +1195,19 @@ class RecordingManager(
         val jsonFile = File(sessionDir, "$sessionId.json")
         if (jsonFile.exists()) {
             try {
-                val jsonStr = jsonFile.readText()
-                val root = JSONObject(jsonStr)
-                val metaObj = root.getJSONObject("sessionMetadata")
-                metaObj.put("sessionName", newName)
-                jsonFile.writeText(root.toString(2))
+                // Streamed rename (same 2026-09-20 OOM class): the old path read the whole
+                // drive into a JSONObject and re-serialised it just to change one string.
+                // Token-by-token copy with sessionName replaced; peak memory is one token.
+                val tmp = File(sessionDir, "$sessionId.json.renaming")
+                jsonFile.reader().use { input ->
+                    tmp.writer().use { output ->
+                        SessionJsonReader.writeRenamedSession(input, output, newName)
+                    }
+                }
+                if (!tmp.renameTo(jsonFile)) {
+                    jsonFile.delete()
+                    tmp.renameTo(jsonFile)
+                }
                 loadSavedRecordings()
             } catch (e: Exception) {
                 e.printStackTrace()
