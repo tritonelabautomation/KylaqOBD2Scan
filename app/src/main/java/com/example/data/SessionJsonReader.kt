@@ -2,7 +2,6 @@ package com.example.data
 
 import android.util.JsonReader
 import android.util.JsonToken
-import android.util.JsonWriter
 import com.example.model.RecordingMetadata
 import java.io.File
 import java.io.Reader
@@ -22,13 +21,22 @@ import java.io.Writer
  * app filled the heap on the IO thread and the next UI allocation threw the OOM - which
  * is also why the app "crashed when opened" in a loop before the crash journal existed.
  *
- * [JsonReader] streams: `sessionMetadata` is captured field by field, the transactions
- * array is `skipValue()`d, so peak memory is one row, not one drive. The transaction
- * count comes from counting the transactions CSV's data rows - which is exactly what the
- * count always represented. [writeRenamedSession] streams a rename the same way, so
- * renaming a long trip no longer re-materialises it either.
+ * [readMetadata] streams with [JsonReader]: `sessionMetadata` is captured field by field
+ * and the transactions array is `skipValue()`d, so peak memory is one row, not one drive.
+ * The transaction count comes from counting the transactions CSV's data rows - exactly
+ * what `txArray.length()` used to report.
+ *
+ * [writeRenamedSession] avoids materialising too, by surgery instead of a token copier:
+ * [JsonExporter] writes `sessionMetadata` as the FIRST root key, so a bounded 64 KiB head
+ * window always contains the `sessionName` field; it is replaced in that window and the
+ * rest of the file is copied through byte-for-byte. (A JsonWriter token copier was tried
+ * first and proved silently wrong in CI - the regression test kept the honesty.)
  */
 object SessionJsonReader {
+
+    private const val HEAD_WINDOW_CHARS = 65_536
+
+    private val SESSION_NAME_FIELD = Regex("\"sessionName\"\\s*:\\s*\"(?:\\\\.|[^\"\\\\])*\"")
 
     /**
      * Reads only `sessionMetadata`, streaming. Null when the document is absent,
@@ -73,17 +81,54 @@ object SessionJsonReader {
     }
 
     /**
-     * Copies the whole document stream-for-stream, replacing `sessionMetadata.sessionName`
-     * with [newName]. Peak memory is one token: renaming a 90-minute trip no longer builds
-     * its object graph (the old path did `readText()` + `JSONObject` + `toString(2)`).
+     * Rewrites the document with `sessionMetadata.sessionName` replaced by [newName].
+     * Peak memory is the head window plus a small copy buffer - renaming a 90-minute
+     * trip no longer builds its object graph (the old path did `readText()` +
+     * `JSONObject` + `toString(2)` on the whole drive).
+     *
+     * @return false only if no `sessionName` field sat inside the head window, i.e. a
+     * document [JsonExporter] did not write; callers treat that as "nothing renamed"
+     * and the file is left exactly as it was.
      */
-    fun writeRenamedSession(input: Reader, out: Writer, newName: String) {
-        JsonReader(input).use { jr ->
-            JsonWriter(out).use { jw ->
-                jw.setIndent("  ")
-                copyValue(jr, jw, newName, insideMeta = false)
+    fun writeRenamedSession(input: Reader, out: Writer, newName: String): Boolean {
+        val window = CharArray(HEAD_WINDOW_CHARS)
+        var filled = 0
+        while (filled < window.size) {
+            val r = input.read(window, filled, window.size - filled)
+            if (r < 0) break
+            filled += r
+        }
+        val head = String(window, 0, filled)
+        val replaced = SESSION_NAME_FIELD.replaceFirst(head, "\"sessionName\":" + quote(newName))
+        if (replaced == head) return false
+        out.write(replaced)
+        if (filled == window.size) {
+            val rest = CharArray(8192)
+            while (true) {
+                val r = input.read(rest)
+                if (r < 0) break
+                out.write(rest, 0, r)
             }
         }
+        out.flush()
+        return true
+    }
+
+    /** Minimal JSON string quoting: escapes quote, backslash and control characters. */
+    private fun quote(value: String): String = buildString {
+        append('"')
+        for (ch in value) {
+            when {
+                ch == '"' -> append("\\\"")
+                ch == '\\' -> append("\\\\")
+                ch == '\n' -> append("\\n")
+                ch == '\r' -> append("\\r")
+                ch == '\t' -> append("\\t")
+                ch < ' ' -> append("\\u%04x".format(ch.code))
+                else -> append(ch)
+            }
+        }
+        append('"')
     }
 
     private fun readMetaObject(jr: JsonReader): RecordingMetadata {
@@ -136,43 +181,4 @@ object SessionJsonReader {
         } else {
             jr.nextString()
         }
-
-    private fun copyValue(jr: JsonReader, jw: JsonWriter, newName: String, insideMeta: Boolean) {
-        when (jr.peek()) {
-            JsonToken.BEGIN_OBJECT -> {
-                jw.beginObject()
-                while (jr.hasNext()) {
-                    val name = jr.nextName()
-                    jw.name(name)
-                    if (insideMeta && name == "sessionName") {
-                        jr.skipValue()
-                        jw.value(newName)
-                    } else {
-                        // The child object IS the metadata object exactly when its key is
-                        // sessionMetadata - passing anything else (e.g. AND-ing with the
-                        // parent's flag) never enters it and the rename silently no-ops,
-                        // which is exactly what the regression test caught on first run.
-                        copyValue(jr, jw, newName, insideMeta = name == "sessionMetadata")
-                    }
-                }
-                jw.endObject()
-            }
-            JsonToken.BEGIN_ARRAY -> {
-                jw.beginArray()
-                while (jr.hasNext()) copyValue(jr, jw, newName, insideMeta)
-                jw.endArray()
-            }
-            JsonToken.STRING -> jw.value(jr.nextString())
-            JsonToken.NUMBER -> {
-                val raw = jr.nextString()
-                raw.toLongOrNull()?.let { jw.value(it) } ?: jw.value(raw.toDouble())
-            }
-            JsonToken.BOOLEAN -> jw.value(jr.nextBoolean())
-            JsonToken.NULL -> {
-                jr.nextNull()
-                jw.nullValue()
-            }
-            else -> jr.skipValue()
-        }
-    }
 }

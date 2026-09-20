@@ -1199,14 +1199,19 @@ class RecordingManager(
                 // drive into a JSONObject and re-serialised it just to change one string.
                 // Token-by-token copy with sessionName replaced; peak memory is one token.
                 val tmp = File(sessionDir, "$sessionId.json.renaming")
-                jsonFile.reader().use { input ->
+                val renamed = jsonFile.reader().use { input ->
                     tmp.writer().use { output ->
                         SessionJsonReader.writeRenamedSession(input, output, newName)
                     }
                 }
-                if (!tmp.renameTo(jsonFile)) {
-                    jsonFile.delete()
-                    tmp.renameTo(jsonFile)
+                if (renamed) {
+                    if (!tmp.renameTo(jsonFile)) {
+                        jsonFile.delete()
+                        tmp.renameTo(jsonFile)
+                    }
+                } else {
+                    // Not a JsonExporter document: leave the original untouched.
+                    tmp.delete()
                 }
                 loadSavedRecordings()
             } catch (e: Exception) {
