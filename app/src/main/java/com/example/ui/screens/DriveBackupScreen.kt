@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
@@ -44,6 +45,7 @@ fun DriveBackupScreen(
     var treeUri by remember { mutableStateOf(settings.driveTreeUri()?.let { Uri.parse(it) }) }
     var status by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
+    var restoringName by remember { mutableStateOf<String?>(null) }
     var backups by remember { mutableStateOf<List<DriveBackupClient.BackupFile>>(emptyList()) }
     val autoBackup by settings.autoCloudBackup.collectAsState()
     val lastBackup by settings.lastBackupTimestamp.collectAsState()
@@ -275,8 +277,13 @@ fun DriveBackupScreen(
                         }
                         TextButton(
                             onClick = { pendingRestore = file },
-                            enabled = !busy
-                        ) { Text("Restore") }
+                            enabled = restoringName == null && !busy
+                        ) {
+                            // Owner 2026-09-20: "Even if i click single restore all are showing
+                            // restoring" - one global flag greyed every row into looking like it
+                            // was mid-restore. Only the row actually being restored says so now.
+                            Text(if (restoringName == file.name) "Restoring…" else "Restore")
+                        }
                     }
                 }
             }
@@ -289,8 +296,12 @@ fun DriveBackupScreen(
             title = { Text("Files on Google Drive") },
             text = {
                 Text(
-                    "Choose how to apply cloud data. RESTORE FULL BACKUP overwrites all current " +
-                        "data with " + file.name + ". For a fuel-log-only merge use Import CSV instead."
+                    "RESTORE replaces this phone's copies of the trips inside " + file.name +
+                        " with the archive's copies, brings back its unsaved raw logs and applies"
+                        + " its fuel / car-pool / settings snapshot. Trips NOT in the archive stay"
+                        + " untouched. On THIS phone - where everything already matches the backup -"
+                        + " the proof is the finished count line and the toast; on a fresh phone it"
+                        + " rebuilds every trip. For a fuel-log-only merge use Import CSV instead."
                 )
             },
             confirmButton = {
@@ -298,17 +309,24 @@ fun DriveBackupScreen(
                     onClick = {
                         val target = file
                         pendingRestore = null
-                        busy = true
+                        restoringName = target.name
                         status = "Restoring " + target.name
                         scope.launch {
-                            status = try {
+                            val outcome = try {
                                 "Restore finished: " + DriveBackupClient.restoreBackup(
                                     context, target.uri, viewModel.recordingManager
                                 )
                             } catch (e: Exception) {
                                 "Restore failed: " + (e.message ?: "error")
                             }
-                            busy = false
+                            // A restore replaces Room rows and files underneath the screens:
+                            // refresh the trip list and TOAST the counts so the owner never has
+                            // to guess whether anything happened (owner 2026-09-20: "nothing is
+                            // restored from drive to app").
+                            viewModel.recordingManager.loadSavedRecordings()
+                            status = outcome
+                            restoringName = null
+                            Toast.makeText(context, outcome, Toast.LENGTH_LONG).show()
                         }
                     }
                 ) { Text("RESTORE (OVERWRITE)") }
