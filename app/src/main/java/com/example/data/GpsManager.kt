@@ -45,6 +45,14 @@ class GpsManager(private val context: Context) : LocationListener {
     private val _gpsStatus = MutableStateFlow(STATUS_NO_FIX)
     val gpsStatus: StateFlow<String> = _gpsStatus.asStateFlow()
 
+    /**
+     * Live tracking flag (owner 2026-09-20: "Altitude still not logging in"). A process that
+     * restarts MID-drive resumes the unfinished journal without ever passing the
+     * START_RECORDING edge - the only place the auto-record loop used to start GPS - so the
+     * keep-alive supervisor asks every tick and belts a recording that lacks GPS.
+     */
+    val isTrackingNow: Boolean get() = isTracking
+
     companion object {
         const val STATUS_OK = "OK"
         const val STATUS_NO_FIX = "NO_FIX"

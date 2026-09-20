@@ -460,9 +460,13 @@ class RecordingManager(
         // The trip window is the DATA window: first row to last row. Deriving it here rather than
         // passing it in means every caller - STOP, an orphaned restart, journal recovery, raw-log
         // recovery - reports the same thing, and no caller can hand over a window that disagrees
-        // with the rows it just handed over. Every row carries its own epoch, so this is exact.
-        val startTimestamp = txList.minOf { it.timestampMonotonic }
-        val endTimestamp = txList.maxOf { it.timestampMonotonic }
+        // with the rows it just handed over. The instant comes from each row's IST STAMP, not from
+        // the monotonic column: that column is SystemClock.elapsedRealtime() (uptime since boot),
+        // and reading it as an epoch put every trip's Room window around 1970 - which is how a
+        // same-day recovered drive earned the "recorded by an older build" altitude footnote
+        // (owner 2026-09-20: "Altitude still not logging in").
+        val startTimestamp = txList.minOf { SessionRecoveryPolicy.wallEpochMs(it.timestampUtc, it.timestampMonotonic) }
+        val endTimestamp = txList.maxOf { SessionRecoveryPolicy.wallEpochMs(it.timestampUtc, it.timestampMonotonic) }
         val endStamp = RecordTime.stamp(endTimestamp)
 
         // GPS altitude window for this trip (owner 2026-09-15 fix: altitude was captured live but
@@ -933,12 +937,20 @@ class RecordingManager(
             val txList = CsvExporter.readTransactionsFromCsv(journal.txFile(sessionId))
             if (txList.isEmpty()) return RecoveryOutcome.NothingToRecover
 
+            // The journal's monotonic column is UPTIME (SystemClock.elapsedRealtime), not an
+            // instant: re-anchor every row to its own IST stamp before anything downstream -
+            // window, replayed wide rows, Room rows - reads a clock that says 1970.
+            val wallTx = txList.map { tx ->
+                val wall = SessionRecoveryPolicy.wallEpochMs(tx.timestampUtc, tx.timestampMonotonic)
+                if (wall == tx.timestampMonotonic) tx else tx.copy(timestampMonotonic = wall)
+            }
+
             val meta = journal.readMeta(sessionId)
             // The trip window is the DATA window: first frame to last frame. The journal also
             // records when the session was opened, but using that as the start would add the
             // connect-to-first-response gap to every recovered duration - and the raw-log recovery
             // path has always used the first telemetry line, so the two now agree.
-            val startMs = txList.minOf { it.timestampMonotonic }
+            val startMs = wallTx.minOf { it.timestampMonotonic }
             val openedMs = meta["startEpochMillis"]?.toLongOrNull()
                 ?: RecordTime.parseMillis(meta["startTime"])
                 ?: startMs
@@ -946,11 +958,11 @@ class RecordingManager(
             val sampleRows = CsvExporter.readSamplesFromCsv(journal.sampleFile(sessionId))
             // Samples journal missing or short (an older build, a write failure): replay the wide
             // rows from the transactions so the trip still gets them. Same pure fold as live.
-            val samples = if (SessionRecoveryPolicy.samplesUsable(sampleRows.size, txList.size)) {
+            val samples = if (SessionRecoveryPolicy.samplesUsable(sampleRows.size, wallTx.size)) {
                 sampleRows
             } else {
                 SessionRecoveryPolicy.replaySamples(
-                    transactions = txList,
+                    transactions = wallTx,
                     seed = SynchronizedSample(timestampUtc = "", timestampMonotonic = 0L),
                     merge = { acc, tx -> mergeSample(acc, tx).copy(altitudeM = tx.altitudeM) }
                 )
@@ -980,7 +992,7 @@ class RecordingManager(
 
             val saved = finalizeSession(
                 metadata = metadata,
-                txList = txList,
+                txList = wallTx,
                 sampleList = samples,
                 rawLogFile = rawLogFile,
                 recovered = true

@@ -132,4 +132,16 @@ object SessionRecoveryPolicy {
      */
     fun shouldAnnounce(recoveredSessions: Int, lostSessions: Int, failures: Int): Boolean =
         recoveredSessions > 0 || lostSessions > 0 || failures > 0
+
+    /**
+     * The true instant of one recorded row. The transports stamp `timestampMonotonic` with
+     * SystemClock.elapsedRealtime() - milliseconds since BOOT, not an instant - while
+     * `timestampUtc` carries the real IST stamp, so the stamp is the only honest wall clock
+     * and the uptime value is a fallback for rows written without one. Reading uptime as an
+     * epoch is how every trip's Room window landed around 1970, which made a same-day
+     * recovered drive get the "recorded by an older build" altitude footnote
+     * (owner 2026-09-20: "Altitude still not logging in").
+     */
+    fun wallEpochMs(stamp: String?, monotonicMs: Long): Long =
+        RecordTime.parseMillis(stamp) ?: monotonicMs
 }

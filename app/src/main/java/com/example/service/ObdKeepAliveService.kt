@@ -311,6 +311,16 @@ class ObdKeepAliveService : Service() {
                             }
                             AutoRecordPolicy.Decision.NONE -> Unit
                         }
+                        // BELT (owner 2026-09-20: "Altitude still not logging in"): a process
+                        // that restarts mid-drive resumes the unfinished journal WITHOUT passing
+                        // the START_RECORDING edge above - the only place this loop used to start
+                        // GPS - so altitude and the GPS trace would stay blank for the rest of
+                        // the drive. Every tick: a recording without tracking gets corrected.
+                        if (container.recordingManager.isRecording.value &&
+                            !container.gpsManager.isTrackingNow
+                        ) {
+                            container.gpsManager.startTracking()
+                        }
                         engineOffSinceMs = AutoRecordPolicy.nextEngineOffSince(
                             rpm, recording, engineOffSinceMs, now
                         )

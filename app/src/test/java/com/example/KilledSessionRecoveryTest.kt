@@ -62,7 +62,7 @@ class KilledSessionRecoveryTest {
      * Frames from the owner's own raw log: `41 0C 0F 28` = 970 rpm, `41 0D 50` = 80 km/h,
      * `41 05 59` = 49 °C coolant, `41 42 0D 62` = 13.77 V.
      */
-    private fun realFrames(startMs: Long): List<TransactionRecord> {
+    private fun realFrames(startMs: Long, monoBase: Long? = null): List<TransactionRecord> {
         val shapes = listOf(
             Triple("0C", "410C0F28", 970.0),
             Triple("0D", "410D50", 80.0),
@@ -73,9 +73,12 @@ class KilledSessionRecoveryTest {
         for (poll in 0 until 5) {
             for ((pid, frame, value) in shapes) {
                 val t = startMs + poll * 520L + out.size * 130L
+                // monoBase simulates the REAL transport: timestampMonotonic is uptime since
+                // boot, not an instant. Null keeps the legacy shape where both clocks agree.
+                val mono = monoBase?.let { it + (t - startMs) } ?: t
                 out += TransactionRecord(
                     timestampUtc = RecordTime.stamp(t),
-                    timestampMonotonic = t,
+                    timestampMonotonic = mono,
                     direction = Direction.RX,
                     canRxId = if (pid == "42") "7E9" else "7E8",
                     requestHex = "01$pid",
@@ -174,6 +177,40 @@ class KilledSessionRecoveryTest {
         assertEquals(
             (frames.last().timestampMonotonic - frames.first().timestampMonotonic) / 1000L,
             trip.durationSeconds
+        )
+    }
+
+    @Test
+    fun aRecoveredTripKeepsTheWallClockNotTheUptimeClock() = runBlocking {
+        // The real transports stamp timestampMonotonic with SystemClock.elapsedRealtime():
+        // three days of uptime here, NOT an instant. The journal carries both clocks per
+        // row, and recovery must anchor the trip to the IST stamp - reading uptime as an
+        // epoch put the Room window around 1970, which made a same-day recovered drive
+        // earn the "recorded by an older build" altitude footnote
+        // (owner 2026-09-20: "Altitude still not logging in").
+        val startMs = RecordTime.parseMillis("2026-09-20T13:25:00+05:30")!!
+        val uptimeBase = 3 * 24 * 3_600_000L
+        val frames = realFrames(startMs, uptimeBase)
+        val lastMs = RecordTime.parseMillis(frames.last().timestampUtc)!!
+        assertTrue("the two clocks must disagree for this test to mean anything", uptimeBase != startMs)
+
+        val killed = newManager()
+        val meta = killed.startRecording()!!
+        frames.forEach { killed.recordTransaction(it) }
+
+        val restarted = newManager()
+        val summary = restarted.recoverUnfinishedSessions()
+        assertEquals(1, summary!!.recoveredSessions)
+
+        val trip = TripRepository(context).getTripById(meta.sessionId)!!
+        assertEquals(startMs, trip.startTimestamp)
+        assertEquals(lastMs, trip.endTimestamp)
+        assertEquals((lastMs - startMs) / 1000L, trip.durationSeconds)
+        // The altitude footnote's era check reads this window: a 2026 drive must never be
+        // called pre-fix again.
+        assertTrue(
+            "recovered window must be wall clock, got ${trip.startTimestamp}",
+            trip.startTimestamp > com.example.service.BackgroundLocationPolicy.FIX_LIVE_SINCE_MS
         )
     }
 
