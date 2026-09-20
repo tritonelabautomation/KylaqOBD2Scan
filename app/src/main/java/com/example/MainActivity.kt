@@ -151,11 +151,72 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** Hands the newest crash record to any app (Drive, Gmail, Files) via FileProvider. */
+    private fun shareCrashLog() {
+        val file = com.example.data.CrashJournal.crashFiles(this).firstOrNull() ?: return
+        runCatching {
+            val uri = androidx.core.content.FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+            startActivity(
+                Intent.createChooser(
+                    Intent(Intent.ACTION_SEND)
+                        .setType("text/plain")
+                        .putExtra(Intent.EXTRA_STREAM, uri)
+                        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),
+                    "Share crash log"
+                )
+            )
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
+        // Crash-loop breaker (owner 2026-09-20: "Again app is crashing when I open it
+        // crashes" with no log to say why): if the last starts died before their first
+        // frame, open the ONE screen that touches nothing else - no ViewModel, no
+        // database, no Bluetooth - it shows the recorded reason and can share the log.
+        if (com.example.data.CrashJournal.shouldEnterSafeMode(this)) {
+            val safeCrashedAt = com.example.data.CrashJournal.lastCrashedAt(this)
+            val safeSummary = com.example.data.CrashJournal.lastCrashSummary(this)
+            val safeText = com.example.data.CrashJournal.latestCrashText(this)
+            setContent {
+                com.example.ui.screens.CrashSafeModeScreen(
+                    crashedAt = safeCrashedAt,
+                    summary = safeSummary,
+                    fullText = safeText,
+                    onShare = { shareCrashLog() },
+                    onTryNormalStart = {
+                        com.example.data.CrashJournal.enterNormalModeAgain(this)
+                        recreate()
+                    }
+                )
+            }
+            return
+        }
+
+        // Read ONCE, off-composition: these touch the journal files and must not re-read
+        // them on every recomposition.
+        val lastCrashSummary = com.example.data.CrashJournal.lastCrashSummary(this)
+        val lastCrashedAt = com.example.data.CrashJournal.lastCrashedAt(this)
         setContent {
+            // This start counts as healthy only after the UI survived its first seconds:
+            // the ViewModel's init coroutines (auto-connect, refuel backfill, update
+            // check) run right after composition, and a crash inside one of them is
+            // still a start crash.
+            LaunchedEffect(Unit) {
+                kotlinx.coroutines.delay(4_000)
+                com.example.data.CrashJournal.startupCompleted(this@MainActivity)
+            }
+            var showCrashNotice by remember { mutableStateOf(lastCrashSummary != null) }
+            if (showCrashNotice && lastCrashSummary != null) {
+                com.example.ui.screens.CrashNoticeDialog(
+                    crashedAt = lastCrashedAt,
+                    summary = lastCrashSummary,
+                    onShare = { shareCrashLog() },
+                    onDismiss = { showCrashNotice = false }
+                )
+            }
             val appearance by viewModel.settingsRepository.appearanceMode.collectAsState()
             MyApplicationTheme(
                 darkTheme = when (appearance) {

@@ -63,6 +63,15 @@ object DriveBackupClient {
                     ?: emptyList()
             }
 
+            // Crash journal (owner 2026-09-20: "No app crash logs why it has crashed"):
+            // every recorded crash rides along in the backup, so the reason reaches Drive
+            // even if the phone itself never opens cleanly again. ZipImporter ignores the
+            // crash_* names on restore (Kind.UNKNOWN), so they can never pollute a trip.
+            val crashDir = com.example.data.CrashJournal.journalDir(context)
+            if (crashDir.isDirectory) {
+                files += crashDir.listFiles()?.filter { it.isFile } ?: emptyList()
+            }
+
             // Best-effort: a snapshot failure must not cost the owner their recordings.
             runCatching { PrefsSnapshotter.writeToFile(context, snapshotFile) }
                 .onSuccess { files += it }
