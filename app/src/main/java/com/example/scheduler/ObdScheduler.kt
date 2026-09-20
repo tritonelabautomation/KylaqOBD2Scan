@@ -296,6 +296,18 @@ class ObdScheduler(
 
                 delay(10)
             }
+            } catch (t: java.util.concurrent.CancellationException) {
+                // A normal stopPolling() cancel is not a death - let it propagate.
+                throw t
+            } catch (t: Exception) {
+                // Owner 2026-09-20: "Any issues with wireless Android Auto and with
+                // bluetooth". A throw inside ONE poll iteration - a flaky BT socket read,
+                // a binder fault while the AA host is bound, any future bug in this loop -
+                // used to escape this coroutine and kill the PROCESS mid-drive. Now the
+                // loop dies ALONE: the finally below clears the polling flag and the
+                // auto-connect supervisor reconnects and resumes polling by itself, so a
+                // bad poll costs one poll, never the drive.
+                android.util.Log.e("ObdScheduler", "poll loop died - reconnect supervisor resumes", t)
             } finally {
                 // KILL-AUDIT FIX E (2026-09-19): an exception escaping one poll iteration kills
                 // this job - and `_isPolling` used to stay TRUE forever: a zombie. The
