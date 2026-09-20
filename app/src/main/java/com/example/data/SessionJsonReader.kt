@@ -148,7 +148,11 @@ object SessionJsonReader {
                         jr.skipValue()
                         jw.value(newName)
                     } else {
-                        copyValue(jr, jw, newName, insideMeta && name == "sessionMetadata")
+                        // The child object IS the metadata object exactly when its key is
+                        // sessionMetadata - passing anything else (e.g. AND-ing with the
+                        // parent's flag) never enters it and the rename silently no-ops,
+                        // which is exactly what the regression test caught on first run.
+                        copyValue(jr, jw, newName, insideMeta = name == "sessionMetadata")
                     }
                 }
                 jw.endObject()
