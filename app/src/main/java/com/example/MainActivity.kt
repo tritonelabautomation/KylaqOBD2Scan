@@ -168,6 +168,55 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Safe mode's way out of a crash loop (owner 2026-09-20: the OOM loop left safe mode
+     * as the ONLY usable screen on the broken build, with no path to the fixed one). Uses
+     * the standalone [com.example.update.UpdateManager] - no ViewModel, no database, none
+     * of the machinery that may be broken - and mirrors the normal path's honesty:
+     * signature-checked APK, system installer confirmation, installs in place over this
+     * build so no trip, log or permission is touched.
+     */
+    private fun safeModeUpdate(onState: (String) -> Unit) {
+        androidx.lifecycle.lifecycleScope.launch {
+            onState("Checking for a newer build...")
+            val manager = com.example.update.UpdateManager(this@MainActivity)
+            val info = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { manager.fetchFeed() }.getOrNull()
+            }
+            if (info == null) {
+                onState("Could not reach the update feed - check the connection and tap again.")
+                return@launch
+            }
+            if (!com.example.update.AppUpdateFeed.isNewerThan(info, manager.installedVersionCode())) {
+                onState("This build is already the newest published - tap \"Try normal start\".")
+                return@launch
+            }
+            onState("Downloading build ${info.versionCode}...")
+            val apk = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { manager.download(info) }.getOrNull()
+            }
+            if (apk == null) {
+                onState("Download failed - check the connection and tap again.")
+                return@launch
+            }
+            val sig = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { manager.installedSignatureMatchesApk(apk) }.getOrNull()
+            }
+            if (sig == false) {
+                onState("Downloaded APK signature does not match this install - refusing to install it.")
+                return@launch
+            }
+            if (!manager.canRequestPackageInstalls()) {
+                onState("Allow \"install unknown apps\" for Kylaq in the screen that opened, then tap again.")
+                runCatching { manager.openInstallPermissionSettings() }
+                return@launch
+            }
+            onState("Handing the APK to the system installer - confirm there.")
+            runCatching { manager.install(apk) }
+                .onFailure { onState("Installer could not start: ${it.message ?: "unknown error"}") }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -181,6 +230,7 @@ class MainActivity : ComponentActivity() {
             val safeSummary = com.example.data.CrashJournal.lastCrashSummary(this)
             val safeText = com.example.data.CrashJournal.latestCrashText(this)
             setContent {
+                var safeUpdateMsg by remember { mutableStateOf<String?>(null) }
                 com.example.ui.screens.CrashSafeModeScreen(
                     crashedAt = safeCrashedAt,
                     summary = safeSummary,
@@ -189,7 +239,9 @@ class MainActivity : ComponentActivity() {
                     onTryNormalStart = {
                         com.example.data.CrashJournal.enterNormalModeAgain(this)
                         recreate()
-                    }
+                    },
+                    updateMessage = safeUpdateMsg,
+                    onUpdate = { safeModeUpdate { safeUpdateMsg = it } }
                 )
             }
             return

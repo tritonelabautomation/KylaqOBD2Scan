@@ -43,7 +43,9 @@ fun CrashSafeModeScreen(
     summary: String?,
     fullText: String?,
     onShare: () -> Unit,
-    onTryNormalStart: () -> Unit
+    onTryNormalStart: () -> Unit,
+    updateMessage: String? = null,
+    onUpdate: (() -> Unit)? = null
 ) {
     var showFull by remember { mutableStateOf(false) }
     Column(
@@ -101,6 +103,18 @@ fun CrashSafeModeScreen(
             }
         }
         Spacer(Modifier.height(4.dp))
+        // The way OUT of a crash loop (owner 2026-09-20: the OOM loop left safe mode as
+        // the only usable screen on the old build, with no path to the fixed one). This
+        // button needs no ViewModel and no database - just the standalone updater - so
+        // it works exactly when everything else cannot.
+        if (onUpdate != null) {
+            Button(onClick = onUpdate, modifier = Modifier.testTag("btn_safe_update")) {
+                Text("Update & install newest build")
+            }
+            if (updateMessage != null) {
+                Text(updateMessage, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+            }
+        }
         Button(onClick = onShare, modifier = Modifier.testTag("btn_share_crash_log")) {
             Text("Share crash log")
         }
