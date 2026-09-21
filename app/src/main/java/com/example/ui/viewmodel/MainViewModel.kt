@@ -1089,7 +1089,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     // Resume, not reopen: a drive cut off by a process death moments ago
                     // continues in its own session - one drive, one trip.
                     com.example.service.AutoRecordPolicy.Decision.START_RECORDING ->
-                        startOrResumeRecording()
+                        recordingManager.startOrResumeRecording()
                     com.example.service.AutoRecordPolicy.Decision.STOP_RECORDING -> stopRecording()
                     com.example.service.AutoRecordPolicy.Decision.NONE -> Unit
                 }
