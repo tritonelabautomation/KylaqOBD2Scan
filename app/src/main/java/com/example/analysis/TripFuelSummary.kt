@@ -128,7 +128,24 @@ object TripFuelSummary {
             }
         }
 
+        // Distance: prefer odometer (PID 01A6) when it answered — it's the cluster's own
+        // kilometres and survives any speed-integration glitch (owner 2026-09-21: recovered
+        // 45 957-tx trip showed 0.1 km). Fall back to speed integration.
+        val odoSeries = (byPid["01A6"] ?: emptyList())
+            .mapNotNull { p -> p.value?.let { p.timestampMs to it } }
+            .sortedBy { it.first }
         var distanceKm = 0.0
+        var odoDistanceUsed = false
+        if (odoSeries.size >= 2) {
+            val firstOdo = odoSeries.first().second
+            val lastOdo = odoSeries.last().second
+            val diff = lastOdo - firstOdo
+            if (diff in 0.1..1000.0) {
+                distanceKm = diff
+                odoDistanceUsed = true
+            }
+        }
+
         var movingSeconds = 0.0
         var idleSeconds = 0.0
         var engineOffSeconds = 0.0
@@ -139,7 +156,9 @@ object TripFuelSummary {
             val (t0, v0) = speedSeries[i - 1].first to speedSeries[i - 1].second
             val t1 = speedSeries[i].first
             val dt = (t1 - t0).coerceIn(0L, MAX_GAP_MS) / 1000.0
-            distanceKm += v0 * dt / 3600.0
+            if (!odoDistanceUsed) {
+                distanceKm += v0 * dt / 3600.0
+            }
             speedTimeIntegral += v0 * dt
             if (v0 > maxSpeed) maxSpeed = v0
             if (v0 > 1.0) {
@@ -147,10 +166,6 @@ object TripFuelSummary {
                 val bin = (v0.toInt() / 10) * 10
                 histogram[bin] = (histogram[bin] ?: 0.0) + dt
             } else {
-                // Idle start-stop split (owner 2026-09-15): standing still with the engine
-                // OFF is not idling - the old bucket charged every stall to "idle", and
-                // coaching then billed 1.05 L/h of imaginary fuel for time the engine was
-                // not running. Trips with no rpm evidence at all keep the old attribution.
                 val rpmAtT0 = valueAt(rpmSeries, t0)
                 if (rpmAtT0 == null || rpmAtT0 > StartStopAnalyzer.ENGINE_RUNNING_RPM) {
                     idleSeconds += dt

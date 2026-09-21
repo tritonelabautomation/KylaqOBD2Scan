@@ -1875,6 +1875,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         recordingManager.deleteRecording(sessionId)
     }
 
+    private val _isMerging = MutableStateFlow(false)
+    val isMerging: StateFlow<Boolean> = _isMerging.asStateFlow()
+
+    private val _mergeNotice = MutableStateFlow<String?>(null)
+    val mergeNotice: StateFlow<String?> = _mergeNotice.asStateFlow()
+
+    fun clearMergeNotice() { _mergeNotice.value = null }
+
+    fun mergeRecordings(sessionIds: List<String>) {
+        if (sessionIds.size < 2) {
+            _mergeNotice.value = "Select at least 2 trips to merge."
+            return
+        }
+        if (_isMerging.value) return
+        viewModelScope.launch {
+            _isMerging.value = true
+            try {
+                val saved = recordingManager.mergeSessions(sessionIds)
+                _mergeNotice.value = if (saved != null) {
+                    "Merged ${sessionIds.size} trips into '${saved.metadata.sessionName}' — ${saved.transactionCount} transactions, ${saved.metadata.sessionName}. Old fragments deleted."
+                } else {
+                    "Merge failed — no transactions found in selected trips."
+                }
+            } catch (e: Exception) {
+                _mergeNotice.value = "Merge failed: ${e.message ?: e.javaClass.simpleName}"
+            } finally {
+                _isMerging.value = false
+            }
+        }
+    }
+
     private val _importStatusMessage = MutableStateFlow<String?>(null)
     val importStatusMessage: StateFlow<String?> = _importStatusMessage.asStateFlow()
 

@@ -6,8 +6,10 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -54,12 +56,26 @@ fun RecordingsScreen(
     val unsavedRawLogs by viewModel.unsavedRawLogs.collectAsState()
     val isRecovering by viewModel.isRecovering.collectAsState()
     val recoveryNotice by viewModel.recoveryNotice.collectAsState()
+    val isMerging by viewModel.isMerging.collectAsState()
+    val mergeNotice by viewModel.mergeNotice.collectAsState()
     LaunchedEffect(Unit) { viewModel.refreshUnsavedRawLogs() }
 
     var renamingRecording by remember { mutableStateOf<SavedRecording?>(null) }
     var deletingRecording by remember { mutableStateOf<SavedRecording?>(null) }
     var storageStats by remember { mutableStateOf<StorageStats?>(null) }
     var showStorageDialog by remember { mutableStateOf(false) }
+
+    // Merge selection (owner 2026-09-21: "there is no option make two trips to merge")
+    var selectedIds by remember { mutableStateOf(setOf<String>()) }
+    val selectionMode = selectedIds.isNotEmpty()
+
+    LaunchedEffect(mergeNotice) {
+        mergeNotice?.let {
+            Toast.makeText(context, it, Toast.LENGTH_LONG).show()
+            viewModel.clearMergeNotice()
+            selectedIds = emptySet()
+        }
+    }
 
     // SAF Open Multiple Documents Launcher
     val zipPickerLauncher = rememberLauncherForActivityResult(
@@ -137,6 +153,61 @@ fun RecordingsScreen(
         }
 
         Spacer(modifier = Modifier.height(10.dp))
+
+        // Merge banner — appears when selection mode is active
+        if (selectionMode) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                color = CyberCyan.copy(alpha = 0.14f)
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.CallMerge, contentDescription = null, tint = CyberCyan, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = "${selectedIds.size} trip(s) selected — tap to toggle, long-press any card to start. Merge stitches them by wall time into ONE trip (your 31 km fragments become one).",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = { viewModel.mergeRecordings(selectedIds.toList()) },
+                    enabled = selectedIds.size >= 2 && !isMerging,
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = NeonEmerald)
+                ) {
+                    if (isMerging) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Color.Black)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Merging…", color = Color.Black, fontWeight = FontWeight.Bold)
+                    } else {
+                        Icon(Icons.Default.CallMerge, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Merge into ONE trip", color = Color.Black, fontWeight = FontWeight.Bold)
+                    }
+                }
+                OutlinedButton(
+                    onClick = { selectedIds = emptySet() },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Cancel selection")
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+        }
 
         // Import & Storage Actions Banner
         Surface(
@@ -314,9 +385,24 @@ fun RecordingsScreen(
                 }
             } else {
                 items(savedRecordings, key = { it.metadata.sessionId }) { rec ->
+                    val isSelected = rec.metadata.sessionId in selectedIds
                     RecordingItemCard(
                         recording = rec,
-                        onClick = { onNavigateToTripDetail(rec.metadata.sessionId) },
+                        isSelected = isSelected,
+                        selectionMode = selectionMode,
+                        onClick = {
+                            if (selectionMode) {
+                                selectedIds = if (isSelected) selectedIds - rec.metadata.sessionId else selectedIds + rec.metadata.sessionId
+                            } else {
+                                onNavigateToTripDetail(rec.metadata.sessionId)
+                            }
+                        },
+                        onLongClick = {
+                            selectedIds = if (isSelected) selectedIds - rec.metadata.sessionId else selectedIds + rec.metadata.sessionId
+                        },
+                        onToggleSelect = {
+                            selectedIds = if (isSelected) selectedIds - rec.metadata.sessionId else selectedIds + rec.metadata.sessionId
+                        },
                         onShareFile = { file, mimeType -> shareFile(context, file, mimeType) },
                         onRename = { renamingRecording = rec },
                         onDelete = { deletingRecording = rec }
@@ -476,10 +562,15 @@ fun RecordingsScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun RecordingItemCard(
     recording: SavedRecording,
+    isSelected: Boolean = false,
+    selectionMode: Boolean = false,
     onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
+    onToggleSelect: (() -> Unit)? = null,
     onShareFile: (File, String) -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit
@@ -489,10 +580,16 @@ fun RecordingItemCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick
+            )
             .testTag("recording_card_${meta.sessionId}"),
         shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        colors = CardDefaults.cardColors(
+            containerColor = if (isSelected) CyberCyan.copy(alpha = 0.18f) else MaterialTheme.colorScheme.surface
+        ),
+        border = if (isSelected) androidx.compose.foundation.BorderStroke(2.dp, CyberCyan) else null
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
             Row(
@@ -500,6 +597,14 @@ fun RecordingItemCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
+                if (selectionMode) {
+                    Checkbox(
+                        checked = isSelected,
+                        onCheckedChange = { onToggleSelect?.invoke() },
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                }
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = meta.sessionName,
