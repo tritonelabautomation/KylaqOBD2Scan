@@ -14,8 +14,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -178,10 +177,15 @@ fun CarpoolScreen(
                                     color = TextPrimaryDark, fontWeight = FontWeight.SemiBold, fontSize = 13.sp
                                 )
                                 Spacer(Modifier.width(6.dp))
-                                val (syncIcon, syncTint) = when (syncState) {
-                                    com.example.data.BackupSyncStatus.State.SYNCED -> androidx.compose.material.icons.Icons.Default.CloudDone to NeonEmerald
-                                    com.example.data.BackupSyncStatus.State.PENDING -> androidx.compose.material.icons.Icons.Default.CloudUpload to ElectricAmber
-                                    com.example.data.BackupSyncStatus.State.NEVER -> androidx.compose.material.icons.Icons.Default.CloudOff to TextSecondaryDark
+                                val syncIcon = when (syncState) {
+                                    com.example.data.BackupSyncStatus.State.SYNCED -> Icons.Default.CheckCircle
+                                    com.example.data.BackupSyncStatus.State.PENDING -> Icons.Default.CloudUpload
+                                    com.example.data.BackupSyncStatus.State.NEVER -> Icons.Default.Warning
+                                }
+                                val syncTint = when (syncState) {
+                                    com.example.data.BackupSyncStatus.State.SYNCED -> NeonEmerald
+                                    com.example.data.BackupSyncStatus.State.PENDING -> ElectricAmber
+                                    com.example.data.BackupSyncStatus.State.NEVER -> TextSecondaryDark
                                 }
                                 Icon(syncIcon, contentDescription = null, tint = syncTint, modifier = Modifier.size(14.dp))
                             }

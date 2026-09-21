@@ -627,14 +627,21 @@ fun RecordingItemCard(
                             modifier = Modifier.weight(1f, fill = false)
                         )
                         Spacer(Modifier.width(6.dp))
-                        // OneDrive-style sync icon (owner 2026-09-21)
-                        val (syncIcon, syncTint, syncDesc) = when (syncState) {
-                            com.example.data.BackupSyncStatus.State.SYNCED ->
-                                Triple(Icons.Default.CloudDone, NeonEmerald, "Synced to Drive")
-                            com.example.data.BackupSyncStatus.State.PENDING ->
-                                Triple(Icons.Default.CloudUpload, ElectricAmber, "Local — needs backup")
-                            com.example.data.BackupSyncStatus.State.NEVER ->
-                                Triple(Icons.Default.CloudOff, TextSecondaryDark, "Never backed up")
+                        // OneDrive-style sync icon (owner 2026-09-21) — use core-safe icons
+                        val syncIcon = when (syncState) {
+                            com.example.data.BackupSyncStatus.State.SYNCED -> Icons.Default.CheckCircle
+                            com.example.data.BackupSyncStatus.State.PENDING -> Icons.Default.CloudUpload
+                            com.example.data.BackupSyncStatus.State.NEVER -> Icons.Default.Warning
+                        }
+                        val syncTint = when (syncState) {
+                            com.example.data.BackupSyncStatus.State.SYNCED -> NeonEmerald
+                            com.example.data.BackupSyncStatus.State.PENDING -> ElectricAmber
+                            com.example.data.BackupSyncStatus.State.NEVER -> TextSecondaryDark
+                        }
+                        val syncDesc = when (syncState) {
+                            com.example.data.BackupSyncStatus.State.SYNCED -> "Synced to Drive"
+                            com.example.data.BackupSyncStatus.State.PENDING -> "Local — needs backup"
+                            com.example.data.BackupSyncStatus.State.NEVER -> "Never backed up"
                         }
                         Icon(
                             syncIcon,
@@ -678,12 +685,17 @@ fun RecordingItemCard(
                         fontSize = 13.sp
                     )
                     Spacer(Modifier.width(6.dp))
-                    val (syncIcon, syncTint) = when (syncState) {
-                        com.example.data.BackupSyncStatus.State.SYNCED -> Icons.Default.CloudDone to NeonEmerald
-                        com.example.data.BackupSyncStatus.State.PENDING -> Icons.Default.CloudUpload to ElectricAmber
-                        com.example.data.BackupSyncStatus.State.NEVER -> Icons.Default.CloudOff to TextSecondaryDark
+                    val syncIcon2 = when (syncState) {
+                        com.example.data.BackupSyncStatus.State.SYNCED -> Icons.Default.CheckCircle
+                        com.example.data.BackupSyncStatus.State.PENDING -> Icons.Default.CloudUpload
+                        com.example.data.BackupSyncStatus.State.NEVER -> Icons.Default.Warning
                     }
-                    Icon(syncIcon, contentDescription = null, tint = syncTint, modifier = Modifier.size(14.dp))
+                    val syncTint2 = when (syncState) {
+                        com.example.data.BackupSyncStatus.State.SYNCED -> NeonEmerald
+                        com.example.data.BackupSyncStatus.State.PENDING -> ElectricAmber
+                        com.example.data.BackupSyncStatus.State.NEVER -> TextSecondaryDark
+                    }
+                    Icon(syncIcon2, contentDescription = null, tint = syncTint2, modifier = Modifier.size(14.dp))
                 }
                 Text(
                     text = com.example.data.RecordTime.dateTime(meta.startTimeUtc),

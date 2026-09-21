@@ -310,10 +310,15 @@ fun FuelCostsScreen(
                             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(entry.dateUtc.take(10), color = Color.White, fontSize = 12.sp, modifier = Modifier.weight(1f))
-                                    val (syncIcon, syncTint) = when (syncState) {
-                                        com.example.data.BackupSyncStatus.State.SYNCED -> Icons.Default.CloudDone to NeonEmerald
-                                        com.example.data.BackupSyncStatus.State.PENDING -> Icons.Default.CloudUpload to ElectricAmber
-                                        com.example.data.BackupSyncStatus.State.NEVER -> Icons.Default.CloudOff to TextSecondaryDark
+                                    val syncIcon = when (syncState) {
+                                        com.example.data.BackupSyncStatus.State.SYNCED -> Icons.Default.CheckCircle
+                                        com.example.data.BackupSyncStatus.State.PENDING -> Icons.Default.CloudUpload
+                                        com.example.data.BackupSyncStatus.State.NEVER -> Icons.Default.Warning
+                                    }
+                                    val syncTint = when (syncState) {
+                                        com.example.data.BackupSyncStatus.State.SYNCED -> NeonEmerald
+                                        com.example.data.BackupSyncStatus.State.PENDING -> ElectricAmber
+                                        com.example.data.BackupSyncStatus.State.NEVER -> TextSecondaryDark
                                     }
                                     Icon(syncIcon, contentDescription = null, tint = syncTint, modifier = Modifier.size(12.dp))
                                     Spacer(Modifier.width(6.dp))
