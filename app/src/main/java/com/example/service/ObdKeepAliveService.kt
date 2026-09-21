@@ -123,9 +123,24 @@ class ObdKeepAliveService : Service() {
         // Live threshold alerts (owner 2026-09-19): the service outlives the UI, so an over-temp
         // or a dying alternator reaches him with the screen off and the phone pocketed.
         refreshScope.launch {
+            var sweep = 0
             while (isActive) {
                 kotlinx.coroutines.delay(5_000)
                 checkVehicleAlerts()
+                // Deferred sweep (owner 2026-09-21): sessions skipped as RESUMABLE while the
+                // engine might still be running get finalized here once they age out of the
+                // window and nothing resumed them - a drive that ended at the kill still
+                // becomes a trip with nobody opening anything.
+                if (++sweep % 12 == 0) {
+                    recoveryScope.launch {
+                        runCatching {
+                            com.example.di.AppContainer.init(applicationContext)
+                            com.example.di.AppContainer.recordingManager.recoverUnfinishedSessions(
+                                com.example.data.SessionRecoveryPolicy.RESUME_WINDOW_MS
+                            )
+                        }.onFailure { android.util.Log.e("ObdKeepAliveService", "deferred sweep failed", it) }
+                    }
+                }
             }
         }
     }
@@ -289,7 +304,8 @@ class ObdKeepAliveService : Service() {
                             isPolling = container.obdScheduler.isPolling.value,
                             autoRecordEnabled = container.settingsRepository.autoRecord.value,
                             engineOffSinceMs = engineOffSinceMs,
-                            nowMs = now
+                            nowMs = now,
+                            sessionAgeMs = container.recordingManager.currentSessionAgeMs(now)
                         )
                         when (decision) {
                             AutoRecordPolicy.Decision.START_RECORDING -> {
@@ -298,7 +314,10 @@ class ObdKeepAliveService : Service() {
                                 // background, would otherwise inherit the previous drive's X-ray and
                                 // report it as part of this one.
                                 container.obdScheduler.rideRecorder.reset()
-                                container.recordingManager.startRecording()
+                                // Resume, not reopen: a drive cut off by a process death inside
+                                // the resume window continues in its own session - one drive,
+                                // one trip (owner 2026-09-21: the shredded 31 km drive).
+                                container.recordingManager.startOrResumeRecording()
                                 container.gpsManager.startTracking()
                                 lastRecordingState = true
                                 startForegroundCompat(true)
@@ -345,7 +364,12 @@ class ObdKeepAliveService : Service() {
             runCatching {
                 com.example.di.AppContainer.init(applicationContext)
                 val manager = com.example.di.AppContainer.recordingManager
-                val summary = manager.recoverUnfinishedSessions()
+                // Resume window: a journal cut off moments ago may belong to a drive that
+                // is still running - the auto-record supervisor resumes it into the same
+                // session instead of shredding one drive into one trip per death.
+                val summary = manager.recoverUnfinishedSessions(
+                    com.example.data.SessionRecoveryPolicy.RESUME_WINDOW_MS
+                )
                 if (summary != null && summary.recoveredSessions > 0) {
                     showRecoveryNotification(summary.notice())
                 }

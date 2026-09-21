@@ -38,6 +38,14 @@ object AutoRecordPolicy {
     /** Ignition genuinely off (no fresh readings at all): one minute, then save the trip. */
     const val ENGINE_OFF_GRACE_MS = 60_000L
 
+    /**
+     * A session younger than this is never auto-stopped (owner 2026-09-21: a 31 km drive
+     * listed a 3-transaction stub trip). Cranking blips and half-second ECU silence at
+     * start can otherwise open AND close a session before the drive begins; the grace
+     * windows below already cover real ends of drive, this covers false ones at the start.
+     */
+    const val MIN_SESSION_MS = 90_000L
+
     /** What the supervisor should do on this tick. */
     enum class Decision {
         /** Engine running and nothing is being recorded: start. */
@@ -76,7 +84,8 @@ object AutoRecordPolicy {
         isPolling: Boolean,
         autoRecordEnabled: Boolean,
         engineOffSinceMs: Long,
-        nowMs: Long
+        nowMs: Long,
+        sessionAgeMs: Long? = null
     ): Decision {
         if (!autoRecordEnabled) return Decision.NONE
 
@@ -92,7 +101,9 @@ object AutoRecordPolicy {
         // Engine off - or no fresh reading at all - while a session is open. Which window applies
         // depends on which of those it is; see the Idle Start-Stop note above.
         val grace = graceMsFor(rpm)
-        return if (engineOffSinceMs > 0L && nowMs - engineOffSinceMs > grace) {
+        return if (engineOffSinceMs > 0L && nowMs - engineOffSinceMs > grace &&
+            (sessionAgeMs == null || sessionAgeMs >= MIN_SESSION_MS)
+        ) {
             Decision.STOP_RECORDING
         } else {
             Decision.NONE

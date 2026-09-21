@@ -252,6 +252,45 @@ class KilledSessionRecoveryTest {
     }
 
     @Test
+    fun oneDriveStaysOneTripAcrossAProcessDeath() = runBlocking {
+        // Owner 2026-09-21: "you see what it did to my 31km trip nothing logged" - the
+        // drive was on disk but shredded: every mid-drive death finalized the live
+        // journal as its own recovered trip and the restart opened a new session. The
+        // resume window must keep one drive one trip across any number of deaths.
+        val t0 = System.currentTimeMillis() - 20 * 60_000L
+        val leg1 = realFrames(t0)
+        val first = newManager()
+        val meta = first.startRecording()!!
+        leg1.forEach { first.recordTransaction(it) }
+
+        // ── process death mid-drive: a fresh manager over the same directories ──
+        val second = newManager()
+        val skipped = second.recoverUnfinishedSessions(
+            com.example.data.SessionRecoveryPolicy.RESUME_WINDOW_MS
+        )
+        assertTrue("a fresh journal must wait for resume, not become its own trip",
+            skipped == null || skipped.recoveredSessions == 0)
+
+        val resumed = second.startOrResumeRecording()!!
+        assertEquals("the drive continues in its OWN session", meta.sessionId, resumed.sessionId)
+
+        val leg2 = realFrames(t0 + 10 * 60_000L)
+        leg2.forEach { second.recordTransaction(it) }
+        second.stopRecording()
+
+        val trip = TripRepository(context).getTripById(meta.sessionId)!!
+        assertEquals("COMPLETED", trip.status)
+        assertEquals("both legs in one trip", leg1.size + leg2.size, trip.sampleCount)
+        assertEquals(
+            leg1.size + leg2.size,
+            TripRepository(context).getSamplesForTrip(meta.sessionId).size
+        )
+        second.loadSavedRecordings()
+        assertEquals("one saved recording, not one per death",
+            1, second.savedRecordings.value.count { it.metadata.sessionId == meta.sessionId })
+    }
+
+    @Test
     fun aRecoveredSessionIsNeverRecoveredTwice() = runBlocking {
         val frames = realFrames(System.currentTimeMillis() - 60_000L)
         val killed = newManager()

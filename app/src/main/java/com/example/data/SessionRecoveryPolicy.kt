@@ -144,4 +144,17 @@ object SessionRecoveryPolicy {
      */
     fun wallEpochMs(stamp: String?, monotonicMs: Long): Long =
         RecordTime.parseMillis(stamp) ?: monotonicMs
+
+    /**
+     * How long a cut-off journal stays RESUMABLE instead of being recovered into its own
+     * trip (owner 2026-09-21: a 31 km drive came back as three fragments because every
+     * process death mid-drive finalized the live journal as a separate "Recovered Run"
+     * and the restart opened a brand-new session). Inside this window a restart APPENDS
+     * to the same session; past it, the drive is genuinely over and recovery finalizes.
+     */
+    const val RESUME_WINDOW_MS: Long = 15 * 60_000L
+
+    /** True while a cut-off journal is fresh enough to resume rather than recover. */
+    fun isResumable(lastRowAgeMs: Long, windowMs: Long = RESUME_WINDOW_MS): Boolean =
+        lastRowAgeMs in 0L..windowMs
 }

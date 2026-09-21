@@ -314,6 +314,82 @@ class RecordingManager(
         return metadata
     }
 
+    /** Wall-clock age of the open session, for the auto-record young-session guard. */
+    fun currentSessionAgeMs(nowMs: Long = System.currentTimeMillis()): Long? =
+        _currentSessionMetadata.value?.let {
+            nowMs - (RecordTime.parseMillis(it.startTimeUtc) ?: nowMs)
+        }
+
+    /**
+     * Resumes a session a process death cut off, in the same journal files, instead of
+     * opening a new one (owner 2026-09-21: "you see what it did to my 31km trip nothing
+     * logged" - every mid-drive death used to finalize the live journal as its own
+     * "Recovered Run" and the restart began a brand-new session, shredding one drive
+     * into one trip per death). The rows the previous process journaled are reloaded
+     * wall-anchored, so the finalized trip carries every leg: RAM lists of this process
+     * start empty and finalizeSession trusts them. Reloaded rows keep wall millis in the
+     * monotonic column while rows recorded after the resume keep uptime - harmless by
+     * construction, because the trip window and every stored stamp come from IST stamps
+     * (see [SessionRecoveryPolicy.wallEpochMs]).
+     */
+    fun resumeRecording(sessionId: String): RecordingMetadata? {
+        if (_isRecording.value) return _currentSessionMetadata.value
+        val meta = journal.readMeta(sessionId)
+        if (meta.isEmpty()) return null
+        val openedMs = meta["startEpochMillis"]?.toLongOrNull()
+            ?: RecordTime.parseMillis(meta["startTime"])
+            ?: System.currentTimeMillis()
+        val metadata = RecordingMetadata(
+            sessionId = sessionId,
+            sessionName = meta["sessionName"]?.takeIf { it.isNotBlank() }
+                ?: "Kylaq Run " + RecordTime.display(openedMs),
+            vehicle = meta["vehicle"]?.ifBlank { null } ?: "Škoda Kylaq 1.0 TSI (EA211)",
+            vehicleId = meta["vehicleId"]?.ifBlank { null },
+            profile = meta["profile"]?.ifBlank { null } ?: "India-Market 1.0 TSI",
+            adapter = meta["adapter"]?.ifBlank { null } ?: "ELM327 v1.5 Bluetooth Classic",
+            protocol = meta["protocol"]?.ifBlank { null } ?: "ISO 15765-4 CAN 11-bit 500kbps",
+            canBitrate = meta["canBitrate"]?.ifBlank { null } ?: "500 kbps",
+            startTimeUtc = RecordTime.stamp(openedMs)
+        )
+        if (!journal.resume(metadata)) return null
+        val reloaded = CsvExporter.readTransactionsFromCsv(journal.txFile(sessionId)).map { tx ->
+            val wall = SessionRecoveryPolicy.wallEpochMs(tx.timestampUtc, tx.timestampMonotonic)
+            if (wall == tx.timestampMonotonic) tx else tx.copy(timestampMonotonic = wall)
+        }
+        synchronized(activeTransactionList) {
+            activeTransactionList.clear()
+            activeSampleList.clear()
+            activeTransactionList.addAll(reloaded)
+            val replayed = SessionRecoveryPolicy.replaySamples(
+                transactions = reloaded,
+                seed = SynchronizedSample(timestampUtc = "", timestampMonotonic = 0L),
+                merge = { acc, tx -> mergeSample(acc, tx).copy(altitudeM = tx.altitudeM) }
+            )
+            activeSampleList.addAll(replayed)
+            currentSample = replayed.lastOrNull()
+                ?: SynchronizedSample(timestampUtc = "", timestampMonotonic = 0L)
+        }
+        _currentSessionMetadata.value = metadata
+        _isRecording.value = true
+        restartLevelCheckArmed = false
+        runCatching { rawLogManager.startFileLogging(sessionId) }
+        return metadata
+    }
+
+    /**
+     * The auto-record supervisors' single entry point: a drive cut off inside the resume
+     * window continues in its own session; anything older starts fresh. One drive, one
+     * trip, across any number of process deaths.
+     */
+    fun startOrResumeRecording(): RecordingMetadata? {
+        val resumable = journal.unfinishedSessions().firstOrNull { id ->
+            SessionRecoveryPolicy.isResumable(
+                System.currentTimeMillis() - journal.txFile(id).lastModified()
+            )
+        }
+        return if (resumable != null) resumeRecording(resumable) else startRecording()
+    }
+
     fun recordTransaction(tx: TransactionRecord) {
         if (!_isRecording.value) return
 
@@ -834,7 +910,7 @@ class RecordingManager(
      * removed from the pending set as soon as it is rebuilt, and one that cannot be rebuilt is
      * archived so it is reported once instead of forever.
      */
-    suspend fun recoverUnfinishedSessions(): RecoverySummary? = withContext(Dispatchers.IO) {
+    suspend fun recoverUnfinishedSessions(skipFreshMs: Long = 0L): RecoverySummary? = withContext(Dispatchers.IO) {
         if (_recoveryRunning.value) return@withContext _journalRecovery.value
         _recoveryRunning.value = true
         val summary = try {
@@ -856,6 +932,17 @@ class RecordingManager(
 
             for (id in journal.unfinishedSessions()) {
                 if (id == liveId) continue
+                // Resume window (owner 2026-09-21: the 31 km drive that came back as three
+                // fragments): a journal cut off moments ago may belong to a drive that is
+                // STILL running - the supervisors resume it into the same session instead
+                // of letting recovery finalize one trip per process death. Past the window
+                // the drive is genuinely over and recovery proceeds as always.
+                if (skipFreshMs > 0L &&
+                    SessionRecoveryPolicy.isResumable(
+                        System.currentTimeMillis() - journal.txFile(id).lastModified(),
+                        skipFreshMs
+                    )
+                ) continue
                 if (id in savedIds) { journal.discard(id); continue }
                 val rawLog = File(rawLogsDir, "raw_log_$id.txt").takeIf { it.exists() }
                 val source = SessionRecoveryPolicy.chooseSource(
@@ -896,6 +983,16 @@ class RecordingManager(
             for (file in findUnsavedRawLogs()) {
                 val id = com.example.analysis.RawLogRecovery.sessionIdOf(file.name) ?: continue
                 if (id in savedIds || id in ids || id in lost || id == liveId) continue
+                // Same resume window as the journal loop: a raw log still being written (or
+                // whose journal was cut off moments ago) belongs to a drive that may still
+                // be running - recovering it now would finalize half a trip under the live
+                // recorder's own session id.
+                if (skipFreshMs > 0L &&
+                    SessionRecoveryPolicy.isResumable(
+                        System.currentTimeMillis() - file.lastModified(),
+                        skipFreshMs
+                    )
+                ) continue
                 when (val r = runCatching { recoverFromRawLog(file) }.getOrNull()) {
                     is RecoveryOutcome.Recovered -> {
                         recovered++; transactions += r.samples; ids += id

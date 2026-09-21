@@ -1082,10 +1082,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         isPolling = obdScheduler.isPolling.value,
                         autoRecordEnabled = settingsRepository.autoRecord.value,
                         engineOffSinceMs = engineOffSinceMs,
-                        nowMs = now
+                        nowMs = now,
+                        sessionAgeMs = recordingManager.currentSessionAgeMs(now)
                     )
                 ) {
-                    com.example.service.AutoRecordPolicy.Decision.START_RECORDING -> startRecording()
+                    // Resume, not reopen: a drive cut off by a process death moments ago
+                    // continues in its own session - one drive, one trip.
+                    com.example.service.AutoRecordPolicy.Decision.START_RECORDING ->
+                        startOrResumeRecording()
                     com.example.service.AutoRecordPolicy.Decision.STOP_RECORDING -> stopRecording()
                     com.example.service.AutoRecordPolicy.Decision.NONE -> Unit
                 }
@@ -1448,7 +1452,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         autoRecoveryStarted = true
         viewModelScope.launch {
             val summary = try {
-                recordingManager.recoverUnfinishedSessions()
+                // Resume window: journals cut off moments ago may belong to a drive still
+                // running - the supervisors resume those; everything older is recovered now.
+                recordingManager.recoverUnfinishedSessions(
+                    com.example.data.SessionRecoveryPolicy.RESUME_WINDOW_MS
+                )
             } catch (e: Exception) {
                 null
             }
@@ -1456,6 +1464,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _autoRecoveryNotice.value = summary.notice()
                 _recoveryNotice.value = summary.notice()
                 refreshUnsavedRawLogs()
+            }
+        }
+        // Deferred sweep: a skipped resumable journal whose drive ended at the kill ages
+        // out of the window while the app is open - finalize it then, without any tap.
+        viewModelScope.launch {
+            kotlinx.coroutines.delay(
+                com.example.data.SessionRecoveryPolicy.RESUME_WINDOW_MS + 60_000L
+            )
+            runCatching {
+                recordingManager.recoverUnfinishedSessions(
+                    com.example.data.SessionRecoveryPolicy.RESUME_WINDOW_MS
+                )
             }
         }
     }

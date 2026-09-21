@@ -199,6 +199,30 @@ class SessionJournal(private val journalDir: File) {
     }
 
     /**
+     * Reopens a cut-off session's journal in APPEND mode - same files, same headers, no
+     * rewrite - so a drive that survives process deaths keeps growing in the rows it
+     * already had and finalizes as ONE trip (owner 2026-09-21: the 31 km drive that came
+     * back as three fragments). Falls back to [open] when the session has no journal yet.
+     */
+    fun resume(metadata: RecordingMetadata): Boolean {
+        val id = metadata.sessionId
+        if (!txFile(id).exists()) return open(metadata)
+        close()
+        return try {
+            txWriter = FileWriter(txFile(id), true).apply { flush() }
+            sampleWriter = FileWriter(sampleFile(id), true).apply { flush() }
+            true
+        } catch (e: Exception) {
+            failures++
+            lastFailure = "resume: ${e.message ?: e.javaClass.simpleName}"
+            false
+        }
+    }
+
+    /** Live writer state, so a supervisor can belt a recording whose journal died. */
+    val isOpenNow: Boolean get() = txWriter != null
+
+    /**
      * Sessions on disk that were cut off: journal present, `.finished` marker absent.
      * Newest first, and ignoring files too small to hold a row (header only = the session never
      * received a single OBD response, so there is nothing to rebuild).

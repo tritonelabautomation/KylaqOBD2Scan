@@ -205,4 +205,38 @@ class AutoRecordPolicyTest {
         assertEquals("saved once, when he parked", 1, stopped)
         assertEquals(false, recording)
     }
+
+    @Test
+    fun aSessionYoungerThanTheMinimumIsNeverAutoStopped() {
+        // Owner 2026-09-21: beside a 31 km drive the list carried a 3-transaction stub -
+        // a cranking blip opened a session and ECU silence seconds later closed it. The
+        // grace windows cover real ends of drive; MIN_SESSION_MS covers false ones at
+        // the start.
+        val now = 5_000_000L
+        val offSince = now - 120_000L // long past any grace window
+        assertEquals(
+            AutoRecordPolicy.Decision.NONE,
+            AutoRecordPolicy.decide(
+                rpm = null, isRecording = true, isPolling = true,
+                autoRecordEnabled = true, engineOffSinceMs = offSince, nowMs = now,
+                sessionAgeMs = 30_000L
+            )
+        )
+        assertEquals(
+            AutoRecordPolicy.Decision.STOP_RECORDING,
+            AutoRecordPolicy.decide(
+                rpm = null, isRecording = true, isPolling = true,
+                autoRecordEnabled = true, engineOffSinceMs = offSince, nowMs = now,
+                sessionAgeMs = AutoRecordPolicy.MIN_SESSION_MS + 1_000L
+            )
+        )
+        // Callers that pass no age keep the historical verdict.
+        assertEquals(
+            AutoRecordPolicy.Decision.STOP_RECORDING,
+            AutoRecordPolicy.decide(
+                rpm = null, isRecording = true, isPolling = true,
+                autoRecordEnabled = true, engineOffSinceMs = offSince, nowMs = now
+            )
+        )
+    }
 }
