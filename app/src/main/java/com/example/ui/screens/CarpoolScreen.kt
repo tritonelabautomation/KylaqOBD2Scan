@@ -68,6 +68,7 @@ fun CarpoolScreen(
     }
     var monthly by remember { mutableStateOf<List<CarpoolCodec.MonthRow>>(emptyList()) }
     var tripTitles by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    val lastBackupMs by viewModel.settingsRepository.lastBackupTimestamp.collectAsState()
     LaunchedEffect(tick, refresh) {
         monthly = viewModel.monthlyCarpool()
         tripTitles = viewModel.tripTitleMap()
@@ -161,6 +162,7 @@ fun CarpoolScreen(
                 }
                 monthEntries.forEach { e ->
                 val ms = CarpoolCodec.whenMs(e) ?: e.idMs
+                val syncState = com.example.data.BackupSyncStatus.forItem(lastBackupMs, e.idMs)
                 Card(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                     shape = RoundedCornerShape(16.dp),
@@ -169,11 +171,20 @@ fun CarpoolScreen(
                     )
                 ) {
                     Column(Modifier.padding(12.dp)) {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text(
-                                com.example.data.RecordTime.format("yyyy-MM-dd HH:mm", ms),
-                                color = TextPrimaryDark, fontWeight = FontWeight.SemiBold, fontSize = 13.sp
-                            )
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    com.example.data.RecordTime.format("yyyy-MM-dd HH:mm", ms),
+                                    color = TextPrimaryDark, fontWeight = FontWeight.SemiBold, fontSize = 13.sp
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                val (syncIcon, syncTint) = when (syncState) {
+                                    com.example.data.BackupSyncStatus.State.SYNCED -> androidx.compose.material.icons.Icons.Default.CloudDone to NeonEmerald
+                                    com.example.data.BackupSyncStatus.State.PENDING -> androidx.compose.material.icons.Icons.Default.CloudUpload to ElectricAmber
+                                    com.example.data.BackupSyncStatus.State.NEVER -> androidx.compose.material.icons.Icons.Default.CloudOff to TextSecondaryDark
+                                }
+                                Icon(syncIcon, contentDescription = null, tint = syncTint, modifier = Modifier.size(14.dp))
+                            }
                             Text(
                                 String.format(java.util.Locale.US, "₹%.0f", e.earned),
                                 color = NeonEmerald, fontWeight = FontWeight.Bold, fontSize = 14.sp

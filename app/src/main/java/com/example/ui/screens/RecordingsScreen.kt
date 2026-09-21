@@ -97,6 +97,9 @@ fun RecordingsScreen(
         trends = runCatching { viewModel.computeTripTrends() }.getOrDefault(emptyList())
     }
 
+    // Sync status — OneDrive-style (owner 2026-09-21)
+    val lastBackupMs by viewModel.settingsRepository.lastBackupTimestamp.collectAsState()
+
     LaunchedEffect(importStatusMessage) {
         importStatusMessage?.let {
             Toast.makeText(context, it, Toast.LENGTH_LONG).show()
@@ -386,10 +389,19 @@ fun RecordingsScreen(
             } else {
                 items(savedRecordings, key = { it.metadata.sessionId }) { rec ->
                     val isSelected = rec.metadata.sessionId in selectedIds
+                    // Dir mtime is the most honest "last changed" for a trip (finalize, rename, merge all touch it)
+                    val dirMtime = rec.transactionCsvFile.parentFile?.lastModified()
+                    val syncState = com.example.data.BackupSyncStatus.forTrip(
+                        lastBackupMs = lastBackupMs,
+                        endMs = null,
+                        startMs = com.example.data.RecordTime.parseMillis(rec.metadata.startTimeUtc),
+                        dirLastModifiedMs = dirMtime
+                    )
                     RecordingItemCard(
                         recording = rec,
                         isSelected = isSelected,
                         selectionMode = selectionMode,
+                        syncState = syncState,
                         onClick = {
                             if (selectionMode) {
                                 selectedIds = if (isSelected) selectedIds - rec.metadata.sessionId else selectedIds + rec.metadata.sessionId
@@ -568,6 +580,7 @@ fun RecordingItemCard(
     recording: SavedRecording,
     isSelected: Boolean = false,
     selectionMode: Boolean = false,
+    syncState: com.example.data.BackupSyncStatus.State = com.example.data.BackupSyncStatus.State.NEVER,
     onClick: () -> Unit,
     onLongClick: (() -> Unit)? = null,
     onToggleSelect: (() -> Unit)? = null,
@@ -606,11 +619,30 @@ fun RecordingItemCard(
                     Spacer(Modifier.width(8.dp))
                 }
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = meta.sessionName,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = meta.sessionName,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        // OneDrive-style sync icon (owner 2026-09-21)
+                        val (syncIcon, syncTint, syncDesc) = when (syncState) {
+                            com.example.data.BackupSyncStatus.State.SYNCED ->
+                                Triple(Icons.Default.CloudDone, NeonEmerald, "Synced to Drive")
+                            com.example.data.BackupSyncStatus.State.PENDING ->
+                                Triple(Icons.Default.CloudUpload, ElectricAmber, "Local — needs backup")
+                            com.example.data.BackupSyncStatus.State.NEVER ->
+                                Triple(Icons.Default.CloudOff, TextSecondaryDark, "Never backed up")
+                        }
+                        Icon(
+                            syncIcon,
+                            contentDescription = syncDesc,
+                            tint = syncTint,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
                     Text(
                         text = "ID: ${meta.sessionId} • ${meta.vehicle}",
                         style = MaterialTheme.typography.bodySmall,
@@ -636,14 +668,23 @@ fun RecordingItemCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text(
-                    text = "${recording.transactionCount} transactions",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = NeonEmerald,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 13.sp
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "${recording.transactionCount} transactions",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = NeonEmerald,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 13.sp
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    val (syncIcon, syncTint) = when (syncState) {
+                        com.example.data.BackupSyncStatus.State.SYNCED -> Icons.Default.CloudDone to NeonEmerald
+                        com.example.data.BackupSyncStatus.State.PENDING -> Icons.Default.CloudUpload to ElectricAmber
+                        com.example.data.BackupSyncStatus.State.NEVER -> Icons.Default.CloudOff to TextSecondaryDark
+                    }
+                    Icon(syncIcon, contentDescription = null, tint = syncTint, modifier = Modifier.size(14.dp))
+                }
                 Text(
                     text = com.example.data.RecordTime.dateTime(meta.startTimeUtc),
                     style = MaterialTheme.typography.bodySmall,

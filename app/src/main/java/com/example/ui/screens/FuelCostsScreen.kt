@@ -51,6 +51,7 @@ fun FuelCostsScreen(
     val entries = remember(refresh) { repo.entries() }
     val stats = remember(refresh) { repo.stats() }
     var showAdd by remember { mutableStateOf(false) }
+    val lastBackupMs by viewModel.settingsRepository.lastBackupTimestamp.collectAsState()
 
     // Since-refuel tracking (owner 2026-09-19): detected level-rise events and the app's own
     // consumption since the newest one - the cluster's SINCE REFUEL tab, plus what the cluster
@@ -286,6 +287,7 @@ fun FuelCostsScreen(
                     }
                 }
                 item(key = entry.idMs) {
+                    val syncState = com.example.data.BackupSyncStatus.forItem(lastBackupMs, entry.idMs)
                     Card(
                         shape = RoundedCornerShape(12.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
@@ -306,12 +308,15 @@ fun FuelCostsScreen(
                             )
                             Spacer(modifier = Modifier.width(10.dp))
                             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                Row {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(entry.dateUtc.take(10), color = Color.White, fontSize = 12.sp, modifier = Modifier.weight(1f))
-                                    // The duplicate timeline used to be the only place showing the
-                                    // absolute odometer; the month card now carries it too, so
-                                    // removing the twin list costs no information (owner 2026-09-20:
-                                    // "same thing showing two times").
+                                    val (syncIcon, syncTint) = when (syncState) {
+                                        com.example.data.BackupSyncStatus.State.SYNCED -> Icons.Default.CloudDone to NeonEmerald
+                                        com.example.data.BackupSyncStatus.State.PENDING -> Icons.Default.CloudUpload to ElectricAmber
+                                        com.example.data.BackupSyncStatus.State.NEVER -> Icons.Default.CloudOff to TextSecondaryDark
+                                    }
+                                    Icon(syncIcon, contentDescription = null, tint = syncTint, modifier = Modifier.size(12.dp))
+                                    Spacer(Modifier.width(6.dp))
                                     entry.odometerKm?.let {
                                         Text(
                                             java.text.DecimalFormat("#,###").format(it) + " km",
