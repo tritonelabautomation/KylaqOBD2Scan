@@ -55,7 +55,19 @@ object DriveBackupClient {
             val name = "kylaq-obd-backup-$stamp.zip"
             val cacheZip = File(context.cacheDir, name)
             val snapshotFile = File(context.cacheDir, AppDataSnapshot.FILE_NAME)
-            val files = recordingManager.recordingsDir.walkTopDown().filter { it.isFile }.toMutableList()
+            // EXCLUDE the journal working directory (owner 2026-09-21: "Backup failed:
+            // duplicate entry: <id>_transactions.csv", "Last synchronized: Never"). A
+            // clean STOP keeps the finished journal beside the finalized session files on
+            // purpose (DATA-LOSS FIX 4), and both carry "<id>_transactions.csv" - zipping
+            // the tree unfiltered handed the zip the same entry name twice and every
+            // backup since the journal shipped died on it. The journal is working state:
+            // finalized data lives in the session dirs, and a drive still in progress is
+            // covered by its raw log, which IS packed below.
+            val journalDir = File(recordingManager.recordingsDir, "journal")
+            val journalPrefix = journalDir.path + File.separator
+            val files = recordingManager.recordingsDir.walkTopDown()
+                .filter { it.isFile && !it.path.startsWith(journalPrefix) }
+                .toMutableList()
 
             val rawLogsDir = File(context.filesDir, "raw_logs")
             if (rawLogsDir.isDirectory) {
