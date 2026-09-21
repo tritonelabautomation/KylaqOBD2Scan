@@ -132,16 +132,32 @@ fun CarpoolEntryRows(
     pricePerL: Double
 ) {
     Text(
-        String.format(java.util.Locale.US, "Shared distance %.1f km", entry.distanceKm),
+        String.format(java.util.Locale.US, "Trip shared %.1f km", entry.distanceKm),
         color = TextSecondaryDark, fontSize = 12.sp
     )
     entry.riders.forEachIndexed { i, r ->
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(r.name.ifBlank { "Rider ${i + 1}" }, color = TextPrimaryDark, fontSize = 13.sp)
-            Text(
-                String.format(java.util.Locale.US, "₹%.0f", r.amount),
-                color = NeonEmerald, fontWeight = FontWeight.SemiBold, fontSize = 13.sp
-            )
+        val effDist = r.effectiveDistance(entry.distanceKm)
+        val perKm = if (effDist > 0.1) r.amount / effDist else null
+        Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(r.name.ifBlank { "Rider ${i + 1}" }, color = TextPrimaryDark, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                Text(
+                    String.format(java.util.Locale.US, "₹%.0f", r.amount),
+                    color = NeonEmerald, fontWeight = FontWeight.SemiBold, fontSize = 13.sp
+                )
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(
+                    String.format(java.util.Locale.US, "%.1f km shared", effDist),
+                    color = TextSecondaryDark, fontSize = 11.sp
+                )
+                if (perKm != null) {
+                    Text(
+                        String.format(java.util.Locale.US, "₹%.1f/km", perKm),
+                        color = TextSecondaryDark, fontSize = 11.sp
+                    )
+                }
+            }
         }
     }
     val fuelCost = if (pricePerL > 0.0 && fuelLiters > 0.01) fuelLiters * pricePerL else null
@@ -251,6 +267,12 @@ fun CarpoolDialog(
                 ?: listOf(""))
         }
     }
+    val riderDistances = remember {
+        mutableStateListOf<String>().apply {
+            addAll(existing?.riders?.map { it.distanceKm?.let { d -> String.format(java.util.Locale.US, "%.1f", d) } ?: "" }
+                ?: listOf(""))
+        }
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Car pool ride") },
@@ -276,31 +298,51 @@ fun CarpoolDialog(
                 OutlinedTextField(
                     value = distance,
                     onValueChange = { distance = it },
-                    label = { Text("Shared distance km") },
-                    singleLine = true
+                    label = { Text("Total trip distance km") },
+                    singleLine = true,
+                    supportingText = { Text("Trip's full distance; per-rider below may differ", fontSize = 10.sp) }
                 )
                 Spacer(Modifier.height(8.dp))
                 riderNames.forEachIndexed { i, name ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        OutlinedTextField(
-                            value = name,
-                            onValueChange = { v -> riderNames[i] = v },
-                            label = { Text("Rider ${i + 1}") },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f)
-                        )
-                        OutlinedTextField(
-                            value = riderAmounts[i],
-                            onValueChange = { v -> riderAmounts[i] = v },
-                            label = { Text("₹") },
-                            singleLine = true,
-                            modifier = Modifier.weight(0.7f)
-                        )
-                        if (riderNames.size > 1) {
-                            IconButton(onClick = {
-                                riderNames.removeAt(i)
-                                riderAmounts.removeAt(i)
-                            }) { Icon(Icons.Default.Close, "Remove rider") }
+                    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedTextField(
+                                value = name,
+                                onValueChange = { v -> riderNames[i] = v },
+                                label = { Text("Rider ${i + 1}") },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            OutlinedTextField(
+                                value = riderAmounts[i],
+                                onValueChange = { v -> riderAmounts[i] = v },
+                                label = { Text("₹") },
+                                singleLine = true,
+                                modifier = Modifier.weight(0.6f)
+                            )
+                            if (riderNames.size > 1) {
+                                IconButton(onClick = {
+                                    riderNames.removeAt(i)
+                                    riderAmounts.removeAt(i)
+                                    riderDistances.removeAt(i)
+                                }) { Icon(Icons.Default.Close, "Remove rider") }
+                            }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            OutlinedTextField(
+                                value = riderDistances[i],
+                                onValueChange = { v -> riderDistances[i] = v },
+                                label = { Text("Rider km (optional)") },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f),
+                                supportingText = { Text("Leave blank = same as trip", fontSize = 9.sp) }
+                            )
+                            val d = riderDistances[i].toDoubleOrNull() ?: distance.toDoubleOrNull() ?: 0.0
+                            val a = riderAmounts[i].toDoubleOrNull() ?: 0.0
+                            val perKm = if (d > 0.1 && a > 0) String.format(java.util.Locale.US, "₹%.1f/km", a / d) else ""
+                            if (perKm.isNotEmpty()) {
+                                Text(perKm, color = TextSecondaryDark, fontSize = 11.sp, modifier = Modifier.padding(top = 16.dp))
+                            }
                         }
                     }
                 }
@@ -308,6 +350,7 @@ fun CarpoolDialog(
                     TextButton(onClick = {
                         riderNames.add("")
                         riderAmounts.add("")
+                        riderDistances.add("")
                     }) { Text("+ Add rider") }
                 } else {
                     Text(
@@ -320,9 +363,13 @@ fun CarpoolDialog(
         confirmButton = {
             TextButton(onClick = {
                 val d = distance.toDoubleOrNull() ?: return@TextButton
-                val riders = riderNames.zip(riderAmounts).mapNotNull { (n, a) ->
-                    a.toDoubleOrNull()?.takeIf { it > 0.0 }
-                        ?.let { com.example.data.CarpoolCodec.Rider(n.trim(), it) }
+                val riders = riderNames.indices.mapNotNull { idx ->
+                    val n = riderNames[idx]
+                    val aStr = riderAmounts.getOrNull(idx) ?: ""
+                    val distStr = riderDistances.getOrNull(idx) ?: ""
+                    val a = aStr.toDoubleOrNull()?.takeIf { it > 0.0 } ?: return@mapNotNull null
+                    val rd = distStr.toDoubleOrNull()?.takeIf { it > 0.0 }
+                    com.example.data.CarpoolCodec.Rider(n.trim(), a, rd)
                 }
                 // Same IST calendar math as the fuel log: the typed date and time ARE the ride's
                 // instant, in the device's IST zone - never UTC-shifted to another day.

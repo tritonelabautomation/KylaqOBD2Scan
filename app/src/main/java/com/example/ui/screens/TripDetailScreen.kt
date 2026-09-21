@@ -113,16 +113,18 @@ fun TripDetailScreen(
             defaultWhenMs = trip?.startTimestamp ?: System.currentTimeMillis(),
             onDismiss = { showCarpool = false },
             onSave = { d, riders, whenMs ->
-                viewModel.carpoolRepository.save(
-                    com.example.data.CarpoolCodec.CarpoolEntry(
-                        idMs = carpoolEntry?.idMs ?: whenMs,
-                        tripId = tripId,
-                        dateUtc = com.example.data.RecordTime.stamp(whenMs),
-                        distanceKm = d,
-                        riders = riders
+                coroutineScope.launch {
+                    viewModel.saveCarpool(
+                        com.example.data.CarpoolCodec.CarpoolEntry(
+                            idMs = carpoolEntry?.idMs ?: whenMs,
+                            tripId = tripId,
+                            dateUtc = com.example.data.RecordTime.stamp(whenMs),
+                            distanceKm = d,
+                            riders = riders
+                        )
                     )
-                )
-                showCarpool = false
+                    showCarpool = false
+                }
             }
         )
     }
@@ -262,7 +264,7 @@ fun TripDetailScreen(
                                     onAdd = { showCarpool = true },
                                     onDelete = {
                                         carpoolEntry?.let {
-                                            viewModel.carpoolRepository.delete(it.idMs)
+                                            viewModel.deleteCarpool(it.idMs)
                                         }
                                     }
                                 )

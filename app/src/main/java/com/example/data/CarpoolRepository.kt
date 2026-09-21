@@ -15,12 +15,20 @@ import android.content.SharedPreferences
  */
 object CarpoolCodec {
 
-    const val FORMAT_VERSION = 1
+    const val FORMAT_VERSION = 2
 
     /** Seats are capped at four including nobody else's car: the owner drives, riders pay. */
     const val MAX_RIDERS = 4
 
-    data class Rider(val name: String, val amount: Double)
+    data class Rider(
+        val name: String,
+        val amount: Double,
+        /** Individual shared distance for this rider — null means "same as trip's shared distance" (old data). */
+        val distanceKm: Double? = null
+    ) {
+        /** Effective distance for cost/km: rider's own if set, else the trip's shared distance (passed in). */
+        fun effectiveDistance(fallback: Double): Double = distanceKm?.takeIf { it > 0.0 } ?: fallback
+    }
 
     data class CarpoolEntry(
         val idMs: Long,
@@ -28,6 +36,7 @@ object CarpoolCodec {
         val tripId: String?,
         /** IST stamp with offset, same convention as the fuel log's dateUtc. */
         val dateUtc: String,
+        /** Total shared distance of the trip (or the old single value). Kept for backward compat and month roll-up. */
         val distanceKm: Double,
         val riders: List<Rider>
     ) {
@@ -68,22 +77,47 @@ object CarpoolCodec {
         e.dateUtc,
         num(e.distanceKm),
         e.tripId ?: "-",
-        e.riders.joinToString(";") { esc(it.name) + "~" + num(it.amount) }
+        e.riders.joinToString(";") { r ->
+            val base = esc(r.name) + "~" + num(r.amount)
+            if (r.distanceKm != null) base + "~" + num(r.distanceKm) else base
+        }
     ).joinToString("|")
 
     fun decode(line: String): CarpoolEntry? {
         val p = line.split('|')
-        if (p[0] != "c$FORMAT_VERSION" || p.size != 6) return null
+        if (p.size != 6) return null
+        val ver = p[0]
+        if (ver != "c1" && ver != "c2" && ver != "c$FORMAT_VERSION") return null
         return try {
             CarpoolEntry(
                 idMs = p[1].toLong(),
                 tripId = p[4].takeIf { it != "-" },
                 dateUtc = p[2],
                 distanceKm = p[3].toDouble(),
-                riders = p[5].split(';').filter { it.isNotBlank() }.map { r ->
-                    val cut = r.lastIndexOf('~')
-                    if (cut < 0) return null
-                    Rider(unesc(r.substring(0, cut)), r.substring(cut + 1).toDouble())
+                riders = p[5].split(';').filter { it.isNotBlank() }.mapNotNull { r ->
+                    // Split into name~amount[~distance] — name is escaped, amount/distance are numeric
+                    // Old format: esc(name)~amount (2 parts). New: esc(name)~amount~distance (3 parts)
+                    // Escaped ~ is \w, so a raw split on ~ is safe for new data; for old data with esc, parts==2
+                    val tildeParts = r.split('~')
+                    if (tildeParts.size < 2) return@mapNotNull null
+                    val amountIdx: Int
+                    val distStr: String?
+                    val nameEnd: Int
+                    if (tildeParts.size >= 3 && tildeParts.last().toDoubleOrNull() != null && tildeParts[tildeParts.size - 2].toDoubleOrNull() != null) {
+                        // 3-part: name~amount~distance
+                        distStr = tildeParts.last()
+                        amountIdx = tildeParts.size - 2
+                        nameEnd = amountIdx
+                    } else {
+                        // 2-part: name~amount
+                        distStr = null
+                        amountIdx = tildeParts.size - 1
+                        nameEnd = amountIdx
+                    }
+                    val nameEsc = tildeParts.subList(0, nameEnd).joinToString("~")
+                    val amount = tildeParts[amountIdx].toDoubleOrNull() ?: return@mapNotNull null
+                    val distKm = distStr?.toDoubleOrNull()
+                    Rider(unesc(nameEsc), amount, distKm)
                 }
             ).takeIf { it.riders.isNotEmpty() && it.riders.size <= MAX_RIDERS }
         } catch (e: NumberFormatException) {

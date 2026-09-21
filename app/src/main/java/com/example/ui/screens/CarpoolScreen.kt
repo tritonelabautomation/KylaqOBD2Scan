@@ -180,10 +180,11 @@ fun CarpoolScreen(
                             )
                         }
                         Text(
-                            String.format(java.util.Locale.US, "%.1f km", e.distanceKm) + " · " +
+                            String.format(java.util.Locale.US, "%.1f km trip", e.distanceKm) + " · " +
                                 e.riders.joinToString(", ") { r ->
+                                    val d = r.effectiveDistance(e.distanceKm)
                                     (r.name.ifBlank { "rider" }) + " " +
-                                        String.format(java.util.Locale.US, "₹%.0f", r.amount)
+                                        String.format(java.util.Locale.US, "₹%.0f (%.1f km, ₹%.1f/km)", r.amount, d, if (d > 0.1) r.amount / d else 0.0)
                                 },
                             color = TextSecondaryDark, fontSize = 12.sp
                         )
@@ -198,7 +199,7 @@ fun CarpoolScreen(
                         )
                         Row {
                             TextButton(onClick = { editTarget = e }) { Text("Edit") }
-                            TextButton(onClick = { viewModel.carpoolRepository.delete(e.idMs) }) {
+                            TextButton(onClick = { viewModel.deleteCarpool(e.idMs) }) {
                                 Text("Delete", color = WarningRed)
                             }
                         }

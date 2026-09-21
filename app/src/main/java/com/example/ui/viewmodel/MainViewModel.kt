@@ -272,6 +272,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun carpoolEntries(): List<com.example.data.CarpoolCodec.CarpoolEntry> =
         carpoolRepository.entries()
 
+    fun deleteCarpool(idMs: Long) {
+        carpoolRepository.delete(idMs)
+        viewModelScope.launch {
+            try {
+                settingsRepository.driveTreeUri()?.let { tree ->
+                    com.example.backup.DriveBackupClient.sendBackup(
+                        getApplication(), android.net.Uri.parse(tree), recordingManager
+                    )
+                    settingsRepository.setLastBackupTimestamp(System.currentTimeMillis())
+                }
+            } catch (_: Exception) {}
+            try { cloudBackupManager.performAutoBackupIfNeeded() } catch (_: Exception) {}
+        }
+    }
+
     suspend fun tripTitleMap(): Map<String, String> =
         recordingManager.tripRepository.allTripsChronological().associate { it.id to it.title }
 
@@ -291,6 +306,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         carpoolRepository.save(e.copy(tripId = linked))
+        // Owner 2026-09-21: "as soon as an entry is made automatically it should trigger backup and save info"
+        // Car-pool rides are part of the Drive backup snapshot (PrefsSnapshotter), so save must mirror to Drive
+        // immediately, not wait for the daily gate. Best-effort, never blocks the save path.
+        viewModelScope.launch {
+            try {
+                settingsRepository.driveTreeUri()?.let { tree ->
+                    com.example.backup.DriveBackupClient.sendBackup(
+                        getApplication(), android.net.Uri.parse(tree), recordingManager
+                    )
+                    settingsRepository.setLastBackupTimestamp(System.currentTimeMillis())
+                }
+            } catch (_: Exception) {}
+            try { cloudBackupManager.performAutoBackupIfNeeded() } catch (_: Exception) {}
+        }
     }
 
     /**

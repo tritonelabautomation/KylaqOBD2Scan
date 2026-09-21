@@ -26,10 +26,10 @@ class CarpoolCodecTest {
             dateUtc = "2026-09-19T08:05:00+05:30",
             distanceKm = 24.5,
             riders = listOf(
-                Rider("Ravi|Kumar", 150.0),
-                Rider("Semi;Colon", 150.0),
-                Rider("Tilde~Wave", 100.0),
-                Rider("", 75.5)
+                Rider("Ravi|Kumar", 150.0, 10.0),
+                Rider("Semi;Colon", 150.0, 20.0),
+                Rider("Tilde~Wave", 100.0, null),
+                Rider("", 75.5, 24.5)
             )
         )
         val back = CarpoolCodec.decode(CarpoolCodec.encode(e))!!
@@ -40,7 +40,22 @@ class CarpoolCodecTest {
         assertEquals("Ravi|Kumar", back.riders[0].name)
         assertEquals("Semi;Colon", back.riders[1].name)
         assertEquals("Tilde~Wave", back.riders[2].name)
+        assertEquals(10.0, back.riders[0].distanceKm!!, 1e-9)
+        assertEquals(20.0, back.riders[1].distanceKm!!, 1e-9)
+        assertEquals(null, back.riders[2].distanceKm)
         assertEquals(475.5, back.earned, 1e-9)
+        // cost per km
+        assertEquals(15.0, back.riders[0].amount / back.riders[0].effectiveDistance(back.distanceKm), 1e-9)
+    }
+
+    @Test
+    fun oldFormatWithoutRiderDistanceStillDecodes() {
+        // c1 format: name~amount only, distance null -> fallback to trip distance
+        val oldLine = "c1|1700000000000|2026-09-19T08:05:00+05:30|24.50|trip_ab12|Ravi~150.00;Kumar~100.00"
+        val decoded = CarpoolCodec.decode(oldLine)!!
+        assertEquals(2, decoded.riders.size)
+        assertEquals(null, decoded.riders[0].distanceKm)
+        assertEquals(24.5, decoded.riders[0].effectiveDistance(decoded.distanceKm), 1e-9)
     }
 
     @Test
