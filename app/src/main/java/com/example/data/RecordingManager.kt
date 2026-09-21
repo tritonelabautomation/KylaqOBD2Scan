@@ -1370,15 +1370,13 @@ class RecordingManager(
 
             for (id in distinctIds) {
                 val dir = File(recordingsDir, "session_$id")
-                val txFile = File(dir, \"${id}_transactions.csv\")
+                val txFile = File(dir, "${id}_transactions.csv")
                 val loaded = if (txFile.exists()) {
                     CsvExporter.readTransactionsFromCsv(txFile)
                 } else {
-                    // Fallback: Room samples → TransactionRecord-ish (only for very old dirs)
                     emptyList()
                 }
                 if (loaded.isEmpty()) continue
-                // Wall-anchor every row — journal files store uptime in monotonic column.
                 val wall = loaded.map { tx ->
                     val w = SessionRecoveryPolicy.wallEpochMs(tx.timestampUtc, tx.timestampMonotonic)
                     if (w == tx.timestampMonotonic) tx else tx.copy(timestampMonotonic = w)
@@ -1391,9 +1389,8 @@ class RecordingManager(
                         if (ms > latestMs) latestMs = ms
                     }
                 }
-                // Metadata from first valid session dir
                 if (firstMeta == null) {
-                    val jsonFile = File(dir, \"$id.json\")
+                    val jsonFile = File(dir, "$id.json")
                     if (jsonFile.exists()) {
                         runCatching {
                             SessionJsonReader.readMetadata(jsonFile.reader())?.let { meta ->
@@ -1409,7 +1406,6 @@ class RecordingManager(
             }
 
             if (allTx.size < 2) return@withContext null
-            // Sort by true instant, not by file order — fragments may overlap or be out of order.
             val sorted = allTx.sortedBy { it.timestampMonotonic }
             if (earliestMs == Long.MAX_VALUE) {
                 earliestMs = sorted.first().timestampMonotonic
@@ -1419,23 +1415,23 @@ class RecordingManager(
             val newId = UUID.randomUUID().toString().take(8)
             val displayStart = RecordTime.display(earliestMs)
             val mergedName = newName?.takeIf { it.isNotBlank() }
-                ?: \"Merged Run $displayStart (${distinctIds.size} trips, ${sorted.size} tx)\"
+                ?: "Merged Run $displayStart (${distinctIds.size} trips, ${sorted.size} tx)"
 
             val metadata = RecordingMetadata(
                 sessionId = newId,
                 sessionName = mergedName,
                 vehicle = vehicleName,
                 vehicleId = vehicleId,
-                profile = \"India-Market 1.0 TSI\",
-                adapter = \"$adapterName (merged ${distinctIds.size} trips)\",
+                profile = "India-Market 1.0 TSI",
+                adapter = "$adapterName (merged ${distinctIds.size} trips)",
                 protocol = protocolName,
-                canBitrate = \"500 kbps\",
+                canBitrate = "500 kbps",
                 startTimeUtc = RecordTime.stamp(earliestMs)
             )
 
             val sampleList = SessionRecoveryPolicy.replaySamples(
                 transactions = sorted,
-                seed = SynchronizedSample(timestampUtc = \"\", timestampMonotonic = 0L),
+                seed = SynchronizedSample(timestampUtc = "", timestampMonotonic = 0L),
                 merge = { acc, tx -> mergeSample(acc, tx).copy(altitudeM = tx.altitudeM) }
             )
 
@@ -1447,14 +1443,12 @@ class RecordingManager(
                 recovered = false
             ) ?: return@withContext null
 
-            // Delete old trips — files synchronously, Room synchronously so the list never shows both.
             for (oldId in distinctIds) {
                 runCatching {
-                    File(recordingsDir, \"session_$oldId\").deleteRecursively()
+                    File(recordingsDir, "session_$oldId").deleteRecursively()
                     tripRepository.deleteTrip(oldId)
                 }
             }
-            // Also discard any lingering journal artefacts with same ids (should be gone, but belt).
             for (oldId in distinctIds) {
                 runCatching { journal.discard(oldId) }
             }
