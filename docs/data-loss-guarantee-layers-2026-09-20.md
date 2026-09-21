@@ -40,4 +40,4 @@ along in the zip.
 what was rebuilt, what could not be and why (recovery banner, journal-failure warning at
 record start, recovery summary notice). Nothing is ever deleted to hide a failure, and
 every loss path found in the field gets the OOM treatment: root-caused, fixed,
-regression-pinned, shipped. Current pinning: 99 suites / 806 tests / 0 failed.
+regression-pinned, shipped. Current pinning: 100 suites / 809 tests / 0 failed.
