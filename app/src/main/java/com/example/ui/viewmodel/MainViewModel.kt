@@ -274,6 +274,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun deleteCarpool(idMs: Long) {
         carpoolRepository.delete(idMs)
+        triggerImmediateBackup()
+    }
+
+    fun triggerImmediateBackup() {
         viewModelScope.launch {
             try {
                 settingsRepository.driveTreeUri()?.let { tree ->
@@ -283,7 +287,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     settingsRepository.setLastBackupTimestamp(System.currentTimeMillis())
                 }
             } catch (_: Exception) {}
-            try { cloudBackupManager.performAutoBackupIfNeeded() } catch (_: Exception) {}
+            try {
+                if (settingsRepository.googleAccountEmail.value != null) {
+                    cloudBackupManager.performBackupNow()
+                }
+            } catch (_: Exception) {}
         }
     }
 
@@ -306,20 +314,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         carpoolRepository.save(e.copy(tripId = linked))
-        // Owner 2026-09-21: "as soon as an entry is made automatically it should trigger backup and save info"
-        // Car-pool rides are part of the Drive backup snapshot (PrefsSnapshotter), so save must mirror to Drive
-        // immediately, not wait for the daily gate. Best-effort, never blocks the save path.
-        viewModelScope.launch {
-            try {
-                settingsRepository.driveTreeUri()?.let { tree ->
-                    com.example.backup.DriveBackupClient.sendBackup(
-                        getApplication(), android.net.Uri.parse(tree), recordingManager
-                    )
-                    settingsRepository.setLastBackupTimestamp(System.currentTimeMillis())
-                }
-            } catch (_: Exception) {}
-            try { cloudBackupManager.performAutoBackupIfNeeded() } catch (_: Exception) {}
-        }
+        triggerImmediateBackup()
     }
 
     /**
@@ -348,18 +343,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     init {
-        // A recording can now be stopped by something other than this ViewModel: the keep-alive
-        // service runs the same auto-record rule, so it closes the drive when the engine has been
-        // off long enough, whether or not the UI is open. Everything that has to happen after a
-        // stop - the ride X-ray, the OAuth-free Drive mirror, the cloud backup, the unsaved-raw-log
-        // banner - lives here, so watch for the fall and run it. Without this a background stop
-        // would save the trip and quietly skip the backups.
         viewModelScope.launch {
             var wasRecording = false
-            // No distinctUntilChanged(): a StateFlow is already conflated and only ever emits a
-            // value that differs from the last, and applying the operator to one is deprecated -
-            // which this build treats as an error.
             recordingManager.isRecording.collect { recording ->
+                if (recording && !wasRecording) {
+                    _recordingDurationSeconds.value = 0L
+                    recordingTimerJob?.cancel()
+                    recordingTimerJob = viewModelScope.launch {
+                        while (recordingManager.isRecording.value) {
+                            delay(1000)
+                            _recordingDurationSeconds.value++
+                        }
+                    }
+                }
                 if (wasRecording && !recording && !stopInitiatedHere) {
                     stopInitiatedHere = true
                     recordingTimerJob?.cancel()
@@ -368,19 +364,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         insightsPersistedForRecording = true
                         persistDriveInsights()
                     }
-                    if (settingsRepository.autoCloudBackup.value) {
+                    try {
                         settingsRepository.driveTreeUri()?.let { tree ->
-                            try {
-                                com.example.backup.DriveBackupClient.sendBackup(
-                                    getApplication(), android.net.Uri.parse(tree), recordingManager
-                                )
-                                settingsRepository.setLastBackupTimestamp(System.currentTimeMillis())
-                            } catch (e: Exception) {
-                                // Backup is best-effort; never block the stop path.
-                            }
+                            com.example.backup.DriveBackupClient.sendBackup(
+                                getApplication(), android.net.Uri.parse(tree), recordingManager
+                            )
+                            settingsRepository.setLastBackupTimestamp(System.currentTimeMillis())
                         }
-                    }
-                    AppContainer.cloudBackupManager.performAutoBackupIfNeeded()
+                    } catch (_: Exception) {}
+                    try {
+                        if (settingsRepository.googleAccountEmail.value != null) {
+                            AppContainer.cloudBackupManager.performBackupNow()
+                        } else {
+                            AppContainer.cloudBackupManager.performAutoBackupIfNeeded()
+                        }
+                    } catch (_: Exception) {}
                     refreshUnsavedRawLogs()
                 }
                 wasRecording = recording
@@ -1406,30 +1404,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             recordingTimerJob?.cancel()
             gpsManager.stopTracking()
-            // 2026-09-15 duplicate-ride fix: auto-stop (car off / link drop) and a manual
-            // STOP tap can BOTH fire for one drive; persistDriveInsights() then appended
-            // the SAME ride X-ray twice (the ride log had no dedup key, unlike the tank
-            // log). One persist per recording session, ever.
             if (!insightsPersistedForRecording) {
                 insightsPersistedForRecording = true
                 persistDriveInsights()
             }
             recordingManager.stopRecording()
-            // OAuth-free Drive backup: if a folder is linked, mirror the recordings there.
-            if (settingsRepository.autoCloudBackup.value) {
+            try {
                 settingsRepository.driveTreeUri()?.let { tree ->
-                    try {
-                        com.example.backup.DriveBackupClient.sendBackup(
-                            getApplication(), android.net.Uri.parse(tree), recordingManager
-                        )
-                        settingsRepository.setLastBackupTimestamp(System.currentTimeMillis())
-                    } catch (e: Exception) {
-                        // Backup is best-effort; never block the stop path.
-                    }
+                    com.example.backup.DriveBackupClient.sendBackup(
+                        getApplication(), android.net.Uri.parse(tree), recordingManager
+                    )
+                    settingsRepository.setLastBackupTimestamp(System.currentTimeMillis())
                 }
-            }
-            // Auto-backup to cloud if enabled
-            cloudBackupManager.performAutoBackupIfNeeded()
+            } catch (_: Exception) {}
+            try {
+                if (settingsRepository.googleAccountEmail.value != null) {
+                    cloudBackupManager.performBackupNow()
+                } else {
+                    cloudBackupManager.performAutoBackupIfNeeded()
+                }
+            } catch (_: Exception) {}
             // A finished stop can reveal older orphaned raw logs (or fail partially) -
             // keep the recovery banner in Trips & Recordings up to date.
             refreshUnsavedRawLogs()
@@ -1848,7 +1842,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return out
     }
 
-    /** Fuelio parity: auto-backup hook fired after every refuel save. */
     fun triggerCloudBackupIfEnabled() {
         viewModelScope.launch { cloudBackupManager.performAutoBackupIfNeeded() }
     }
@@ -1898,10 +1891,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun renameRecording(sessionId: String, newName: String) {
         recordingManager.renameRecording(sessionId, newName)
+        triggerImmediateBackup()
     }
 
     fun deleteRecording(sessionId: String) {
         recordingManager.deleteRecording(sessionId)
+        triggerImmediateBackup()
     }
 
     private val _isMerging = MutableStateFlow(false)
@@ -1927,6 +1922,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 } else {
                     "Merge failed — no transactions found in selected trips."
                 }
+                if (saved != null) triggerImmediateBackup()
             } catch (e: Exception) {
                 _mergeNotice.value = "Merge failed: ${e.message ?: e.javaClass.simpleName}"
             } finally {

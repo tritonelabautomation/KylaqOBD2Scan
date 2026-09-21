@@ -367,7 +367,7 @@ fun FuelCostsScreen(
                             IconButton(onClick = { editTarget = entry; showAdd = true }) {
                                 Icon(Icons.Default.Edit, contentDescription = "Edit entry", tint = TextSecondaryDark, modifier = Modifier.size(18.dp))
                             }
-                            IconButton(onClick = { repo.delete(entry.idMs); refresh++ }) {
+                            IconButton(onClick = { repo.delete(entry.idMs); refresh++; viewModel.triggerImmediateBackup() }) {
                                 Icon(Icons.Default.Delete, contentDescription = "Delete", tint = WarningRed, modifier = Modifier.size(18.dp))
                             }
                         }
@@ -405,10 +405,8 @@ fun FuelCostsScreen(
                         partial = partial
                     )
                 )
-                // The pump's own litres, matched to the detected event by odometer, calibrate the
-                // level-rise estimate and re-derive the tank capacity (brim-to-brim loop).
                 viewModel.calibrateAfterFuelEntry(liters, odo, partial)
-                viewModel.triggerCloudBackupIfEnabled()
+                viewModel.triggerImmediateBackup()
                 if (grade != FuelLogCodec.GRADE_UNKNOWN) viewModel.tagFuelGrade(grade)
                 odo?.let { viewModel.maintenanceRepository.setCurrentOdometerKm(it) }
                 refresh++
