@@ -54,6 +54,9 @@ class RecordingManager(
     private val _currentTransactions = MutableStateFlow<List<TransactionRecord>>(emptyList())
     val currentTransactions: StateFlow<List<TransactionRecord>> = _currentTransactions.asStateFlow()
 
+    /** Walls the 1 Hz snapshot of [currentTransactions]; see recordTransaction. */
+    private var lastTxListPublishMs = 0L
+
     private val _savedRecordings = MutableStateFlow<List<SavedRecording>>(emptyList())
 
     // OWNER BUG 2026-09-16: a recording ran 99 minutes against a SILENT link (ignition
@@ -448,7 +451,16 @@ class RecordingManager(
             val stamped = tx.copy(altitudeM = com.example.di.AppContainer.currentAltitudeM())
             lastRxAtMs = System.currentTimeMillis()
             activeTransactionList.add(stamped)
-            _currentTransactions.value = activeTransactionList.toList()
+            // One snapshot per second, not one per RX frame. Copying the WHOLE drive on every frame
+            // meant a 60 000-row session allocated a 60 000-element list eight times a second for
+            // hours - gigabytes of garbage for screens that cannot render eight full-list
+            // recompositions a second anyway, and GC pressure stacked on top of everything else a
+            // long drive holds (owner 2026-09-22: long sessions dying instead of saving).
+            val publishAt = System.currentTimeMillis()
+            if (publishAt - lastTxListPublishMs >= 1_000L) {
+                lastTxListPublishMs = publishAt
+                _currentTransactions.value = activeTransactionList.toList()
+            }
 
             // Wide-row merge, extracted to the pure companion RecordingManager.mergeSample so
             // journal recovery replays the identical rows.
@@ -498,14 +510,26 @@ class RecordingManager(
         // was restarted mid-drive (auto-reconnect after a kill): the old rows are on disk, the new
         // process only holds the rows it saw itself. Taking the longer source keeps the drive whole
         // rather than silently truncating it to whatever survived in memory.
-        val journalTx = if (journal.txFile(metadata.sessionId).exists()) {
-            runCatching { CsvExporter.readTransactionsFromCsv(journal.txFile(metadata.sessionId)) }
+        // The journal is parsed ONLY when a streaming line count says it knows more rows than RAM -
+        // the restart-mid-drive case it exists for. On a normal stop the two are equal and the old
+        // code parsed the entire drive twice (transactions and wide rows) for a comparison that a
+        // line count answers; on a 60 000-row session that was two extra full copies of the drive in
+        // RAM inside finalization's own peak window, and that window is where stops died and trips
+        // ended up "recovered" instead of saved (owner 2026-09-22).
+        val journalTxFile = journal.txFile(metadata.sessionId)
+        val journalSampleFile = journal.sampleFile(metadata.sessionId)
+        val journalTx = if (journalTxFile.exists() &&
+            SessionRecoveryPolicy.dataRowCount(journalTxFile) > txList.size
+        ) {
+            runCatching { CsvExporter.readTransactionsFromCsv(journalTxFile) }
                 .getOrDefault(emptyList())
-        } else emptyList()
-        val journalSamples = if (journal.sampleFile(metadata.sessionId).exists()) {
-            runCatching { CsvExporter.readSamplesFromCsv(journal.sampleFile(metadata.sessionId)) }
+        } else emptyList<TransactionRecord>()
+        val journalSamples = if (journalSampleFile.exists() &&
+            SessionRecoveryPolicy.dataRowCount(journalSampleFile) > sampleList.size
+        ) {
+            runCatching { CsvExporter.readSamplesFromCsv(journalSampleFile) }
                 .getOrDefault(emptyList())
-        } else emptyList()
+        } else emptyList<SynchronizedSample>()
         val effectiveTx = SessionRecoveryPolicy.preferLonger(txList, journalTx)
         val effectiveSamples = SessionRecoveryPolicy.preferLonger(sampleList, journalSamples)
         // KILL-AUDIT FIX A (owner 2026-09-19: "find hidden mechanism which could kill app during
@@ -528,13 +552,26 @@ class RecordingManager(
         _isRecording.value = false
         _currentSessionMetadata.value = null
 
-        val saved = finalizeSession(
-            metadata = metadata,
-            txList = effectiveTx,
-            sampleList = effectiveSamples,
-            rawLogFile = rawLogFile,
-            recovered = false
-        )
+        val saved = try {
+            finalizeSession(
+                metadata = metadata,
+                txList = effectiveTx,
+                sampleList = effectiveSamples,
+                rawLogFile = rawLogFile,
+                recovered = false
+            )
+        } catch (e: Exception) {
+            // A stop that dies here has the journal intact on disk (every row was flushed when it
+            // arrived) but no trip - so the next start rebuilds the drive and nothing is lost. Say
+            // that in the owner's language instead of leaving a STOP that appears to do nothing
+            // (owner 2026-09-22: "after trip when click stop trip is not saved").
+            android.util.Log.e("RecordingManager", "stop finalize failed", e)
+            _autoStopNotice.value =
+                "STOP could not write the trip (${e.message ?: e.javaClass.simpleName}). Every OBD " +
+                    "line is safe in the crash journal - recovery rebuilds this drive on the next " +
+                    "start, and the trip list will show it as recovered."
+            null
+        }
         // KILL-AUDIT FIX A: the marker is earned by the persisted trip, never by the intention to
         // persist one. finalizeSession throwing skips it too - the journal stays unfinished and
         // the next recovery pass rebuilds the drive instead of trusting a lie.
@@ -1259,9 +1296,14 @@ class RecordingManager(
     fun findUnsavedRawLogs(): List<File> {
         val saved = _savedRecordings.value.map { it.metadata.sessionId }.toSet()
         val mergedAway = mergeLedger.ids()
+        // The session being recorded RIGHT NOW has a raw log on disk by design - it is the drive in
+        // progress, not a corpse. Offering it a Recover button while the recorder holds the same id
+        // invites a rebuild that fights the live session over its own files (owner screenshot
+        // 2026-09-22 09:14: the banner listed the very session that was ACTIVE on the dashboard).
+        val liveId = if (_isRecording.value) _currentSessionMetadata.value?.sessionId else null
         return rawLogsDir.listFiles()?.filter { f ->
             val id = com.example.analysis.RawLogRecovery.sessionIdOf(f.name)
-            id != null && id !in saved && id !in mergedAway && f.length() > 64L
+            id != null && id !in saved && id !in mergedAway && id != liveId && f.length() > 64L
         }?.sortedByDescending { it.lastModified() } ?: emptyList()
     }
 

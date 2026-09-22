@@ -20,6 +20,12 @@ import java.util.UUID
 
 class TripRepository(context: Context) {
 
+    companion object {
+        /** Rows per Room transaction on the sample insert path - see [insertSamples]. */
+        private const val INSERT_CHUNK = 2_000
+    }
+
+
     private val db = AppDatabase.getInstance(context)
     private val tripDao = db.tripDao()
     private val sampleDao = db.telemetrySampleDao()
@@ -156,8 +162,24 @@ class TripRepository(context: Context) {
     }
 
     suspend fun insertSamples(samples: List<TelemetrySampleEntity>) = withContext(Dispatchers.IO) {
-        if (samples.isNotEmpty()) {
-            sampleDao.insertSamples(samples)
+        if (samples.isEmpty()) return@withContext
+        // Chunked, with one retry per chunk. A single transaction holding every sample of a drive
+        // means one SQLite rollback segment the size of the whole trip and a multi-second write on
+        // phone flash - stacked on top of finalization's CSV/JSON/ZIP writes it is both a heap
+        // spike and an ANR window, and a stop that dies in here is a stop that never saved (owner
+        // 2026-09-22: "after trip when click stop trip is not saved always on recover mode only").
+        // 2 000-row transactions keep each write short; a chunk that still fails is logged, never
+        // swallowed silently.
+        samples.chunked(INSERT_CHUNK).forEach { chunk ->
+            runCatching { sampleDao.insertSamples(chunk) }
+                .recoverCatching { sampleDao.insertSamples(chunk) }
+                .onFailure {
+                    android.util.Log.e(
+                        "TripRepository",
+                        "sample insert failed for ${chunk.size} row(s) of trip ${chunk.first().tripId}",
+                        it
+                    )
+                }
         }
     }
 

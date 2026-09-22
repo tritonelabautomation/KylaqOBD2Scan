@@ -499,6 +499,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _vinDecodeResult = MutableStateFlow<com.example.protocol.VinDecodeResult?>(null)
     val vinDecodeResult: StateFlow<com.example.protocol.VinDecodeResult?> = _vinDecodeResult.asStateFlow()
 
+    /** How often the VIN watcher looks at the link at all. */
+    private val VIN_RETRY_TICK_MS = 15_000L
+    /** Minimum silence between two mode-09 attempts on a link that stays up. */
+    private val VIN_ATTEMPT_GAP_MS = 60_000L
     private var lastVinAttemptMs = 0L
 
     init {
@@ -508,25 +512,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     init {
-        // The VIN resolves itself (owner 2026-09-19: "VIN is not resolved yet"). The auto-connect
-        // path never opens the scan screen - the only place that used to ask the ECU for 0902 - so
-        // a drive connected in the background could show "VIN Unavailable" forever with no button
-        // press coming. Ask once the link is up AND frame evidence says the bus is talking;
-        // throttled to one attempt per minute so a flapping verdict cannot spam mode-09 reads.
+        // The VIN resolves itself (owner 2026-09-19: "VIN is not resolved yet"; owner 2026-09-22:
+        // "Still VIN number is not updating"). The first version of this watcher was a
+        // combine(connectionState, protocolHealth).collect - which fires only when one of the two
+        // CHANGES. One failed mode-09 read on a link that then stayed CONNECTED/PARTIAL for hours
+        // was therefore never retried: "VIN Unavailable" became permanent until something flapped,
+        // and the READ VIN button died too whenever the transport field it read was stale. A slow
+        // tick with a one-minute attempt throttle retries for as long as the link is up and the VIN
+        // is still missing, without spamming mode-09 reads at a healthy bus.
         viewModelScope.launch {
-            kotlinx.coroutines.flow.combine(connectionState, com.example.di.AppContainer.protocolHealth) { c, h -> c to h }
-                .collect { (c, h) ->
-                    val vin = _vehicleVin.value
-                    val needsVin = vin.isNullOrBlank() || vin == "VIN Unavailable"
-                    val linkUp = c == ConnectionState.CONNECTED &&
-                        (h == com.example.model.ProtocolHealth.WORKING ||
-                            h == com.example.model.ProtocolHealth.PARTIAL)
-                    if (needsVin && linkUp && System.currentTimeMillis() - lastVinAttemptMs > 60_000L) {
-                        lastVinAttemptMs = System.currentTimeMillis()
-                        kotlinx.coroutines.delay(1200)
-                        fetchVehicleVin()
-                    }
-                }
+            while (isActive) {
+                kotlinx.coroutines.delay(VIN_RETRY_TICK_MS)
+                val vin = _vehicleVin.value
+                val needsVin = vin.isNullOrBlank() || vin == "VIN Unavailable" || vin == "VIN Ambiguous"
+                if (!needsVin) continue
+                if (System.currentTimeMillis() - lastVinAttemptMs < VIN_ATTEMPT_GAP_MS) continue
+                val linkUp = connectionState.value == ConnectionState.CONNECTED &&
+                    (com.example.di.AppContainer.protocolHealth.value == com.example.model.ProtocolHealth.WORKING ||
+                        com.example.di.AppContainer.protocolHealth.value == com.example.model.ProtocolHealth.PARTIAL)
+                if (!linkUp) continue
+                lastVinAttemptMs = System.currentTimeMillis()
+                fetchVehicleVin()
+            }
         }
     }
 
@@ -535,11 +542,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (!transport.isConnected) return
 
         viewModelScope.launch {
-            val resp = transport.sendCommand("0902", 3000L)
+            var resp = transport.sendCommand("0902", 3000L)
+            if (resp.status != com.example.model.ResponseStatus.OK || resp.lines.isEmpty()) {
+                // One quiet retry. A mode-09 read that lands while the poller's own request is still
+                // on the wire can come back NO DATA on a perfectly healthy bus, and a single unlucky
+                // answer must not decide what the vehicle card shows for the rest of the drive.
+                kotlinx.coroutines.delay(500)
+                resp = transport.sendCommand("0902", 3000L)
+            }
 
             if (resp.status != com.example.model.ResponseStatus.OK || resp.lines.isEmpty()) {
                 _vehicleVin.value = "VIN Unavailable"
                 _vinDecodeResult.value = null
+                android.util.Log.w(
+                    "MainViewModel",
+                    "VIN read returned no answer: status=${resp.status} lines=${resp.lines.size}"
+                )
                 return@launch
             }
 
@@ -1509,9 +1527,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             gpsManager.stopTracking()
             if (!insightsPersistedForRecording) {
                 insightsPersistedForRecording = true
-                persistDriveInsights()
+                // Anything thrown before the manager stop used to kill this coroutine outright and
+                // the STOP the owner just tapped did nothing at all - the drive then only came back
+                // through recovery (owner 2026-09-22: "when click stop trip is not saved"). Insights
+                // are a nice-to-have; the trip is not.
+                runCatching { persistDriveInsights() }
+                    .onFailure { android.util.Log.e("MainViewModel", "drive insights persist failed", it) }
             }
-            recordingManager.stopRecording()
+            runCatching { recordingManager.stopRecording() }
+                .onFailure { android.util.Log.e("MainViewModel", "stopRecording failed", it) }
             try {
                 settingsRepository.driveTreeUri()?.let { tree ->
                     com.example.backup.DriveBackupClient.sendBackup(

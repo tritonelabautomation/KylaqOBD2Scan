@@ -73,6 +73,28 @@ object SessionRecoveryPolicy {
         if (fromJournal.size > fromRam.size) fromJournal else fromRam
 
     /**
+     * How many DATA rows a journal or CSV holds, counted by streaming lines - header excluded,
+     * nothing parsed, nothing held in RAM.
+     *
+     * STOP needs to know whether the journal knows more rows than RAM (a process restart
+     * mid-drive), and it used to find out by parsing the WHOLE journal into record objects first.
+     * On the owner's 60 000-row drives that materialised two extra full copies of the drive -
+     * transactions and wide rows - at exactly the moment finalization is also building the CSVs,
+     * the JSON, the ZIP bundle and 60 000 Room rows. That window is where the heap died, and a heap
+     * that dies inside stopRecording is a trip that never saves and only recovery can rebuild
+     * (owner 2026-09-22: *"after trip when click stop trip is not saved always on recover mode
+     * only"*). A line count costs one buffered reader and zero records.
+     */
+    fun dataRowCount(file: java.io.File): Int {
+        val lines = runCatching {
+            var n = 0
+            file.bufferedReader().use { reader -> while (reader.readLine() != null) n++ }
+            n
+        }.getOrDefault(0)
+        return maxOf(0, lines - 1)
+    }
+
+    /**
      * Replay the wide sample rows from the journaled transactions.
      *
      * Used when the samples journal is missing or shorter than the transaction journal - an older

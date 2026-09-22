@@ -305,6 +305,35 @@ class MergeReviewPolicyTest {
         assertFalse(ledger.contains("anything"))
     }
 
+    // ── counting a journal without parsing it (the stop path's memory fix) ────────────
+
+    @Test
+    fun dataRowCountCountsRowsWithoutParsingThem() {
+        val file = tmp.newFile("journal.csv")
+        file.writeText("header,a,b\n1,2,3\n4,5,6\n7,8,9\n")
+        assertEquals(3, SessionRecoveryPolicy.dataRowCount(file))
+    }
+
+    @Test
+    fun aHeaderOnlyJournalHoldsZeroRows() {
+        val file = tmp.newFile("header_only.csv")
+        file.writeText("header,a,b\n")
+        assertEquals(0, SessionRecoveryPolicy.dataRowCount(file))
+        assertEquals(0, SessionRecoveryPolicy.dataRowCount(tmp.newFile("empty.csv")))
+    }
+
+    @Test
+    fun aMissingLastNewlineStillCountsItsRow() {
+        val file = tmp.newFile("no_trailing_nl.csv")
+        file.writeText("header\nrow1\nrow2")
+        assertEquals(2, SessionRecoveryPolicy.dataRowCount(file))
+    }
+
+    @Test
+    fun aMissingFileCountsAsZeroNotAsAnError() {
+        assertEquals(0, SessionRecoveryPolicy.dataRowCount(java.io.File(tmp.root, "never/written.csv")))
+    }
+
     // ── altitude re-association during a merge ────────────────────────────────────────
 
     private data class Row(val ts: Long, val alt: Double?)
