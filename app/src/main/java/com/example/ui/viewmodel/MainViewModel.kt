@@ -311,7 +311,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         documentRepository.delete(idMs)
         triggerImmediateBackup()
     }
-    fun addReminder(r: com.example.data.ReminderCodec.ReminderEntry) {
+    fun addReminder(r: com.example.data.ReminderCodec.CustomReminder) {
         reminderRepository.add(r)
         triggerImmediateBackup()
     }
