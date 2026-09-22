@@ -184,7 +184,7 @@ fun ExpensesScreen(
                             color = ElectricAmber, fontSize = 13.sp, fontWeight = FontWeight.Bold
                         )
                         if (r.kind == "Other") {
-                            IconButton(onClick = { viewModel.expenseRepository.delete(r.idMs); refresh++ }) {
+                            IconButton(onClick = { viewModel.deleteExpense(r.idMs); refresh++ }) {
                                 Icon(Icons.Default.Delete, "Delete", tint = WarningRed, modifier = Modifier.size(16.dp))
                             }
                         }
@@ -201,7 +201,7 @@ fun ExpensesScreen(
                 val now = System.currentTimeMillis()
                 // IST with offset (owner 2026-09-17). idMs stays the authoritative instant.
                 val utc = com.example.data.RecordTime.stamp(now)
-                viewModel.expenseRepository.add(
+                viewModel.addExpense(
                     ExpenseCodec.ExpenseEntry(now, utc, category, amount, vendor, note)
                 )
                 refresh++

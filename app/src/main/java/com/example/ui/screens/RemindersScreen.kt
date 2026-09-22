@@ -128,13 +128,13 @@ fun RemindersScreen(
                     subtitle = "Due ${Date(rem.dueMs)}" + (rem.note.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""),
                     color = WarningRed,
                     actions = {
-                        TextButton(onClick = { viewModel.reminderRepository.snooze(rem.idMs, now + day); refresh++ }) {
+                        TextButton(onClick = { viewModel.reminderRepository.snooze(rem.idMs, now + day); refresh++; viewModel.triggerImmediateBackup() }) {
                             Text("Snooze 1d", fontSize = 10.sp)
                         }
-                        TextButton(onClick = { viewModel.reminderRepository.complete(rem.idMs, now); refresh++ }) {
+                        TextButton(onClick = { viewModel.reminderRepository.complete(rem.idMs, now); refresh++; viewModel.triggerImmediateBackup() }) {
                             Text("Done", fontSize = 10.sp)
                         }
-                        IconButton(onClick = { viewModel.reminderRepository.delete(rem.idMs); refresh++ }) {
+                        IconButton(onClick = { viewModel.deleteReminder(rem.idMs); refresh++ }) {
                             Icon(Icons.Default.Delete, "Delete", tint = WarningRed, modifier = Modifier.size(16.dp))
                         }
                     }
@@ -149,7 +149,7 @@ fun RemindersScreen(
                     subtitle = "Due ${Date(rem.dueMs)} · ${rem.repeat.name.lowercase()}",
                     color = NeonEmerald,
                     actions = {
-                        IconButton(onClick = { viewModel.reminderRepository.delete(rem.idMs); refresh++ }) {
+                        IconButton(onClick = { viewModel.deleteReminder(rem.idMs); refresh++ }) {
                             Icon(Icons.Default.Delete, "Delete", tint = WarningRed, modifier = Modifier.size(16.dp))
                         }
                     }
@@ -165,7 +165,7 @@ fun RemindersScreen(
         ReminderDialog(
             onDismiss = { showAdd = false },
             onSave = { title, dueMs, repeat, occurrences, note ->
-                viewModel.reminderRepository.add(
+                viewModel.addReminder(
                     ReminderCodec.CustomReminder(
                         idMs = System.currentTimeMillis(), title = title, dueMs = dueMs,
                         repeat = repeat, occurrencesLeft = occurrences, snoozedUntilMs = null,

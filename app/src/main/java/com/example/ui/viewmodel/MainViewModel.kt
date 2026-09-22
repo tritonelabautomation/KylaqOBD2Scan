@@ -295,6 +295,39 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun addExpense(e: com.example.data.ExpenseCodec.ExpenseEntry) {
+        expenseRepository.add(e)
+        triggerImmediateBackup()
+    }
+    fun deleteExpense(idMs: Long) {
+        expenseRepository.delete(idMs)
+        triggerImmediateBackup()
+    }
+    fun addDocument(d: com.example.data.DocumentCodec.VehicleDocument) {
+        documentRepository.add(d)
+        triggerImmediateBackup()
+    }
+    fun deleteDocument(idMs: Long) {
+        documentRepository.delete(idMs)
+        triggerImmediateBackup()
+    }
+    fun addReminder(r: com.example.data.ReminderCodec.ReminderEntry) {
+        reminderRepository.add(r)
+        triggerImmediateBackup()
+    }
+    fun deleteReminder(idMs: Long) {
+        reminderRepository.delete(idMs)
+        triggerImmediateBackup()
+    }
+    fun logMaintenance(l: com.example.data.MaintenanceCatalog.ServiceLog) {
+        maintenanceRepository.log(l)
+        triggerImmediateBackup()
+    }
+    fun setMaintenanceOdo(km: Double) {
+        maintenanceRepository.setCurrentOdometerKm(km)
+        triggerImmediateBackup()
+    }
+
     suspend fun tripTitleMap(): Map<String, String> =
         recordingManager.tripRepository.allTripsChronological().associate { it.id to it.title }
 

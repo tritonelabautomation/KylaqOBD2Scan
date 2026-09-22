@@ -101,7 +101,7 @@ fun DocumentsScreen(
                                 )
                             }
                         }
-                        IconButton(onClick = { viewModel.documentRepository.delete(doc.idMs); refresh++ }) {
+                        IconButton(onClick = { viewModel.deleteDocument(doc.idMs); refresh++ }) {
                             Icon(Icons.Default.Delete, "Delete", tint = WarningRed, modifier = Modifier.size(18.dp))
                         }
                     }
@@ -123,7 +123,7 @@ fun DocumentsScreen(
                             .parse(it)?.time
                     }.getOrNull()
                 }
-                viewModel.documentRepository.add(
+                viewModel.addDocument(
                     DocumentCodec.VehicleDocument(System.currentTimeMillis(), type, title, number, issuer, expiry, expiryMs)
                 )
                 refresh++

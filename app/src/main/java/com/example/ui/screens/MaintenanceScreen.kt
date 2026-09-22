@@ -154,7 +154,7 @@ fun MaintenanceScreen(
                         TextButton(
                             onClick = {
                                 odoText.toDoubleOrNull()?.let {
-                                    repo.setCurrentOdometerKm(it)
+                                    viewModel.setMaintenanceOdo(it)
                                     refresh++
                                 }
                             }
@@ -468,13 +468,13 @@ fun MaintenanceScreen(
                 val now = System.currentTimeMillis()
                 // IST with offset (owner 2026-09-17). dateMs stays the authoritative instant.
                 val utc = com.example.data.RecordTime.stamp(now)
-                repo.log(
+                viewModel.logMaintenance(
                     MaintenanceCatalog.ServiceLog(
                         itemId = item.id, dateUtc = utc, dateMs = now,
                         odometerKm = odo, cost = cost, rating = rating, notes = notes
                     )
                 )
-                odo?.let { repo.setCurrentOdometerKm(it); odoText = String.format(java.util.Locale.US, "%.0f", it) }
+                odo?.let { viewModel.setMaintenanceOdo(it); odoText = String.format(java.util.Locale.US, "%.0f", it) }
                 logTarget = null
                 refresh++
             }
