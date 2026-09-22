@@ -275,7 +275,17 @@ class ObdKeepAliveService : Service() {
                         com.example.di.AppContainer.init(applicationContext)
                         val settings = com.example.di.AppContainer.settingsRepository
                         val scheduler = com.example.di.AppContainer.obdScheduler
-                        if (settings.autoConnect.value && !scheduler.isPolling.value) {
+                        // A PID discovery scan STOPS polling on purpose: one ELM327 serial link
+                        // holds one conversation at a time, and the scan needs it exclusively.
+                        // "Polling is off, therefore reconnect and poll" firing mid-scan put two
+                        // masters on the same wire - the scan decoded the poller's answers and the
+                        // dashboard decoded the scan's (owner 2026-09-22: "PID discovery doesn't
+                        // work"). While a scan or a validation run owns the link, this tick waits.
+                        val discoveryBusy = runCatching {
+                            val discovery = com.example.di.AppContainer.pidDiscoveryService
+                            discovery.isScanning.value || discovery.isValidating.value
+                        }.getOrDefault(false)
+                        if (settings.autoConnect.value && !scheduler.isPolling.value && !discoveryBusy) {
                             com.example.scheduler.ObdQuickConnect.connectPairedAdapterAndPoll(
                                 this,
                                 respectAutoConnectSetting = true

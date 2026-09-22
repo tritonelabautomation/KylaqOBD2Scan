@@ -164,7 +164,14 @@ class ObdDashboardScreen(carContext: CarContext) : Screen(carContext) {
                 } catch (t: Throwable) {
                     false
                 }
-                if (!alreadyPolling) {
+                // A phone-side PID discovery scan stops polling to own the adapter's single serial
+                // conversation; reconnecting from the car screen mid-scan would interleave two
+                // masters on one wire (owner 2026-09-22). Wait for the scan to finish instead.
+                val discoveryBusy = runCatching {
+                    val discovery = AppContainer.pidDiscoveryService
+                    discovery.isScanning.value || discovery.isValidating.value
+                }.getOrDefault(false)
+                if (!alreadyPolling && !discoveryBusy) {
                     try {
                         val ok = ObdQuickConnect.connectPairedAdapterAndPoll(this) { note ->
                             statusNote = note

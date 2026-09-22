@@ -428,7 +428,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val cloudBackupManager = AppContainer.cloudBackupManager
     val catalogRepository = AppContainer.catalogRepository
 
+    /**
+     * The transport that is ACTUALLY carrying traffic right now - not only the one this ViewModel
+     * opened itself.
+     *
+     * Three entry points open the adapter socket: this ViewModel's connect dialog, the keep-alive
+     * service's auto-connect tick and the Android Auto session - the last two go through
+     * [com.example.bluetooth.BluetoothManager] / [com.example.scheduler.ObdQuickConnect] and poll
+     * the shared ObdScheduler without ever touching this field. After a process death the service
+     * reconnects in the background while a freshly created ViewModel still holds null here, so the
+     * dashboard was visibly LIVE - recording ACTIVE, TX/RX counting, GPS fix with altitude - and
+     * PID discovery still answered "OBD-II adapter is not connected", because `startPidScan` read
+     * this field and handed a brand-new SimulationTransport to the scan (owner 2026-09-22: *"PID
+     * discovery doesn't work even though I have [the adapter connected]"*). Every `activeTransport
+     * ?: return` in this class - ECU discovery, VIN read, DTC scan, protocol test - died the same
+     * silent death.
+     *
+     * One question, one answer: our own socket while it is alive, otherwise adopt the shared one.
+     * The rule itself is pure and unit-tested: [resolveLiveTransport].
+     */
     var activeTransport: ElmTransport? = null
+        get() {
+            val shared = runCatching { AppContainer.bluetoothManager.currentTransport() }.getOrNull()
+            return resolveLiveTransport(field, shared).also { live ->
+                if (live != null) field = live
+            }
+        }
         private set
     private var recordingTimerJob: Job? = null
 
@@ -620,11 +645,44 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         viewModelScope.launch {
-            val wasPolling = obdScheduler.isPolling.value
-            if (wasPolling) {
-                obdScheduler.stopPolling()
-            }
+            suspendPollingForDiscovery()
             pidDiscoveryService.startScan(transport, viewModelScope)
+        }
+    }
+
+    /**
+     * One ELM327 holds one serial conversation at a time, so a scan borrows the link exclusively.
+     * Remembering that polling was suspended for THIS reason is what lets the status watcher below
+     * hand the link back - before that, a scan left the dashboard parked at "Waiting for ECU"
+     * until something else happened to restart polling.
+     */
+    private fun suspendPollingForDiscovery() {
+        if (obdScheduler.isPolling.value) {
+            obdScheduler.stopPolling()
+            pollingSuspendedForDiscovery = true
+        }
+    }
+
+    /** Set by [suspendPollingForDiscovery], cleared the moment the scan reaches a terminal state. */
+    private var pollingSuspendedForDiscovery = false
+
+    /** True while a PID scan or a direct-validation run owns the adapter link exclusively. */
+    private fun discoveryOwnsLink(): Boolean =
+        pidDiscoveryService.isScanning.value || pidDiscoveryService.isValidating.value
+
+    init {
+        // The scan's own status is the right wake-up call: SCANNING/VALIDATING own the link, every
+        // other state means the conversation is over and the dashboard may have it back. startPolling
+        // ignores a call while it is already polling, so a racing keep-alive tick cannot double it.
+        viewModelScope.launch {
+            pidDiscoveryService.status.collect { st ->
+                if (st == com.example.discovery.PidScanStatus.SCANNING ||
+                    st == com.example.discovery.PidScanStatus.VALIDATING
+                ) return@collect
+                if (!pollingSuspendedForDiscovery) return@collect
+                pollingSuspendedForDiscovery = false
+                activeTransport?.let { live -> obdScheduler.startPolling(viewModelScope, live) }
+            }
         }
     }
 
@@ -639,10 +697,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         viewModelScope.launch {
-            val wasPolling = obdScheduler.isPolling.value
-            if (wasPolling) {
-                obdScheduler.stopPolling()
-            }
+            suspendPollingForDiscovery()
             pidDiscoveryService.startDirectValidation(transport, viewModelScope)
         }
     }
@@ -731,6 +786,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val batchTestResults = _batchTestResults.asStateFlow()
     companion object {
         const val PROTOCOL_SETTLE_DELAY_MS = 400L
+
+        /**
+         * Which socket is carrying traffic right now: the caller's own while it is alive,
+         * otherwise the process-wide one, otherwise nothing.
+         *
+         * Pure on purpose - the owner's "adapter IS connected" bug was a rule like this being
+         * answered from a single field that only one of three connect paths ever wrote, so the
+         * rule itself has to be testable without a phone, a socket or a ViewModel.
+         */
+        fun resolveLiveTransport(own: ElmTransport?, shared: ElmTransport?): ElmTransport? =
+            own?.takeIf { it.isConnected } ?: shared?.takeIf { it.isConnected }
     }
 
     fun verifySelectedProtocol() {
@@ -1116,7 +1182,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun startSessionAutomation() {
         viewModelScope.launch {
             while (isActive) {
-                if (settingsRepository.autoConnect.value && !obdScheduler.isPolling.value) {
+                // Same rule as the keep-alive service's tick: a PID discovery scan owns the one
+                // serial conversation the adapter can hold, so "nothing is polling" during a scan
+                // is deliberate, not an invitation to reconnect (owner 2026-09-22).
+                if (settingsRepository.autoConnect.value && !obdScheduler.isPolling.value &&
+                    !discoveryOwnsLink()
+                ) {
                     try {
                         ObdQuickConnect.connectPairedAdapterAndPoll(viewModelScope) { message ->
                             _automationMessage.value = message
