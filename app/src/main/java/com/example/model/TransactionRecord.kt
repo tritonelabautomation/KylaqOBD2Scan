@@ -110,7 +110,20 @@ data class SynchronizedSample(
      * (no-fake-values rule). Added 2026-09-15 so the trip log carries the elevation
      * profile, not just the trip-summary min/max.
      */
-    val altitudeM: Double? = null
+    val altitudeM: Double? = null,
+    /**
+     * Tank level (PID 012F) at this sample, in percent.
+     *
+     * Added 2026-09-22 (owner: *"Fuel percentage at the start of trip & end of trip is also not
+     * available on trip logs"*). The level was decoded live and stored per row in Room, but the
+     * wide sample row - the one the CSV/ZIP trip log carries - had no column for it, so a trip's
+     * opening and closing tank percentage existed only as long as the database did. Appended LAST
+     * so every samples CSV already on the phone still reads back unchanged.
+     *
+     * Null when 012F never answered on this drive; never carried forward from a previous sample
+     * and never 0.0, which would read as an empty tank.
+     */
+    val fuelLevelPct: Double? = null
 )
 
 /**
@@ -157,5 +170,20 @@ data class RecordingMetadata(
      * Carried in the session JSON so backup -> reinstall -> import keeps them.
      */
     val minVoltageV: Double? = null,
-    val maxVoltageV: Double? = null
+    val maxVoltageV: Double? = null,
+    /**
+     * Tank level (PID 012F) at the START and at the END of the trip, in percent
+     * (owner 2026-09-22: *"Fuel percentage at the start of trip & end of trip is also not
+     * available on trip logs"*).
+     *
+     * Filled when the session is finalized, from the first and last valid 012F row of that
+     * session's own transactions - measured, never estimated, and never carried over from the
+     * previous trip. Null when the ECU never answered 012F on this drive, in which case the log
+     * and the UI show an honest blank rather than a plausible number.
+     *
+     * The pair is what makes a trip self-describing about fuel: the difference is the tank the
+     * drive used, and a RISE between the two is a refuel that happened mid-trip.
+     */
+    val startFuelLevelPct: Double? = null,
+    val endFuelLevelPct: Double? = null
 )

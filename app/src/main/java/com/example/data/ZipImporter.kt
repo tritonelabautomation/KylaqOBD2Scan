@@ -180,6 +180,8 @@ object ZipImporter {
             // for backups written before 2026-09-16; never defaulted to 0.0.
             var minVoltageV: Double? = null
             var maxVoltageV: Double? = null
+            var startFuelLevelPct: Double? = null
+            var endFuelLevelPct: Double? = null
 
             var parsedTxCount = 0
             val txEntities = mutableListOf<TransactionRecord>()
@@ -202,6 +204,10 @@ object ZipImporter {
                         minAltitudeM = JsonExporter.nullableDouble(metaObj, "minAltitudeM")
                         minVoltageV = JsonExporter.nullableDouble(metaObj, "minVoltageV")
                         maxVoltageV = JsonExporter.nullableDouble(metaObj, "maxVoltageV")
+                        // Tank level at the start/end of the drive (owner 2026-09-22). Read back
+                        // so a restored trip reports the same fuel percentages the exported one did.
+                        startFuelLevelPct = JsonExporter.nullableDouble(metaObj, "startFuelLevelPct")
+                        endFuelLevelPct = JsonExporter.nullableDouble(metaObj, "endFuelLevelPct")
                     }
                     if (root.has("transactions")) {
                         val txArray = root.getJSONArray("transactions")
@@ -232,7 +238,15 @@ object ZipImporter {
                                     decodedValueDisplay = txObj.optString("decodedValueDisplay", ""),
                                     unit = txObj.optString("unit", ""),
                                     responseStatus = stat,
-                                    errorMessage = txObj.optString("errorMessage", null)
+                                    errorMessage = txObj.optString("errorMessage", null),
+                                    // Per-row GPS altitude travels with the trip log so a
+                                    // backup -> reinstall -> import keeps the elevation trace
+                                    // (owner 2026-09-22: "Altitude not logging still").
+                                    altitudeM = if (txObj.has("altitudeM") && !txObj.isNull("altitudeM")) {
+                                        txObj.optDouble("altitudeM").takeIf { !it.isNaN() }
+                                    } else {
+                                        null
+                                    }
                                 )
                             )
                         }
@@ -284,7 +298,9 @@ object ZipImporter {
                     maxAltitudeM = maxAltitudeM,
                     minAltitudeM = minAltitudeM,
                     minVoltageV = minVoltageV,
-                    maxVoltageV = maxVoltageV
+                    maxVoltageV = maxVoltageV,
+                    startFuelLevelPct = startFuelLevelPct,
+                    endFuelLevelPct = endFuelLevelPct
                 )
                 JsonExporter.exportToJson(destJson, synthesizedMeta, txEntities)
             }
@@ -305,7 +321,9 @@ object ZipImporter {
                     maxAltitudeM = maxAltitudeM,
                     minAltitudeM = minAltitudeM,
                     minVoltageV = minVoltageV,
-                    maxVoltageV = maxVoltageV
+                    maxVoltageV = maxVoltageV,
+                    startFuelLevelPct = startFuelLevelPct,
+                    endFuelLevelPct = endFuelLevelPct
                 )
                 CsvExporter.exportTransactionsToCsv(destTxCsv, metaForCsv, txEntities)
             }
@@ -373,7 +391,9 @@ object ZipImporter {
                 maxAltitudeM = maxAltitudeM,
                 minAltitudeM = minAltitudeM,
                 minVoltageV = minVoltageV,
-                maxVoltageV = maxVoltageV
+                maxVoltageV = maxVoltageV,
+                startFuelLevelPct = startFuelLevelPct,
+                endFuelLevelPct = endFuelLevelPct
             )
             tripRepository.insertTrip(tripEntity)
 
@@ -396,6 +416,9 @@ object ZipImporter {
                         displayValue = tx.decodedValueDisplay,
                         unit = tx.unit,
                         quality = "RESTORED",
+                        // Restored rows keep the elevation they were recorded with; without this
+                        // the altitude trend of every imported trip was blank whatever the ZIP held.
+                        altitudeM = tx.altitudeM,
                         sequence = idx.toLong()
                     )
                 }
@@ -443,6 +466,9 @@ object ZipImporter {
                     val unit = parts.getOrNull(12).orEmpty()
                     val statStr = parts.getOrNull(13).orEmpty()
                     val err = parts.getOrNull(14)
+                    // Column 16, added 2026-09-22. Absent in every older CSV -> null, the honest
+                    // blank it always was.
+                    val altM = parts.getOrNull(15)?.toDoubleOrNull()
 
                     val dir = try { com.example.model.Direction.valueOf(dirStr) } catch (_: Exception) { com.example.model.Direction.RX }
                     val stat = try { com.example.model.ResponseStatus.valueOf(statStr) } catch (_: Exception) { com.example.model.ResponseStatus.OK }
@@ -466,7 +492,8 @@ object ZipImporter {
                             decodedValueDisplay = decValStr,
                             unit = unit,
                             responseStatus = stat,
-                            errorMessage = err?.ifBlank { null }
+                            errorMessage = err?.ifBlank { null },
+                            altitudeM = altM
                         )
                     )
                 }

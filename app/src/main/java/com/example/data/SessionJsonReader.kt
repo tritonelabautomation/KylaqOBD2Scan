@@ -139,15 +139,23 @@ object SessionJsonReader {
         var adapter: String? = null
         var protocol: String? = null
         var canBitrate: String? = null
+        var vehicleId: String? = null
         var startTimeUtc = ""
         var endTimeUtc: String? = null
         var appVersion: String? = null
+        var maxAltitudeM: Double? = null
+        var minAltitudeM: Double? = null
+        var minVoltageV: Double? = null
+        var maxVoltageV: Double? = null
+        var startFuelLevelPct: Double? = null
+        var endFuelLevelPct: Double? = null
         jr.beginObject()
         while (jr.hasNext()) {
             when (jr.nextName()) {
                 "sessionId" -> sessionId = nextStringOrNull(jr) ?: ""
                 "sessionName" -> sessionName = nextStringOrNull(jr)
                 "vehicle" -> vehicle = nextStringOrNull(jr)
+                "vehicleId" -> vehicleId = nextStringOrNull(jr)
                 "profile" -> profile = nextStringOrNull(jr)
                 "adapter" -> adapter = nextStringOrNull(jr)
                 "protocol" -> protocol = nextStringOrNull(jr)
@@ -155,22 +163,42 @@ object SessionJsonReader {
                 "startTimeUtc" -> startTimeUtc = nextStringOrNull(jr) ?: ""
                 "endTimeUtc" -> endTimeUtc = nextStringOrNull(jr)
                 "appVersion" -> appVersion = nextStringOrNull(jr)
+                "maxAltitudeM" -> maxAltitudeM = nextDoubleOrNull(jr)
+                "minAltitudeM" -> minAltitudeM = nextDoubleOrNull(jr)
+                "minVoltageV" -> minVoltageV = nextDoubleOrNull(jr)
+                "maxVoltageV" -> maxVoltageV = nextDoubleOrNull(jr)
+                "startFuelLevelPct" -> startFuelLevelPct = nextDoubleOrNull(jr)
+                "endFuelLevelPct" -> endFuelLevelPct = nextDoubleOrNull(jr)
                 else -> jr.skipValue()
             }
         }
         jr.endObject()
         // Defaults mirror the old JSONObject loader exactly, so the UI reads identically.
+        //
+        // DATA-LOSS FIX (owner 2026-09-22): `endTimeUtc` was parsed into a local and then dropped
+        // on the floor, and the altitude / voltage windows were skipped outright, so every trip
+        // the app listed from disk looked like a drive that never ended and never climbed. That
+        // is not cosmetic - it is what the merge review reads to work out the gap between two
+        // fragments, and a fragment with no end stamp cannot be reviewed at all. The fuel-level
+        // pair is read for the same reason it is written.
         return RecordingMetadata(
             sessionId = sessionId,
             sessionName = sessionName ?: "Session $sessionId",
             vehicle = vehicle ?: "Škoda Kylaq 1.0 TSI",
+            vehicleId = vehicleId?.ifBlank { null },
             profile = profile ?: "India-Market 1.0 TSI",
             adapter = adapter ?: "ELM327 v1.5",
             protocol = protocol ?: "ISO 15765-4",
             canBitrate = canBitrate ?: "500 kbps",
             startTimeUtc = startTimeUtc,
-            endTimeUtc = endTimeUtc,
-            appVersion = appVersion ?: "1.0"
+            endTimeUtc = endTimeUtc?.ifBlank { null },
+            appVersion = appVersion ?: "1.0",
+            maxAltitudeM = maxAltitudeM,
+            minAltitudeM = minAltitudeM,
+            minVoltageV = minVoltageV,
+            maxVoltageV = maxVoltageV,
+            startFuelLevelPct = startFuelLevelPct,
+            endFuelLevelPct = endFuelLevelPct
         )
     }
 
@@ -180,5 +208,28 @@ object SessionJsonReader {
             null
         } else {
             jr.nextString()
+        }
+
+    /**
+     * A nullable number. Every token shape is CONSUMED before returning, including the ones this
+     * app never writes: a reader left parked on an unexpected token desynchronises the whole
+     * metadata object, and a null window is a far cheaper mistake than a misread one.
+     */
+    private fun nextDoubleOrNull(jr: JsonReader): Double? =
+        when (jr.peek()) {
+            JsonToken.NULL -> {
+                jr.nextNull()
+                null
+            }
+            JsonToken.NUMBER -> jr.nextDouble().takeIf { !it.isNaN() }
+            JsonToken.BOOLEAN -> {
+                jr.nextBoolean()
+                null
+            }
+            JsonToken.STRING -> jr.nextString().toDoubleOrNull()
+            else -> {
+                jr.skipValue()
+                null
+            }
         }
 }

@@ -280,3 +280,18 @@ val MIGRATION_12_13 = object : Migration(12, 13) {
         )
     }
 }
+
+/**
+ * v14: tank level at the start and end of each trip (owner 2026-09-22: *"Fuel percentage at the
+ * start of trip & end of trip is also not available on trip logs"*). PID 012F was decoded live and
+ * stored per row, but nothing reduced it to the trip, so the pair existed only as long as the
+ * telemetry rows did and never reached the exported log. Nullable columns following the altitude
+ * and voltage precedents: older trips keep NULL, and the UI derives the pair from their stored
+ * 012F rows instead of showing a fabricated percentage.
+ */
+val MIGRATION_13_14 = object : Migration(13, 14) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `trips` ADD COLUMN `startFuelLevelPct` REAL DEFAULT NULL")
+        db.execSQL("ALTER TABLE `trips` ADD COLUMN `endFuelLevelPct` REAL DEFAULT NULL")
+    }
+}

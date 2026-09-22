@@ -42,7 +42,20 @@ data class TripEntity(
     val minAltitudeM: Double? = null,
     /** Battery voltage extremes measured from stored 0142 samples at trip end. Null = never captured (pre-v11 trips or no voltage samples) -> UI derives from samples or stays blank. Added 2026-09-16 (MIGRATION_10_11, owner pipeline task 3). */
     val minVoltageV: Double? = null,
-    val maxVoltageV: Double? = null
+    val maxVoltageV: Double? = null,
+    /**
+     * Tank level (PID 012F) at the START and at the END of this trip, in percent. Added
+     * 2026-09-22 (owner: "Fuel percentage at the start of trip & end of trip is also not
+     * available on trip logs"), MIGRATION_13_14.
+     *
+     * Nullable like the altitude and voltage precedents: a trip recorded before this column, or a
+     * drive the ECU never answered 012F on, keeps NULL and the UI shows an honest "-- %". The
+     * value is never carried over from the previous trip and never estimated from consumption -
+     * and because it is also derived on read from the trip's own 012F rows
+     * (`TripFuelSummary.fuelLevel`), pre-migration trips still report the pair without a rewrite.
+     */
+    val startFuelLevelPct: Double? = null,
+    val endFuelLevelPct: Double? = null
 )
 
 /**

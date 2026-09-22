@@ -157,4 +157,63 @@ object SessionRecoveryPolicy {
     /** True while a cut-off journal is fresh enough to resume rather than recover. */
     fun isResumable(lastRowAgeMs: Long, windowMs: Long = RESUME_WINDOW_MS): Boolean =
         lastRowAgeMs in 0L..windowMs
+
+    /**
+     * How far a row may sit from a recorded GPS fix and still be given that fix's altitude.
+     *
+     * GPS delivers at 1 Hz; the poller writes ~11 rows per second. So the fix that was current
+     * when a row was stamped is at most ~1 s away, and 1.5 s leaves room for a jittery provider
+     * without ever reaching across a real gap. Past this the row keeps null: an elevation from
+     * ten minutes ago is not this row's elevation, and a blank is honest where a guess is not.
+     */
+    const val ALTITUDE_MATCH_TOLERANCE_MS: Long = 1500L
+
+    /**
+     * Re-associates a trip's OWN recorded GPS fixes with rows that lost their altitude stamp.
+     *
+     * Added 2026-09-22 (owner: *"Altitude not logging still"*). Merging reads each fragment's
+     * `<id>_transactions.csv`, and until that file grew an `altitude_m` column it held no
+     * elevation at all - while the fragment's samples CSV and its Room rows, written from the
+     * same drive, held the real fixes. Stitching the fragments together therefore produced a
+     * merged trip with a blank altitude trend even though every piece had recorded elevation.
+     *
+     * This is not interpolation and not invention: the value written is one the recorder measured
+     * during that same fragment, at an instant within [toleranceMs] of the row. Rows that already
+     * carry an altitude are never touched, rows with no fix nearby stay null, and nothing is
+     * extrapolated past the first or last fix.
+     *
+     * Two-pointer over two time-sorted lists, so a 45 000-row fragment costs one pass rather than
+     * a nearest-neighbour search per row - the same trip that once OOM'd the app at 256 MB.
+     *
+     * @param rows         the fragment's transactions, in any order
+     * @param timestamp    each row's wall instant
+     * @param hasAltitude  true when the row already carries an altitude and must be left alone
+     * @param fixes        (instant, altitude) the fragment recorded, in any order
+     * @param withAltitude how to write a fix onto a row
+     */
+    fun <T> attachAltitude(
+        rows: List<T>,
+        timestamp: (T) -> Long,
+        hasAltitude: (T) -> Boolean,
+        fixes: List<Pair<Long, Double>>,
+        withAltitude: (T, Double) -> T,
+        toleranceMs: Long = ALTITUDE_MATCH_TOLERANCE_MS
+    ): List<T> {
+        if (rows.isEmpty() || fixes.isEmpty()) return rows
+        val sortedFixes = fixes.sortedBy { it.first }
+        val out = rows.toMutableList()
+        var j = 0
+        for (i in rows.indices.sortedBy { timestamp(rows[it]) }) {
+            if (hasAltitude(rows[i])) continue
+            val ts = timestamp(rows[i])
+            while (j + 1 < sortedFixes.size &&
+                kotlin.math.abs(sortedFixes[j + 1].first - ts) <= kotlin.math.abs(sortedFixes[j].first - ts)
+            ) {
+                j++
+            }
+            val (fixTs, alt) = sortedFixes[j]
+            if (kotlin.math.abs(fixTs - ts) <= toleranceMs) out[i] = withAltitude(rows[i], alt)
+        }
+        return out
+    }
 }

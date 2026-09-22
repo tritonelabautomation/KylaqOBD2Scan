@@ -278,21 +278,46 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun triggerImmediateBackup() {
-        viewModelScope.launch {
-            try {
-                settingsRepository.driveTreeUri()?.let { tree ->
-                    com.example.backup.DriveBackupClient.sendBackup(
-                        getApplication(), android.net.Uri.parse(tree), recordingManager
-                    )
-                    settingsRepository.setLastBackupTimestamp(System.currentTimeMillis())
-                }
-            } catch (_: Exception) {}
-            try {
-                if (settingsRepository.googleAccountEmail.value != null) {
-                    cloudBackupManager.performBackupNow()
-                }
-            } catch (_: Exception) {}
+        viewModelScope.launch { runCatching { runImmediateBackup() } }
+    }
+
+    /**
+     * Backs up NOW and returns a sentence saying what happened.
+     *
+     * `triggerImmediateBackup` was fire-and-forget with two swallowed catch blocks, so the owner's
+     * 2026-09-22 ask - *"immediately after merged auto backup"* - could not be answered by the app
+     * either way: a merge that backed up said nothing about it, and a merge whose backup failed
+     * (Drive folder unlinked, token expired, disk full) said nothing about that either. Whatever
+     * this returns is true and is shown to him.
+     *
+     * The two paths are alternatives, not a sequence: `performBackupNow` already sends the same
+     * archive when a Drive folder is linked, so running both wrote the backup to Drive twice.
+     */
+    suspend fun runImmediateBackup(): String {
+        val signedIn = runCatching { settingsRepository.googleAccountEmail.value }.getOrNull() != null
+        if (signedIn) {
+            val result = runCatching { cloudBackupManager.performBackupNow() }.getOrNull()
+            return when {
+                result == null -> "Backup ran but reported nothing - open Backup & Sync to check."
+                result.success -> "Auto-backup done: ${result.message}"
+                else -> "Auto-backup FAILED: ${result.message}"
+            }
         }
+        val tree = runCatching { settingsRepository.driveTreeUri() }.getOrNull()
+        if (tree != null) {
+            return runCatching {
+                val name = com.example.backup.DriveBackupClient.sendBackup(
+                    getApplication(), android.net.Uri.parse(tree), recordingManager
+                )
+                settingsRepository.setLastBackupTimestamp(System.currentTimeMillis())
+                "Auto-backup done: $name written to your Drive folder."
+            }.getOrElse { e ->
+                "Auto-backup FAILED: ${e.message ?: e.javaClass.simpleName}"
+            }
+        }
+        return "No backup destination is linked, so the merged trip exists on this phone only. " +
+            "Sign in with Google or link a Drive folder in Backup & Sync and every merge backs " +
+            "itself up immediately."
     }
 
     suspend fun tripTitleMap(): Map<String, String> =
@@ -386,9 +411,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         // Elevation logging for the ride X-ray: GPS altitude when available, silent otherwise.
+        //
+        // `hasAltitude` is part of the gate (owner 2026-09-22: "Altitude not logging still"). A fix
+        // that carried no elevation leaves `altitudeMeters` at GpsData's meaningless 0.0 default,
+        // and this lambda used to hand that 0.0 out as a measurement - so the ride X-ray accumulated
+        // "0 m" for every such fix while the per-row stamp (AppContainer.currentAltitudeM, which
+        // does gate on hasAltitude) stayed null. Two channels of one trip disagreed, and the one
+        // that drew the elevation profile was the wrong one.
         obdScheduler.altitudeSource = {
             val g = gpsManager.gpsData.value
-            if (g.isAvailable) g.altitudeMeters else null
+            if (g.isAvailable && g.hasAltitude) g.altitudeMeters else null
         }
         // Rebuild anything a killed process left behind, before the owner has to ask.
         runAutoRecovery()
@@ -1905,24 +1937,110 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _mergeNotice = MutableStateFlow<String?>(null)
     val mergeNotice: StateFlow<String?> = _mergeNotice.asStateFlow()
 
+    /**
+     * The review the owner has to agree to BEFORE a merge writes anything, or null when nothing is
+     * pending (owner 2026-09-22: *"do a proper review while merging. If more than 40 min difference
+     * between merging files ask user to confirm. For different dates ask user confirmation are you
+     * sure."*). The screen draws it as a dialog; [confirmMerge] runs the same selection with the
+     * agreement recorded, [cancelMergeReview] drops it and changes nothing on disk.
+     */
+    private val _mergeReview = MutableStateFlow<com.example.data.MergeReviewPolicy.Review?>(null)
+    val mergeReview: StateFlow<com.example.data.MergeReviewPolicy.Review?> = _mergeReview.asStateFlow()
+
+    /** The selection the pending review belongs to, so Confirm re-runs exactly what was shown. */
+    private var mergeReviewIds: List<String> = emptyList()
+
     fun clearMergeNotice() { _mergeNotice.value = null }
 
-    fun mergeRecordings(sessionIds: List<String>) {
-        if (sessionIds.size < 2) {
+    fun cancelMergeReview() {
+        _mergeReview.value = null
+        mergeReviewIds = emptyList()
+    }
+
+    /** Clears the selection preview - called when the selection is emptied. */
+    fun clearMergePreview() { _mergePreview.value = null }
+
+    /**
+     * Live review of the CURRENT selection, for the merge banner: it warns about a 3-hour gap or
+     * two different dates while the owner is still picking, instead of telling him only after he
+     * has tapped Merge. Separate from [mergeReview], which is the blocking confirmation request -
+     * a preview must never open a dialog he did not ask for.
+     */
+    private val _mergePreview = MutableStateFlow<com.example.data.MergeReviewPolicy.Review?>(null)
+    val mergePreview: StateFlow<com.example.data.MergeReviewPolicy.Review?> = _mergePreview.asStateFlow()
+
+    /** Called with the selection whenever it changes; clears itself below 2 trips. */
+    fun reviewMergeSelection(sessionIds: List<String>) {
+        val ids = sessionIds.distinct()
+        if (ids.size < 2) {
+            _mergePreview.value = null
+            return
+        }
+        viewModelScope.launch {
+            _mergePreview.value = runCatching { recordingManager.planMerge(ids) }.getOrNull()
+        }
+    }
+
+    fun mergeRecordings(sessionIds: List<String>) = launchMerge(sessionIds, confirmed = false)
+
+    /** The owner read the review and said yes. Runs the selection that was shown to him. */
+    fun confirmMerge(sessionIds: List<String> = mergeReviewIds) = launchMerge(sessionIds, confirmed = true)
+
+    private fun launchMerge(sessionIds: List<String>, confirmed: Boolean) {
+        if (sessionIds.distinct().size < 2) {
             _mergeNotice.value = "Select at least 2 trips to merge."
+            _mergeReview.value = null
             return
         }
         if (_isMerging.value) return
         viewModelScope.launch {
             _isMerging.value = true
+            _mergeReview.value = null
             try {
-                val saved = recordingManager.mergeSessions(sessionIds)
-                _mergeNotice.value = if (saved != null) {
-                    "Merged ${sessionIds.size} trips into '${saved.metadata.sessionName}' — ${saved.transactionCount} transactions, ${saved.metadata.sessionName}. Old fragments deleted."
-                } else {
-                    "Merge failed — no transactions found in selected trips."
+                when (val result = recordingManager.mergeSessions(sessionIds, confirmed = confirmed)) {
+                    is com.example.data.RecordingManager.MergeResult.NeedsConfirmation -> {
+                        // STOP and ask. Nothing was written, nothing was deleted.
+                        mergeReviewIds = sessionIds.distinct()
+                        _mergeReview.value = result.review
+                    }
+
+                    is com.example.data.RecordingManager.MergeResult.Merged -> {
+                        val saved = result.saved
+                        // "immediately after merged auto backup" - awaited, so the notice can say
+                        // whether the merged trip actually reached Drive or is phone-only.
+                        val backupNote = runCatching { runImmediateBackup() }
+                            .getOrElse { "Auto-backup FAILED: ${it.message ?: it.javaClass.simpleName}" }
+                        _mergeNotice.value = buildString {
+                            append("Merged ")
+                            append(result.review.usable.size)
+                            append(" trips into '")
+                            append(saved.metadata.sessionName)
+                            append("' — ")
+                            append(saved.transactionCount)
+                            append(" OBD rows, ")
+                            append(
+                                com.example.data.MergeReviewPolicy.formatDuration(
+                                    (result.review.endMs ?: 0L) - (result.review.startMs ?: 0L)
+                                )
+                            )
+                            append(". Old fragments and their recovered raw logs are deleted, and ")
+                            append("their raw ELM logs are folded into the merged trip. ")
+                            append(backupNote)
+                        }
+                        refreshUnsavedRawLogs()
+                    }
+
+                    is com.example.data.RecordingManager.MergeResult.Failed -> {
+                        // A refusal, never a question: `mergeSessions` only fails on a selection it
+                        // could not stitch at all (fewer than two trips, or trips with no OBD rows),
+                        // so there is nothing left for him to agree to. Say why and leave the trips
+                        // exactly as they were - re-opening the review dialog here would ask him to
+                        // confirm something that cannot happen.
+                        _mergeNotice.value = result.reason
+                        mergeReviewIds = emptyList()
+                        refreshUnsavedRawLogs()
+                    }
                 }
-                if (saved != null) triggerImmediateBackup()
             } catch (e: Exception) {
                 _mergeNotice.value = "Merge failed: ${e.message ?: e.javaClass.simpleName}"
             } finally {

@@ -81,7 +81,17 @@ object TripFuelSummary {
          */
         val meanTorqueNm: Double? = null,
         val peakTorqueNm: Double? = null,
-        val torqueReferenceNm: Double? = null
+        val torqueReferenceNm: Double? = null,
+        /**
+         * Tank level (PID 012F) at the START and at the END of this trip, in percent
+         * (owner 2026-09-22: *"Fuel percentage at the start of trip & end of trip is also not
+         * available on trip logs"*).
+         *
+         * Derived from the trip's own stored rows rather than only from a column written at
+         * finalize time, so EVERY trip ever recorded - old, recovered, imported, merged - reports
+         * the pair the moment this build reads it, with no migration and no re-drive.
+         */
+        val fuelLevel: FuelLevelWindow = FuelLevelWindow.NONE
     ) {
         val litersPer100Km: Double?
             get() = if (distanceKm > 0.05) fuelLiters / distanceKm * 100.0 else null
@@ -270,7 +280,87 @@ object TripFuelSummary {
             stopBattery = stopBattery,
             meanTorqueNm = meanTorqueNm,
             peakTorqueNm = peakTorqueNm,
-            torqueReferenceNm = if (meanTorqueNm != null) torqueRef else null
+            torqueReferenceNm = if (meanTorqueNm != null) torqueRef else null,
+            fuelLevel = fuelLevelWindow(
+                (byPid["012F"] ?: emptyList()),
+                pid = { "012F" },
+                value = { it.value },
+                timestamp = { it.timestampMs }
+            )
+        )
+    }
+
+    /** Tank level PID, in both spellings the recorder has stored over time. */
+    const val PID_FUEL_LEVEL = "012F"
+
+    /** A 012F answer outside 0..100 % is a corrupt row, not a tank. Rejected, never clamped. */
+    const val MIN_PLAUSIBLE_LEVEL_PCT = 0.0
+    const val MAX_PLAUSIBLE_LEVEL_PCT = 100.0
+
+    /**
+     * The tank at the beginning and at the end of one drive.
+     *
+     * Both ends come from REAL 012F rows of that drive: the first plausible one and the last
+     * plausible one. Neither is carried over from the previous trip, neither is interpolated
+     * across a gap, and a drive the ECU never answered 012F on yields [NONE] - the UI then shows
+     * "-- %" instead of a number that looks measured.
+     */
+    data class FuelLevelWindow(
+        val startPct: Double?,
+        val endPct: Double?,
+        val startMs: Long?,
+        val endMs: Long?,
+        val sampleCount: Int
+    ) {
+        companion object {
+            val NONE = FuelLevelWindow(null, null, null, null, 0)
+        }
+
+        /** End minus start. NEGATIVE = fuel used; POSITIVE = a refuel happened during the trip. */
+        val deltaPct: Double?
+            get() = if (startPct != null && endPct != null) endPct - startPct else null
+
+        /** True when the tank went UP during the drive - filled mid-trip, or a sender glitch. */
+        val refuelledDuringTrip: Boolean get() = (deltaPct ?: 0.0) > 0.5
+
+        val isBlank: Boolean get() = startPct == null && endPct == null
+
+        /** `78.4 % → 61.2 % (-17.2 %)` - the line the trip log and the fuel card print. */
+        fun describe(): String? {
+            if (isBlank) return null
+            val a = startPct?.let { pct(it) } ?: "-- %"
+            val b = endPct?.let { pct(it) } ?: "-- %"
+            val d = deltaPct
+            return if (d == null) "$a → $b" else "$a → $b (${if (d >= 0) "+" else ""}${pct(d)})"
+        }
+
+        private fun pct(v: Double) = String.format(java.util.Locale.US, "%.1f %%", v)
+    }
+
+    /**
+     * Reduces any row type to its [FuelLevelWindow]. Generic because the same pair has to come
+     * out of three different stores: a live drive's [com.example.model.TransactionRecord]s at
+     * finalize time, a saved trip's Room `TelemetrySampleEntity` rows when the UI opens it, and a
+     * merged trip's combined rows. One rule, three callers, no drift.
+     */
+    fun <T> fuelLevelWindow(
+        rows: List<T>,
+        pid: (T) -> String,
+        value: (T) -> Double?,
+        timestamp: (T) -> Long
+    ): FuelLevelWindow {
+        val level = rows
+            .filter { normalizePidKey(pid(it)) == PID_FUEL_LEVEL }
+            .mapNotNull { r -> value(r)?.let { v -> timestamp(r) to v } }
+            .filter { (_, v) -> v in MIN_PLAUSIBLE_LEVEL_PCT..MAX_PLAUSIBLE_LEVEL_PCT }
+            .sortedBy { it.first }
+        if (level.isEmpty()) return FuelLevelWindow.NONE
+        return FuelLevelWindow(
+            startPct = level.first().second,
+            endPct = level.last().second,
+            startMs = level.first().first,
+            endMs = level.last().first,
+            sampleCount = level.size
         )
     }
 

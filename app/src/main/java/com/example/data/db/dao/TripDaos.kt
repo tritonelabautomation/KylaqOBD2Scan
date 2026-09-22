@@ -58,6 +58,18 @@ interface TelemetrySampleDao {
     @Query("SELECT * FROM telemetry_samples WHERE tripId = :tripId ORDER BY sequence ASC")
     fun getSamplesForTripFlow(tripId: String): Flow<List<TelemetrySampleEntity>>
 
+    /**
+     * Only the rows of a trip that carry a GPS altitude, projected to the three columns a merge
+     * needs. A merged fragment can be 45 000 rows wide and the app has already died once at the
+     * 256 MB heap loading full entities (owner crash log 2026-09-20), so the elevation index is
+     * read as a projection and only for rows where it exists.
+     */
+    @Query(
+        "SELECT timestamp, timestampUtc, altitudeM FROM telemetry_samples " +
+            "WHERE tripId = :tripId AND altitudeM IS NOT NULL ORDER BY sequence ASC"
+    )
+    suspend fun altitudeRowsForTrip(tripId: String): List<AltitudeRow>
+
     @Query("SELECT * FROM telemetry_samples WHERE tripId = :tripId ORDER BY sequence ASC")
     suspend fun getSamplesForTrip(tripId: String): List<TelemetrySampleEntity>
 
@@ -155,6 +167,14 @@ interface AiAnalysisDao {
 
 /** Projection for since-refuel aggregation: only the columns the integrator reads. */
 data class SampleRow(val timestamp: Long, val pid: String, val numericValue: Double?)
+
+/**
+ * Projection for a trip's elevation index: the instant and the altitude of every row that has
+ * one. Read by [com.example.data.RecordingManager] when it merges fragments whose transactions
+ * CSV predates the `altitude_m` column, so the merged trip keeps the elevation the pieces
+ * recorded instead of coming back with a blank altitude trend.
+ */
+data class AltitudeRow(val timestamp: Long, val timestampUtc: String, val altitudeM: Double?)
 
 @Dao
 interface RefuelEventDao {

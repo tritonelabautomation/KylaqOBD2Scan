@@ -35,6 +35,29 @@ class AltitudeStats {
             points.forEach { s.record(it) }
             return if (s.sampleCount > 0) s else null
         }
+
+        /**
+         * Widens two windows into one: the lower minimum and the higher maximum, sample counts
+         * added. Null-safe on both sides, so "the live accumulator and the persisted rows" can be
+         * combined without either one having to exist.
+         *
+         * Added 2026-09-22 (owner: *"Altitude not logging still"*). Two separate defects needed
+         * it. A process that restarts MID-drive resets this trip's live accumulator - the RAM
+         * window then covers only the leg recorded after the restart, while the persisted rows
+         * still hold the whole drive; picking either one alone reported a short window. And a
+         * RECOVERED or MERGED trip used to take the live accumulator whenever it happened to be
+         * non-empty, which is the window of whatever drive is running NOW - one trip's elevation
+         * stamped onto a different trip. Callers now decide whether the live accumulator belongs
+         * to the trip being written, and [combine] merges it with the rows when it does.
+         */
+        fun combine(a: AltitudeStats?, b: AltitudeStats?): AltitudeStats? {
+            if (a == null) return b
+            if (b == null) return a
+            val min = listOfNotNull(a.minAltitudeM, b.minAltitudeM).minOrNull()
+            val max = listOfNotNull(a.maxAltitudeM, b.maxAltitudeM).maxOrNull()
+            if (min == null || max == null) return null
+            return AltitudeStats().apply { setWindow(min, max, a.sampleCount + b.sampleCount) }
+        }
     }
 
     var minAltitudeM: Double? = null
@@ -66,5 +89,16 @@ class AltitudeStats {
         minAltitudeM = null
         maxAltitudeM = null
         sampleCount = 0
+    }
+
+    /**
+     * Adopts an already-gated window wholesale. Only [Companion.combine] uses it: merging two
+     * windows that each passed [record]'s plausibility gate must not re-count their fixes as two,
+     * and must not re-gate values that were accepted when they were measured.
+     */
+    internal fun setWindow(min: Double, max: Double, count: Int) {
+        minAltitudeM = min
+        maxAltitudeM = max
+        sampleCount = count
     }
 }

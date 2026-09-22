@@ -118,6 +118,20 @@ class RecordingManager(
      */
     val journal: SessionJournal = SessionJournal(File(recordingsDir, "journal"))
 
+    /**
+     * Tombstones of every session id a merge has consumed (owner 2026-09-22: *"When I merge
+     * fragmented same trip it's showing as recovered and merging multiple times"*).
+     *
+     * A merge used to delete the fragments' session dirs, Room rows and journals but leave their
+     * `raw_logs/raw_log_<id>.txt` behind. Recovery asks only "is this id already a saved trip?",
+     * and after a merge the answer is no - the merged trip has a NEW id - so the next launch
+     * rebuilt every fragment as a fresh "Recovered Run" and the owner merged the same drive
+     * again, doubling its telemetry each pass. The merge now folds those raw logs into the merged
+     * bundle and removes them from the scan directory; this ledger is the belt that also covers
+     * recovery triggered from the keep-alive service, a boot receiver or a Drive restore.
+     */
+    val mergeLedger: MergeLedger = MergeLedger(File(context.filesDir, "merged_sessions.log"))
+
     private val _journalRecovery = MutableStateFlow<RecoverySummary?>(null)
 
     /** Result of the automatic recovery that runs on app start. Null = nothing was pending. */
@@ -137,6 +151,13 @@ class RecordingManager(
 
     companion object {
         const val SILENT_LIMIT_MS: Long = 5 * 60_000L
+
+        /**
+         * Grams-per-second (PID 019D) to litres-per-hour at petrol density 0.745 kg/L. The same
+         * factor `ObdScheduler.effectiveFuelRateLh` and `TripFuelSummary.buildFuelSeries` use, so
+         * the live dashboard, the trip summary and the exported wide rows finally agree.
+         */
+        const val MASS_GS_TO_LH: Double = 3600.0 / 745.0
 
         /** Pure so the watchdog rule is testable: silent only counts once a first RX existed. */
         fun shouldAutoStop(lastRxMs: Long, nowMs: Long, silentLimitMs: Long = SILENT_LIMIT_MS): Boolean =
@@ -166,7 +187,20 @@ class RecordingManager(
                 "05" -> base.copy(coolantC = tx.decodedValue)
                 "0F" -> base.copy(iatC = tx.decodedValue)
                 "46" -> base.copy(ambientC = tx.decodedValue)
-                "9D" -> base.copy(fuelRateLh = tx.decodedValue)
+                // Fuel rate, in L/h, from whichever PID answered.
+                //
+                // 015E is ALREADY litres per hour ((A*256+B)/20). 019D is grams per second
+                // ((A*256+B)/50, the 2026-09-13 real-car calibration) and this fold used to copy
+                // that number straight into a column named `fuelRateLh` - so every samples CSV,
+                // every ZIP bundle and every wide row of a recovered trip carried g/s labelled as
+                // L/h, ~4.85x too high (0.68 g/s idle written as "0.680 L/h" instead of 3.29).
+                // `ObdScheduler` and `TripFuelSummary` both convert at 745 g/L; the wide row was
+                // the only place that did not, and it is the one that reaches the trip log.
+                "5E" -> base.copy(fuelRateLh = tx.decodedValue)
+                "9D" -> base.copy(fuelRateLh = tx.decodedValue?.let { it * MASS_GS_TO_LH })
+                // Tank level (PID 012F): what makes the trip's start/end fuel percentage
+                // reconstructible from the log files, not only from the database.
+                "2F" -> base.copy(fuelLevelPct = tx.decodedValue)
                 "62" -> base.copy(engineTorquePct = tx.decodedValue)
                 "42" -> base.copy(voltageV = tx.decodedValue)
                 "6D" -> base.copy(fuelPressureRaw = tx.rawPayload)
@@ -186,7 +220,9 @@ class RecordingManager(
             "05" -> "coolantC"
             "0F" -> "iatC"
             "46" -> "ambientC"
+            "5E" -> "fuelRateLh"
             "9D" -> "fuelRateLh"
+            "2F" -> "fuelLevelPct"
             "62" -> "engineTorquePct"
             "42" -> "voltageV"
             "6D" -> "fuelPressureRaw"
@@ -528,7 +564,19 @@ class RecordingManager(
         txList: List<TransactionRecord>,
         sampleList: List<SynchronizedSample>,
         rawLogFile: File?,
-        recovered: Boolean
+        recovered: Boolean,
+        /**
+         * Whether the LIVE GPS accumulator belongs to the trip being written. True only for a
+         * clean STOP of the drive in progress.
+         *
+         * A recovered or merged trip used to inherit it whenever it happened to be non-empty -
+         * and it is non-empty exactly when some OTHER drive is being recorded right now, because
+         * the keep-alive service belts GPS on for any live recording. The result was one trip's
+         * elevation range stamped onto a different trip's summary (owner 2026-09-22: *"Altitude
+         * not logging still"* - a merged trip showed the elevation of whatever he drove next).
+         * With this false, the window comes only from the rows the trip itself persisted.
+         */
+        liveGpsWindow: Boolean = !recovered
     ): SavedRecording? {
         if (txList.isEmpty()) return null
         val sessionId = metadata.sessionId
@@ -543,6 +591,15 @@ class RecordingManager(
         // (owner 2026-09-20: "Altitude still not logging in").
         val startTimestamp = txList.minOf { SessionRecoveryPolicy.wallEpochMs(it.timestampUtc, it.timestampMonotonic) }
         val endTimestamp = txList.maxOf { SessionRecoveryPolicy.wallEpochMs(it.timestampUtc, it.timestampMonotonic) }
+        // BOTH ends of the written window come from the rows. `endTimeUtc` always did; `startTimeUtc`
+        // used to stay at the instant START was tapped, so one trip carried two disagreeing starts:
+        // its Room row and duration said "first OBD answer", while its session JSON, its CSV header
+        // and its trip card said "the moment I pressed record". The gap is the whole adapter
+        // connect-and-handshake, seconds normally and minutes on a flaky link - and the merge review
+        // reads that stamp to measure the silence between two fragments, so a fragment that took a
+        // minute to connect reported a minute less gap than the drive really had (owner 2026-09-22:
+        // "do a proper review while merging"). One window, derived once, written everywhere.
+        val startStamp = RecordTime.stamp(startTimestamp)
         val endStamp = RecordTime.stamp(endTimestamp)
 
         // GPS altitude window for this trip (owner 2026-09-15 fix: altitude was captured live but
@@ -552,24 +609,45 @@ class RecordingManager(
         // trip used to show "-- m" even though every journaled sample row carries its altitude_m.
         // Fall back to reducing the persisted rows through the same plausibility gate; null only
         // when no row ever held an altitude. Never invented, never lost.
-        val liveAlt = com.example.di.AppContainer.tripAltitudeStats()
-        val altStats = if (liveAlt != null && liveAlt.sampleCount > 0) {
-            liveAlt
+        // Live accumulator (only when it is THIS trip's) widened by every altitude the trip's own
+        // rows carry. Neither source alone is enough: a process restart mid-drive resets the live
+        // window to the post-restart leg while the rows still hold the whole drive, and a
+        // recovered trip's live window is empty RAM while the rows are all that survived.
+        val liveAlt = if (liveGpsWindow) {
+            com.example.di.AppContainer.tripAltitudeStats()?.takeIf { it.sampleCount > 0 }
         } else {
-            com.example.analysis.AltitudeStats.reduce(sampleList.mapNotNull { it.altitudeM })
+            null
         }
+        val rowAlt = com.example.analysis.AltitudeStats.reduce(
+            sampleList.mapNotNull { it.altitudeM } + txList.mapNotNull { it.altitudeM }
+        )
+        val altStats = com.example.analysis.AltitudeStats.combine(liveAlt, rowAlt)
         // Battery voltage extremes (owner pipeline task 3, 2026-09-16), reduced from the real 0142
         // samples exactly like the altitude window.
         val voltStats = com.example.analysis.VoltageStats.extremes(
             sampleList.mapNotNull { smp -> smp.voltageV?.let { smp.timestampMonotonic to it } }
         )
+        // Tank level at the START and at the END of this drive, from its own 012F rows
+        // (owner 2026-09-22: "Fuel percentage at the start of trip & end of trip is also not
+        // available on trip logs"). Measured, never carried over from the previous trip and
+        // never estimated: null when the ECU never answered 012F, so the log says "-- %"
+        // instead of printing a plausible number nobody measured.
+        val fuelLevel = com.example.analysis.TripFuelSummary.fuelLevelWindow(
+            txList,
+            pid = { it.pid },
+            value = { it.decodedValue },
+            timestamp = { SessionRecoveryPolicy.wallEpochMs(it.timestampUtc, it.timestampMonotonic) }
+        )
         // The trip log files must carry the same altitude window as the database row, or a
         // backup -> reinstall -> import round trip silently strips elevation from every past trip.
         val metadataForFiles = metadata.copy(
+            startTimeUtc = startStamp,
             maxAltitudeM = altStats?.maxAltitudeM,
             minAltitudeM = altStats?.minAltitudeM,
             minVoltageV = voltStats?.minV,
             maxVoltageV = voltStats?.maxV,
+            startFuelLevelPct = fuelLevel.startPct ?: metadata.startFuelLevelPct,
+            endFuelLevelPct = fuelLevel.endPct ?: metadata.endFuelLevelPct,
             adapter = if (recovered) metadata.adapter + " (recovered after the app was killed)" else metadata.adapter
         ).apply { endTimeUtc = endStamp }
 
@@ -606,7 +684,8 @@ class RecordingManager(
             endTimestamp = endTimestamp,
             endStamp = endStamp,
             altStats = altStats,
-            voltStats = voltStats
+            voltStats = voltStats,
+            fuelLevel = fuelLevel
         )
 
         return SavedRecording(
@@ -631,7 +710,9 @@ class RecordingManager(
         endTimestamp: Long,
         endStamp: String,
         altStats: com.example.analysis.AltitudeStats?,
-        voltStats: com.example.analysis.VoltageExtremes?
+        voltStats: com.example.analysis.VoltageExtremes?,
+        fuelLevel: com.example.analysis.TripFuelSummary.FuelLevelWindow =
+            com.example.analysis.TripFuelSummary.FuelLevelWindow.NONE
     ) {
         val maxRpm = txList.filter { it.pid.equals("0C", ignoreCase = true) }.mapNotNull { it.decodedValue }.maxOrNull() ?: 0.0
         val maxSpeed = txList.filter { it.pid.equals("0D", ignoreCase = true) }.mapNotNull { it.decodedValue }.maxOrNull() ?: 0.0
@@ -667,7 +748,9 @@ class RecordingManager(
                     maxAltitudeM = altStats?.maxAltitudeM,
                     minAltitudeM = altStats?.minAltitudeM,
                     minVoltageV = voltStats?.minV,
-                    maxVoltageV = voltStats?.maxV
+                    maxVoltageV = voltStats?.maxV,
+                    startFuelLevelPct = fuelLevel.startPct,
+                    endFuelLevelPct = fuelLevel.endPct
                 )
             )
         }.onFailure { android.util.Log.e("RecordingManager", "trip insert failed for $sessionId", it) }
@@ -925,6 +1008,11 @@ class RecordingManager(
             val lost = mutableListOf<String>()
             val failures = mutableListOf<String>()
             val savedIds = _savedRecordings.value.map { it.metadata.sessionId }.toSet()
+            // Sessions a merge already consumed. Their data is inside a merged trip, so rebuilding
+            // one would resurrect the fragments the owner stitched away and let him merge the same
+            // drive again (owner 2026-09-22). Loaded once: the ledger is a small file and this pass
+            // can run from the app, the keep-alive service and a boot receiver.
+            val mergedAwayIds = mergeLedger.ids()
             // The session THIS process is recording right now has an unfinished journal by
             // definition - it only gets its `.finished` marker at STOP. Rebuilding it would write a
             // half trip and then fight the live recorder over the same files.
@@ -932,6 +1020,7 @@ class RecordingManager(
 
             for (id in journal.unfinishedSessions()) {
                 if (id == liveId) continue
+                if (id in mergedAwayIds) { journal.discard(id); continue }
                 // Resume window (owner 2026-09-21: the 31 km drive that came back as three
                 // fragments): a journal cut off moments ago may belong to a drive that is
                 // STILL running - the supervisors resume it into the same session instead
@@ -983,6 +1072,9 @@ class RecordingManager(
             for (file in findUnsavedRawLogs()) {
                 val id = com.example.analysis.RawLogRecovery.sessionIdOf(file.name) ?: continue
                 if (id in savedIds || id in ids || id in lost || id == liveId) continue
+                // findUnsavedRawLogs already filters the ledger; re-checked here because the two
+                // loops share `lost`/`ids` state and a raw log must never be rebuilt twice.
+                if (id in mergedAwayIds) continue
                 // Same resume window as the journal loop: a raw log still being written (or
                 // whose journal was cut off moments ago) belongs to a drive that may still
                 // be running - recovering it now would finalize half a trip under the live
@@ -1154,12 +1246,22 @@ class RecordingManager(
 
     private val rawLogsDir: File get() = File(context.filesDir, "raw_logs")
 
-    /** Raw-log sessions on disk that were never finalized into a saved trip, newest first. */
+    /**
+     * Raw-log sessions on disk that were never finalized into a saved trip, newest first.
+     *
+     * A session id in [mergeLedger] is excluded: its rows are already inside a merged trip, so
+     * offering it here - or rebuilding it in the automatic pass - would hand the owner the same
+     * fragments he just stitched and let him double that drive (owner 2026-09-22: "it's showing
+     * as recovered and merging multiple times"). The merge deletes these files, and this is the
+     * belt for the ones it could not: a file restored from Drive, a delete that failed on a full
+     * disk, a raw log written by a process that died mid-merge.
+     */
     fun findUnsavedRawLogs(): List<File> {
         val saved = _savedRecordings.value.map { it.metadata.sessionId }.toSet()
+        val mergedAway = mergeLedger.ids()
         return rawLogsDir.listFiles()?.filter { f ->
             val id = com.example.analysis.RawLogRecovery.sessionIdOf(f.name)
-            id != null && id !in saved && f.length() > 64L
+            id != null && id !in saved && id !in mergedAway && f.length() > 64L
         }?.sortedByDescending { it.lastModified() } ?: emptyList()
     }
 
@@ -1323,6 +1425,10 @@ class RecordingManager(
             sessionDir.deleteRecursively()
             loadSavedRecordings()
         }
+        // Deleting a MERGED trip releases its tombstones: the fragments it consumed are no longer
+        // duplicated by a live trip, so a raw log that survived the merge's cleanup may honestly be
+        // recovered again instead of staying forbidden forever.
+        pruneMergeLedger()
         CoroutineScope(Dispatchers.IO).launch {
             runCatching { tripRepository.deleteTrip(sessionId) }
                 .onFailure { android.util.Log.e("RecordingManager", "trip delete failed", it) }
@@ -1334,128 +1440,393 @@ class RecordingManager(
             if (file.isDirectory) file.deleteRecursively() else file.delete()
         }
         loadSavedRecordings()
+        // Every merged trip is gone, so every tombstone is stale: keeping them would forbid
+        // recovering raw logs the owner may still want after clearing storage.
+        runCatching { mergeLedger.retainOnly(emptySet()) }
         CoroutineScope(Dispatchers.IO).launch {
             runCatching { tripRepository.deleteAllTrips() }
                 .onFailure { android.util.Log.e("RecordingManager", "delete-all failed", it) }
         }
     }
 
+    // ── Merging fragments of one drive back together ──────────────────────────────────
+    //
+    // Owner 2026-09-21: "there is no option make two trips to merge and make it one trip" — a
+    // 31 km drive came back as 13 717 + 45 957 transactions plus a 3-tx stub, each its own trip.
+    // Owner 2026-09-22: "When I merge fragmented same trip it's showing as recovered and merging
+    // multiple times man do a proper review while merging. If more than 40 min difference between
+    // merging files ask user to confirm. For different dates ask user confirmation are you sure.
+    // Once it's merged properly no need to keep old fragmented trips for recovered logs
+    // immediately after merged auto backup."
+    //
+    // Four separate defects, all in this block:
+    //  1. the merge never LOOKED at what it was joining, so two unrelated drives stitched as
+    //     silently as two fragments of one - [planMerge] + [MergeReviewPolicy] now describe the
+    //     selection and [MergeResult.NeedsConfirmation] stops the UI before anything is written;
+    //  2. the fragments' raw ELM logs stayed in files/raw_logs, so the next recovery pass rebuilt
+    //     them as fresh "Recovered Run" trips and the owner merged the same drive again, doubling
+    //     it every time - the raw logs are now FOLDED into the merged bundle and removed from the
+    //     scan directory, and [mergeLedger] remembers every id a merge consumed;
+    //  3. the merged trip inherited the LIVE GPS altitude window, i.e. the elevation of whatever
+    //     drive was being recorded when he tapped Merge;
+    //  4. the fragments' transactions CSV carried no altitude column, so a merged trip came back
+    //     with a blank altitude trend even though every piece had recorded fixes.
+
+    /** What a merge did, or what it needs from the owner before it may touch a single file. */
+    sealed class MergeResult {
+        /** The merged trip is persisted, the fragments and their recovered logs are gone. */
+        data class Merged(
+            val saved: SavedRecording,
+            val review: MergeReviewPolicy.Review
+        ) : MergeResult()
+
+        /**
+         * NOTHING was written. The review found something the owner has to agree to first: a
+         * silence longer than [MergeReviewPolicy.GAP_CONFIRM_MS] between two pieces, pieces on
+         * different dates, a piece that was already merged into another trip, two pieces that
+         * look like the same drive twice, pieces that overlap in time, or a selection with
+         * nothing mergeable in it at all.
+         */
+        data class NeedsConfirmation(val review: MergeReviewPolicy.Review) : MergeResult()
+
+        /** The merge could not run, with the reason worded for the owner rather than a logcat. */
+        data class Failed(
+            val reason: String,
+            val review: MergeReviewPolicy.Review? = null
+        ) : MergeResult()
+    }
+
     /**
-     * Merges multiple saved trips into one, sorted by wall time (owner 2026-09-21:
-     * "there is no option make two trips to merge and make it one trip" — the
-     * 31 km drive came back as 13 717 + 45 957 transactions plus a 3-tx stub,
-     * each as its own trip; recovery saved them, but the UI had no way to stitch
-     * them back into the single drive the cluster shows).
-     *
-     * The merged trip replays wide rows from the combined transactions so its
-     * fuel, trends and altitude are computed from the same pure fold as live.
-     * Old trips are deleted after the merged one is persisted — local files +
-     * Room rows. Returns the new SavedRecording or null when nothing to merge.
+     * Reviews a selection WITHOUT merging it: reads each trip's own window and row count and
+     * reports what joining them would mean. Cheap by design - metadata and a row count, never the
+     * rows themselves - because the UI calls it the moment the owner taps Merge and again to draw
+     * the confirmation, and a 45 000-row fragment must not be parsed twice for a yes/no question.
      */
-    suspend fun mergeSessions(sessionIds: List<String>, newName: String? = null): SavedRecording? =
+    suspend fun planMerge(sessionIds: List<String>): MergeReviewPolicy.Review =
         withContext(Dispatchers.IO) {
-            if (sessionIds.size < 2) return@withContext null
-            // Deduplicate, keep order by start time later.
-            val distinctIds = sessionIds.distinct()
-            if (distinctIds.size < 2) return@withContext null
-
-            val allTx = mutableListOf<TransactionRecord>()
-            var firstMeta: RecordingMetadata? = null
-            var earliestMs = Long.MAX_VALUE
-            var latestMs = Long.MIN_VALUE
-            var vehicleName = "Škoda Kylaq 1.0 TSI (EA211)"
-            var vehicleId: String? = null
-            var adapterName = "ELM327 v1.5 Bluetooth Classic"
-            var protocolName = "ISO 15765-4 CAN 11-bit 500kbps"
-
-            for (id in distinctIds) {
-                val dir = File(recordingsDir, "session_$id")
-                val txFile = File(dir, "${id}_transactions.csv")
-                val loaded = if (txFile.exists()) {
-                    CsvExporter.readTransactionsFromCsv(txFile)
-                } else {
-                    emptyList()
-                }
-                if (loaded.isEmpty()) continue
-                val wall = loaded.map { tx ->
-                    val w = SessionRecoveryPolicy.wallEpochMs(tx.timestampUtc, tx.timestampMonotonic)
-                    if (w == tx.timestampMonotonic) tx else tx.copy(timestampMonotonic = w)
-                }
-                allTx += wall
-                for (tx in wall) {
-                    val ms = tx.timestampMonotonic
-                    if (ms in RecordTime.MIN_PLAUSIBLE_EPOCH_MS..RecordTime.MAX_PLAUSIBLE_EPOCH_MS) {
-                        if (ms < earliestMs) earliestMs = ms
-                        if (ms > latestMs) latestMs = ms
+            // The in-memory list is loaded asynchronously at init, and a review built from an
+            // empty list would call every real trip "not in the trip list" with zero rows and
+            // report the selection unmergeable. Reload whenever a selected id is not in it.
+            val known = _savedRecordings.value
+            if (known.isEmpty() || sessionIds.any { id -> known.none { it.metadata.sessionId == id } }) {
+                loadSavedRecordings()
+            }
+            val savedById = _savedRecordings.value.associateBy { it.metadata.sessionId }
+            val tombstones = mergeLedger.ids()
+            val fragments = sessionIds.distinct().map { id ->
+                val meta = savedById[id]?.metadata
+                var startMs = meta?.startTimeUtc?.let { RecordTime.parseMillis(it) }
+                var endMs = meta?.endTimeUtc?.let { RecordTime.parseMillis(it) }
+                var rows = savedById[id]?.transactionCount ?: 0
+                // The session JSON is the file of record, but a trip whose end stamp cannot be
+                // read back still has an honest window in Room. Take whichever source knows more;
+                // never average the two, and never accept a column holding uptime as an instant.
+                if (startMs == null || endMs == null || rows == 0) {
+                    runCatching { tripRepository.getTripById(id) }.getOrNull()?.let { trip ->
+                        if (startMs == null && RecordTime.isPlausibleEpoch(trip.startTimestamp)) {
+                            startMs = trip.startTimestamp
+                        }
+                        if (endMs == null && RecordTime.isPlausibleEpoch(trip.endTimestamp)) {
+                            endMs = trip.endTimestamp
+                        }
+                        if (rows == 0) rows = trip.sampleCount
                     }
                 }
-                if (firstMeta == null) {
-                    val jsonFile = File(dir, "$id.json")
-                    if (jsonFile.exists()) {
-                        runCatching {
-                            SessionJsonReader.readMetadata(jsonFile.reader())?.let { meta ->
-                                firstMeta = meta
-                                vehicleName = meta.vehicle
-                                vehicleId = meta.vehicleId
-                                adapterName = meta.adapter
-                                protocolName = meta.protocol
-                            }
+                MergeReviewPolicy.Fragment(
+                    sessionId = id,
+                    name = meta?.sessionName ?: "session $id (not in the trip list)",
+                    startMs = startMs,
+                    endMs = endMs ?: startMs,
+                    transactionCount = rows,
+                    alreadyMergedAway = id in tombstones
+                )
+            }
+            MergeReviewPolicy.review(fragments)
+        }
+
+    /**
+     * Merges saved trips into one, sorted by wall time.
+     *
+     * @param confirmed the owner has seen [planMerge]'s review and agreed to it. Required whenever
+     *   [MergeReviewPolicy.Review.needsConfirmation] is true; ignored when it is not, so a clean
+     *   same-drive stitch still happens in one tap.
+     * @return [MergeResult.NeedsConfirmation] with the review to show, [MergeResult.Merged] with
+     *   the persisted trip, or [MergeResult.Failed] with a reason. Never null-with-no-explanation:
+     *   the old signature returned `SavedRecording?` and the UI could only say "Merge failed".
+     */
+    suspend fun mergeSessions(
+        sessionIds: List<String>,
+        newName: String? = null,
+        confirmed: Boolean = false
+    ): MergeResult = withContext(Dispatchers.IO) {
+        val ids = sessionIds.distinct()
+        if (ids.size < 2) {
+            return@withContext MergeResult.Failed(
+                "Select at least 2 trips to merge.",
+                MergeReviewPolicy.review(emptyList())
+            )
+        }
+
+        // REVIEW BEFORE WRITE. Nothing is read, moved or deleted until this has been looked at -
+        // and when it needs the owner's agreement, the call returns instead of guessing.
+        val review = planMerge(ids)
+        // An empty selection is a refusal, not a question. Only a stitch we COULD perform cleanly
+        // is ever offered for confirmation - asking "are you sure?" about a merge that cannot
+        // happen, and then failing anyway once he says yes, just burns a tap.
+        if (!review.mergeable) {
+            // Confirmation cannot conjure rows: an unmergeable selection stays unmergeable.
+            return@withContext MergeResult.Failed(review.headline(), review)
+        }
+        if (review.needsConfirmation && !confirmed) {
+            return@withContext MergeResult.NeedsConfirmation(review)
+        }
+        val usableIds = review.usable.map { it.sessionId }
+
+        val allTx = mutableListOf<TransactionRecord>()
+        var firstMeta: RecordingMetadata? = null
+        var vehicleName = "Škoda Kylaq 1.0 TSI (EA211)"
+        var vehicleId: String? = null
+        var adapterName = "ELM327 v1.5 Bluetooth Classic"
+        var protocolName = "ISO 15765-4 CAN 11-bit 500kbps"
+        var earliestMs = Long.MAX_VALUE
+        val rawFragments = mutableListOf<Pair<String, File>>()
+        val stitched = mutableListOf<String>()
+
+        // usableIds is already chronological: the review sorted the fragments by their own window.
+        for (id in usableIds) {
+            val dir = File(recordingsDir, "session_$id")
+            val txFile = File(dir, "${id}_transactions.csv")
+            val loaded = if (txFile.exists()) {
+                CsvExporter.readTransactionsFromCsv(txFile)
+            } else {
+                emptyList()
+            }
+            if (loaded.isEmpty()) continue
+
+            val wall = loaded.map { tx ->
+                val w = SessionRecoveryPolicy.wallEpochMs(tx.timestampUtc, tx.timestampMonotonic)
+                if (w == tx.timestampMonotonic) tx else tx.copy(timestampMonotonic = w)
+            }
+
+            // Elevation the fragment recorded but its transactions CSV could not carry (the
+            // `altitude_m` column is new): re-associate the fragment's OWN fixes, from its wide
+            // rows and its Room rows, onto the rows that have none. Nearest fix within 1.5 s -
+            // GPS delivers at 1 Hz, the poller at ~11 rows/s, so that IS the fix the recorder
+            // would have stamped. Beyond it the row stays honestly null.
+            val fixes = altitudeIndexFor(id, dir)
+            val withAltitude = SessionRecoveryPolicy.attachAltitude(
+                rows = wall,
+                timestamp = { it.timestampMonotonic },
+                hasAltitude = { it.altitudeM != null },
+                fixes = fixes,
+                withAltitude = { tx, alt -> tx.copy(altitudeM = alt) }
+            )
+
+            allTx += withAltitude
+            stitched += id
+            for (tx in withAltitude) {
+                val ms = tx.timestampMonotonic
+                // Only a plausible epoch counts as the drive's start: a row stamped with uptime
+                // would name the merged trip after 1970 and put its window before every other trip.
+                if (ms in RecordTime.MIN_PLAUSIBLE_EPOCH_MS..RecordTime.MAX_PLAUSIBLE_EPOCH_MS) {
+                    if (ms < earliestMs) earliestMs = ms
+                }
+            }
+            // The EARLIEST fragment's metadata describes the drive: vehicle, adapter, protocol.
+            if (firstMeta == null) {
+                val jsonFile = File(dir, "$id.json")
+                if (jsonFile.exists()) {
+                    runCatching {
+                        SessionJsonReader.readMetadata(jsonFile.reader())?.let { meta ->
+                            firstMeta = meta
+                            vehicleName = meta.vehicle
+                            vehicleId = meta.vehicleId
+                            adapterName = meta.adapter
+                            protocolName = meta.protocol
                         }
                     }
                 }
             }
+            rawLogForFragment(id)?.let { rawFragments += id to it }
+        }
 
-            if (allTx.size < 2) return@withContext null
-            val sorted = allTx.sortedBy { it.timestampMonotonic }
-            if (earliestMs == Long.MAX_VALUE) {
-                earliestMs = sorted.first().timestampMonotonic
-                latestMs = sorted.last().timestampMonotonic
-            }
-
-            val newId = UUID.randomUUID().toString().take(8)
-            val displayStart = RecordTime.display(earliestMs)
-            val mergedName = newName?.takeIf { it.isNotBlank() }
-                ?: "Merged Run $displayStart (${distinctIds.size} trips, ${sorted.size} tx)"
-
-            val metadata = RecordingMetadata(
-                sessionId = newId,
-                sessionName = mergedName,
-                vehicle = vehicleName,
-                vehicleId = vehicleId,
-                profile = "India-Market 1.0 TSI",
-                adapter = "$adapterName (merged ${distinctIds.size} trips)",
-                protocol = protocolName,
-                canBitrate = "500 kbps",
-                startTimeUtc = RecordTime.stamp(earliestMs)
+        if (allTx.size < 2 || stitched.size < 2) {
+            return@withContext MergeResult.Failed(
+                "Merge failed - the selected trips hold no readable OBD rows " +
+                    "(${allTx.size} row(s) in ${stitched.size} trip(s)). Nothing was changed.",
+                review
             )
+        }
+        val sorted = allTx.sortedBy { it.timestampMonotonic }
+        if (earliestMs == Long.MAX_VALUE) {
+            // No row carried a plausible epoch (a legacy import stamped with uptime). The merged
+            // trip still needs a name and a window, so fall back to the first row's own key rather
+            // than inventing one.
+            earliestMs = sorted.first().timestampMonotonic
+        }
 
-            val sampleList = SessionRecoveryPolicy.replaySamples(
-                transactions = sorted,
-                seed = SynchronizedSample(timestampUtc = "", timestampMonotonic = 0L),
-                merge = { acc, tx -> mergeSample(acc, tx).copy(altitudeM = tx.altitudeM) }
-            )
+        val newId = UUID.randomUUID().toString().take(8)
+        val displayStart = RecordTime.display(earliestMs)
+        val mergedName = newName?.takeIf { it.isNotBlank() }
+            ?: "Merged Run $displayStart (${stitched.size} trips, ${sorted.size} tx)"
 
-            val saved = finalizeSession(
+        val metadata = RecordingMetadata(
+            sessionId = newId,
+            sessionName = mergedName,
+            vehicle = vehicleName,
+            vehicleId = vehicleId,
+            profile = firstMeta?.profile ?: "India-Market 1.0 TSI",
+            adapter = "$adapterName (merged ${stitched.size} trips)",
+            protocol = protocolName,
+            canBitrate = firstMeta?.canBitrate ?: "500 kbps",
+            startTimeUtc = RecordTime.stamp(earliestMs)
+        )
+
+        val sampleList = SessionRecoveryPolicy.replaySamples(
+            transactions = sorted,
+            seed = SynchronizedSample(timestampUtc = "", timestampMonotonic = 0L),
+            merge = { acc, tx -> mergeSample(acc, tx).copy(altitudeM = tx.altitudeM) }
+        )
+
+        // The fragments' raw ELM logs are folded into ONE file so the merged bundle stays
+        // self-contained - a merged trip with no raw log is a trip that cannot be re-recovered or
+        // audited, and the owner's rule for logs is that they are never lost.
+        val foldedRaw = foldRawLogs(
+            dest = File(recordingsDir, "merge_raw_$newId.txt"),
+            sources = rawFragments
+        )
+
+        val saved: SavedRecording? = try {
+            finalizeSession(
                 metadata = metadata,
                 txList = sorted,
                 sampleList = sampleList,
-                rawLogFile = null,
-                recovered = false
-            ) ?: return@withContext null
+                rawLogFile = foldedRaw,
+                recovered = false,
+                // The live GPS accumulator belongs to whatever drive is being recorded NOW, not to
+                // the trips being stitched. Its window comes from the fragments' own rows only.
+                liveGpsWindow = false
+            )
+        } catch (e: Exception) {
+            // A merge that dies HERE has written nothing but the folded raw log: the fragments are
+            // still on disk, still in Room, still not tombstoned. Say so instead of leaving the
+            // owner guessing whether his trips survived.
+            android.util.Log.e("RecordingManager", "merge finalize failed", e)
+            runCatching { foldedRaw?.delete() }
+            return@withContext MergeResult.Failed(
+                "Merge failed while writing the trip: ${e.message ?: e.javaClass.simpleName}. " +
+                    "The selected trips were left untouched.",
+                review
+            )
+        }
+        if (saved == null) {
+            runCatching { foldedRaw?.delete() }
+            return@withContext MergeResult.Failed(
+                "Merge failed - nothing could be written from the selected trips.",
+                review
+            )
+        }
 
-            for (oldId in distinctIds) {
-                runCatching {
-                    File(recordingsDir, "session_$oldId").deleteRecursively()
-                    tripRepository.deleteTrip(oldId)
+        // TOMBSTONE FIRST. The merged trip exists, so from this instant every fragment is data
+        // that is already inside a saved trip. Recording that before any deletion means a crash
+        // half-way through the cleanup leaves duplicates the owner can delete, never a
+        // resurrection that silently doubles the drive again.
+        runCatching { mergeLedger.record(stitched, newId) }
+            .onFailure { android.util.Log.e("RecordingManager", "merge ledger failed", it) }
+
+        runCatching { foldedRaw?.delete() }
+
+        // Now remove the fragments: session files, Room rows, journals, and the raw logs recovery
+        // would otherwise rebuild them from ("no need to keep old fragmented trips for recovered
+        // logs"). Their content lives on inside the merged bundle.
+        for (oldId in stitched) {
+            runCatching { File(recordingsDir, "session_$oldId").deleteRecursively() }
+                .onFailure { android.util.Log.e("RecordingManager", "merge: session dir delete failed", it) }
+            runCatching { tripRepository.deleteTrip(oldId) }
+                .onFailure { android.util.Log.e("RecordingManager", "merge: room delete failed", it) }
+            runCatching { journal.discard(oldId) }
+            runCatching { File(rawLogsDir, "raw_log_$oldId.txt").takeIf { it.exists() }?.delete() }
+                .onFailure { android.util.Log.e("RecordingManager", "merge: raw log delete failed", it) }
+        }
+
+        loadSavedRecordings()
+        MergeResult.Merged(saved, review)
+    }
+
+    /**
+     * The raw ELM log of a fragment, wherever it lives: the original in `files/raw_logs` first
+     * (it is the one that kept growing while the drive ran), then the copy finalize put in the
+     * session bundle. Null when the fragment has neither - an imported ZIP trip usually does not.
+     */
+    private fun rawLogForFragment(sessionId: String): File? {
+        val live = File(rawLogsDir, "raw_log_$sessionId.txt")
+        if (live.isFile && live.length() > 0L) return live
+        val bundled = File(File(recordingsDir, "session_$sessionId"), "${sessionId}_raw.txt")
+        return if (bundled.isFile && bundled.length() > 0L) bundled else null
+    }
+
+    /**
+     * Streams several fragments' raw logs into one file, each under a header naming the session it
+     * came from. Streamed, never `readText()`: these are the largest files in the app and the
+     * 2026-09-20 OOM was exactly a whole drive materialised as a String.
+     */
+    private fun foldRawLogs(dest: File, sources: List<Pair<String, File>>): File? {
+        if (sources.isEmpty()) return null
+        return runCatching {
+            dest.parentFile?.mkdirs()
+            java.io.BufferedOutputStream(java.io.FileOutputStream(dest)).use { out ->
+                out.write(
+                    ("--- MERGED RAW OBD-II LOG | ${sources.size} fragments folded into one trip | " +
+                        "built ${RecordTime.stamp()} (${RecordTime.zoneLabel()} " +
+                        "${RecordTime.offsetLabel()}) ---\n").toByteArray()
+                )
+                for ((id, src) in sources) {
+                    out.write(
+                        ("--- FRAGMENT session $id | ${src.name} | ${src.length()} bytes | " +
+                            "last modified ${RecordTime.logStamp(src.lastModified())} ---\n").toByteArray()
+                    )
+                    src.inputStream().use { it.copyTo(out) }
+                    out.write("\n".toByteArray())
                 }
             }
-            for (oldId in distinctIds) {
-                runCatching { journal.discard(oldId) }
-            }
+            dest
+        }.onFailure {
+            android.util.Log.e("RecordingManager", "could not fold raw logs for a merge", it)
+            runCatching { dest.delete() }
+        }.getOrNull()
+    }
 
-            loadSavedRecordings()
-            saved
+    /**
+     * (instant, altitude) pairs a fragment already recorded, from its wide sample rows and from
+     * its Room rows. Projected, not full entities - see `altitudeRowsForTrip`.
+     */
+    private suspend fun altitudeIndexFor(sessionId: String, dir: File): List<Pair<Long, Double>> {
+        val out = ArrayList<Pair<Long, Double>>()
+        runCatching { CsvExporter.readSamplesFromCsv(File(dir, "${sessionId}_samples.csv")) }
+            .getOrDefault(emptyList())
+            .forEach { smp ->
+                val alt = smp.altitudeM ?: return@forEach
+                val ms = RecordTime.parseMillis(smp.timestampUtc) ?: return@forEach
+                out += ms to alt
+            }
+        tripRepository.altitudeRowsForTrip(sessionId).forEach { row ->
+            val alt = row.altitudeM ?: return@forEach
+            val ms = RecordTime.instantOf(row.timestamp, row.timestampUtc) ?: return@forEach
+            if (RecordTime.isPlausibleEpoch(ms)) out += ms to alt
         }
+        return out
+    }
+
+    /**
+     * Drops tombstones whose merged trip no longer exists, so deleting a trip never leaves an id
+     * permanently forbidden from recovery.
+     */
+    private fun pruneMergeLedger() {
+        runCatching {
+            val live = _savedRecordings.value.map { it.metadata.sessionId }.toSet()
+            mergeLedger.retainOnly(live)
+        }
+    }
 
     /**
      * Imports a single ZIP archive from a content URI.

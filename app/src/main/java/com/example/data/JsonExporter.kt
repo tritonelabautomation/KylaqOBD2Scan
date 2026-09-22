@@ -40,6 +40,11 @@ object JsonExporter {
             put("minAltitudeM", metadata.minAltitudeM ?: JSONObject.NULL)
             put("minVoltageV", metadata.minVoltageV ?: JSONObject.NULL)
             put("maxVoltageV", metadata.maxVoltageV ?: JSONObject.NULL)
+            // Tank level at the start and end of the drive (owner 2026-09-22: "Fuel percentage at
+            // the start of trip & end of trip is also not available on trip logs"). JSON null when
+            // the ECU never answered 012F, so the log says "unknown" instead of printing 0 %.
+            put("startFuelLevelPct", metadata.startFuelLevelPct ?: JSONObject.NULL)
+            put("endFuelLevelPct", metadata.endFuelLevelPct ?: JSONObject.NULL)
         }
 
         // STREAMING: previous built JSONArray of 59k objects + toString(2) = >100MB string → OOM at 256MB heap
@@ -77,6 +82,12 @@ object JsonExporter {
                         put("decoderVersion", tx.decoderVersion)
                         put("responseStatus", tx.responseStatus.name)
                         put("errorMessage", tx.errorMessage ?: JSONObject.NULL)
+                        // GPS altitude of this row's own moment. Written here too (owner 2026-09-22:
+                        // "Altitude not logging still"): the session JSON is what a ZIP restore
+                        // reads back into Room, and without this column a backup -> reinstall ->
+                        // import round trip stripped per-row elevation from every restored trip,
+                        // blanking the altitude trend of trips that had recorded it.
+                        put("altitudeM", tx.altitudeM ?: JSONObject.NULL)
                     }
                     writer.write("    ")
                     writer.write(txObj.toString())

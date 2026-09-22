@@ -91,6 +91,12 @@ class TripRepository(context: Context) {
         }
     }
 
+    /** Elevation index of one trip: (instant, altitude) for every row that recorded a fix. */
+    suspend fun altitudeRowsForTrip(tripId: String): List<com.example.data.db.dao.AltitudeRow> =
+        withContext(Dispatchers.IO) {
+            runCatching { sampleDao.altitudeRowsForTrip(tripId) }.getOrDefault(emptyList())
+        }
+
     suspend fun getSamplesForTrip(tripId: String): List<TelemetrySampleEntity> = withContext(Dispatchers.IO) {
         sampleDao.getSamplesForTrip(tripId)
     }

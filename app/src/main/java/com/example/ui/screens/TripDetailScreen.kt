@@ -374,7 +374,7 @@ private fun TripOverviewView(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
-            TripFuelLogCard(summary)
+            TripFuelLogCard(summary, trip)
         }
         carpoolSlot?.let { slot ->
             item { slot() }
@@ -487,6 +487,36 @@ private fun TripOverviewView(
                             ?.let { com.example.data.RecordTime.format("yyyy-MM-dd HH:mm:ss", it) }
                             ?: "--"
                     )
+                    DetailRow(
+                        "End Time (IST)",
+                        com.example.data.RecordTime.instantOf(trip.endTimestamp, trip.endTimeUtc)
+                            ?.let { com.example.data.RecordTime.format("yyyy-MM-dd HH:mm:ss", it) }
+                            ?: "--"
+                    )
+                    // Tank level at both ends of the drive, straight off the trip log's own
+                    // columns (owner 2026-09-22). The fuel card derives the pair from the 012F
+                    // rows so pre-migration trips show it too; this row prints what the LOG says,
+                    // and "-- %" when the drive never recorded a level.
+                    DetailRow(
+                        "Fuel % (start → end)",
+                        if (trip.startFuelLevelPct == null && trip.endFuelLevelPct == null) {
+                            "-- % (PID 012F not recorded for this trip)"
+                        } else {
+                            "${trip.startFuelLevelPct?.let { String.format(java.util.Locale.US, "%.1f %%", it) } ?: "-- %"}" +
+                                " → " +
+                                "${trip.endFuelLevelPct?.let { String.format(java.util.Locale.US, "%.1f %%", it) } ?: "-- %"}"
+                        }
+                    )
+                    DetailRow(
+                        "Altitude (min → max)",
+                        if (trip.minAltitudeM == null && trip.maxAltitudeM == null) {
+                            "-- m (no GPS fix recorded)"
+                        } else {
+                            "${trip.minAltitudeM?.let { String.format(java.util.Locale.US, "%.0f m", it) } ?: "-- m"}" +
+                                " → " +
+                                "${trip.maxAltitudeM?.let { String.format(java.util.Locale.US, "%.0f m", it) } ?: "-- m"}"
+                        }
+                    )
                 }
             }
         }
@@ -584,6 +614,19 @@ private fun TripTrendsView(
             "0162", "Torque", "Nm", Color(0xFF64B5F6),
             transform = { pct -> com.example.engine.PowertrainModel.torqueNmFromPercent(pct, torqueRefNm) }
         ),
+        // Fuel flow (owner 2026-09-22: "fuel flow rate PID is not available in trends"). A chip
+        // wired to 015E alone is EMPTY on this car - its 0180 bitmap claims 9D, not 5E - so the
+        // channel is derived: whichever fuel-rate pid answered, reported in L/h.
+        TrendChannel(
+            com.example.analysis.TripTrendAnalyzer.PID_FUEL_RATE_LH, "Fuel Rate", "L/h",
+            Color(0xFFFFD54F)
+        ),
+        // Tank level (PID 012F): the percentage the fuel card reports at the start and end of the
+        // trip, drawn over the whole drive so a mid-trip fill is visible as a step.
+        TrendChannel(
+            com.example.analysis.TripTrendAnalyzer.PID_FUEL_LEVEL, "Fuel Level", "%",
+            Color(0xFFA1887F)
+        ),
         // Derived channels (owner 2026-09-16/17): computed from stored rpm/torque/speed,
         // available on EVERY trip ever recorded. Kept next to Torque so they are found
         // without scrolling the whole chip row.
@@ -615,6 +658,13 @@ private fun TripTrendsView(
                 samples,
                 timestamp = { it.instantMs },
                 altitudeM = { it.altitudeM }
+            )
+        } else if (ch.pid == com.example.analysis.TripTrendAnalyzer.PID_FUEL_RATE_LH) {
+            com.example.analysis.TripTrendAnalyzer.fuelRatePoints(
+                samples,
+                timestamp = { it.instantMs },
+                pid = { it.pid },
+                value = { it.numericValue }
             )
         } else {
             samples
@@ -1146,7 +1196,11 @@ private fun InsightBlock(accent: Color, title: String, body: String) {
 }
 
 @Composable
-private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summary) {
+private fun TripFuelLogCard(
+    summary: com.example.analysis.TripFuelSummary.Summary,
+    /** The trip's OWN persisted fuel percentages, for a drive whose samples no longer carry them. */
+    trip: TripEntity? = null
+) {
     Card(
         modifier = Modifier.fillMaxWidth().padding(12.dp),
         shape = RoundedCornerShape(12.dp),
@@ -1193,6 +1247,52 @@ private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summar
                 color = TextSecondaryDark,
                 fontSize = 13.sp
             )
+            // Tank level at the START and at the END of this drive (owner 2026-09-22: "Fuel
+            // percentage at the start of trip & end of trip is also not available on trip logs").
+            // Derived from the trip's own 012F rows, so every trip ever recorded reports it -
+            // old, recovered, imported or merged - with the persisted columns as the fallback for
+            // a drive whose sample rows were pruned. Blank when the ECU never answered 012F:
+            // "-- %" is the truth, a plausible number would not be.
+            val level = summary.fuelLevel
+            val startPct = level.startPct ?: trip?.startFuelLevelPct
+            val endPct = level.endPct ?: trip?.endFuelLevelPct
+            if (startPct != null || endPct != null) {
+                Spacer(modifier = Modifier.height(4.dp))
+                val pct = { v: Double -> String.format(java.util.Locale.US, "%.1f %%", v) }
+                val delta = if (startPct != null && endPct != null) endPct - startPct else null
+                val whenNote = when {
+                    level.startMs != null && level.endMs != null ->
+                        " • read ${com.example.data.RecordTime.format("HH:mm:ss", level.startMs)}" +
+                            " → ${com.example.data.RecordTime.format("HH:mm:ss", level.endMs)}"
+                    else -> ""
+                }
+                InsightBlock(
+                    accent = Color(0xFFFFD54F),
+                    title = "TANK LEVEL - MEASURED (PID 012F)",
+                    body = "Fuel % start → end: ${startPct?.let(pct) ?: "-- %"} → " +
+                        "${endPct?.let(pct) ?: "-- %"}" +
+                        (delta?.let {
+                            " • ${if (it >= 0) "+" else ""}${String.format(java.util.Locale.US, "%.1f", it)} pts"
+                        } ?: "") +
+                        (if (level.sampleCount > 0) " • ${level.sampleCount} level row(s)" else "") +
+                        whenNote +
+                        if (delta != null && delta > 0.5) {
+                            " • the tank ROSE during this trip: a fill happened mid-drive, or the " +
+                                "sender read higher after a top-up - the integrated litres above " +
+                                "are what the engine burned, not what the gauge lost"
+                        } else {
+                            ""
+                        }
+                )
+            } else {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    "TANK LEVEL UNAVAILABLE: PID 012F never answered on this trip, so the start " +
+                        "and end fuel percentages are not recorded - nothing is estimated in " +
+                        "their place.",
+                    color = ElectricAmber, fontSize = 12.sp
+                )
+            }
             val startStop = summary.startStop
             if (startStop.stopEvents > 0) {
                 Spacer(modifier = Modifier.height(6.dp))

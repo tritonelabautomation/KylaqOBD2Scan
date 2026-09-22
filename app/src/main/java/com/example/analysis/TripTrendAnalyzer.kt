@@ -51,6 +51,20 @@ object TripTrendAnalyzer {
     const val PID_FUEL_VOL = "015E"
     const val PID_FUEL_MASS = "019D"
 
+    /** Tank level, PID 012F, in percent. */
+    const val PID_FUEL_LEVEL = "012F"
+
+    /**
+     * Petrol density in g/L: how a MASS fuel rate (019D, g/s) becomes a VOLUME one (L/h). The
+     * same factor `ObdScheduler.effectiveFuelRateLh`, `TripFuelSummary.buildFuelSeries` and
+     * `RecordingManager.MASS_GS_TO_LH` use - one number, so a chart, a summary and an exported
+     * CSV cannot disagree about what a gram of this fuel occupies.
+     */
+    const val FUEL_DENSITY_G_PER_L = 745.0
+
+    /** Grams per second to litres per hour. */
+    fun massGsToVolumeLh(gs: Double): Double = gs * 3600.0 / FUEL_DENSITY_G_PER_L
+
     /**
      * Room projection pid list for the cross-trip trend charts: every pid in BOTH its
      * 4-hex form ("019D") and the 2-hex form the recorder actually stores ("9D").
@@ -60,7 +74,12 @@ object TripTrendAnalyzer {
      */
     val TREND_PROJECTION_PIDS = listOf(
         PID_RPM, PID_SPEED, PID_LOAD, PID_TORQUE_PCT, PID_FUEL_VOL, PID_FUEL_MASS,
-        "0C", "0D", "04", "62", "5E", "9D"
+        "0C", "0D", "04", "62", "5E", "9D",
+        // Tank level, both spellings, added 2026-09-22 (owner: "fuel flow rate PID is not
+        // available in trends" / "Fuel percentage at the start of trip & end of trip is also not
+        // available on trip logs"). The recorder stores the 2-hex form; the projection has to
+        // carry both or the channel reads an empty list on every trip.
+        PID_FUEL_LEVEL, "2F"
     )
 
     /** Matches PowertrainModel.IDLE_FUEL_LH - kept local so the analyzer stays dependency-free. */
@@ -181,6 +200,18 @@ object TripTrendAnalyzer {
     const val PID_POWER_KW = "PWR"
     const val PID_GEAR = "GEAR"
 
+    /**
+     * Fuel-flow channel (owner 2026-09-22: *"fuel flow rate PID is not available in trends"*).
+     *
+     * Derived rather than a plain pid filter, because this car answers only ONE of the two J1979
+     * fuel-rate pids: the 2026-09-16 run's `0180` bitmap (`00 24 00 0D`) claims 8B, 8E, 9D and
+     * 9E - so 019D (mass, g/s) answers and 015E (volume, L/h) does not. A chip wired to `015E`
+     * alone was therefore empty on every trip he owns, which is exactly what he reported. This
+     * channel takes whichever answered and reports BOTH in litres per hour, so one chip works on
+     * this car, on a car that answers only 015E, and on one that answers both.
+     */
+    const val PID_FUEL_RATE_LH = "FUEL"
+
     private fun normPid(p: String): String = p.removePrefix("01").uppercase()
 
     /**
@@ -282,6 +313,31 @@ object TripTrendAnalyzer {
             }
         }
         return out
+    }
+
+    /**
+     * Fuel-flow series in L/h from whichever fuel-rate PID answered: 015E directly, 019D
+     * converted at petrol density. When a trip holds BOTH, the volumetric one wins - it is the
+     * ECU's own litres and needs no density assumption - and the mass rows are dropped rather
+     * than interleaved, so the line cannot zig-zag between two measurements of one quantity.
+     */
+    fun <T> fuelRatePoints(
+        rows: List<T>,
+        timestamp: (T) -> Long,
+        pid: (T) -> String,
+        value: (T) -> Double?
+    ): List<Pair<Long, Double>> {
+        val volume = mutableListOf<Pair<Long, Double>>()
+        val mass = mutableListOf<Pair<Long, Double>>()
+        for (r in rows) {
+            val v = value(r) ?: continue
+            when (normPid(pid(r))) {
+                "5E" -> volume += timestamp(r) to v
+                "9D" -> mass += timestamp(r) to massGsToVolumeLh(v)
+                else -> {}
+            }
+        }
+        return (if (volume.isNotEmpty()) volume else mass).sortedBy { it.first }
     }
 
     fun <T> altitudePoints(

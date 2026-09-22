@@ -11,6 +11,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -58,6 +60,12 @@ fun RecordingsScreen(
     val recoveryNotice by viewModel.recoveryNotice.collectAsState()
     val isMerging by viewModel.isMerging.collectAsState()
     val mergeNotice by viewModel.mergeNotice.collectAsState()
+    // Merge REVIEW (owner 2026-09-22: "do a proper review while merging. If more than 40 min
+    // difference between merging files ask user to confirm. For different dates ask user
+    // confirmation are you sure."). `mergePreview` warns while he is still picking; `mergeReview`
+    // is the blocking dialog the merge itself asks for before it writes a single file.
+    val mergePreview by viewModel.mergePreview.collectAsState()
+    val mergeReview by viewModel.mergeReview.collectAsState()
     LaunchedEffect(Unit) { viewModel.refreshUnsavedRawLogs() }
 
     var renamingRecording by remember { mutableStateOf<SavedRecording?>(null) }
@@ -75,6 +83,13 @@ fun RecordingsScreen(
             viewModel.clearMergeNotice()
             selectedIds = emptySet()
         }
+    }
+
+    // Keep the live review in step with the selection. Empty selection clears both the preview and
+    // any dialog that was left open by a selection that no longer exists.
+    LaunchedEffect(selectedIds) {
+        viewModel.reviewMergeSelection(selectedIds.toList())
+        if (selectedIds.isEmpty()) viewModel.cancelMergeReview()
     }
 
     // SAF Open Multiple Documents Launcher
@@ -172,12 +187,76 @@ fun RecordingsScreen(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.CallMerge, contentDescription = null, tint = CyberCyan, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text(
-                            text = "${selectedIds.size} trip(s) selected — tap to toggle, long-press any card to start. Merge stitches them by wall time into ONE trip (your 31 km fragments become one).",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.weight(1f)
-                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "${selectedIds.size} trip(s) selected — tap to toggle, long-press any card to start. Merge reviews the selection FIRST, stitches it by wall time into ONE trip, deletes the fragments and their recovered raw logs, then backs up.",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            // The review runs while he picks, so a bad selection is obvious before
+                            // the button is ever tapped - not after the trips are already gone.
+                            mergePreview?.let { preview ->
+                                Spacer(Modifier.height(4.dp))
+                                if (preview.mergeable) {
+                                    Text(
+                                        text = "Will merge: ${preview.usable.size} trips · " +
+                                            com.example.data.MergeReviewPolicy.formatDuration(
+                                                (preview.endMs ?: 0L) - (preview.startMs ?: 0L)
+                                            ) +
+                                            " · ${preview.totalTransactions} OBD rows · " +
+                                            (preview.dates.joinToString(", ").ifBlank { "no date" }),
+                                        fontSize = 11.sp,
+                                        color = TextSecondaryDark
+                                    )
+                                }
+                                preview.confirmGaps.forEach { gap ->
+                                    Text(
+                                        text = "⚠ ${com.example.data.MergeReviewPolicy.formatDuration(gap.gapMs)} " +
+                                            "silence between '${gap.fromName}' and '${gap.toName}' — over " +
+                                            "${com.example.data.MergeReviewPolicy.GAP_CONFIRM_MS / 60_000L} min, you will be asked to confirm.",
+                                        fontSize = 11.sp,
+                                        color = ElectricAmber
+                                    )
+                                }
+                                if (preview.spansMultipleDates) {
+                                    Text(
+                                        text = "⚠ Different dates: ${preview.dates.joinToString(", ")} — " +
+                                            "you will be asked to confirm.",
+                                        fontSize = 11.sp,
+                                        color = ElectricAmber
+                                    )
+                                }
+                                preview.mergedAway.forEach { frag ->
+                                    Text(
+                                        text = "⛔ '${frag.name}' was ALREADY merged into another trip. " +
+                                            "It is a recovered copy — merging it again duplicates that drive.",
+                                        fontSize = 11.sp,
+                                        color = WarningRed
+                                    )
+                                }
+                                preview.duplicates.forEach { dup ->
+                                    Text(
+                                        text = "⛔ '${dup.a.name}' and '${dup.b.name}' look like the SAME drive twice.",
+                                        fontSize = 11.sp,
+                                        color = WarningRed
+                                    )
+                                }
+                                preview.emptyFragments.forEach { frag ->
+                                    Text(
+                                        text = "· '${frag.name}' holds no OBD rows and will be skipped.",
+                                        fontSize = 11.sp,
+                                        color = TextSecondaryDark
+                                    )
+                                }
+                                if (!preview.mergeable) {
+                                    Text(
+                                        text = preview.headline(),
+                                        fontSize = 11.sp,
+                                        color = WarningRed
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -511,6 +590,83 @@ fun RecordingsScreen(
             dismissButton = {
                 TextButton(onClick = { showStorageDialog = false }) {
                     Text("Close")
+                }
+            }
+        )
+    }
+
+    // ── Merge review / confirmation (owner 2026-09-22) ─────────────────────────────────
+    //
+    // Shown when the merge itself refuses to run unconfirmed: a silence longer than 40 minutes
+    // between two pieces, pieces on different dates, a piece already merged into another trip, two
+    // pieces that look like the same drive twice, or pieces that overlap in time. NOTHING has been
+    // written when this is on screen - Cancel leaves every trip exactly as it was.
+    mergeReview?.let { review ->
+        val dangerous = review.mergedAway.isNotEmpty() || review.duplicates.isNotEmpty()
+        AlertDialog(
+            onDismissRequest = { viewModel.cancelMergeReview() },
+            modifier = Modifier.testTag("merge_review_dialog"),
+            title = {
+                Column {
+                    Text(
+                        if (review.spansMultipleDates) "Are you sure? These trips are on different dates"
+                        else "Are you sure? Review this merge",
+                        fontWeight = FontWeight.Bold,
+                        color = if (dangerous) WarningRed else ElectricAmber
+                    )
+                    Text(
+                        review.headline(),
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 380.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    review.bullets().forEach { line ->
+                        Text(
+                            line,
+                            fontSize = 12.sp,
+                            lineHeight = 17.sp,
+                            color = when {
+                                line.startsWith("ALREADY MERGED") || line.startsWith("SAME DRIVE") -> WarningRed
+                                line.startsWith("GAP") || line.startsWith("DIFFERENT DATES") ||
+                                    line.startsWith("OVERLAP") -> ElectricAmber
+                                line.startsWith("SKIPPED") -> MaterialTheme.colorScheme.onSurfaceVariant
+                                else -> MaterialTheme.colorScheme.onSurface
+                            }
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { viewModel.confirmMerge() },
+                    // Belt and braces: `mergeSessions` refuses an unmergeable selection outright, so
+                    // this dialog should never be showing one - but if it ever is, tapping Confirm
+                    // must not be the way to find out.
+                    enabled = review.mergeable && !isMerging
+                ) {
+                    Text(
+                        if (review.mergeable) "Yes, merge them" else "Cannot merge",
+                        color = when {
+                            !review.mergeable -> TextSecondaryDark
+                            dangerous -> WarningRed
+                            else -> ElectricAmber
+                        },
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.cancelMergeReview() }) {
+                    Text("Cancel — keep the trips as they are")
                 }
             }
         )

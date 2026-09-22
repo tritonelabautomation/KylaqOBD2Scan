@@ -15,15 +15,31 @@ object CsvExporter {
      * logs"). Two copies of a header string is how a journal file ends up unreadable by the
      * importer that reads the finalized one; there is now exactly one.
      */
+    /**
+     * `altitude_m` appended last (owner 2026-09-22: "Altitude not logging still").
+     *
+     * The stamp existed on [com.example.model.TransactionRecord] and reached Room, but it was
+     * never written HERE - and this header is the crash journal's schema too. Every path that
+     * rebuilds a trip from its journal (`stopRecording` when the journal is longer than RAM,
+     * `recoverJournalSession`, and `mergeSessions`, which reads each fragment's transactions
+     * CSV) therefore got rows back with `altitudeM = null`, re-persisted them that way, and the
+     * trip's per-row elevation - the Trends altitude channel and the trip min/max - came out
+     * blank even though the drive had recorded fixes. A column at the END keeps every existing
+     * file readable: old rows have no 16th cell and read back as null, exactly as before.
+     */
     const val TRANSACTIONS_HEADER =
         "session_id,timestamp_utc,timestamp_monotonic_ms,direction,can_id,request_hex," +
-            "response_hex,service,pid,parameter,raw_payload,decoded_value,unit,status,error"
+            "response_hex,service,pid,parameter,raw_payload,decoded_value,unit,status,error,altitude_m"
 
-    /** altitude_m appended last (owner 2026-09-15) so existing column order stays stable. */
+    /**
+     * altitude_m appended last (owner 2026-09-15) so existing column order stays stable;
+     * `fuel_level_pct` appended after it (owner 2026-09-22: "Fuel percentage at the start of
+     * trip & end of trip is also not available on trip logs") for the same reason.
+     */
     const val SAMPLES_HEADER =
         "timestamp_utc,RPM,speed_kmh,engine_load_pct,MAP_kPa,throttle_pct,accelerator_pct," +
             "coolant_C,IAT_C,ambient_C,fuel_rate_L_h,engine_torque_pct,voltage_V," +
-            "fuel_pressure_raw,boost_pressure_raw,altitude_m"
+            "fuel_pressure_raw,boost_pressure_raw,altitude_m,fuel_level_pct"
 
     /**
      * One transaction row, WITHOUT the trailing newline. Used by both the batch export and the
@@ -49,7 +65,11 @@ object CsvExporter {
             escapeCsv(decodedValStr),
             escapeCsv(tx.unit),
             escapeCsv(tx.responseStatus.name),
-            escapeCsv(tx.errorMessage ?: "")
+            escapeCsv(tx.errorMessage ?: ""),
+            // Last column, so a file written before it exists still reads back (see
+            // TRANSACTIONS_HEADER). Blank = no accuracy-gated GPS fix carried altitude at this
+            // instant; never 0.0, which would read as sea level.
+            tx.altitudeM?.let { String.format(Locale.US, "%.1f", it) } ?: ""
         ).joinToString(",")
     }
 
@@ -71,14 +91,17 @@ object CsvExporter {
         s.voltageV?.let { String.format(Locale.US, "%.3f", it) } ?: "",
         escapeCsv(s.fuelPressureRaw ?: ""),
         escapeCsv(s.boostPressureRaw ?: ""),
-        s.altitudeM?.let { String.format(Locale.US, "%.1f", it) } ?: ""
+        s.altitudeM?.let { String.format(Locale.US, "%.1f", it) } ?: "",
+        // Tank level (PID 012F) at this sample: what makes the trip's start/end fuel percentage
+        // reconstructible from the log files alone, not only from the summary (owner 2026-09-22).
+        s.fuelLevelPct?.let { String.format(Locale.US, "%.1f", it) } ?: ""
     ).joinToString(",")
 
     /**
      * Exports raw transaction records to CSV format.
-     * Columns:
-     * session_id, timestamp_utc, timestamp_monotonic_ms, direction, can_id, request_hex, response_hex,
-     * service, pid, parameter, raw_payload, decoded_value, unit, status, error
+     * Columns: [TRANSACTIONS_HEADER] - session_id, timestamp_utc, timestamp_monotonic_ms,
+     * direction, can_id, request_hex, response_hex, service, pid, parameter, raw_payload,
+     * decoded_value, unit, status, error, altitude_m
      */
     fun exportTransactionsToCsv(
         file: File,
@@ -96,9 +119,10 @@ object CsvExporter {
 
     /**
      * Exports synchronized telemetry samples to CSV format.
-     * Columns:
-     * timestamp_utc, RPM, speed_kmh, engine_load_pct, MAP_kPa, throttle_pct, accelerator_pct,
-     * coolant_C, IAT_C, ambient_C, fuel_rate_L_h, engine_torque_pct, voltage_V, fuel_pressure_raw, boost_pressure_raw
+     * Columns: [SAMPLES_HEADER] - timestamp_utc, RPM, speed_kmh, engine_load_pct, MAP_kPa,
+     * throttle_pct, accelerator_pct, coolant_C, IAT_C, ambient_C, fuel_rate_L_h,
+     * engine_torque_pct, voltage_V, fuel_pressure_raw, boost_pressure_raw, altitude_m,
+     * fuel_level_pct
      */
     fun exportSynchronizedSamplesToCsv(
         file: File,
@@ -166,7 +190,11 @@ object CsvExporter {
                     decodedValueDisplay = valueStr,
                     unit = p.getOrNull(12).orEmpty(),
                     responseStatus = status,
-                    errorMessage = p.getOrNull(14)?.ifBlank { null }
+                    errorMessage = p.getOrNull(14)?.ifBlank { null },
+                    // Column 16, added 2026-09-22: the GPS altitude this row was stamped with.
+                    // A file written before the column existed simply has no 16th cell and reads
+                    // back null - the honest blank it always was, never 0.0.
+                    altitudeM = p.getOrNull(15)?.toDoubleOrNull()
                 )
             )
         }
@@ -208,7 +236,11 @@ object CsvExporter {
                     voltageV = p[12].toDoubleOrNull(),
                     fuelPressureRaw = p[13].ifBlank { null },
                     boostPressureRaw = p[14].ifBlank { null },
-                    altitudeM = p.getOrNull(15)?.toDoubleOrNull()
+                    altitudeM = p.getOrNull(15)?.toDoubleOrNull(),
+                    // Column 17, added 2026-09-22 (owner: "Fuel percentage at the start of trip &
+                    // end of trip is also not available on trip logs"). Absent in every older file,
+                    // so it reads back null and the trip reports an honest blank.
+                    fuelLevelPct = p.getOrNull(16)?.toDoubleOrNull()
                 )
             )
         }
