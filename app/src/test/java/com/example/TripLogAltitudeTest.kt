@@ -108,10 +108,18 @@ class TripLogAltitudeTest {
         CsvExporter.exportSynchronizedSamplesToCsv(file, samples)
         val lines = file.readLines()
 
-        assertTrue("altitude_m must be the last column", lines[0].endsWith(",altitude_m"))
+        // 2026-09-22: fuel_level_pct was appended AFTER altitude_m (owner: "Fuel percentage at the
+        // start of trip & end of trip is also not available on trip logs"), so altitude_m is now
+        // second-to-last. Everything before it keeps its order, which is what older readers and
+        // older backups rely on; the two new cells are trailing and blank-tolerant.
+        assertTrue("fuel_level_pct must be the last column", lines[0].endsWith(",fuel_level_pct"))
+        assertTrue("altitude_m must sit directly before it", lines[0].contains(",altitude_m,fuel_level_pct"))
         assertTrue("existing column order must stay stable", lines[0].startsWith("timestamp_utc,RPM,speed_kmh,"))
-        assertTrue("measured altitude is written", lines[1].endsWith(",511.2"))
-        assertTrue("absent altitude stays an empty cell, not 0.0", lines[2].endsWith(","))
+        val measured = lines[1].split(",")
+        val absent = lines[2].split(",")
+        assertEquals("measured altitude is written", "511.2", measured[measured.size - 2])
+        assertEquals("no tank reading on these rows: blank fuel cell", "", measured[measured.size - 1])
+        assertEquals("absent altitude stays an empty cell, not 0.0", "", absent[absent.size - 2])
         assertEquals(3, lines.size)
     }
 

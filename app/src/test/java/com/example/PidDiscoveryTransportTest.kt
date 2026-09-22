@@ -11,6 +11,7 @@ import com.example.ui.viewmodel.MainViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -101,7 +102,11 @@ class PidDiscoveryTransportTest {
             service.supportedPidsCount.value > 0
         )
         sim.disconnect()
-        scope.coroutineContext[kotlinx.coroutines.Job]?.cancel()
+        // JUnit4 validates that a @Test method returns void: a runBlocking block whose last
+        // expression is a Job (or anything else non-Unit) makes the WHOLE class unrunnable -
+        // CI reported it as initializationError "should be void" and the failing suite held
+        // the APK gate shut (owner 2026-09-22: "why apk file is not generated").
+        scope.cancel()
     }
 
     // ── 2. which socket is "the" socket ───────────────────────────────────────────────
