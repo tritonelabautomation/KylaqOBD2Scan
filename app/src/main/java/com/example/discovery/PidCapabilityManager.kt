@@ -81,8 +81,15 @@ class PidCapabilityManager(
      * them, via the existing unresolved-poll path). Learned state always wins: the seed
      * only applies where NO entry exists yet - a stored NOT_SUPPORTED is respected.
      */
+    /**
+     * Bootstrap seed (owner screenshot 2026-09-16, \"reference 178 Nm\" + owner 2026-09-23
+     * full-up 38.54L not auto-detected): 0162/0163/0164 reference torque + 012F fuel level,
+     * 01A6 odo, 010D speed are SLOW-tier behind isLiveEligible and would NEVER be polled
+     * before validation. Seed them LIVE_ELIGIBLE on 7E8 so first poll validates immediately.
+     * Learned state wins: seed only where no entry exists.
+     */
     private fun seedBootstrapEligibility() {
-        for (pid in listOf("63", "64")) {
+        for (pid in listOf("63", "64", "2F", "A6", "0D")) {
             if (capabilityMap[pid] != null) continue
             capabilityMap[pid] = CapabilityStatus.LIVE_ELIGIBLE
             capabilityMap["01$pid"] = CapabilityStatus.LIVE_ELIGIBLE

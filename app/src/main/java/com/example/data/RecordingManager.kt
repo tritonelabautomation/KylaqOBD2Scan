@@ -757,7 +757,8 @@ class RecordingManager(
                     listOf(
                         com.example.analysis.RefuelEventDetector.PID_LEVEL,
                         com.example.analysis.RefuelEventDetector.PID_SPEED,
-                        com.example.analysis.RefuelEventDetector.PID_ODO
+                        com.example.analysis.RefuelEventDetector.PID_ODO,
+                        com.example.analysis.RefuelEventDetector.PID_RPM
                     )
                 )
                 if (rows.isEmpty()) continue
@@ -789,6 +790,26 @@ class RecordingManager(
         }
         scan.lastLevel?.let { settings.setLastLevelStamp(it.first, it.second, it.third) }
         for (ev in events) insertEventCarryCalibration(ev, capacity)
+        // Owner 2026-09-23 full-up 38.54L: within-session rise (not between-sessions) must also
+        // raise the receipt prompt on finalize. Previously only cross-session via maybeFlagRestartRefuel.
+        runCatching {
+            val newest = events.maxByOrNull { it.windowEndMs } ?: return@runCatching
+            val now = System.currentTimeMillis()
+            // Recent = within 7 days, not already calibrated, not dismissed.
+            if (now - newest.windowEndMs > 7L * 24 * 60 * 60 * 1000) return@runCatching
+            if (tripRepository.calibratedPumpFor(newest.windowEndMs) != null) return@runCatching
+            if (settings.restartRefuelDismissedMs() == newest.windowEndMs) return@runCatching
+            // Only raise if no prompt currently shown.
+            if (_restartRefuel.value != null) return@runCatching
+            _restartRefuel.value = RestartRefuel(
+                idMs = newest.windowEndMs,
+                tsStartMs = newest.windowStartMs,
+                levelBeforePct = newest.levelBeforePct,
+                levelAfterPct = newest.levelAfterPct,
+                estLitres = newest.risePct / 100.0 * capacity,
+                odoKm = newest.odoKm
+            )
+        }
     }
 
     private suspend fun relinkCarpoolEntries() {

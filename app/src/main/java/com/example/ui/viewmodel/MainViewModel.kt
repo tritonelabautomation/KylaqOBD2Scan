@@ -60,6 +60,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val bluetoothManager = AppContainer.bluetoothManager
     val obdScheduler = AppContainer.obdScheduler
 
+    // Timer + guards must be BEFORE any init that touches them (NPE crash 2026-09-23 09:26 IST at line 350)
+    private val _recordingDurationSeconds = MutableStateFlow(0L)
+    val recordingDurationSeconds: StateFlow<Long> = _recordingDurationSeconds.asStateFlow()
+    private var recordingTimerJob: Job? = null
+    private var insightsPersistedForRecording = false
+    @Volatile private var stopInitiatedHere = false
+
     // ── Background location (owner field report 2026-09-18: "Altitude") ────────────────────
     //
     // A 1 h 33 min recovered drive showed `-- m` altitude and an empty Altitude trend because
@@ -431,19 +438,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     var activeTransport: ElmTransport? = null
         private set
-    private var recordingTimerJob: Job? = null
-
-    /** One-persist-per-recording guard for coast/ride/tank insight logs (dup-ride fix 2026-09-15). */
-    private var insightsPersistedForRecording = false
-
-    /**
-     * Set the moment THIS ViewModel begins stopping a recording, so the external-stop watcher below
-     * does not run the same aftermath a second time. `stopRecording()` launches, so the flag has to
-     * be raised before the launch rather than inside it - otherwise the watcher can see
-     * `isRecording` fall while the flag is still false and persist the ride X-ray twice, which is
-     * the 2026-09-15 duplicate-ride bug wearing a different hat.
-     */
-    @Volatile private var stopInitiatedHere = false
 
     val connectionState: StateFlow<ConnectionState> = bluetoothManager.connectionState
     val connectedDeviceName: StateFlow<String?> = bluetoothManager.connectedDeviceName
@@ -704,9 +698,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     val canHeader: StateFlow<String> = settingsRepository.canHeader
     val sppUuid: StateFlow<String> = settingsRepository.sppUuid
-
-    private val _recordingDurationSeconds = MutableStateFlow(0L)
-    val recordingDurationSeconds: StateFlow<Long> = _recordingDurationSeconds.asStateFlow()
 
     private val _manualCommandOutput = MutableStateFlow<String?>(null)
     val manualCommandOutput: StateFlow<String?> = _manualCommandOutput.asStateFlow()
@@ -1016,7 +1007,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun performDashboardBootstrap(transport: ElmTransport) {
-        val pidsToTest = listOf("010C", "010D", "0105", "010B", "0111", "010F", "0142", "015E", "019D")
+        // 012F + 01A6 added 2026-09-23: first-trip fuel full-up (38.54L) missed because
+        // ObdScheduler gated 012F as SLOW-tier UNKNOWN until 0120 bitmap resolved; bootstrap
+        // validates them on connect so fuel + odo are LIVE_ELIGIBLE immediately.
+        val pidsToTest = listOf("010C", "010D", "0105", "010B", "0111", "010F", "0142", "015E", "019D", "012F", "01A6")
         for (pid in pidsToTest) {
             val resp = transport.sendCommand(pid, 1000L)
             val expectedService = "41"

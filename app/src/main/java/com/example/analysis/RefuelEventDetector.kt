@@ -49,6 +49,15 @@ class RefuelEventDetector(private val minRisePct: Double = DEFAULT_MIN_RISE_PCT)
                 stationary = nowStationary
                 closed
             }
+            PID_RPM -> {
+                // Engine-off gap at pump: no 010D samples, but RPM=0 proves stationary.
+                // Owner 2026-09-23 receipt 38.54L: engine off 08:49-08:53, only RPM 0 then gap.
+                val nowStationary = v < STOP_RPM
+                val closed = if (stationary && !nowStationary) closeWindow(s.tsMs) else null
+                if (nowStationary && !stationary) openWindow(s.tsMs)
+                stationary = nowStationary
+                closed
+            }
             PID_LEVEL -> {
                 lastLevelPct = v
                 if (stationary) {
@@ -101,10 +110,13 @@ class RefuelEventDetector(private val minRisePct: Double = DEFAULT_MIN_RISE_PCT)
         const val PID_SPEED = "010D"
         const val PID_LEVEL = "012F"
         const val PID_ODO = "01A6"
+        const val PID_RPM = "010C"
 
         /** ~2 L in the Kylaq's 50 L tank; measured driving slosh on this car stays under 2 pts. */
         const val DEFAULT_MIN_RISE_PCT = 4.0
         const val STOP_KMH = 1.0
+        /** RPM below this = engine off / cranking = stationary for refuel window (owner 2026-09-23 38.54L: gap 08:49-08:53 with RPM 0 and no 010D samples). */
+        const val STOP_RPM = 500.0
 
         /**
          * The owner's 2026-09-17 refuel happened BETWEEN sessions: engine off at the pump ends
