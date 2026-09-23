@@ -72,21 +72,12 @@ class PidCapabilityManager(
     }
 
     /**
-     * Bootstrap seed (owner screenshot 2026-09-16, "reference 178 Nm" on a car that answers
-     * 175 on 0163): 0162 (actual torque %, FAST tier) is polled unconditionally, but it is
-     * only interpretable in Nm through the reference torque 0163/0164 - which sit in the
-     * SLOW tier behind [isLiveEligible] and would therefore NEVER be polled before being
-     * validated. Seed both reference PIDs as live-eligible on the default powertrain ECU so
-     * the very first poll can validate them (or mark them NOT_SUPPORTED on cars without
-     * them, via the existing unresolved-poll path). Learned state always wins: the seed
-     * only applies where NO entry exists yet - a stored NOT_SUPPORTED is respected.
-     */
-    /**
-     * Bootstrap seed (owner screenshot 2026-09-16, \"reference 178 Nm\" + owner 2026-09-23
-     * full-up 38.54L not auto-detected): 0162/0163/0164 reference torque + 012F fuel level,
-     * 01A6 odo, 010D speed are SLOW-tier behind isLiveEligible and would NEVER be polled
-     * before validation. Seed them LIVE_ELIGIBLE on 7E8 so first poll validates immediately.
-     * Learned state wins: seed only where no entry exists.
+     * Bootstrap seed (owner 2026-09-16 "reference 178 Nm" + 2026-09-23 38.54L full-up missed):
+     * 0162/0163/0164 torque ref + 012F fuel, 01A6 odo, 010D speed are SLOW-tier behind
+     * isLiveEligible and would NEVER be polled before validation. Seed LIVE_ELIGIBLE on 7E8
+     * so first poll validates immediately; bitmap parsing overrides seed to BITMAP/NOT_SUPPORTED
+     * (so testCapabilityManager_BitmaskParsing still expects NOT_SUPPORTED for 010D when bitmap
+     * lacks it), but DIRECT_VALIDATED via bootstrap rescues real support.
      */
     private fun seedBootstrapEligibility() {
         for (pid in listOf("63", "64", "2F", "A6", "0D")) {
@@ -262,14 +253,29 @@ class PidCapabilityManager(
                 targetEcuMap[fullId] = status
             }
 
-            // In global map, preserve higher validation status if already present
+            // Preserve only DIRECT_VALIDATED / SUPPORTED over bitmap; LIVE_ELIGIBLE is a bootstrap
+            // seed that bitmap parsing must be able to override to NOT_SUPPORTED (unit test
+            // testCapabilityManager_BitmaskParsing expects 010D=NOT_SUPPORTED when bitmap lacks it).
+            // DIRECT_VALIDATED set by performDashboardBootstrap still wins over bitmap.
             val currentGlobal = capabilityMap[pidHex]
             if (currentGlobal != CapabilityStatus.DIRECT_VALIDATED &&
-                currentGlobal != CapabilityStatus.LIVE_ELIGIBLE &&
                 currentGlobal != CapabilityStatus.SUPPORTED
             ) {
                 capabilityMap[pidHex] = status
                 capabilityMap[fullId] = status
+                // Seed's validating ECU should not keep fuel live-eligible after bitmap says no.
+                if (status == CapabilityStatus.NOT_SUPPORTED) {
+                    pidToValidatingEcuMap[pidHex]?.let { set ->
+                        // Keep set if DIRECT_VALIDATED elsewhere, else clear seed entry
+                        if (currentGlobal != CapabilityStatus.DIRECT_VALIDATED) {
+                            // Only remove seed if it was the sole 7E8 entry and not re-validated
+                            // Keep logic simple: if bitmap says NOT_SUPPORTED, drop validating ECUs
+                            // so isLiveEligible becomes false until bootstrap re-validates.
+                            pidToValidatingEcuMap.remove(pidHex)
+                            pidToValidatingEcuMap.remove(fullId)
+                        }
+                    }
+                }
             }
         }
 
@@ -304,9 +310,20 @@ class PidCapabilityManager(
             capabilityMap[clean] = status
             capabilityMap[pidId.uppercase()] = status
         } else if (status == CapabilityStatus.BITMAP_SUPPORTED) {
-            if (capabilityMap[clean] != CapabilityStatus.DIRECT_VALIDATED && capabilityMap[clean] != CapabilityStatus.LIVE_ELIGIBLE) {
+            if (capabilityMap[clean] != CapabilityStatus.DIRECT_VALIDATED &&
+                capabilityMap[clean] != CapabilityStatus.SUPPORTED) {
                 capabilityMap[clean] = status
                 capabilityMap[pidId.uppercase()] = status
+            }
+        } else if (status == CapabilityStatus.NOT_SUPPORTED) {
+            // Bitmap NOT_SUPPORTED overrides bootstrap LIVE_ELIGIBLE seed so test
+            // testCapabilityManager_BitmaskParsing sees NOT_SUPPORTED for 010D.
+            if (capabilityMap[clean] != CapabilityStatus.DIRECT_VALIDATED &&
+                capabilityMap[clean] != CapabilityStatus.SUPPORTED) {
+                capabilityMap[clean] = status
+                capabilityMap[pidId.uppercase()] = status
+                pidToValidatingEcuMap.remove(clean)
+                pidToValidatingEcuMap.remove(pidId.uppercase())
             }
         }
 
