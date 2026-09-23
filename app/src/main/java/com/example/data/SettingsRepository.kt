@@ -582,4 +582,15 @@ class SettingsRepository(private val context: Context) {
             if (uri == null) remove("drive_tree_uri") else putString("drive_tree_uri", uri)
         }.apply()
     }
+
+    // ── Automatic crash → GitHub (owner 2026-09-23) ──────────────────────────
+    private val _crashReportingEnabled = MutableStateFlow(prefs.getBoolean("crash_reporting_enabled", true))
+    val crashReportingEnabled: StateFlow<Boolean> = _crashReportingEnabled.asStateFlow()
+
+    fun setCrashReportingEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean("crash_reporting_enabled", enabled).apply()
+        _crashReportingEnabled.value = enabled
+    }
+
+    fun crashReportingEnabledSync(): Boolean = prefs.getBoolean("crash_reporting_enabled", true)
 }

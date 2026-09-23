@@ -66,6 +66,10 @@ val computedVersionName = if (githubRunNumber > 0) "1.0.$githubRunNumber" else "
 val updateRepoSlug = System.getenv("GITHUB_REPOSITORY") ?: "tritonelabautomation/KylaqOBD2Scan"
 val updateFeedUrl = "https://github.com/$updateRepoSlug/releases/latest/download/latest.json"
 val updateApkUrl = "https://github.com/$updateRepoSlug/releases/latest/download/KylaqOBD2Scan.apk"
+// Crash auto-report token: optional fine-grained PAT with issues:write + contents:write for crash-auto label.
+// Stored as secret CRASH_REPORT_TOKEN in GitHub Actions and as .env CRASH_REPORT_TOKEN locally.
+// Empty = no GitHub auto-push, crash still saved to crash_logs + Drive backup.
+val crashReportToken = System.getenv("CRASH_REPORT_TOKEN") ?: ""
 
 plugins {
   alias(libs.plugins.android.application)
@@ -74,6 +78,7 @@ plugins {
   alias(libs.plugins.roborazzi)
   alias(libs.plugins.secrets)
   alias(libs.plugins.google.services)
+  id("com.google.firebase.crashlytics") version "3.0.3"
 }
 
 // Unit-test hygiene: a hung test must fail the job in minutes, not zombie-run for hours,
@@ -121,6 +126,9 @@ android {
     // Where the in-app updater looks for the newest build (see update/AppUpdateFeed.kt).
     buildConfigField("String", "UPDATE_FEED_URL", "\"${updateFeedUrl}\"")
     buildConfigField("String", "UPDATE_APK_URL", "\"${updateApkUrl}\"")
+    // Auto crash → GitHub Issues (optional, empty = disabled, still local + Drive)
+    buildConfigField("String", "CRASH_REPORT_TOKEN", "\"${crashReportToken}\"")
+    buildConfigField("String", "CRASH_REPORT_REPO", "\"${updateRepoSlug}\"")
   }
 
   signingConfigs {
@@ -212,6 +220,8 @@ dependencies {
   implementation(libs.firebase.ai)
   implementation(libs.firebase.appcheck.recaptcha)
   implementation(libs.firebase.appcheck.debug)
+  implementation("com.google.firebase:firebase-crashlytics:19.4.4")
+  implementation("com.google.firebase:firebase-analytics:22.4.0")
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.kotlinx.coroutines.core)
   implementation(libs.logging.interceptor)
