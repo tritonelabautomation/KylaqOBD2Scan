@@ -85,6 +85,7 @@ object CsvExporter {
         metadata: RecordingMetadata,
         transactions: List<TransactionRecord>
     ) {
+        file.parentFile?.mkdirs()
         FileWriter(file).use { writer ->
             // Header row
             writer.append(TRANSACTIONS_HEADER).append("\n")
@@ -104,6 +105,7 @@ object CsvExporter {
         file: File,
         samples: List<SynchronizedSample>
     ) {
+        file.parentFile?.mkdirs()
         FileWriter(file).use { writer ->
             // Header row
             // altitude_m appended last (owner 2026-09-15): existing column order stays stable

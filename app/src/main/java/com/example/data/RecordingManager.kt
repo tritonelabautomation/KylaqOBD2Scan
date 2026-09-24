@@ -578,9 +578,12 @@ class RecordingManager(
         val sampleCsvFile = File(sessionDir, "${sessionId}_samples.csv")
         val jsonFile = File(sessionDir, "$sessionId.json")
 
-        CsvExporter.exportTransactionsToCsv(txCsvFile, metadataForFiles, txList)
-        CsvExporter.exportSynchronizedSamplesToCsv(sampleCsvFile, sampleList)
-        JsonExporter.exportToJson(jsonFile, metadataForFiles, txList)
+        runCatching { CsvExporter.exportTransactionsToCsv(txCsvFile, metadataForFiles, txList) }
+            .onFailure { android.util.Log.e("RecordingManager", "exportTransactionsToCsv failed for $sessionId", it) }
+        runCatching { CsvExporter.exportSynchronizedSamplesToCsv(sampleCsvFile, sampleList) }
+            .onFailure { android.util.Log.e("RecordingManager", "exportSynchronizedSamplesToCsv failed for $sessionId", it) }
+        runCatching { JsonExporter.exportToJson(jsonFile, metadataForFiles, txList) }
+            .onFailure { android.util.Log.e("RecordingManager", "exportToJson failed for $sessionId", it) }
 
         // Copy the raw log into the session folder so the bundle is self-contained. The original
         // stays in files/raw_logs: findUnsavedRawLogs() filters by saved session id, so it will no

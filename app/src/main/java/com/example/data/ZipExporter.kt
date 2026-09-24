@@ -11,6 +11,7 @@ object ZipExporter {
         destZipFile: File,
         filesToInclude: List<File>
     ): File {
+        destZipFile.parentFile?.mkdirs()
         if (destZipFile.exists()) {
             destZipFile.delete()
         }
