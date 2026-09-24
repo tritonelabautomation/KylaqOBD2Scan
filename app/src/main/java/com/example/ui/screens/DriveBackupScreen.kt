@@ -7,6 +7,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -259,7 +260,7 @@ fun DriveBackupScreen(
             if (backups.isEmpty() && treeUri != null) {
                 item { Text("No backup ZIPs yet.", color = TextSecondaryDark, fontSize = 11.sp) }
             }
-            items(backups, key = { it.name }) { file ->
+            itemsIndexed(backups, key = { index, file -> "${file.uri}_${file.name}_$index" }) { _, file ->
                 Card(
                     shape = RoundedCornerShape(12.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)

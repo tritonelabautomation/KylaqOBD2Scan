@@ -3,6 +3,7 @@ package com.example.ui.screens
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -103,7 +104,7 @@ fun RemindersScreen(
                     color = WarningRed, fontSize = 11.sp, fontWeight = FontWeight.Bold
                 )
             }
-            items(overdueServices, key = { "svc-${it.item.id}" }) { state ->
+            itemsIndexed(overdueServices, key = { index, it -> "svc-${it.item.id}_$index" }) { _, state ->
                 AlertCard(
                     title = state.item.label,
                     subtitle = when (state.status) {
@@ -114,7 +115,7 @@ fun RemindersScreen(
                     actions = null
                 )
             }
-            items(expiringDocs, key = { "doc-${it.first.idMs}" }) { (doc, remainingMs) ->
+            itemsIndexed(expiringDocs, key = { index, it -> "doc-${it.first.idMs}_$index" }) { _, (doc, remainingMs) ->
                 AlertCard(
                     title = "${doc.type} · ${doc.title}",
                     subtitle = if (remainingMs < 0) "Expired ${-remainingMs / day} d ago" else "Expires in ${remainingMs / day} d",
@@ -122,7 +123,7 @@ fun RemindersScreen(
                     actions = null
                 )
             }
-            items(customDue, key = { "rem-${it.idMs}" }) { rem ->
+            itemsIndexed(customDue, key = { index, rem -> "rem-${rem.idMs}_$index" }) { _, rem ->
                 AlertCard(
                     title = rem.title,
                     subtitle = "Due ${Date(rem.dueMs)}" + (rem.note.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""),
@@ -143,7 +144,7 @@ fun RemindersScreen(
             item {
                 Text("UPCOMING (${upcoming.size})", color = TextSecondaryDark, fontSize = 11.sp, fontWeight = FontWeight.Bold)
             }
-            items(upcoming, key = { "up-${it.idMs}" }) { rem ->
+            itemsIndexed(upcoming, key = { index, rem -> "up-${rem.idMs}_$index" }) { _, rem ->
                 AlertCard(
                     title = rem.title,
                     subtitle = "Due ${Date(rem.dueMs)} · ${rem.repeat.name.lowercase()}",

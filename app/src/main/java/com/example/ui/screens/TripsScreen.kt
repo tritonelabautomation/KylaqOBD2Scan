@@ -3,6 +3,7 @@ package com.example.ui.screens
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -219,7 +220,7 @@ fun TripsScreen(
             if (upcoming.isEmpty()) {
                 item { Text("No planned trips yet - tap + to plan one.", color = TextSecondaryDark, fontSize = 12.sp) }
             }
-            items(upcoming, key = { it.idMs }) { plan ->
+            itemsIndexed(upcoming, key = { index, plan -> "${plan.idMs}_$index" }) { _, plan ->
                 TripCard(
                     plan = plan, cur = cur, stats = stats,
                     onEdit = { editTarget = plan },
@@ -272,7 +273,7 @@ fun TripsScreen(
                 item {
                     Text("COMPLETED (${done.size})", color = TextSecondaryDark, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
-                items(done, key = { it.idMs }) { plan ->
+                itemsIndexed(done, key = { index, plan -> "${plan.idMs}_$index" }) { _, plan ->
                     TripCard(
                         plan = plan, cur = cur, stats = stats,
                         onEdit = { editTarget = plan },

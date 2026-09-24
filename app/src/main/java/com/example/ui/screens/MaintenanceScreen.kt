@@ -3,6 +3,7 @@ package com.example.ui.screens
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -237,7 +238,7 @@ fun MaintenanceScreen(
                 item {
                     Text("Recent services", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 }
-                items(logs.take(8), key = { "${it.itemId}_${it.dateMs}" }) { l ->
+                itemsIndexed(logs.take(8), key = { index, l -> "${l.id}_${l.itemId}_${l.dateMs}_$index" }) { _, l ->
                     val label = MaintenanceCatalog.KYLAQ_ITEMS.firstOrNull { it.id == l.itemId }?.label ?: l.itemId
                     Card(
                         shape = RoundedCornerShape(10.dp),
