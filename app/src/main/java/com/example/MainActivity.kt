@@ -703,6 +703,8 @@ fun MainApp(viewModel: MainViewModel) {
                     }
                     items.sortedByDescending { it.first }.take(6).map { it.second }
                 }
+                val allDtcs by viewModel.recordingManager.tripRepository.dtcRecordsFlow.collectAsState(initial = emptyList())
+                val currentOdoKm = viewModel.maintenanceRepository.currentOdometerKm()
                 com.example.ui.screens.VehicleProfileScreen(
                     vehicle = vehicle,
                     catalogRepository = viewModel.catalogRepository,
@@ -711,7 +713,9 @@ fun MainApp(viewModel: MainViewModel) {
                     onNavigateToPidScanner = { navController.navigate(Screen.PidScanner.route) },
                     ownership = ownershipRows,
                     upcoming = upcomingRows,
-                    recent = recentRows
+                    recent = recentRows,
+                    dtcRecords = allDtcs,
+                    currentOdoKm = currentOdoKm
                 )
             }
             
