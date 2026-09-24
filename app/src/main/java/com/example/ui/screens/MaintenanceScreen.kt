@@ -238,7 +238,7 @@ fun MaintenanceScreen(
                 item {
                     Text("Recent services", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 }
-                itemsIndexed(logs.take(8), key = { index, l -> "${l.id}_${l.itemId}_${l.dateMs}_$index" }) { _, l ->
+                itemsIndexed(logs.take(8), key = { index, l -> "${l.itemId}_${l.dateMs}_$index" }) { _, l ->
                     val label = MaintenanceCatalog.KYLAQ_ITEMS.firstOrNull { it.id == l.itemId }?.label ?: l.itemId
                     Card(
                         shape = RoundedCornerShape(10.dp),

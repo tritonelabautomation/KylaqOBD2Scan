@@ -482,6 +482,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     init {
+        // Auto-seed default Škoda Kylaq profile so "My Garage" is ready on first launch
+        viewModelScope.launch {
+            val vehicles = recordingManager.tripRepository.allVehiclesFlow.firstOrNull() ?: emptyList()
+            if (vehicles.isEmpty()) {
+                val vin = settingsRepository.savedVin.value?.takeIf { it.isNotBlank() && it != "VIN Unavailable" } ?: "MEXKPEPC2TG028855"
+                recordingManager.tripRepository.insertVehicle(
+                    com.example.data.db.entities.VehicleEntity(
+                        id = "kylaq-default",
+                        make = "Škoda",
+                        model = "Kylaq",
+                        year = "2025",
+                        vin = vin,
+                        defaultProtocol = "ISO 15765-4 (CAN 11/500)",
+                        nickname = "Kylaq 1.0 TSI AT",
+                        catalogEngineId = "1.0 TSI EA211 (85 kW / 115 PS)",
+                        catalogTransmissionId = "6-speed Torque Converter (AQ250)",
+                        notes = "Signature+ / AT (EA211 1.0 TSI)"
+                    )
+                )
+            }
+        }
+    }
+
+    init {
         // Replay trips finalized before the refuel detector shipped, once, on first launch
         // (owner 2026-09-19: "does the current logic detect the fuel refill automatically?").
         viewModelScope.launch { recordingManager.backfillRefuelEvents() }
