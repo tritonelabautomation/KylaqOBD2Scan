@@ -76,21 +76,21 @@ object CrashReporter {
         }
     }
 
-    suspend fun uploadPendingCrashes(context: Context) {
+    suspend fun uploadPendingCrashes(context: Context, force: Boolean = false) {
         // Respect opt-out (SettingsRepository default true)
         val enabled = context.getSharedPreferences("obd_research_prefs", Context.MODE_PRIVATE)
             .getBoolean("crash_reporting_enabled", true)
-        if (!enabled) return
+        if (!enabled && !force) return
 
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val uploaded = prefs.getStringSet(KEY_UPLOADED, emptySet())?.toMutableSet() ?: mutableSetOf()
         val files = CrashJournal.crashFiles(context)
         if (files.isEmpty()) return
 
-        // Throttle: at most once per 5 minutes to avoid spamming GitHub on boot loop
+        // Throttle: at most once per 5 minutes to avoid spamming GitHub on boot loop (unless forced)
         val now = System.currentTimeMillis()
         val last = prefs.getLong(KEY_LAST_UPLOAD_MS, 0L)
-        if (now - last < 5 * 60 * 1000L && files.size == uploaded.size) {
+        if (!force && (now - last < 5 * 60 * 1000L && files.size == uploaded.size)) {
             // All already uploaded and recently checked
             return
         }

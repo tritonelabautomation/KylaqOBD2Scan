@@ -264,20 +264,35 @@ fun RecordingsScreen(
                 color = ElectricAmber.copy(alpha = 0.14f)
             ) {
                 Column(modifier = Modifier.padding(12.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            Icons.Default.SettingsBackupRestore,
-                            contentDescription = null,
-                            tint = ElectricAmber,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "${unsavedRawLogs.size} unsaved log session(s) found on this phone",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            Icon(
+                                Icons.Default.SettingsBackupRestore,
+                                contentDescription = null,
+                                tint = ElectricAmber,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "${unsavedRawLogs.size} unsaved log session(s) found",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        Button(
+                            onClick = { viewModel.forceRecoverAllNow() },
+                            modifier = Modifier.height(28.dp),
+                            shape = RoundedCornerShape(6.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = ElectricAmber),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                        ) {
+                            Text("Recover All", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                        }
                     }
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(

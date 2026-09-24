@@ -688,13 +688,13 @@ fun SettingsScreen(
                     }
 
                     OutlinedButton(
-                        onClick = { viewModel.runAutoRecovery() },
+                        onClick = { viewModel.forceRecoverAllNow() },
                         enabled = !isAutoRecovering,
                         modifier = Modifier.fillMaxWidth().testTag("btn_recover_now")
                     ) {
                         Icon(Icons.Default.SettingsBackupRestore, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text(if (isAutoRecovering) "Checking for killed sessions..." else "Recover killed sessions now")
+                        Text(if (isAutoRecovering) "Recovering sessions..." else "Recover killed sessions now (Immediate)")
                     }
 
                     autoRecoveryNotice?.let {
@@ -707,6 +707,76 @@ fun SettingsScreen(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                         }
+                    }
+                }
+            }
+
+            // ── Crash Auto-Reporting (owner 2026-09-23) ──────────────────────────────
+            val crashReportingEnabled by viewModel.settingsRepository.crashReportingEnabled.collectAsState()
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Default.BugReport,
+                            contentDescription = null,
+                            tint = WarningRed,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Crash Auto-Reporting",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Automatically upload stack traces to GitHub Issues and Crashlytics on next app launch so fixes can be released without manual intervention.",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = crashReportingEnabled,
+                            onCheckedChange = { viewModel.settingsRepository.setCrashReportingEnabled(it) }
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Crash logs location",
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = "files/crash_logs/",
+                            fontSize = 12.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = CyberCyan
+                        )
+                    }
+
+                    Button(
+                        onClick = {
+                            viewModel.viewModelScope.launch {
+                                com.example.crash.CrashReporter.uploadPendingCrashes(context, force = true)
+                                Toast.makeText(context, "Crash reporter upload pass triggered", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Icon(Icons.Default.Upload, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Upload Pending Crash Logs Now")
                     }
                 }
             }

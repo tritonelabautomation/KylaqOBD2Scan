@@ -593,4 +593,15 @@ class SettingsRepository(private val context: Context) {
     }
 
     fun crashReportingEnabledSync(): Boolean = prefs.getBoolean("crash_reporting_enabled", true)
+
+    // ── Persisted Vehicle VIN (owner 2026-09-24) ────────────────────────────
+    private val _savedVin = MutableStateFlow(prefs.getString("saved_vehicle_vin", null))
+    val savedVin: StateFlow<String?> = _savedVin.asStateFlow()
+
+    fun setSavedVin(vin: String?) {
+        if (!vin.isNullOrBlank() && !vin.contains("Unavailable", ignoreCase = true) && !vin.contains("Failed", ignoreCase = true) && !vin.contains("Ambiguous", ignoreCase = true)) {
+            prefs.edit().putString("saved_vehicle_vin", vin).apply()
+            _savedVin.value = vin
+        }
+    }
 }

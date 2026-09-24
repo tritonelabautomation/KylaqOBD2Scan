@@ -463,10 +463,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _adapterFirmware = MutableStateFlow<String?>(null)
     val adapterFirmware: StateFlow<String?> = _adapterFirmware.asStateFlow()
 
-    private val _vehicleVin = MutableStateFlow<String?>(null)
+    private val _vehicleVin = MutableStateFlow<String?>(settingsRepository.savedVin.value)
     val vehicleVin: StateFlow<String?> = _vehicleVin.asStateFlow()
     
-    private val _vinDecodeResult = MutableStateFlow<com.example.protocol.VinDecodeResult?>(null)
+    private val _vinDecodeResult = MutableStateFlow<com.example.protocol.VinDecodeResult?>(
+        settingsRepository.savedVin.value?.let { com.example.protocol.VinDecoder.decodeVin(it, catalogRepository) }
+    )
     val vinDecodeResult: StateFlow<com.example.protocol.VinDecodeResult?> = _vinDecodeResult.asStateFlow()
 
     private var lastVinAttemptMs = 0L
@@ -505,11 +507,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (!transport.isConnected) return
 
         viewModelScope.launch {
+            // Set header to 7E0 for Mode 09 query so Engine ECU 7E8 responds with VIN
+            transport.sendCommand("ATSH 7E0", 1000L)
             val resp = transport.sendCommand("0902", 3000L)
 
             if (resp.status != com.example.model.ResponseStatus.OK || resp.lines.isEmpty()) {
-                _vehicleVin.value = "VIN Unavailable"
-                _vinDecodeResult.value = null
+                val fallback = settingsRepository.savedVin.value
+                if (!fallback.isNullOrBlank()) {
+                    _vehicleVin.value = fallback
+                    _vinDecodeResult.value = com.example.protocol.VinDecoder.decodeVin(fallback, catalogRepository)
+                } else {
+                    _vehicleVin.value = "VIN Unavailable"
+                    _vinDecodeResult.value = null
+                }
                 return@launch
             }
 
@@ -542,21 +552,40 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 when (result) {
                     is com.example.protocol.VinSelectionResult.Success -> {
                         _vehicleVin.value = result.vin
+                        settingsRepository.setSavedVin(result.vin)
                         _vinDecodeResult.value = com.example.protocol.VinDecoder.decodeVin(result.vin, catalogRepository)
                     }
                     is com.example.protocol.VinSelectionResult.Ambiguous -> {
-                        _vehicleVin.value = "VIN Ambiguous"
-                        _vinDecodeResult.value = null
+                        val fallback = settingsRepository.savedVin.value
+                        if (!fallback.isNullOrBlank()) {
+                            _vehicleVin.value = fallback
+                            _vinDecodeResult.value = com.example.protocol.VinDecoder.decodeVin(fallback, catalogRepository)
+                        } else {
+                            _vehicleVin.value = "VIN Ambiguous"
+                            _vinDecodeResult.value = null
+                        }
                     }
                     is com.example.protocol.VinSelectionResult.Unavailable -> {
-                        _vehicleVin.value = "VIN Unavailable"
-                        _vinDecodeResult.value = null
+                        val fallback = settingsRepository.savedVin.value
+                        if (!fallback.isNullOrBlank()) {
+                            _vehicleVin.value = fallback
+                            _vinDecodeResult.value = com.example.protocol.VinDecoder.decodeVin(fallback, catalogRepository)
+                        } else {
+                            _vehicleVin.value = "VIN Unavailable"
+                            _vinDecodeResult.value = null
+                        }
                     }
                 }
 
             } catch (e: Exception) {
-                _vehicleVin.value = "Failed to parse VIN"
-                _vinDecodeResult.value = null
+                val fallback = settingsRepository.savedVin.value
+                if (!fallback.isNullOrBlank()) {
+                    _vehicleVin.value = fallback
+                    _vinDecodeResult.value = com.example.protocol.VinDecoder.decodeVin(fallback, catalogRepository)
+                } else {
+                    _vehicleVin.value = "Failed to parse VIN"
+                    _vinDecodeResult.value = null
+                }
             }
         }
     }
@@ -1532,13 +1561,42 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearAutoRecoveryNotice() { _autoRecoveryNotice.value = null }
 
+    fun forceRecoverAllNow() {
+        if (_isRecovering.value) return
+        viewModelScope.launch {
+            _isRecovering.value = true
+            try {
+                val summary = recordingManager.recoverUnfinishedSessions(skipFreshMs = 0L)
+                if (summary != null) {
+                    _autoRecoveryNotice.value = summary.notice()
+                    _recoveryNotice.value = summary.notice()
+                } else {
+                    _recoveryNotice.value = "No pending sessions found to recover."
+                }
+            } catch (e: Exception) {
+                _recoveryNotice.value = "Recovery error: ${e.message ?: e.javaClass.simpleName}"
+            } finally {
+                _isRecovering.value = false
+                refreshUnsavedRawLogs()
+                recordingManager.loadSavedRecordings()
+            }
+        }
+    }
+
     fun recoverRawLog(file: java.io.File) {
         if (_isRecovering.value) return
         viewModelScope.launch {
             _isRecovering.value = true
             try {
-                val outcome = recordingManager.recoverFromRawLog(file)
                 val sid = com.example.analysis.RawLogRecovery.sessionIdOf(file.name) ?: file.name
+                runCatching { recordingManager.recoverUnfinishedSessions(skipFreshMs = 0L) }
+                val alreadySaved = recordingManager.savedRecordings.value.any { it.metadata.sessionId == sid }
+                if (alreadySaved) {
+                    _recoveryNotice.value = "Recovered session $sid from crash journal. It is now saved in Trips & Recordings."
+                    return@launch
+                }
+
+                val outcome = recordingManager.recoverFromRawLog(file)
                 _recoveryNotice.value = when (outcome) {
                     is com.example.data.RecordingManager.RecoveryOutcome.Recovered ->
                         "Recovered session ${outcome.sessionId} - ${outcome.samples} OBD lines " +
