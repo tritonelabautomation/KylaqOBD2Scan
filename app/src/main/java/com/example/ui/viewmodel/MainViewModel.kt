@@ -466,12 +466,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _vehicleVin = MutableStateFlow<String?>(settingsRepository.savedVin.value)
     val vehicleVin: StateFlow<String?> = _vehicleVin.asStateFlow()
     
-    private val _vinDecodeResult = MutableStateFlow<com.example.protocol.VinDecodeResult?>(
-        settingsRepository.savedVin.value?.let { com.example.protocol.VinDecoder.decodeVin(it, catalogRepository) }
-    )
+    private val _vinDecodeResult = MutableStateFlow<com.example.protocol.VinDecodeResult?>(null)
     val vinDecodeResult: StateFlow<com.example.protocol.VinDecodeResult?> = _vinDecodeResult.asStateFlow()
 
     private var lastVinAttemptMs = 0L
+
+    init {
+        settingsRepository.savedVin.value?.let { saved ->
+            if (saved.isNotBlank()) {
+                viewModelScope.launch {
+                    _vinDecodeResult.value = com.example.protocol.VinDecoder.decodeVin(saved, catalogRepository)
+                }
+            }
+        }
+    }
 
     init {
         // Replay trips finalized before the refuel detector shipped, once, on first launch

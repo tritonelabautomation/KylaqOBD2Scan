@@ -766,7 +766,7 @@ fun SettingsScreen(
 
                     Button(
                         onClick = {
-                            viewModel.viewModelScope.launch {
+                            coroutineScope.launch {
                                 com.example.crash.CrashReporter.uploadPendingCrashes(context, force = true)
                                 Toast.makeText(context, "Crash reporter upload pass triggered", Toast.LENGTH_SHORT).show()
                             }
