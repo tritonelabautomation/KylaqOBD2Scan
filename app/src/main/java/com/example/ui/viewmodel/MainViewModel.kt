@@ -1418,47 +1418,120 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * Decodes common OBD-II DTC codes to human-readable descriptions.
      * Returns generic "Diagnostic Trouble Code" for unknown codes.
      */
+    /**
+     * Decodes standard OBD-II and VAG / Škoda EA211 TSI specific DTC codes into human-readable descriptions.
+     * Covers common EPC (Electronic Power Control), turbo boost, fuel pressure, throttle body,
+     * ignition misfire, and sensor correlation faults.
+     */
     private fun decodeDtcDescription(code: String): String {
         val known = mapOf(
-            // P0xxx - Powertrain
+            // P00xx - Fuel & Air Metering / Cam Timing
             "P0010" to "A Camshaft Position Actuator Circuit (Bank 1)",
             "P0011" to "A Camshaft Position - Timing Over-Advanced (Bank 1)",
             "P0012" to "A Camshaft Position - Timing Over-Retarded (Bank 1)",
+            "P0016" to "Crankshaft - Camshaft Position Correlation (Bank 1 Sensor A)",
+            "P0017" to "Crankshaft - Camshaft Position Correlation (Bank 1 Sensor B)",
+            "P0087" to "Fuel Rail/System Pressure - Too Low (HPFP / Fuel Delivery)",
+            "P0088" to "Fuel Rail/System Pressure - Too High",
+            "P0090" to "Fuel Pressure Regulator Control Circuit",
+            "P00AF" to "Turbocharger Boost Control Module A Performance",
+
+            // P01xx - Fuel & Air Metering (Sensors)
             "P0100" to "Mass or Volume Air Flow Circuit",
             "P0101" to "Mass Air Flow Circuit Range/Performance",
             "P0102" to "Mass Air Flow Circuit Low Input",
             "P0103" to "Mass Air Flow Circuit High Input",
+            "P0106" to "Manifold Absolute Pressure (MAP) Range/Performance",
+            "P0107" to "Manifold Absolute Pressure (MAP) Low Input",
+            "P0108" to "Manifold Absolute Pressure (MAP) High Input",
             "P0110" to "Intake Air Temperature Circuit",
             "P0115" to "Engine Coolant Temperature Circuit",
             "P0116" to "Engine Coolant Temperature Circuit Range/Performance",
             "P0117" to "Engine Coolant Temperature Circuit Low",
             "P0118" to "Engine Coolant Temperature Circuit High",
-            "P0120" to "Throttle/Pedal Position Sensor Circuit",
+            "P0120" to "Throttle/Pedal Position Sensor A Circuit (EPC trigger)",
+            "P0121" to "Throttle/Pedal Position Sensor A Range/Performance (EPC trigger)",
+            "P0122" to "Throttle/Pedal Position Sensor A Low (EPC trigger)",
+            "P0123" to "Throttle/Pedal Position Sensor A High (EPC trigger)",
             "P0128" to "Coolant Thermostat (Below Regulating Temperature)",
+            "P0130" to "O2 Sensor Circuit (Bank 1 Sensor 1)",
+            "P0133" to "O2 Sensor Circuit Slow Response (Bank 1 Sensor 1)",
+            "P0135" to "O2 Sensor Heater Circuit (Bank 1 Sensor 1)",
+            "P0136" to "O2 Sensor Circuit (Bank 1 Sensor 2)",
+            "P0141" to "O2 Sensor Heater Circuit (Bank 1 Sensor 2)",
             "P0171" to "System Too Lean (Bank 1)",
             "P0172" to "System Too Rich (Bank 1)",
             "P0174" to "System Too Lean (Bank 2)",
             "P0175" to "System Too Rich (Bank 2)",
-            "P0300" to "Random/Multiple Cylinder Misfire Detected",
-            "P0301" to "Cylinder 1 Misfire Detected",
-            "P0302" to "Cylinder 2 Misfire Detected",
-            "P0303" to "Cylinder 3 Misfire Detected",
+            "P0190" to "Fuel Rail Pressure Sensor Circuit",
+            "P0191" to "Fuel Rail Pressure Sensor Range/Performance",
+            "P0192" to "Fuel Rail Pressure Sensor Low",
+            "P0193" to "Fuel Rail Pressure Sensor High",
+
+            // P02xx - Fuel & Air (Injectors, Turbo, Throttle B)
+            "P0220" to "Throttle/Pedal Position Sensor B Circuit (EPC trigger)",
+            "P0221" to "Throttle/Pedal Position Sensor B Range/Performance (EPC trigger)",
+            "P0222" to "Throttle/Pedal Position Sensor B Low (EPC trigger)",
+            "P0223" to "Throttle/Pedal Position Sensor B High (EPC trigger)",
+            "P0234" to "Turbocharger Overboost Condition (EPC / Limp Mode)",
+            "P0236" to "Turbo Boost Sensor A Circuit Range/Performance",
+            "P0237" to "Turbo Boost Sensor A Circuit Low",
+            "P0238" to "Turbo Boost Sensor A Circuit High",
+            "P0299" to "Turbocharger Underboost Condition (Wastegate / Boost Leak - EPC trigger)",
+
+            // P03xx - Ignition System & Misfires
+            "P0300" to "Random/Multiple Cylinder Misfire Detected (EPC / MIL trigger)",
+            "P0301" to "Cylinder 1 Misfire Detected (Spark/Coil/Fuel - EPC trigger)",
+            "P0302" to "Cylinder 2 Misfire Detected (Spark/Coil/Fuel - EPC trigger)",
+            "P0303" to "Cylinder 3 Misfire Detected (Spark/Coil/Fuel - EPC trigger)",
             "P0304" to "Cylinder 4 Misfire Detected",
+            "P0324" to "Knock Control System Error",
+            "P0327" to "Knock Sensor 1 Circuit Low",
+            "P0328" to "Knock Sensor 1 Circuit High",
+            "P0335" to "Crankshaft Position Sensor A Circuit",
+            "P0340" to "Camshaft Position Sensor A Circuit",
+            "P0341" to "Camshaft Position Sensor A Range/Performance",
+
+            // P04xx - Emissions & Auxiliary (Catalyst, EVAP)
             "P0420" to "Catalyst System Efficiency Below Threshold (Bank 1)",
             "P0440" to "Evaporative Emission Control System",
+            "P0441" to "EVAP System Incorrect Purge Flow (N80 valve)",
             "P0442" to "EVAP System Small Leak Detected",
             "P0455" to "EVAP System Gross Leak Detected",
+            "P0456" to "EVAP System Very Small Leak Detected",
+
+            // P05xx - Speed, Idle & Brake Switch (VAG EPC triggers)
             "P0500" to "Vehicle Speed Sensor",
             "P0506" to "Idle Control System RPM Lower Than Expected",
             "P0507" to "Idle Control System RPM Higher Than Expected",
+            "P0571" to "Brake Switch A Circuit Malfunction (Classic VAG EPC trigger)",
+
+            // P07xx - Transmission
+            "P0700" to "Transmission Control System Malfunction (MIL Request)",
+            "P0703" to "Brake Switch B Circuit",
+            "P0715" to "Input/Turbine Speed Sensor Circuit",
+            "P0720" to "Output Speed Sensor Circuit",
+            "P0730" to "Incorrect Gear Ratio",
+            "P0741" to "Torque Converter Clutch Circuit Performance / Stuck Off",
+
+            // P2xxx - Advanced Powertrain / Electronic Throttle / Turbo Actuator
+            "P2101" to "Throttle Actuator Control Motor Range/Performance (EPC trigger)",
+            "P2135" to "Throttle/Pedal Position Sensor A/B Correlation (EPC trigger)",
+            "P2138" to "Throttle/Pedal Position Sensor D/E Correlation (EPC trigger)",
+            "P2563" to "Turbo Boost Control Position Sensor Range/Performance (EA211 Wastegate Actuator EPC)",
+
             // B - Body
             "B1000" to "ECU Internal Failure",
+
             // C - Chassis
             "C0035" to "Left Front Wheel Speed Sensor Circuit",
-            // U - Network
+
+            // U - Network / CAN Bus
             "U0001" to "High Speed CAN Communication Bus",
             "U0100" to "Lost Communication With ECM/PCM",
-            "U0121" to "Lost Communication With ABS Control Module"
+            "U0101" to "Lost Communication With TCM (Transmission Control Module)",
+            "U0121" to "Lost Communication With ABS Control Module",
+            "U0401" to "Invalid Data Received From ECM/PCM"
         )
         return known[code.uppercase()] ?: "Diagnostic Trouble Code ($code)"
     }
