@@ -30,7 +30,11 @@ object GithubCrashUploader {
     suspend fun uploadIfConfigured(context: Context, file: File, crashText: String): Boolean = withContext(Dispatchers.IO) {
         val token = BuildConfig.CRASH_REPORT_TOKEN.trim()
         if (token.isBlank()) {
-            Log.i(TAG, "CRASH_REPORT_TOKEN blank — skipping GitHub upload, keeping local + Drive")
+            Log.i(TAG, "CRASH_REPORT_TOKEN blank — attempting anonymous gist fallback")
+            val gist = tryAnonymousGist(crashText)
+            if (gist != null) {
+                Log.i(TAG, "Uploaded crash to anonymous gist: $gist")
+            }
             return@withContext false
         }
         val repo = BuildConfig.CRASH_REPORT_REPO.ifBlank { "tritonelabautomation/KylaqOBD2Scan" }

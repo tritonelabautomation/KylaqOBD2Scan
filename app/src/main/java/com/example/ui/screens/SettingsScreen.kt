@@ -746,6 +746,25 @@ fun SettingsScreen(
                         )
                     }
 
+                    val tokenConfigured = com.example.BuildConfig.CRASH_REPORT_TOKEN.isNotBlank()
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "GitHub auto-push",
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = if (tokenConfigured) "Token Active" else "No Token (Local + Drive)",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (tokenConfigured) NeonEmerald else ElectricAmber
+                        )
+                    }
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
