@@ -78,21 +78,37 @@ class GpsManager(private val context: Context) : LocationListener {
         if (isTracking) return true
         try {
             val hasGps = locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
-            if (hasGps) {
+            val hasNetwork = locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+            if (hasGps || hasNetwork) {
                 // New trip, new altitude window (owner 2026-09-15 trip-summary fix).
                 tripAltitude.reset()
                 totalDistance = 0f
                 lastLocation = null
-                // FIX TD-2 / MED: Use 5m min distance instead of 0f to avoid continuous GPS
-                // callbacks that drain battery. 5m is fine-grained enough for OBD correlation.
-                locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 5f, this)
+                
+                // Continuous 1-second cadence with 0m distance threshold so stationary / idling
+                // periods and traffic light stops continuously record altitude.
+                if (hasGps) {
+                    locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, this)
+                }
+                if (hasNetwork) {
+                    runCatching {
+                        locationManager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 2000L, 0f, this)
+                    }
+                }
                 isTracking = true
                 _gpsStatus.value = STATUS_NO_FIX
+
                 // Prime from the last known fix (accuracy-gated inside onLocationChanged) so a
-                // parked recording gets altitude IMMEDIATELY instead of waiting for the first
-                // 5 m displacement callback - short/stationary trips used to log zero altitude.
+                // parked recording gets altitude IMMEDIATELY instead of waiting for satellite lock.
                 try {
-                    locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)?.let { onLocationChanged(it) }
+                    val lastGps = if (hasGps) locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER) else null
+                    val lastNet = if (hasNetwork) locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER) else null
+                    val best = when {
+                        lastGps != null && lastNet != null -> if (lastGps.time >= lastNet.time) lastGps else lastNet
+                        lastGps != null -> lastGps
+                        else -> lastNet
+                    }
+                    best?.let { onLocationChanged(it) }
                 } catch (_: Exception) {}
                 return true
             } else {
@@ -131,9 +147,10 @@ class GpsManager(private val context: Context) : LocationListener {
      * Horizontal accuracy gate (2026-09-14 cross-validation: Car Scanner's VAG default
      * thresholds are 40 m horizontal / 50 m vertical / 2 m/s speed). Fixes worse than
      * this are dropped instead of poisoning trip distance, coast detection and the
-     * speed series; the last good fix stays published.
+     * speed series; the last good fix stays published. Loosened to 80m so initial
+     * satellite acquisition doesn't get dropped while locking.
      */
-    val MAX_HORIZONTAL_ACCURACY_M = 40f
+    val MAX_HORIZONTAL_ACCURACY_M = 80f
 
     override fun onLocationChanged(location: Location) {
         if (location.hasAccuracy() && location.accuracy > MAX_HORIZONTAL_ACCURACY_M) {
