@@ -51,6 +51,7 @@
     <uses-permission android:name="android.permission.GET_ACCOUNTS" />
 
     <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
+    <uses-feature android:name="android.hardware.type.automotive" android:required="false" />
 
     <application
         android:name=".KylaqApplication"
@@ -94,7 +95,6 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.CAR_LAUNCHER" />
-                <category android:name="androidx.car.app.category.NAVIGATION" />
                 <category android:name="android.intent.category.APP_MAPS" />
             </intent-filter>
             <layout
@@ -121,8 +121,10 @@
             <intent-filter>
                 <action android:name="androidx.car.app.CarAppService" />
                 <category android:name="androidx.car.app.category.IOT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="androidx.car.app.CarAppService" />
                 <category android:name="androidx.car.app.category.POI" />
-                <category android:name="androidx.car.app.category.NAVIGATION" />
             </intent-filter>
             <!-- Car App Library spec: minCarApiLevel MUST live INSIDE the service
                  element - the AA host reads service-level metadata only. It was
