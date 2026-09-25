@@ -248,10 +248,10 @@ class MainActivity : ComponentActivity() {
             return
         }
 
-        // Read ONCE, off-composition: these touch the journal files and must not re-read
-        // them on every recomposition.
-        val lastCrashSummary = com.example.data.CrashJournal.lastCrashSummary(this)
-        val lastCrashedAt = com.example.data.CrashJournal.lastCrashedAt(this)
+        // Read ONCE, off-composition: check if there is an unacknowledged crash notice.
+        val hasUnseenCrash = com.example.data.CrashJournal.hasUnseenCrash(this)
+        val lastCrashSummary = if (hasUnseenCrash) com.example.data.CrashJournal.lastCrashSummary(this) else null
+        val lastCrashedAt = if (hasUnseenCrash) com.example.data.CrashJournal.lastCrashedAt(this) else null
         setContent {
             // This start counts as healthy only after the UI survived its first seconds:
             // the ViewModel's init coroutines (auto-connect, refuel backfill, update
@@ -267,7 +267,10 @@ class MainActivity : ComponentActivity() {
                     crashedAt = lastCrashedAt,
                     summary = lastCrashSummary,
                     onShare = { shareCrashLog() },
-                    onDismiss = { showCrashNotice = false }
+                    onDismiss = {
+                        com.example.data.CrashJournal.dismissCrashNotice(this@MainActivity)
+                        showCrashNotice = false
+                    }
                 )
             }
             val appearance by viewModel.settingsRepository.appearanceMode.collectAsState()

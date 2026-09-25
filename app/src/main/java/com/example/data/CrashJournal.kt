@@ -67,6 +67,9 @@ object CrashJournal {
     fun startupCompleted(context: Context) { writeStreak(context, 0) }
 
     /** "Try normal start" on the safe-mode screen: forgive the streak and retry. */
+    private const val PREFS_NAME = "crash_journal_prefs"
+    private const val KEY_DISMISSED_CRASH = "last_dismissed_crash_file"
+
     fun enterNormalModeAgain(context: Context) { writeStreak(context, 0) }
 
     fun shouldEnterSafeMode(context: Context): Boolean =
@@ -79,14 +82,32 @@ object CrashJournal {
             ?.sortedByDescending { it.lastModified() }
             ?: emptyList()
 
+    fun latestCrashFile(context: Context): File? =
+        crashFiles(context).firstOrNull()
+
     fun latestCrashText(context: Context): String? =
-        crashFiles(context).firstOrNull()?.let { runCatching { it.readText() }.getOrNull() }
+        latestCrashFile(context)?.let { runCatching { it.readText() }.getOrNull() }
 
     fun lastCrashSummary(context: Context): String? =
         CrashJournalPolicy.summarize(latestCrashText(context))
 
     fun lastCrashedAt(context: Context): String? =
         CrashJournalPolicy.crashedAt(latestCrashText(context))
+
+    /** True if the newest crash file has not been dismissed yet. */
+    fun hasUnseenCrash(context: Context): Boolean {
+        val latest = latestCrashFile(context) ?: return false
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val dismissed = prefs.getString(KEY_DISMISSED_CRASH, null)
+        return latest.name != dismissed
+    }
+
+    /** Marks the newest crash file as seen/dismissed so the notice does not repeat on every launch. */
+    fun dismissCrashNotice(context: Context) {
+        val latest = latestCrashFile(context) ?: return
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putString(KEY_DISMISSED_CRASH, latest.name).apply()
+    }
 
     private fun streakFile(context: Context) = File(context.filesDir, STREAK_FILE)
 
