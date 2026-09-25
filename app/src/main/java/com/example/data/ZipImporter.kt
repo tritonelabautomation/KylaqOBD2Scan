@@ -180,6 +180,9 @@ object ZipImporter {
             // for backups written before 2026-09-16; never defaulted to 0.0.
             var minVoltageV: Double? = null
             var maxVoltageV: Double? = null
+            var startFuelPercent: Double? = null
+            var endFuelPercent: Double? = null
+            var fuelDeltaPercent: Double? = null
 
             var parsedTxCount = 0
             val txEntities = mutableListOf<TransactionRecord>()
@@ -202,6 +205,9 @@ object ZipImporter {
                         minAltitudeM = JsonExporter.nullableDouble(metaObj, "minAltitudeM")
                         minVoltageV = JsonExporter.nullableDouble(metaObj, "minVoltageV")
                         maxVoltageV = JsonExporter.nullableDouble(metaObj, "maxVoltageV")
+                        startFuelPercent = JsonExporter.nullableDouble(metaObj, "startFuelPercent")
+                        endFuelPercent = JsonExporter.nullableDouble(metaObj, "endFuelPercent")
+                        fuelDeltaPercent = JsonExporter.nullableDouble(metaObj, "fuelDeltaPercent")
                     }
                     if (root.has("transactions")) {
                         val txArray = root.getJSONArray("transactions")
@@ -284,7 +290,10 @@ object ZipImporter {
                     maxAltitudeM = maxAltitudeM,
                     minAltitudeM = minAltitudeM,
                     minVoltageV = minVoltageV,
-                    maxVoltageV = maxVoltageV
+                    maxVoltageV = maxVoltageV,
+                    startFuelPercent = startFuelPercent,
+                    endFuelPercent = endFuelPercent,
+                    fuelDeltaPercent = fuelDeltaPercent
                 )
                 JsonExporter.exportToJson(destJson, synthesizedMeta, txEntities)
             }
@@ -305,7 +314,10 @@ object ZipImporter {
                     maxAltitudeM = maxAltitudeM,
                     minAltitudeM = minAltitudeM,
                     minVoltageV = minVoltageV,
-                    maxVoltageV = maxVoltageV
+                    maxVoltageV = maxVoltageV,
+                    startFuelPercent = startFuelPercent,
+                    endFuelPercent = endFuelPercent,
+                    fuelDeltaPercent = fuelDeltaPercent
                 )
                 CsvExporter.exportTransactionsToCsv(destTxCsv, metaForCsv, txEntities)
             }
@@ -342,6 +354,13 @@ object ZipImporter {
             val avgVolt = if (voltList.isNotEmpty()) voltList.average() else 0.0
             val detectedEcus = txEntities.mapNotNull { it.canRxId.takeIf { id -> id.isNotBlank() } }.distinct().joinToString(", ").ifBlank { "7E8" }
 
+            if (startFuelPercent == null && txEntities.isNotEmpty()) {
+                val lvlSamples = txEntities.filter { it.pid.equals("2F", ignoreCase = true) || it.pid.equals("012F", ignoreCase = true) }.mapNotNull { it.decodedValue }
+                startFuelPercent = lvlSamples.firstOrNull()
+                endFuelPercent = lvlSamples.lastOrNull()
+                fuelDeltaPercent = if (startFuelPercent != null && endFuelPercent != null) endFuelPercent - startFuelPercent else null
+            }
+
             // Keep the recorded time window instead of stamping every restored trip "now,
             // 60 seconds long" - duration feeds average speed, idle share and L/h trends.
             val startMillis = SessionTime.parseMillis(startTimeUtc)
@@ -373,7 +392,10 @@ object ZipImporter {
                 maxAltitudeM = maxAltitudeM,
                 minAltitudeM = minAltitudeM,
                 minVoltageV = minVoltageV,
-                maxVoltageV = maxVoltageV
+                maxVoltageV = maxVoltageV,
+                startFuelPercent = startFuelPercent,
+                endFuelPercent = endFuelPercent,
+                fuelDeltaPercent = fuelDeltaPercent
             )
             tripRepository.insertTrip(tripEntity)
 

@@ -52,6 +52,7 @@ fun DrivingDashboardScreen(
     val load = liveDecodedMap["0104"] ?: "--"
     val voltage = liveDecodedMap["0142"] ?: "--"
     val iat = liveDecodedMap["010F"] ?: "--"
+    val fuelLevel = liveDecodedMap["012F"] ?: "--"
 
     Scaffold(
         topBar = {
@@ -408,10 +409,10 @@ fun DrivingDashboardScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     HudGaugeCard(
-                        title = "ENGINE LOAD",
-                        value = load,
-                        icon = Icons.Default.FitnessCenter,
-                        color = CyberCyanDark,
+                        title = "FUEL TANK",
+                        value = fuelLevel,
+                        icon = Icons.Default.LocalGasStation,
+                        color = ElectricAmber,
                         modifier = Modifier.weight(1f)
                     )
                     HudGaugeCard(

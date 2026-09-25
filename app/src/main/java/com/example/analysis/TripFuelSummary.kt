@@ -81,7 +81,17 @@ object TripFuelSummary {
          */
         val meanTorqueNm: Double? = null,
         val peakTorqueNm: Double? = null,
-        val torqueReferenceNm: Double? = null
+        val torqueReferenceNm: Double? = null,
+        /** Tank level % at trip start (PID 012F). */
+        val startFuelPercent: Double? = null,
+        /** Tank level % at trip end (PID 012F). */
+        val endFuelPercent: Double? = null,
+        /** Fuel level difference % (end - start). Negative = consumed, positive = refuel. */
+        val fuelDeltaPercent: Double? = null,
+        /** Approximate liters from % delta and standard tank capacity (50L). */
+        val fuelDeltaLiters: Double? = null,
+        /** True if level rose by >= 3.0% during the trip indicating a refuel / brim event. */
+        val isRefuelBrimEvent: Boolean = false
     ) {
         val litersPer100Km: Double?
             get() = if (distanceKm > 0.05) fuelLiters / distanceKm * 100.0 else null
@@ -248,6 +258,19 @@ object TripFuelSummary {
         val movingAverage = if (movingSeconds > 0) speedTimeIntegral / movingSeconds else 0.0
         val kmL = if (fuelLiters > 0.05 && distanceKm > 0.05) distanceKm / fuelLiters else null
 
+        val levelSeries = (byPid["012F"] ?: byPid["2F"] ?: emptyList())
+            .mapNotNull { p -> p.value?.let { p.timestampMs to it } }
+            .sortedBy { it.first }
+        val startFuelPercent = levelSeries.firstOrNull()?.second
+        val endFuelPercent = levelSeries.lastOrNull()?.second
+        val fuelDeltaPercent = if (startFuelPercent != null && endFuelPercent != null) {
+            endFuelPercent - startFuelPercent
+        } else null
+        val fuelDeltaLiters = if (fuelDeltaPercent != null) {
+            kotlin.math.abs(fuelDeltaPercent) / 100.0 * 50.0
+        } else null
+        val isRefuelBrimEvent = (fuelDeltaPercent ?: 0.0) >= 3.0
+
         return Summary(
             fuelLiters = fuelLiters,
             distanceKm = distanceKm,
@@ -270,7 +293,12 @@ object TripFuelSummary {
             stopBattery = stopBattery,
             meanTorqueNm = meanTorqueNm,
             peakTorqueNm = peakTorqueNm,
-            torqueReferenceNm = if (meanTorqueNm != null) torqueRef else null
+            torqueReferenceNm = if (meanTorqueNm != null) torqueRef else null,
+            startFuelPercent = startFuelPercent,
+            endFuelPercent = endFuelPercent,
+            fuelDeltaPercent = fuelDeltaPercent,
+            fuelDeltaLiters = fuelDeltaLiters,
+            isRefuelBrimEvent = isRefuelBrimEvent
         )
     }
 

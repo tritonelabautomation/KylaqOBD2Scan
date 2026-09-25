@@ -1193,6 +1193,66 @@ private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summar
                 color = TextSecondaryDark,
                 fontSize = 13.sp
             )
+
+            // Mandatory Fuel Tank Level % & Brim Detection (Start vs End)
+            val startFuel = summary.startFuelPercent
+            val endFuel = summary.endFuelPercent
+            val deltaPct = summary.fuelDeltaPercent
+            if (startFuel != null && endFuel != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text("TANK LEVEL (PID 012F)", color = CyberCyan, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = "${String.format(java.util.Locale.US, "%.1f", startFuel)}% → ${String.format(java.util.Locale.US, "%.1f", endFuel)}%",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                            val deltaColor = if (summary.isRefuelBrimEvent) NeonEmerald else if ((deltaPct ?: 0.0) < 0) ElectricAmber else TextSecondaryDark
+                            val deltaSign = if ((deltaPct ?: 0.0) > 0) "+" else ""
+                            Surface(
+                                color = deltaColor.copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text(
+                                    text = "$deltaSign${String.format(java.util.Locale.US, "%.1f", deltaPct ?: 0.0)}%" +
+                                        (summary.fuelDeltaLiters?.let { " (${String.format(java.util.Locale.US, "%.2f", it)} L)" } ?: ""),
+                                    color = deltaColor,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 11.sp,
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                    }
+                    if (summary.isRefuelBrimEvent) {
+                        Surface(
+                            color = NeonEmerald.copy(alpha = 0.2f),
+                            shape = RoundedCornerShape(8.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, NeonEmerald.copy(alpha = 0.5f))
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(Icons.Default.LocalGasStation, contentDescription = null, tint = NeonEmerald, modifier = Modifier.size(14.dp))
+                                Text("REFUEL BRIM", color = NeonEmerald, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            }
+                        }
+                    }
+                }
+            }
             val startStop = summary.startStop
             if (startStop.stopEvents > 0) {
                 Spacer(modifier = Modifier.height(6.dp))

@@ -38,7 +38,11 @@ object WeeklyTripOverview {
         val kmPerL: Double?,
         /** Fraction of the trip in each band (sums to 1, or all-zero when no speed data). */
         val fractions: Map<DriveBand, Double>,
-        val score: Int
+        val score: Int,
+        val startFuelPercent: Double? = null,
+        val endFuelPercent: Double? = null,
+        val fuelDeltaPercent: Double? = null,
+        val isRefuelBrimEvent: Boolean = false
     )
 
     data class DayBucket(val label: String, val minutes: Map<DriveBand, Double>)
@@ -177,7 +181,11 @@ object WeeklyTripOverview {
                 durationSec = t.summary.durationSeconds,
                 kmPerL = t.summary.kmPerLiter,
                 fractions = if (tot > 0) secs.mapValues { it.value / tot } else secs.mapValues { 0.0 },
-                score = scoreOf(t.summary)
+                score = scoreOf(t.summary),
+                startFuelPercent = t.summary.startFuelPercent,
+                endFuelPercent = t.summary.endFuelPercent,
+                fuelDeltaPercent = t.summary.fuelDeltaPercent,
+                isRefuelBrimEvent = t.summary.isRefuelBrimEvent
             )
         }
 

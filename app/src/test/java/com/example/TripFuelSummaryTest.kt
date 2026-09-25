@@ -182,4 +182,35 @@ class TripFuelSummaryTest {
         assertEquals(0.0, summary.engineOffSeconds, 1e-9)
         assertEquals(0, summary.startStop.stopEvents)
     }
+
+    @Test
+    fun `fuel level start end and consumption delta are detected from 012F`() {
+        val samples = mutableListOf<TripFuelSummary.SamplePoint>()
+        samples.add(point("012F", 1_000L, 85.0))
+        samples.add(point("010D", 2_000L, 50.0))
+        samples.add(point("015E", 2_000L, 4.0))
+        samples.add(point("012F", 30_000L, 81.5))
+
+        val summary = TripFuelSummary.summarize(samples)
+        assertEquals(85.0, summary.startFuelPercent!!, 1e-9)
+        assertEquals(81.5, summary.endFuelPercent!!, 1e-9)
+        assertEquals(-3.5, summary.fuelDeltaPercent!!, 1e-9)
+        assertEquals(1.75, summary.fuelDeltaLiters!!, 1e-9) // 3.5% of 50L = 1.75L
+        assertEquals(false, summary.isRefuelBrimEvent)
+    }
+
+    @Test
+    fun `fuel level rise during trip triggers refuel brim event detection`() {
+        val samples = mutableListOf<TripFuelSummary.SamplePoint>()
+        samples.add(point("012F", 1_000L, 25.0))
+        samples.add(point("010D", 2_000L, 0.0))
+        samples.add(point("012F", 60_000L, 95.0))
+
+        val summary = TripFuelSummary.summarize(samples)
+        assertEquals(25.0, summary.startFuelPercent!!, 1e-9)
+        assertEquals(95.0, summary.endFuelPercent!!, 1e-9)
+        assertEquals(70.0, summary.fuelDeltaPercent!!, 1e-9)
+        assertEquals(35.0, summary.fuelDeltaLiters!!, 1e-9) // 70% of 50L = 35.0L
+        assertEquals(true, summary.isRefuelBrimEvent)
+    }
 }

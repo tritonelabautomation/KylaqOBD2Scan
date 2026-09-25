@@ -40,6 +40,9 @@ object JsonExporter {
             put("minAltitudeM", metadata.minAltitudeM ?: JSONObject.NULL)
             put("minVoltageV", metadata.minVoltageV ?: JSONObject.NULL)
             put("maxVoltageV", metadata.maxVoltageV ?: JSONObject.NULL)
+            put("startFuelPercent", metadata.startFuelPercent ?: JSONObject.NULL)
+            put("endFuelPercent", metadata.endFuelPercent ?: JSONObject.NULL)
+            put("fuelDeltaPercent", metadata.fuelDeltaPercent ?: JSONObject.NULL)
         }
 
         // STREAMING: previous built JSONArray of 59k objects + toString(2) = >100MB string → OOM at 256MB heap

@@ -166,6 +166,23 @@ fun TrackerSummaryCards(
                     color = TkWhite, fontSize = 14.sp, fontWeight = FontWeight.SemiBold
                 )
             }
+            if (summary.startFuelPercent != null && summary.endFuelPercent != null) {
+                Spacer(Modifier.height(8.dp))
+                Box(Modifier.fillMaxWidth().height(1.dp).background(TkInner))
+                Spacer(Modifier.height(8.dp))
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("Tank Level (Start → End)", color = TkGray, fontSize = 13.sp)
+                    val delta = summary.fuelDeltaPercent ?: 0.0
+                    val deltaStr = if (delta > 0) "+%.1f%%".format(delta) else "%.1f%%".format(delta)
+                    val deltaCol = if (summary.isRefuelBrimEvent) TkGreen else if (delta < 0) TkOrange else TkGray
+                    Text(
+                        "%.1f%% → %.1f%% (%s)".format(summary.startFuelPercent, summary.endFuelPercent, deltaStr),
+                        color = deltaCol,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
         }
 
         // ── Drive analysis ─────────────────────────────────────────────────

@@ -721,6 +721,40 @@ fun RecordingItemCard(
                 )
             }
 
+            if (meta.startFuelPercent != null && meta.endFuelPercent != null) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    val delta = meta.fuelDeltaPercent ?: (meta.endFuelPercent - meta.startFuelPercent)
+                    val isRefuel = delta >= 3.0
+                    val deltaCol = if (isRefuel) NeonEmerald else if (delta < 0) ElectricAmber else TextSecondaryDark
+                    val deltaSign = if (delta > 0) "+" else ""
+                    Surface(
+                        color = deltaCol.copy(alpha = 0.12f),
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(Icons.Default.LocalGasStation, contentDescription = null, tint = deltaCol, modifier = Modifier.size(12.dp))
+                            Text(
+                                text = "⛽ ${String.format(java.util.Locale.US, "%.1f", meta.startFuelPercent)}% → ${String.format(java.util.Locale.US, "%.1f", meta.endFuelPercent)}% ($deltaSign${String.format(java.util.Locale.US, "%.1f", delta)}%)" +
+                                    if (isRefuel) " • Refuel Brim" else "",
+                                color = deltaCol,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(10.dp))
             Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
             Spacer(modifier = Modifier.height(8.dp))

@@ -379,6 +379,22 @@ private fun TripRow(trip: WeeklyTripOverview.TripCard, price: Double, onOpenTrip
                     Spacer(Modifier.width(4.dp))
                     Icon(Icons.Default.Payments, null, tint = TtGray, modifier = Modifier.size(12.dp))
                 }
+                if (trip.startFuelPercent != null && trip.endFuelPercent != null) {
+                    Spacer(Modifier.height(3.dp))
+                    val delta = trip.fuelDeltaPercent ?: (trip.endFuelPercent - trip.startFuelPercent)
+                    val deltaStr = if (delta > 0) "+%.1f%%".format(delta) else "%.1f%%".format(delta)
+                    val deltaCol = if (trip.isRefuelBrimEvent) TtGreen else if (delta < 0) TtOrange else TtGray
+                    Text(
+                        "⛽ %.1f%% → %.1f%% (%s)%s".format(
+                            trip.startFuelPercent, trip.endFuelPercent, deltaStr,
+                            if (trip.isRefuelBrimEvent) " • Brim" else ""
+                        ),
+                        color = deltaCol,
+                        fontSize = 11.sp,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
             }
             Text(timeFmt.format(Date(trip.startMs)), color = TtGray, fontSize = 11.sp)
             Spacer(Modifier.width(8.dp))

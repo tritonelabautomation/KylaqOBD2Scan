@@ -42,7 +42,13 @@ data class TripEntity(
     val minAltitudeM: Double? = null,
     /** Battery voltage extremes measured from stored 0142 samples at trip end. Null = never captured (pre-v11 trips or no voltage samples) -> UI derives from samples or stays blank. Added 2026-09-16 (MIGRATION_10_11, owner pipeline task 3). */
     val minVoltageV: Double? = null,
-    val maxVoltageV: Double? = null
+    val maxVoltageV: Double? = null,
+    /** Fuel tank level at trip start (PID 012F %). Null if unmeasured. Added 2026-09-25 (MIGRATION_13_14). */
+    val startFuelPercent: Double? = null,
+    /** Fuel tank level at trip end (PID 012F %). Null if unmeasured. Added 2026-09-25 (MIGRATION_13_14). */
+    val endFuelPercent: Double? = null,
+    /** Delta % (end - start %): negative = fuel consumed, positive = refuel / brim during trip. Added 2026-09-25 (MIGRATION_13_14). */
+    val fuelDeltaPercent: Double? = null
 )
 
 /**

@@ -563,6 +563,17 @@ class RecordingManager(
         val voltStats = com.example.analysis.VoltageStats.extremes(
             sampleList.mapNotNull { smp -> smp.voltageV?.let { smp.timestampMonotonic to it } }
         )
+
+        // Fuel level start, end, and delta % (mandatory per-trip fuel change tracking)
+        val levelSamples = txList.filter {
+            it.pid.equals("2F", ignoreCase = true) || it.pid.equals("012F", ignoreCase = true)
+        }.mapNotNull { it.decodedValue }
+        val startFuelPercent = levelSamples.firstOrNull()
+        val endFuelPercent = levelSamples.lastOrNull()
+        val fuelDeltaPercent = if (startFuelPercent != null && endFuelPercent != null) {
+            endFuelPercent - startFuelPercent
+        } else null
+
         // The trip log files must carry the same altitude window as the database row, or a
         // backup -> reinstall -> import round trip silently strips elevation from every past trip.
         val metadataForFiles = metadata.copy(
@@ -570,6 +581,9 @@ class RecordingManager(
             minAltitudeM = altStats?.minAltitudeM,
             minVoltageV = voltStats?.minV,
             maxVoltageV = voltStats?.maxV,
+            startFuelPercent = startFuelPercent,
+            endFuelPercent = endFuelPercent,
+            fuelDeltaPercent = fuelDeltaPercent,
             adapter = if (recovered) metadata.adapter + " (recovered after the app was killed)" else metadata.adapter
         ).apply { endTimeUtc = endStamp }
 
@@ -645,6 +659,15 @@ class RecordingManager(
             .joinToString(", ").ifBlank { "7E8" }
         val durationSec = maxOf(1L, (endTimestamp - startTimestamp) / 1000)
 
+        val levelSamples = txList.filter {
+            it.pid.equals("2F", ignoreCase = true) || it.pid.equals("012F", ignoreCase = true)
+        }.mapNotNull { it.decodedValue }
+        val startFuelPercent = levelSamples.firstOrNull() ?: metadata.startFuelPercent
+        val endFuelPercent = levelSamples.lastOrNull() ?: metadata.endFuelPercent
+        val fuelDeltaPercent = if (startFuelPercent != null && endFuelPercent != null) {
+            endFuelPercent - startFuelPercent
+        } else metadata.fuelDeltaPercent
+
         runCatching {
             tripRepository.insertTrip(
                 TripEntity(
@@ -670,7 +693,10 @@ class RecordingManager(
                     maxAltitudeM = altStats?.maxAltitudeM,
                     minAltitudeM = altStats?.minAltitudeM,
                     minVoltageV = voltStats?.minV,
-                    maxVoltageV = voltStats?.maxV
+                    maxVoltageV = voltStats?.maxV,
+                    startFuelPercent = startFuelPercent,
+                    endFuelPercent = endFuelPercent,
+                    fuelDeltaPercent = fuelDeltaPercent
                 )
             )
         }.onFailure { android.util.Log.e("RecordingManager", "trip insert failed for $sessionId", it) }

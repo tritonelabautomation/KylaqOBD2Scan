@@ -157,5 +157,12 @@ data class RecordingMetadata(
      * Carried in the session JSON so backup -> reinstall -> import keeps them.
      */
     val minVoltageV: Double? = null,
-    val maxVoltageV: Double? = null
+    val maxVoltageV: Double? = null,
+    /**
+     * Fuel tank level at trip start & end (PID 012F %), and the net delta.
+     * Carried in the session JSON so backup -> reinstall -> import preserves fuel changes.
+     */
+    val startFuelPercent: Double? = null,
+    val endFuelPercent: Double? = null,
+    val fuelDeltaPercent: Double? = null
 )

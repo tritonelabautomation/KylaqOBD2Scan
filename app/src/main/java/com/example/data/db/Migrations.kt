@@ -280,3 +280,15 @@ val MIGRATION_12_13 = object : Migration(12, 13) {
         )
     }
 }
+
+/**
+ * v13 -> v14 (2026-09-25): persist per-trip start and end fuel tank level % (PID 012F) and delta %.
+ * Allows every single trip to record and display the exact tank % difference and refuel / brim events.
+ */
+val MIGRATION_13_14 = object : Migration(13, 14) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `trips` ADD COLUMN `startFuelPercent` REAL DEFAULT NULL")
+        db.execSQL("ALTER TABLE `trips` ADD COLUMN `endFuelPercent` REAL DEFAULT NULL")
+        db.execSQL("ALTER TABLE `trips` ADD COLUMN `fuelDeltaPercent` REAL DEFAULT NULL")
+    }
+}
