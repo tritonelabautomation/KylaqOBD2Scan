@@ -75,7 +75,7 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector)
     object VehicleProfile : Screen("vehicle_profile/{vehicleId}", "Vehicle Profile", Icons.Default.DirectionsCar) {
         fun createRoute(vehicleId: String) = "vehicle_profile/$vehicleId"
     }
-    object DtcScanner : Screen("dtc_scanner", "DTC Scanner", Icons.Default.Warning)
+    object DtcScanner : Screen("dtc_scanner", "EPC & DTC Scanner", Icons.Default.Warning)
     object AddVehicle : Screen("add_vehicle", "Add Vehicle", Icons.Default.Add)
     object PidDetail : Screen("pid_detail/{pidId}", "Research", Icons.Default.Science) {
         fun createRoute(pidId: String) = "pid_detail/$pidId"
@@ -461,7 +461,7 @@ fun MainApp(viewModel: MainViewModel) {
         )
     }
     val drawerItems = bottomNavItems + listOf(
-        Screen.FuelCosts, Screen.Carpool, Screen.FuelSavings, Screen.Maintenance, Screen.Expenses, Screen.Reports,
+        Screen.DtcScanner, Screen.FuelCosts, Screen.Carpool, Screen.FuelSavings, Screen.Maintenance, Screen.Expenses, Screen.Reports,
         Screen.CoachChat, Screen.Trips, Screen.TripsOverview, Screen.Reminders, Screen.Documents, Screen.OwnerManual, Screen.DriveBackup,
         Screen.PidScanner, Screen.CodingLab, Screen.RevTheater, Screen.Settings, Screen.About
     )
@@ -557,6 +557,9 @@ fun MainApp(viewModel: MainViewModel) {
                     },
                     onNavigateToPidScanner = {
                         navController.navigate(Screen.PidScanner.route)
+                    },
+                    onNavigateToDtc = {
+                        navController.navigate(Screen.DtcScanner.route)
                     },
                     onOpenConnectDialog = { showConnectionDialog = true }
                 )

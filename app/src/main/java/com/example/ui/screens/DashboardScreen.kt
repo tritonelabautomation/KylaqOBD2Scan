@@ -48,6 +48,7 @@ fun DashboardScreen(
     onNavigateToSettings: () -> Unit = {},
     onOpenDrawer: () -> Unit = {},
     onNavigateToPidScanner: () -> Unit = {},
+    onNavigateToDtc: () -> Unit = {},
     onOpenConnectDialog: () -> Unit
 ) {
     val connectionState by viewModel.connectionState.collectAsState()
@@ -191,7 +192,8 @@ fun DashboardScreen(
             onHudClick = onNavigateToHud,
             onTripsClick = onNavigateToTrips,
             onRawMonitorClick = onNavigateToRawMonitor,
-            onPidScannerClick = onNavigateToPidScanner
+            onPidScannerClick = onNavigateToPidScanner,
+            onDtcClick = onNavigateToDtc
         )
 
         Spacer(modifier = Modifier.height(14.dp))
@@ -1110,7 +1112,8 @@ fun QuickAccessHub(
     onHudClick: () -> Unit,
     onTripsClick: () -> Unit,
     onRawMonitorClick: () -> Unit,
-    onPidScannerClick: () -> Unit = {}
+    onPidScannerClick: () -> Unit = {},
+    onDtcClick: () -> Unit = {}
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(
@@ -1166,6 +1169,14 @@ fun QuickAccessHub(
                 accentColor = ElectricAmber,
                 modifier = Modifier.weight(1f),
                 onClick = onTripsClick
+            )
+            QuickActionCard(
+                title = "EPC & Diagnostics",
+                subtitle = "VAG EPC 6-Point Check & DTCs",
+                icon = Icons.Default.Security,
+                accentColor = WarningRed,
+                modifier = Modifier.weight(1f),
+                onClick = onDtcClick
             )
         }
     }
