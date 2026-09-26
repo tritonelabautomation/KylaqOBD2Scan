@@ -63,7 +63,7 @@ class KylaqMultiEcuUdsIntegrationTest {
 
     @Test
     fun `formatLiveValue seamlessly resolves fallback PID when primary is unavailable`() {
-        val mapWithFallback = mapOf("015C" to "85 °C", "220202" to "no data from ECU")
+        val mapWithFallback = mapOf("015C" to "85 °C", "220202" to "Not available")
         val result = formatLiveValue(mapWithFallback, "220202", fallbackPid = "015C")
         assertEquals("85 °C", result)
         assertFalse(isLiveError(mapWithFallback, "220202", fallbackPid = "015C"))

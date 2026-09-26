@@ -3,22 +3,21 @@ package com.example.ui.screens
 fun formatLiveValue(map: Map<String, String>, pid: String, defaultUnit: String = "", fallbackPid: String? = null): String {
     val value = map[pid]
     val errorStates = setOf("UNSUPPORTED", "TIMEOUT", "ERROR", "NO_DATA", "NO_RESPONSE", "NOT_AVAILABLE")
-    if (value != null && !errorStates.contains(value.uppercase()) && !value.startsWith("Not available") &&
-        !value.contains("NOT SUPPORTED") && !value.contains("no data") && !value.contains("no answer") && !value.contains("CAN bus error")) {
-        return value
+    val isPrimaryInvalid = value == null || errorStates.contains(value.uppercase()) || value.startsWith("Not available")
+
+    if (!isPrimaryInvalid) {
+        return value!!
     }
+
     if (fallbackPid != null) {
         val fbVal = map[fallbackPid]
-        if (fbVal != null && !errorStates.contains(fbVal.uppercase()) && !fbVal.startsWith("Not available") &&
-            !fbVal.contains("NOT SUPPORTED") && !fbVal.contains("no data") && !fbVal.contains("no answer") && !fbVal.contains("CAN bus error")) {
-            return fbVal
+        val isFbInvalid = fbVal == null || errorStates.contains(fbVal.uppercase()) || fbVal.startsWith("Not available")
+        if (!isFbInvalid) {
+            return fbVal!!
         }
     }
-    val raw = value ?: (fallbackPid?.let { map[it] } ?: return "Not available")
-    if (errorStates.contains(raw.uppercase()) || raw.startsWith("Not available")) {
-        return "Not available"
-    }
-    return raw
+
+    return value ?: (fallbackPid?.let { map[it] } ?: "Not available")
 }
 
 /**
@@ -34,15 +33,18 @@ fun numericWithStaleFallback(numeric: Double?, decoded: String?): Double? =
 fun isLiveError(map: Map<String, String>, pid: String, fallbackPid: String? = null): Boolean {
     val value = map[pid]
     val errorStates = setOf("UNSUPPORTED", "TIMEOUT", "ERROR", "NO_DATA", "NO_RESPONSE", "NOT_AVAILABLE")
-    val isPrimaryError = value == null || errorStates.contains(value.uppercase()) || value.startsWith("Not available") ||
-        value.contains("NOT SUPPORTED") || value.contains("no data") || value.contains("no answer") || value.contains("CAN bus error")
-
-    if (!isPrimaryError) return false
-    if (fallbackPid != null) {
-        val fbVal = map[fallbackPid]
-        val isFbError = fbVal == null || errorStates.contains(fbVal.uppercase()) || fbVal.startsWith("Not available") ||
-            fbVal.contains("NOT SUPPORTED") || fbVal.contains("no data") || fbVal.contains("no answer") || fbVal.contains("CAN bus error")
-        return isFbError
+    if (value != null) {
+        val isError = errorStates.contains(value.uppercase()) || value.startsWith("Not available")
+        if (!isError) return false
+        if (fallbackPid != null) {
+            val fbVal = map[fallbackPid] ?: return isError
+            return errorStates.contains(fbVal.uppercase()) || fbVal.startsWith("Not available")
+        }
+        return isError
     }
-    return isPrimaryError
+    if (fallbackPid != null) {
+        val fbVal = map[fallbackPid] ?: return false
+        return errorStates.contains(fbVal.uppercase()) || fbVal.startsWith("Not available")
+    }
+    return false
 }
