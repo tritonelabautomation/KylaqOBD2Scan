@@ -179,12 +179,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * re-derives the estimate constant, clamped to a sane tank so one bad receipt cannot poison it.
      */
     fun calibrateAfterFuelEntry(litres: Double, odoKm: Double?, partial: Boolean) {
-        if (partial || odoKm == null || litres <= 0.0) return
+        if (partial || litres <= 0.0) return
         viewModelScope.launch {
             val repo = recordingManager.tripRepository
             val match = repo.refuelEvents().firstOrNull {
-                it.calibratedPumpL == null && it.odoKm != null &&
-                    kotlin.math.abs(it.odoKm - odoKm) <= 3.0
+                it.calibratedPumpL == null && (
+                    (odoKm != null && it.odoKm != null && kotlin.math.abs(it.odoKm - odoKm) <= 15.0) ||
+                    (System.currentTimeMillis() - it.tsEndMs <= 48 * 3600 * 1000L)
+                )
             } ?: return@launch
             repo.calibrateRefuelEvent(match.idMs, litres)
             val rise = match.levelAfterPct - match.levelBeforePct
@@ -192,6 +194,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val implied = litres / (rise / 100.0)
                 if (implied in 30.0..80.0) {
                     com.example.di.AppContainer.settingsRepository.setTankCapacityL(implied)
+                }
+            }
+        }
+    }
+
+    /** Reconciles all uncalibrated refuel events against logged fuel receipts. */
+    fun reconcileRefuelEventsWithFuelLogs() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val repo = recordingManager.tripRepository
+            val events = repo.refuelEvents().filter { it.calibratedPumpL == null }
+            if (events.isEmpty()) return@launch
+            val logs = fuelLogRepository.entries().filter { !it.partial && it.liters > 0.0 }
+            for (ev in events) {
+                val match = logs.firstOrNull { log ->
+                    (ev.odoKm != null && log.odometerKm != null && kotlin.math.abs(ev.odoKm - log.odometerKm) <= 15.0) ||
+                    (kotlin.math.abs(ev.tsEndMs - log.idMs) <= 48 * 3600 * 1000L)
+                } ?: continue
+                repo.calibrateRefuelEvent(ev.idMs, match.liters)
+                val rise = ev.levelAfterPct - ev.levelBeforePct
+                if (rise >= 4.0) {
+                    val implied = match.liters / (rise / 100.0)
+                    if (implied in 30.0..80.0) {
+                        com.example.di.AppContainer.settingsRepository.setTankCapacityL(implied)
+                    }
                 }
             }
         }
@@ -508,7 +534,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     init {
         // Replay trips finalized before the refuel detector shipped, once, on first launch
         // (owner 2026-09-19: "does the current logic detect the fuel refill automatically?").
-        viewModelScope.launch { recordingManager.backfillRefuelEvents() }
+        viewModelScope.launch { 
+            recordingManager.backfillRefuelEvents()
+            reconcileRefuelEventsWithFuelLogs()
+        }
     }
 
     init {
