@@ -193,50 +193,56 @@ fun TripMapView(
                 }
 
                 // Replay Live Telemetry HUD Callout (appears during replay)
-                AnimatedVisibility(
-                    visible = isReplaying || replayProgress > 0f,
-                    modifier = Modifier.align(Alignment.BottomStart).padding(10.dp)
-                ) {
-                    Surface(
-                        color = Color.Black.copy(alpha = 0.85f),
-                        shape = RoundedCornerShape(10.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, RouteTeal.copy(alpha = 0.5f))
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                if (isReplaying || replayProgress > 0f) {
+                    Box(modifier = Modifier.align(Alignment.BottomStart).padding(10.dp)) {
+                        Surface(
+                            color = Color.Black.copy(alpha = 0.85f),
+                            shape = RoundedCornerShape(10.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, RouteTeal.copy(alpha = 0.5f))
                         ) {
-                            Column {
-                                Text("REPLAY SPEED", color = TextSecondaryDark, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                                Text(
-                                    text = String.format(Locale.US, "%.0f km/h", currentReplayPoint?.speedKmh ?: 0.0),
-                                    color = RouteTeal,
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Black,
-                                    fontFamily = FontFamily.Monospace
-                                )
-                            }
-                            currentReplayPoint?.rpm?.let { rpm ->
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
                                 Column {
-                                    Text("RPM", color = TextSecondaryDark, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                    Text("REPLAY SPEED", color = TextSecondaryDark, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                                     Text(
-                                        text = "${rpm.toInt()}",
-                                        color = NeonEmerald,
+                                        text = String.format(Locale.US, "%.0f km/h", currentReplayPoint?.speedKmh ?: 0.0),
+                                        color = RouteTeal,
                                         fontSize = 15.sp,
                                         fontWeight = FontWeight.Black,
                                         fontFamily = FontFamily.Monospace
                                     )
                                 }
+                                currentReplayPoint?.rpm?.let { rpm ->
+                                    Column {
+                                        Text("RPM", color = TextSecondaryDark, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                        Text(
+                                            text = "${rpm.toInt()}",
+                                            color = NeonEmerald,
+                                            fontSize = 15.sp,
+                                            fontWeight = FontWeight.Black,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                    }
+                                }
+                                currentReplayPoint?.altitudeM?.let { alt ->
+                                    Column {
+                                        Text("ALTITUDE", color = TextSecondaryDark, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                        Text(
+                                            text = String.format(Locale.US, "%.0f m", alt),
+                                            color = ElectricAmber,
+                                            fontSize = 15.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                    }
+                                }
                             }
-                            currentReplayPoint?.altitudeM?.let { alt ->
-                                Column {
-                                    Text("ALTITUDE", color = TextSecondaryDark, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                                    Text(
-                                        text = String.format(Locale.US, "%.0f m", alt),
-                                        color = ElectricAmber,
-                                        fontSize = 15.sp,
-                                        fontWeight = FontWeight.Bold,
+                        }
+                    }
+                }
                                         fontFamily = FontFamily.Monospace
                                     )
                                 }

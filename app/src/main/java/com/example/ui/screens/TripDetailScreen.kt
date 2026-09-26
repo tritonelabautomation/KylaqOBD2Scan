@@ -399,22 +399,6 @@ fun TripDetailScreen(
                     }
                 }
                 TripDetailTab.TRENDS -> {
-                                    entry = carpoolEntry,
-                                    fuelLiters = fuelSummary.fuelLiters,
-                                    pricePerL = viewModel.fuelLogRepository.entries()
-                                        .maxByOrNull { it.idMs }?.pricePerL ?: 0.0,
-                                    onAdd = { showCarpool = true },
-                                    onDelete = {
-                                        carpoolEntry?.let {
-                                            viewModel.deleteCarpool(it.idMs)
-                                        }
-                                    }
-                                )
-                            }
-                        )
-                    }
-                }
-                TripDetailTab.TRENDS -> {
                     TripTrendsView(
                         samples = samples,
                         selectedPids = selectedTrendPids,
