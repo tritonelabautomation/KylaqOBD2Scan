@@ -33,6 +33,8 @@ enum class DecoderType {
     STEERING_ANGLE_SIGNED_10, // (Signed16(A, B)) / 10.0 (°): -720.0° to +720.0° - J1979-2 PID B5 / UDS DID 0200
     SIGNED_16_DIV_10,         // Signed16(A, B) / 10.0
     SIGNED_16_DIV_100,        // Signed16(A, B) / 100.0
+    SIGNED_16_RAW,            // Signed16(A, B)
+    PRESSURE_HPA_16,          // ((A * 256) + B) (hPa)
     MISFIRE_COUNT_16,         // (A * 256) + B
     KNOCK_RETARD_DIV_10,      // Signed16(A, B) / 10.0 (°CA)
     PRESSURE_BAR_10,          // ((A * 256) + B) / 10.0 (bar)
@@ -516,7 +518,7 @@ object DefaultPidDefinitions {
                 expectedRxId = "7E8",
                 defaultIntervalMs = 250L,
                 enabled = true,
-                decoderType = DecoderType.RAW_A_KPA,
+                decoderType = DecoderType.PRESSURE_HPA_16,
                 formulaDisplay = "(A * 256) + B",
                 description = "UDS Service 0x22 DID 0203 Target Charge Air Pressure (IDE00190)",
                 priority = PollingPriority.FAST
@@ -532,7 +534,7 @@ object DefaultPidDefinitions {
                 expectedRxId = "7E8",
                 defaultIntervalMs = 150L,
                 enabled = true,
-                decoderType = DecoderType.RAW_A_KPA,
+                decoderType = DecoderType.PRESSURE_HPA_16,
                 formulaDisplay = "(A * 256) + B",
                 description = "UDS Service 0x22 DID 0204 Measured Manifold Boost Pressure (IDE00191)",
                 priority = PollingPriority.FAST
@@ -693,7 +695,7 @@ object DefaultPidDefinitions {
                 expectedRxId = "7E9",
                 defaultIntervalMs = 250L,
                 enabled = true,
-                decoderType = DecoderType.SIGNED_16_DIV_10,
+                decoderType = DecoderType.SIGNED_16_RAW,
                 formulaDisplay = "Signed16(A, B)",
                 description = "UDS Service 0x22 DID 0221 Torque Converter Lockup Clutch Slip RPM",
                 priority = PollingPriority.FAST

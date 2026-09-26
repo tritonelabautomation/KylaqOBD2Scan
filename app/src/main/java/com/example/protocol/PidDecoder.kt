@@ -697,6 +697,59 @@ object PidDecoder {
                 }
             }
 
+            DecoderType.PRESSURE_HPA_16 -> {
+                if (dataBytes.size < 2) {
+                    DecodedResult(
+                        parameterName = pidDef.name,
+                        numericValue = null,
+                        displayValue = "NO DATA",
+                        unit = pidDef.unit,
+                        rawPayloadHex = rawHex,
+                        dataBytes = dataBytes,
+                        isKnown = false
+                    )
+                } else {
+                    val raw = (a shl 8) or b
+                    val hpa = raw.toDouble()
+                    DecodedResult(
+                        parameterName = pidDef.name,
+                        numericValue = hpa,
+                        displayValue = String.format(Locale.US, "%.0f hPa", hpa),
+                        unit = "hPa",
+                        rawPayloadHex = rawHex,
+                        dataBytes = dataBytes,
+                        isKnown = true
+                    )
+                }
+            }
+
+            DecoderType.SIGNED_16_RAW -> {
+                if (dataBytes.size < 2) {
+                    DecodedResult(
+                        parameterName = pidDef.name,
+                        numericValue = null,
+                        displayValue = "NO DATA",
+                        unit = pidDef.unit,
+                        rawPayloadHex = rawHex,
+                        dataBytes = dataBytes,
+                        isKnown = false
+                    )
+                } else {
+                    val raw16 = (a shl 8) or b
+                    val signedVal = if (raw16 > 32767) raw16 - 65536 else raw16
+                    val value = signedVal.toDouble()
+                    DecodedResult(
+                        parameterName = pidDef.name,
+                        numericValue = value,
+                        displayValue = String.format(Locale.US, "%+d %s", signedVal, pidDef.unit).trim(),
+                        unit = pidDef.unit,
+                        rawPayloadHex = rawHex,
+                        dataBytes = dataBytes,
+                        isKnown = true
+                    )
+                }
+            }
+
             DecoderType.MISFIRE_COUNT_16 -> {
                 if (dataBytes.size < 2) {
                     DecodedResult(
