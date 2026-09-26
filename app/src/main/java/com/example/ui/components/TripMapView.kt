@@ -243,13 +243,6 @@ fun TripMapView(
                         }
                     }
                 }
-                                        fontFamily = FontFamily.Monospace
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
             }
 
             // Replay Scrubber & Controls Bar
