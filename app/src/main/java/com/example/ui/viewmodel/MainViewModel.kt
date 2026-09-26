@@ -2134,7 +2134,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             val payload = com.example.protocol.CodingLabCodec.decodePositive(resp.lines, didHex)
                                 .ifBlank { com.example.protocol.CodingLabCodec.decodePositive(listOf(raw), didHex) }
                             val ascii = com.example.protocol.CodingLabCodec.hexToAscii(payload)
-                            val recognizedName = DefaultPidDefinitions.getDefaults()
+                            val recognizedName = com.example.model.DefaultPidDefinitions.getDefaults()
                                 .firstOrNull { it.pid.equals(didHex, ignoreCase = true) }?.name
                             val hit = UdsDiscoveredDid(
                                 didHex = didHex,
