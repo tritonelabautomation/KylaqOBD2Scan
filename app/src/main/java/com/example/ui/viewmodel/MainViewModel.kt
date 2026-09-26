@@ -2117,7 +2117,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 for (currentHeader in headersToScan) {
                     if (!isActive) break
+                    val expectedRx = com.example.model.KylaqProtocolProfile.getExpectedRxId(currentHeader)
                     transport.sendCommand("ATSH $currentHeader", 900L)
+                    if (expectedRx != null && !currentHeader.startsWith("7E")) {
+                        transport.sendCommand("ATCRA $expectedRx", 900L)
+                    } else {
+                        transport.sendCommand("ATCRA", 900L)
+                    }
 
                     for (didInt in startDid..endDid) {
                         if (!isActive) break
@@ -2126,7 +2132,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         _udsScanProgress.value = (currentIndex.toFloat() / total.toFloat()).coerceIn(0f, 1f)
                         _udsScanStatusText.value = "Scanning $currentHeader DID $didHex ($currentIndex/$total)"
 
-                        val cmd = "22$didHex"
+                        val cmd = "22 ${didHex.take(2)} ${didHex.drop(2)}"
                         val resp = transport.sendCommand(cmd, 1500L)
                         val raw = resp.rawText.ifBlank { resp.lines.joinToString(" ") }
 
@@ -2149,6 +2155,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
                 transport.sendCommand("ATSH 7E0", 900L)
+                transport.sendCommand("ATCRA", 900L)
                 _udsScanStatusText.value = "Scan complete: ${foundList.size} valid DIDs discovered"
             } catch (e: Exception) {
                 _udsScanStatusText.value = "Scan aborted: ${e.message}"
@@ -2177,7 +2184,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 for (header in com.example.protocol.CodingLabCodec.ALL_MODULE_HEADERS) {
                     val moduleName = com.example.protocol.CodingLabCodec.ecuNameForHeader(header)
+                    val expectedRx = com.example.model.KylaqProtocolProfile.getExpectedRxId(header)
                     transport.sendCommand("ATSH $header", 900L)
+                    if (expectedRx != null && !header.startsWith("7E")) {
+                        transport.sendCommand("ATCRA $expectedRx", 900L)
+                    } else {
+                        transport.sendCommand("ATCRA", 900L)
+                    }
 
                     // 19 02 09: UDS ReadDTCInformation reportDTCByStatusMask (0x09: confirmed + pending)
                     val resp = transport.sendCommand("19 02 09", 2500L)
@@ -2204,6 +2217,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
                 transport.sendCommand("ATSH 7E0", 900L)
+                transport.sendCommand("ATCRA", 900L)
                 _udsMultiEcuDtcSummaries.value = summaries
                 if (allExtractedDtcs.isNotEmpty()) {
                     saveDtcs(allExtractedDtcs.distinct(), "CONFIRMED (UDS Multi-ECU)")
@@ -2225,9 +2239,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (validation is com.example.protocol.ValidationResult.Rejected) {
             return CodingLabResult("SAFETY: ${validation.reason}", null, null, null)
         }
+        val expectedRx = com.example.model.KylaqProtocolProfile.getExpectedRxId(header)
         transport.sendCommand("ATSH $header", 1200L)
-        val resp = transport.sendCommand(request, 2500L)
+        if (expectedRx != null && !header.startsWith("7E")) {
+            transport.sendCommand("ATCRA $expectedRx", 1200L)
+        } else {
+            transport.sendCommand("ATCRA", 1200L)
+        }
+        val readCmd = if (did.length == 4) "22 ${did.take(2)} ${did.drop(2)}" else request
+        val resp = transport.sendCommand(readCmd, 2500L)
         transport.sendCommand("ATSH 7E0", 1200L)
+        transport.sendCommand("ATCRA", 1200L)
         val raw = resp.rawText.ifBlank { resp.lines.joinToString(" | ") }
         val nrc = com.example.protocol.CodingLabCodec.negativeNrc(raw)
         val payload = if (nrc == null) {
@@ -2250,8 +2272,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             ?: return listOf(SweepHit("--", "NO_ADAPTER", "Connect the ELM327 adapter first."))
         val out = mutableListOf<SweepHit>()
         for (h in com.example.protocol.CodingLabCodec.SWEEP_HEADERS) {
+            val expectedRx = com.example.model.KylaqProtocolProfile.getExpectedRxId(h)
             transport.sendCommand("ATSH $h", 900L)
-            val r = transport.sendCommand("22F190", 2000L)
+            if (expectedRx != null && !h.startsWith("7E")) {
+                transport.sendCommand("ATCRA $expectedRx", 900L)
+            } else {
+                transport.sendCommand("ATCRA", 900L)
+            }
+            val r = transport.sendCommand("22 F1 90", 2000L)
             val raw = r.rawText.ifBlank { r.lines.joinToString(" ") }
             when (val kind = com.example.protocol.CodingLabCodec.classifyResponse(raw, "F190")) {
                 "POSITIVE" -> {
@@ -2265,6 +2293,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         transport.sendCommand("ATSH 7E0", 900L)
+        transport.sendCommand("ATCRA", 900L)
         if (out.isEmpty()) out.add(SweepHit("--", "SILENT", "No module answered on any header (adapter asleep or car off)."))
         return out
     }

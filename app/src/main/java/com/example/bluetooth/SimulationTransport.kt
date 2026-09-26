@@ -459,6 +459,148 @@ class SimulationElmTransport(
                 val a = (coolantTempC - 5.0 + 40).toInt().coerceIn(0, 255)
                 lines.add("7E8 03 41 67 %02X".format(a))
             }
+
+            // Extended UDS Service 0x22 Simulation Responses
+            cleanCmd == "220200" || cleanCmd == "22 02 00" -> {
+                // EPS Steering Angle: 0.0°
+                lines.add("77E 05 62 02 00 00 00")
+            }
+            cleanCmd == "220202" || cleanCmd == "22 02 02" -> {
+                // Engine Oil Temp: 80°C (0x78 = 120 -> 120 - 40 = 80)
+                lines.add("7E8 04 62 02 02 78")
+            }
+            cleanCmd == "220203" || cleanCmd == "22 02 03" -> {
+                // Target Boost: 1000 hPa
+                lines.add("7E8 05 62 02 03 03 E8")
+            }
+            cleanCmd == "220204" || cleanCmd == "22 02 04" -> {
+                // Actual Boost: 1013 hPa
+                lines.add("7E8 05 62 02 04 03 F5")
+            }
+            cleanCmd == "220205" || cleanCmd == "22 02 05" -> {
+                // Cyl 1 Misfires: 0
+                lines.add("7E8 05 62 02 05 00 00")
+            }
+            cleanCmd == "220206" || cleanCmd == "22 02 06" -> {
+                // Cyl 2 Misfires: 0
+                lines.add("7E8 05 62 02 06 00 00")
+            }
+            cleanCmd == "220207" || cleanCmd == "22 02 07" -> {
+                // Cyl 3 Misfires: 0
+                lines.add("7E8 05 62 02 07 00 00")
+            }
+            cleanCmd == "220208" || cleanCmd == "22 02 08" -> {
+                // Cyl 1 Knock Retard: 0.0°
+                lines.add("7E8 04 62 02 08 00")
+            }
+            cleanCmd == "220209" || cleanCmd == "22 02 09" -> {
+                // Cyl 2 Knock Retard: 0.0°
+                lines.add("7E8 04 62 02 09 00")
+            }
+            cleanCmd == "22020A" || cleanCmd == "22 02 0A" -> {
+                // Cyl 3 Knock Retard: 0.0°
+                lines.add("7E8 04 62 02 0A 00")
+            }
+            cleanCmd == "22020B" || cleanCmd == "22 02 0B" -> {
+                // Rail Pressure: 40.0 bar (0x0190 = 400 -> 40.0 bar)
+                lines.add("7E8 05 62 02 0B 01 90")
+            }
+            cleanCmd == "22020C" || cleanCmd == "22 02 0C" -> {
+                // Pre-Turbine EGT: 480°C
+                lines.add("7E8 05 62 02 0C 01 E0")
+            }
+            cleanCmd == "220220" || cleanCmd == "22 02 20" -> {
+                // ATF Temp: 70°C (0x6E = 110 -> 110 - 40 = 70)
+                lines.add("7E9 04 62 02 20 6E")
+            }
+            cleanCmd == "220221" || cleanCmd == "22 02 21" -> {
+                // Torque Converter Slip: 15 RPM
+                lines.add("7E9 05 62 02 21 00 0F")
+            }
+            cleanCmd == "220222" || cleanCmd == "22 02 22" -> {
+                // AT Line Pressure: 6.2 bar
+                lines.add("7E9 05 62 02 22 00 3E")
+            }
+            cleanCmd == "2202B0" || cleanCmd == "22 02 B0" -> {
+                // Wheel Speed FL: 0.00 km/h
+                lines.add("77D 05 62 02 B0 00 00")
+            }
+            cleanCmd == "2202B1" || cleanCmd == "22 02 B1" -> {
+                // Wheel Speed FR: 0.00 km/h
+                lines.add("77D 05 62 02 B1 00 00")
+            }
+            cleanCmd == "2202B6" || cleanCmd == "22 02 B6" -> {
+                // Wheel Speed RL: 0.00 km/h
+                lines.add("77D 05 62 02 B6 00 00")
+            }
+            cleanCmd == "2202B7" || cleanCmd == "22 02 B7" -> {
+                // Wheel Speed RR: 0.00 km/h
+                lines.add("77D 05 62 02 B7 00 00")
+            }
+            cleanCmd == "2202B3" || cleanCmd == "22 02 B3" -> {
+                // Brake Master Pressure: 0.0 bar
+                lines.add("77D 05 62 02 B3 00 00")
+            }
+            cleanCmd == "2202B4" || cleanCmd == "22 02 B4" -> {
+                // Lateral Accel: 0.0 m/s2
+                lines.add("77D 05 62 02 B4 00 00")
+            }
+            cleanCmd == "2202B5" || cleanCmd == "22 02 B5" -> {
+                // Yaw Rate: 0.0 deg/s
+                lines.add("77D 05 62 02 B5 00 00")
+            }
+            cleanCmd == "220280" || cleanCmd == "22 02 80" -> {
+                // A/C Refrigerant Pressure: 7.2 bar (0x48 = 72 -> 7.2 bar)
+                lines.add("77B 04 62 02 80 48")
+            }
+            cleanCmd == "220281" || cleanCmd == "22 02 81" -> {
+                // A/C Compressor Torque: 3.5 Nm (0x23 = 35 -> 3.5 Nm)
+                lines.add("77B 04 62 02 81 23")
+            }
+            cleanCmd == "220282" || cleanCmd == "22 02 82" -> {
+                // Evaporator Core Temp: 6.0°C (0x2E = 46 -> 46 - 40 = 6)
+                lines.add("77B 04 62 02 82 2E")
+            }
+            cleanCmd == "220260" || cleanCmd == "22 02 60" -> {
+                // 12V Battery SoC: 85%
+                lines.add("77A 04 62 02 60 55")
+            }
+            cleanCmd == "220261" || cleanCmd == "22 02 61" -> {
+                // 12V Battery Resistance: 4.0 mOhm
+                lines.add("77A 05 62 02 61 00 28")
+            }
+            cleanCmd == "22040F" || cleanCmd == "22 04 0F" -> {
+                // Needle sweep staging: active
+                lines.add("77F 04 62 04 0F 01")
+            }
+            cleanCmd == "220225" || cleanCmd == "22 02 25" -> {
+                // Acoustic lock: active
+                lines.add("77A 04 62 02 25 01")
+            }
+            cleanCmd == "220240" || cleanCmd == "22 02 40" -> {
+                // Comfort blinker: 3 cycles
+                lines.add("77A 04 62 02 40 03")
+            }
+            cleanCmd == "220242" || cleanCmd == "22 02 42" -> {
+                // DRL menu: active
+                lines.add("77A 04 62 02 42 01")
+            }
+            cleanCmd == "220310" || cleanCmd == "22 03 10" -> {
+                // Tear wiping: active
+                lines.add("77A 04 62 03 10 01")
+            }
+            cleanCmd == "220320" || cleanCmd == "22 03 20" -> {
+                // Mirror fold: active
+                lines.add("77A 04 62 03 20 01")
+            }
+            cleanCmd == "220450" || cleanCmd == "22 04 50" -> {
+                // Lap timer: active
+                lines.add("77F 04 62 04 50 01")
+            }
+            cleanCmd.startsWith("1902") || cleanCmd.startsWith("19 02") -> {
+                // Multi-ECU UDS DTC scan: healthy, 0 DTCs
+                lines.add("59 02 FF")
+            }
             else -> {
                 lines.add("NO DATA")
                 responseStatus = ResponseStatus.NO_DATA

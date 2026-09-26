@@ -166,6 +166,7 @@ class ObdScheduler(
      * or stops.
      */
     private var currentCanHeader = ""
+    private var currentRxFilter = ""
 
     /**
      * Adaptive staleness inputs (2026-09-13, owner: "dashboard update inconsistency").
@@ -181,6 +182,31 @@ class ObdScheduler(
     private val queryGapEwmaMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private val lastQueryAttemptMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
+    private suspend fun applyCanHeaderAndFilter(
+        transport: ElmTransport,
+        desiredHeader: String,
+        expectedRx: String? = null
+    ) {
+        val upperHeader = desiredHeader.uppercase()
+        if (upperHeader.isNotBlank() && upperHeader != currentCanHeader) {
+            transport.sendCommand("ATSH $upperHeader", timeoutMs = 800L)
+            currentCanHeader = upperHeader
+        }
+
+        val targetRx = expectedRx ?: com.example.model.KylaqProtocolProfile.getExpectedRxId(upperHeader)
+        if (targetRx != null && !upperHeader.startsWith("7E") && upperHeader != com.example.model.KylaqProtocolProfile.FUNCTIONAL_REQUEST_ID) {
+            if (currentRxFilter != targetRx) {
+                transport.sendCommand("ATCRA $targetRx", timeoutMs = 800L)
+                currentRxFilter = targetRx
+            }
+        } else {
+            if (currentRxFilter.isNotEmpty()) {
+                transport.sendCommand("ATCRA", timeoutMs = 800L)
+                currentRxFilter = ""
+            }
+        }
+    }
+
     fun startPolling(scope: CoroutineScope, transport: ElmTransport) {
         if (_isPolling.value) return
         _isPolling.value = true
@@ -188,6 +214,7 @@ class ObdScheduler(
         // The adapter was (re)initialised outside this scheduler: its ATSH header is
         // unknown, so force the first query to re-send it.
         currentCanHeader = ""
+        currentRxFilter = ""
         queryGapEwmaMs.clear()
         lastQueryAttemptMs.clear()
 
@@ -224,14 +251,18 @@ class ObdScheduler(
                     continue
                 }
 
-                // Sort: FAST first, then MEDIUM, then SLOW
-                val prioritizedPids = activePids.sortedBy {
-                    when (it.priority) {
-                        PollingPriority.FAST -> 0
-                        PollingPriority.MEDIUM -> 1
-                        PollingPriority.SLOW -> 2
+                // Sort: FAST first, then MEDIUM, then SLOW, clustered by CAN header to minimize ATSH switches
+                val prioritizedPids = activePids.sortedWith(
+                    compareBy<PidDefinition> {
+                        when (it.priority) {
+                            PollingPriority.FAST -> 0
+                            PollingPriority.MEDIUM -> 1
+                            PollingPriority.SLOW -> 2
+                        }
+                    }.thenBy {
+                        it.canHeader.ifBlank { "7E0" }
                     }
-                }
+                )
 
                 for (pidDef in prioritizedPids) {
                     if (!isActive || !transport.isConnected) break
@@ -283,7 +314,19 @@ class ObdScheduler(
                 }
                 if (unresolvedDef != null) {
                     lastProbeTimeMap[unresolvedDef.id] = nowProbe
-                    val resp = runCatching { transport.sendCommand(unresolvedDef.id, 900L) }.getOrNull()
+                    val probeHeader = when {
+                        unresolvedDef.canHeader.isNotBlank() -> com.example.model.KylaqProtocolProfile.getPhysicalRequestId(unresolvedDef.canHeader)
+                        else -> com.example.model.KylaqProtocolProfile.FUNCTIONAL_REQUEST_ID
+                    }
+                    val probeRx = unresolvedDef.expectedRxId.ifBlank { null }
+                    applyCanHeaderAndFilter(transport, probeHeader, probeRx)
+
+                    val probeCmd = if (unresolvedDef.service.equals("22", ignoreCase = true) && unresolvedDef.pid.length == 4) {
+                        "22 ${unresolvedDef.pid.substring(0, 2)} ${unresolvedDef.pid.substring(2, 4)}"
+                    } else {
+                        unresolvedDef.id
+                    }
+                    val resp = runCatching { transport.sendCommand(probeCmd, 1200L) }.getOrNull()
                     when (resp?.status) {
                         com.example.model.ResponseStatus.OK -> executePidQuery(transport, unresolvedDef)
                         com.example.model.ResponseStatus.NO_DATA ->
@@ -325,9 +368,10 @@ class ObdScheduler(
         stalenessJob?.cancel()
         stalenessJob = null
         _isPolling.value = false
-        // FIX: drop the cached ATSH header. The next session may talk to a different
+        // FIX: drop the cached ATSH header and CRA filter. The next session may talk to a different
         // adapter (or the same one after an ATZ reset), so the header must be re-sent.
         currentCanHeader = ""
+        currentRxFilter = ""
         queryGapEwmaMs.clear()
         lastQueryAttemptMs.clear()
     }
@@ -364,15 +408,18 @@ class ObdScheduler(
         val validatingEcu = capabilityManager.getValidatingEcuForPid(pidDef.id)
         val desiredHeader = when {
             validatingEcu != null -> com.example.model.KylaqProtocolProfile.getPhysicalRequestId(validatingEcu)
-            pidDef.canHeader.isNotBlank() -> pidDef.canHeader
-            settingsRepository.canHeader.value.isNotBlank() -> settingsRepository.canHeader.value
+            pidDef.canHeader.isNotBlank() -> com.example.model.KylaqProtocolProfile.getPhysicalRequestId(pidDef.canHeader)
+            settingsRepository.canHeader.value.isNotBlank() -> com.example.model.KylaqProtocolProfile.getPhysicalRequestId(settingsRepository.canHeader.value)
             else -> com.example.model.KylaqProtocolProfile.FUNCTIONAL_REQUEST_ID
         }
-        if (desiredHeader.isNotBlank() && desiredHeader != currentCanHeader) {
-            transport.sendCommand("ATSH $desiredHeader", timeoutMs = 1000L)
-            currentCanHeader = desiredHeader
-        }
+        val expectedRx = validatingEcu ?: pidDef.expectedRxId.ifBlank { null }
+        applyCanHeaderAndFilter(transport, desiredHeader, expectedRx)
 
+        val commandToSend = if (pidDef.service.equals("22", ignoreCase = true) && pidDef.pid.length == 4) {
+            "22 ${pidDef.pid.substring(0, 2)} ${pidDef.pid.substring(2, 4)}"
+        } else {
+            "${pidDef.service}${pidDef.pid}"
+        }
         val requestHex = "${pidDef.service}${pidDef.pid}"
         val txUtc = getNowStamp()
         val txMonotonic = SystemClock.elapsedRealtime()
@@ -382,7 +429,7 @@ class ObdScheduler(
             timestampUtc = txUtc,
             timestampMonotonic = txMonotonic,
             direction = Direction.TX,
-            elmCommand = requestHex,
+            elmCommand = commandToSend,
             canTxId = desiredHeader,
             requestHex = requestHex,
             service = pidDef.service,
@@ -395,7 +442,7 @@ class ObdScheduler(
         recordingManager.recordTransaction(txRecord)
 
         // 2. Transmit over ELM327 and await response
-        val elmResponse = transport.sendCommand(requestHex, timeoutMs = 1800L)
+        val elmResponse = transport.sendCommand(commandToSend, timeoutMs = 1800L)
         val rxUtc = getNowStamp()
         val rxMonotonic = SystemClock.elapsedRealtime()
 

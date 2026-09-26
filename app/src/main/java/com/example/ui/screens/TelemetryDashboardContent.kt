@@ -283,11 +283,13 @@ fun TelemetryDashboardContent(
             icon = Icons.Default.HealthAndSafety,
             color = ElectricAmber,
         ) {
-            MetricRowWithSource("Engine Oil Temp (Sump)", formatLiveValue(effectiveLive, "220202"), isLiveError(effectiveLive, "220202"), source = "UDS DID 0202 (G266)")
+            val oilSource = if (effectiveLive["220202"] != null && !isLiveError(effectiveLive, "220202")) "UDS DID 0202 (G266)" else if (effectiveLive["015C"] != null && !isLiveError(effectiveLive, "015C")) "OBD PID 015C (Engine Oil)" else "UDS DID 0202 (G266)"
+            val boostSource = if (effectiveLive["220204"] != null && !isLiveError(effectiveLive, "220204")) "UDS DID 0204 (hPa)" else if (effectiveLive["010B"] != null && !isLiveError(effectiveLive, "010B")) "OBD PID 010B (MAP)" else "UDS DID 0204 (hPa)"
+            MetricRowWithSource("Engine Oil Temp (Sump)", formatLiveValue(effectiveLive, "220202", fallbackPid = "015C"), isLiveError(effectiveLive, "220202", fallbackPid = "015C"), source = oilSource)
             MetricRowWithSource("Direct Inj Rail Pressure", formatLiveValue(effectiveLive, "22020B"), isLiveError(effectiveLive, "22020B"), source = "UDS DID 020B (bar)")
             MetricRowWithSource("Pre-Turbine EGT", formatLiveValue(effectiveLive, "22020C"), isLiveError(effectiveLive, "22020C"), source = "UDS DID 020C (°C)")
             MetricRowWithSource("Target Boost Pressure", formatLiveValue(effectiveLive, "220203"), isLiveError(effectiveLive, "220203"), source = "UDS DID 0203 (hPa)")
-            MetricRowWithSource("Actual Boost Pressure", formatLiveValue(effectiveLive, "220204"), isLiveError(effectiveLive, "220204"), source = "UDS DID 0204 (hPa)")
+            MetricRowWithSource("Actual Boost Pressure", formatLiveValue(effectiveLive, "220204", fallbackPid = "010B"), isLiveError(effectiveLive, "220204", fallbackPid = "010B"), source = boostSource)
             MetricRowWithSource("Cylinder 1 Knock Retard", formatLiveValue(effectiveLive, "220208"), isLiveError(effectiveLive, "220208"), source = "UDS DID 0208 (°CA)")
             MetricRowWithSource("Cylinder 2 Knock Retard", formatLiveValue(effectiveLive, "220209"), isLiveError(effectiveLive, "220209"), source = "UDS DID 0209 (°CA)")
             MetricRowWithSource("Cylinder 3 Knock Retard", formatLiveValue(effectiveLive, "22020A"), isLiveError(effectiveLive, "22020A"), source = "UDS DID 020A (°CA)")
