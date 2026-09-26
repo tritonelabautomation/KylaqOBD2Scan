@@ -234,6 +234,45 @@ fun CodingLabScreen(
                 }
             }
 
+            // ---- Full-Vehicle OEM DTC Scanner (Service 0x19) ----
+            val isMultiEcuScanning by viewModel.isMultiEcuDtcScanning.collectAsState()
+            val multiEcuSummaries by viewModel.udsMultiEcuDtcSummaries.collectAsState()
+
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("FULL-VEHICLE MULTI-ECU DTC HEALTH (0x19 02 09)", color = ElectricAmber, fontSize = 12.sp, fontWeight = FontWeight.Black)
+                    Text("Sweeps all 9 vehicle modules for confirmed, pending, and permanent fault codes.", color = TextSecondaryDark, fontSize = 11.sp)
+
+                    Button(
+                        onClick = { viewModel.scanFullVehicleUdsDtcs() },
+                        enabled = !isMultiEcuScanning && !busy && !isUdsScanning,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = ElectricAmber)
+                    ) {
+                        Text(if (isMultiEcuScanning) "SCANNING 9 MODULES..." else "SCAN ALL 9 MODULES FOR DTCs", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    if (multiEcuSummaries.isNotEmpty()) {
+                        multiEcuSummaries.forEach { summary ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(summary.moduleName, color = TextPrimaryDark, fontSize = 11.sp, modifier = Modifier.weight(1f))
+                                val isClean = summary.status.startsWith("HEALTHY")
+                                Text(
+                                    summary.status,
+                                    color = if (isClean) NeonEmerald else WarningRed,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
             // ---- ECU sweep ----
             OutlinedButton(
                 onClick = {
