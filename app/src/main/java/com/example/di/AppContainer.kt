@@ -57,6 +57,16 @@ object AppContainer {
         } else {
             null
         }
+
+    fun currentCoordinates(): Pair<Double, Double>? =
+        if (::gpsManager.isInitialized) {
+            gpsManager.gpsData.value
+                .takeIf { it.isAvailable && it.latitude != 0.0 && it.longitude != 0.0 }
+                ?.let { it.latitude to it.longitude }
+        } else null
+
+    fun currentGps(): com.example.data.GpsData =
+        if (::gpsManager.isInitialized) gpsManager.gpsData.value else com.example.data.GpsData()
     lateinit var bluetoothManager: BluetoothManager
     lateinit var obdScheduler: ObdScheduler
     lateinit var pidDiscoveryService: com.example.discovery.PidDiscoveryService

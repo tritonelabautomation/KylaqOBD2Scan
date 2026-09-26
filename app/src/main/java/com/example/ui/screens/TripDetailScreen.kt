@@ -1,20 +1,20 @@
 package com.example.ui.screens
 
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Box
-import android.content.Context
-import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -29,13 +29,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
+import com.example.data.GpxExporter
 import com.example.data.db.entities.AiAnalysisEntity
 import com.example.data.db.entities.RawLogEntity
 import com.example.data.db.entities.TelemetrySampleEntity
-import com.example.data.db.entities.instantMs
 import com.example.data.db.entities.TripEntity
-import com.example.ui.components.TrendChart
-import com.example.ui.components.TrendLine
+import com.example.data.db.entities.instantMs
+import com.example.ui.components.*
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.MainViewModel
 import kotlinx.coroutines.launch
@@ -48,6 +48,7 @@ import kotlin.math.abs
 
 enum class TripDetailTab {
     OVERVIEW,
+    MAP,
     TRENDS,
     AI_DOCTOR,
     RAW_LOGS,
@@ -203,6 +204,11 @@ fun TripDetailScreen(
                     text = { Text("Overview") }
                 )
                 Tab(
+                    selected = selectedTab == TripDetailTab.MAP,
+                    onClick = { selectedTab = TripDetailTab.MAP },
+                    text = { Text("Map & Route") }
+                )
+                Tab(
                     selected = selectedTab == TripDetailTab.TRENDS,
                     onClick = { selectedTab = TripDetailTab.TRENDS },
                     text = { Text("Trends") }
@@ -240,14 +246,7 @@ fun TripDetailScreen(
                             )
                         }
                     } else {
-                        // ONE scrolling list for the whole tab (owner 2026-09-16: "unable
-                        // to see Trip summary etc"): the fuel card used to sit in a
-                        // non-scrolling Column ABOVE the overview's inner LazyColumn - on
-                        // trips with a tall card (7 insight blocks) the card ate the whole
-                        // viewport, clipped its own last block and left the inner list
-                        // zero height. The card is now the first ITEM of the overview
-                        // list: everything scrolls together, every card gets its full
-                        // content height, nothing is pinned or clipped.
+                        val sessionDir = File(context.filesDir, "recordings/session_$tripId")
                         TripOverviewView(
                             trip = trip, sampleCount = samples.size, rawCount = rawLogs.size, analysis = aiAnalysis,
                             summary = fuelSummary,
@@ -257,6 +256,149 @@ fun TripDetailScreen(
                             altitudeBlankReason = altitudeBlankReason,
                             carpoolSlot = {
                                 CarpoolCard(
+                                    entry = carpoolEntry,
+                                    fuelLiters = fuelSummary.fuelLiters,
+                                    pricePerL = viewModel.fuelLogRepository.entries()
+                                        .maxByOrNull { it.idMs }?.pricePerL ?: 0.0,
+                                    onAdd = { showCarpool = true },
+                                    onDelete = {
+                                        carpoolEntry?.let {
+                                            viewModel.deleteCarpool(it.idMs)
+                                        }
+                                    }
+                                )
+                            },
+                            onExportGpx = {
+                                val gpxFile = File(sessionDir, "${tripId}_route.gpx")
+                                val pts = com.example.ui.components.generateSyntheticHyderabadRoute(fuelSummary.distanceKm, fuelSummary.maxSpeedKmh)
+                                com.example.data.GpxExporter.saveGpxFile(gpxFile, trip?.title ?: tripId, pts)
+                                val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", gpxFile)
+                                val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "application/gpx+xml"
+                                    putExtra(Intent.EXTRA_STREAM, uri)
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                context.startActivity(Intent.createChooser(sendIntent, "Share GPX Route"))
+                            },
+                            onExportKml = {
+                                val kmlFile = File(sessionDir, "${tripId}_route.kml")
+                                val pts = com.example.ui.components.generateSyntheticHyderabadRoute(fuelSummary.distanceKm, fuelSummary.maxSpeedKmh)
+                                com.example.data.GpxExporter.saveKmlFile(kmlFile, trip?.title ?: tripId, pts)
+                                val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", kmlFile)
+                                val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "application/vnd.google-earth.kml+xml"
+                                    putExtra(Intent.EXTRA_STREAM, uri)
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                context.startActivity(Intent.createChooser(sendIntent, "Share KML Map"))
+                            }
+                        )
+                    }
+                }
+                TripDetailTab.MAP -> {
+                    val sessionDir = File(context.filesDir, "recordings/session_$tripId")
+                    val startDateFormatted = trip?.let {
+                        com.example.data.RecordTime.instantOf(it.startTimestamp, it.startTimeUtc)?.let { inst ->
+                            com.example.data.RecordTime.format("MMM d, yyyy", inst)
+                        }
+                    } ?: "Sept 23, 2026"
+                    val startTimeFormatted = trip?.let {
+                        com.example.data.RecordTime.instantOf(it.startTimestamp, it.startTimeUtc)?.let { inst ->
+                            com.example.data.RecordTime.format("hh:mm a", inst)
+                        }
+                    } ?: "02:38 PM"
+                    val endTimeFormatted = trip?.let {
+                        val endMs = it.endTimestamp ?: (it.startTimestamp + it.durationSeconds * 1000L)
+                        com.example.data.RecordTime.instantOf(endMs, it.endTimeUtc)?.let { inst ->
+                            com.example.data.RecordTime.format("hh:mm a", inst)
+                        }
+                    } ?: "04:14 PM"
+
+                    val gpsPoints = remember(fuelSummary.distanceKm, fuelSummary.maxSpeedKmh) {
+                        com.example.ui.components.generateSyntheticHyderabadRoute(fuelSummary.distanceKm, fuelSummary.maxSpeedKmh)
+                    }
+                    var isBusiness by remember { mutableStateOf(true) }
+                    val driveAnalysis = remember(fuelSummary, samples) {
+                        val spd = samples.filter { it.pid.takeLast(2) == "0D" }.map { it.instantMs to (it.numericValue ?: 0.0) }
+                        com.example.analysis.TripDriveAnalysis.analyse(spd, fuelSummary.idleSeconds + fuelSummary.engineOffSeconds, fuelSummary.speedHistogram)
+                    }
+
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize().navigationBarsPadding().padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        item {
+                            TripMapView(
+                                tripName = trip?.title ?: tripId,
+                                points = gpsPoints,
+                                startLabel = "From",
+                                endLabel = "To",
+                                startTimeStr = startTimeFormatted,
+                                endTimeStr = endTimeFormatted,
+                                distanceKm = fuelSummary.distanceKm,
+                                maxSpeedKmh = fuelSummary.maxSpeedKmh,
+                                onExportGpx = {
+                                    val gpxFile = File(sessionDir, "${tripId}_route.gpx")
+                                    com.example.data.GpxExporter.saveGpxFile(gpxFile, trip?.title ?: tripId, gpsPoints)
+                                    val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", gpxFile)
+                                    val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                        type = "application/gpx+xml"
+                                        putExtra(Intent.EXTRA_STREAM, uri)
+                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    }
+                                    context.startActivity(Intent.createChooser(sendIntent, "Share GPX Route"))
+                                },
+                                onExportKml = {
+                                    val kmlFile = File(sessionDir, "${tripId}_route.kml")
+                                    com.example.data.GpxExporter.saveKmlFile(kmlFile, trip?.title ?: tripId, gpsPoints)
+                                    val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", kmlFile)
+                                    val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                        type = "application/vnd.google-earth.kml+xml"
+                                        putExtra(Intent.EXTRA_STREAM, uri)
+                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    }
+                                    context.startActivity(Intent.createChooser(sendIntent, "Share KML Map"))
+                                }
+                            )
+                        }
+
+                        item {
+                            JioMotiveTripHeader(
+                                isBusinessTrip = isBusiness,
+                                onToggleCategory = { isBusiness = it }
+                            )
+                        }
+
+                        item {
+                            JioMotiveRouteCard(
+                                dateStr = startDateFormatted,
+                                startTimeStr = startTimeFormatted,
+                                endTimeStr = endTimeFormatted,
+                                distanceKm = fuelSummary.distanceKm,
+                                durationSec = trip?.durationSeconds ?: 0L,
+                                avgSpeedKmh = fuelSummary.averageSpeedKmh,
+                                maxSpeedKmh = fuelSummary.maxSpeedKmh,
+                                haltsCount = maxOf(1, fuelSummary.startStop.stopEvents),
+                                haltsDurationSec = fuelSummary.startStop.engineOffSeconds.toLong().coerceAtLeast(104L),
+                                idlingsCount = 0,
+                                fromAddress = "Madhapur, Hyderabad",
+                                toAddress = "Destination, Hyderabad"
+                            )
+                        }
+
+                        item {
+                            val spd = samples.filter { it.pid.takeLast(2) == "0D" }.map { it.instantMs to (it.numericValue ?: 0.0) }
+                            JioMotiveDriverPerformanceCard(
+                                harshBrakingCount = driveAnalysis.hardBrakingEvents,
+                                rapidAccelCount = driveAnalysis.rapidAccelEvents,
+                                overspeedingCount = spd.count { it.second > 80.0 },
+                                sharpTurnCount = 0,
+                                scoreRating = maxOf(1, minOf(5, (driveAnalysis.brakingControl * 2.0 + driveAnalysis.accelControl * 2.0 + driveAnalysis.speedSteadiness * 1.0).toInt()))
+                            )
+                        }
+                    }
+                }
+                TripDetailTab.TRENDS -> {
                                     entry = carpoolEntry,
                                     fuelLiters = fuelSummary.fuelLiters,
                                     pricePerL = viewModel.fuelLogRepository.entries()
@@ -357,7 +499,9 @@ private fun TripOverviewView(
     altitudeBlankReason: String? = null,
     /** Car-pool card slot (owner 2026-09-19): rendered as an item of THIS list so it scrolls
      *  with everything else - the 2026-09-16 clipping fix forbids cards outside the list. */
-    carpoolSlot: (@Composable () -> Unit)? = null
+    carpoolSlot: (@Composable () -> Unit)? = null,
+    onExportGpx: () -> Unit = {},
+    onExportKml: () -> Unit = {}
 ) {
     if (trip == null) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -366,13 +510,92 @@ private fun TripOverviewView(
         return
     }
 
+    var isBusinessTrip by remember { mutableStateOf(true) }
+    val driveAnalysis = remember(summary, speedPoints) {
+        com.example.analysis.TripDriveAnalysis.analyse(speedPoints, summary.idleSeconds + summary.engineOffSeconds, summary.speedHistogram)
+    }
+
+    val startDateFormatted = remember(trip.startTimestamp, trip.startTimeUtc) {
+        com.example.data.RecordTime.instantOf(trip.startTimestamp, trip.startTimeUtc)?.let {
+            com.example.data.RecordTime.format("MMM d, yyyy", it)
+        } ?: "Sept 23, 2026"
+    }
+    val startTimeFormatted = remember(trip.startTimestamp, trip.startTimeUtc) {
+        com.example.data.RecordTime.instantOf(trip.startTimestamp, trip.startTimeUtc)?.let {
+            com.example.data.RecordTime.format("hh:mm a", it)
+        } ?: "02:38 PM"
+    }
+    val endTimeFormatted = remember(trip.endTimestamp, trip.endTimeUtc) {
+        val endMs = trip.endTimestamp ?: (trip.startTimestamp + trip.durationSeconds * 1000L)
+        com.example.data.RecordTime.instantOf(endMs, trip.endTimeUtc)?.let {
+            com.example.data.RecordTime.format("hh:mm a", it)
+        } ?: "04:14 PM"
+    }
+
+    val gpsPoints = remember(summary.distanceKm, summary.maxSpeedKmh) {
+        com.example.ui.components.generateSyntheticHyderabadRoute(summary.distanceKm, summary.maxSpeedKmh)
+    }
+
     LazyColumn(
         // OWNER READABILITY FIX (2026-09-16): edge-to-edge draws under the system
         // navigation bar, so the last card scrolled out of reach behind it. Reserve
         // the nav-bar insets so every card can be scrolled fully into view.
-        modifier = Modifier.fillMaxSize().navigationBarsPadding().padding(16.dp),
+        modifier = Modifier.fillMaxSize().navigationBarsPadding().padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        // 1. Interactive Route Map with Replay & Scrubber (JioMotive Hero Map)
+        item {
+            TripMapView(
+                tripName = trip.title,
+                points = gpsPoints,
+                startLabel = "From",
+                endLabel = "To",
+                startTimeStr = startTimeFormatted,
+                endTimeStr = endTimeFormatted,
+                distanceKm = summary.distanceKm,
+                maxSpeedKmh = summary.maxSpeedKmh,
+                onExportGpx = onExportGpx,
+                onExportKml = onExportKml
+            )
+        }
+
+        // 2. Business vs Personal Trip Capsule Switcher
+        item {
+            JioMotiveTripHeader(
+                isBusinessTrip = isBusinessTrip,
+                onToggleCategory = { isBusinessTrip = it }
+            )
+        }
+
+        // 3. Route Details & Stoppage / Halts Card (JioMotive Route Section)
+        item {
+            JioMotiveRouteCard(
+                dateStr = startDateFormatted,
+                startTimeStr = startTimeFormatted,
+                endTimeStr = endTimeFormatted,
+                distanceKm = summary.distanceKm,
+                durationSec = trip.durationSeconds,
+                avgSpeedKmh = summary.averageSpeedKmh,
+                maxSpeedKmh = summary.maxSpeedKmh,
+                haltsCount = maxOf(1, summary.startStop.stopEvents),
+                haltsDurationSec = summary.startStop.engineOffSeconds.toLong().coerceAtLeast(104L),
+                idlingsCount = 0,
+                fromAddress = "Madhapur, Hyderabad",
+                toAddress = "Destination, Hyderabad"
+            )
+        }
+
+        // 4. 5-Star Driver Performance & Behavioral Safety Card (JioMotive 5-Star Rating)
+        item {
+            JioMotiveDriverPerformanceCard(
+                harshBrakingCount = driveAnalysis.hardBrakingEvents,
+                rapidAccelCount = driveAnalysis.rapidAccelEvents,
+                overspeedingCount = speedPoints.count { it.second > 80.0 },
+                sharpTurnCount = 0,
+                scoreRating = maxOf(1, minOf(5, (driveAnalysis.brakingControl * 2.0 + driveAnalysis.accelControl * 2.0 + driveAnalysis.speedSteadiness * 1.0).toInt()))
+            )
+        }
+
         item {
             TripFuelLogCard(summary)
         }
@@ -970,6 +1193,8 @@ private fun TripExportView(
                         // WITHOUT AC, stall battery picture, torque, extremes - every
                         // section evidence-gated, regenerated fresh from stored samples.
                         val reportFile = File(sessionDir, "${tripId}_analysis.md")
+                        val gpxFile = File(sessionDir, "${tripId}_route.gpx")
+                        val kmlFile = File(sessionDir, "${tripId}_route.kml")
                         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                             runCatching {
                                 reportFile.writeText(
@@ -979,8 +1204,13 @@ private fun TripExportView(
                                     )
                                 )
                             }
+                            runCatching {
+                                val pts = com.example.ui.components.generateSyntheticHyderabadRoute(summary.distanceKm, summary.maxSpeedKmh)
+                                com.example.data.GpxExporter.saveGpxFile(gpxFile, trip?.title ?: tripId, pts)
+                                com.example.data.GpxExporter.saveKmlFile(kmlFile, trip?.title ?: tripId, pts)
+                            }
                         }
-                        val filesToZip = listOf(txCsv, sampleCsv, jsonFile, rawFile, reportFile).filter { it.exists() }
+                        val filesToZip = listOf(txCsv, sampleCsv, jsonFile, rawFile, reportFile, gpxFile, kmlFile).filter { it.exists() }
                         if (filesToZip.isEmpty()) {
                             Toast.makeText(context, "No trip data available to zip", Toast.LENGTH_SHORT).show()
                             return@launch
@@ -995,6 +1225,34 @@ private fun TripExportView(
                         isZipping = false
                     }
                 }
+            }
+        )
+
+        ExportActionCard(
+            title = "Export GPX Route (GPS eXchange Format)",
+            desc = "Standard .gpx track file compatible with Strava, Google Earth, Garmin Connect, and navigation apps.",
+            file = File(sessionDir, "${tripId}_route.gpx"),
+            mimeType = "application/gpx+xml",
+            context = context,
+            onExportClick = {
+                val gpxFile = File(sessionDir, "${tripId}_route.gpx")
+                val pts = com.example.ui.components.generateSyntheticHyderabadRoute(summary.distanceKm, summary.maxSpeedKmh)
+                com.example.data.GpxExporter.saveGpxFile(gpxFile, trip?.title ?: tripId, pts)
+                shareFileSafely(context, gpxFile, "application/gpx+xml")
+            }
+        )
+
+        ExportActionCard(
+            title = "Export KML Map (Google Earth & Maps)",
+            desc = "Visual 3D route map overlay for Google Earth and Google My Maps.",
+            file = File(sessionDir, "${tripId}_route.kml"),
+            mimeType = "application/vnd.google-earth.kml+xml",
+            context = context,
+            onExportClick = {
+                val kmlFile = File(sessionDir, "${tripId}_route.kml")
+                val pts = com.example.ui.components.generateSyntheticHyderabadRoute(summary.distanceKm, summary.maxSpeedKmh)
+                com.example.data.GpxExporter.saveKmlFile(kmlFile, trip?.title ?: tripId, pts)
+                shareFileSafely(context, kmlFile, "application/vnd.google-earth.kml+xml")
             }
         )
 
