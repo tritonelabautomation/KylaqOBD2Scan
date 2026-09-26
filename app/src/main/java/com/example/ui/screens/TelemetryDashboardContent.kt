@@ -36,10 +36,14 @@ fun TelemetryDashboardContent(
     val effectiveLive = remember(liveMap, capabilityStatuses) {
         val m = liveMap.toMutableMap()
         for ((rawPid, st) in capabilityStatuses) {
-            val key4 = ("01" + rawPid.uppercase().removePrefix("01")).takeLast(4)
-            val cur = m[key4]
+            val key = if (rawPid.startsWith("22", ignoreCase = true)) {
+                rawPid.uppercase()
+            } else {
+                ("01" + rawPid.uppercase().removePrefix("01")).takeLast(4)
+            }
+            val cur = m[key]
             if (cur == null || cur == "Not available") {
-                m[key4] = when (st) {
+                m[key] = when (st) {
                     com.example.model.CapabilityStatus.NOT_SUPPORTED -> "NOT SUPPORTED BY ECU"
                     com.example.model.CapabilityStatus.TIMEOUT -> "no answer (timeout)"
                     // QA/QC fuel audit 2026-09-13 (F-4): a VALIDATED pid whose live query hits a
@@ -271,6 +275,64 @@ fun TelemetryDashboardContent(
             } else {
                 MetricRowWithSource("GPS Signal", "Not available", isError = true, source = "HARDWARE GPS")
             }
+        }
+
+        // 9. Extended UDS: Engine Health & Direct Injection (MED17.1.27)
+        TelemetrySectionCard(
+            title = "ENGINE HEALTH & IGNITION (UDS)",
+            icon = Icons.Default.HealthAndSafety,
+            color = ElectricAmber,
+        ) {
+            MetricRowWithSource("Engine Oil Temp (Sump)", formatLiveValue(effectiveLive, "220202"), isLiveError(effectiveLive, "220202"), source = "UDS DID 0202 (G266)")
+            MetricRowWithSource("Direct Inj Rail Pressure", formatLiveValue(effectiveLive, "22020B"), isLiveError(effectiveLive, "22020B"), source = "UDS DID 020B (bar)")
+            MetricRowWithSource("Pre-Turbine EGT", formatLiveValue(effectiveLive, "22020C"), isLiveError(effectiveLive, "22020C"), source = "UDS DID 020C (°C)")
+            MetricRowWithSource("Target Boost Pressure", formatLiveValue(effectiveLive, "220203"), isLiveError(effectiveLive, "220203"), source = "UDS DID 0203 (hPa)")
+            MetricRowWithSource("Actual Boost Pressure", formatLiveValue(effectiveLive, "220204"), isLiveError(effectiveLive, "220204"), source = "UDS DID 0204 (hPa)")
+            MetricRowWithSource("Cylinder 1 Knock Retard", formatLiveValue(effectiveLive, "220208"), isLiveError(effectiveLive, "220208"), source = "UDS DID 0208 (°CA)")
+            MetricRowWithSource("Cylinder 2 Knock Retard", formatLiveValue(effectiveLive, "220209"), isLiveError(effectiveLive, "220209"), source = "UDS DID 0209 (°CA)")
+            MetricRowWithSource("Cylinder 3 Knock Retard", formatLiveValue(effectiveLive, "22020A"), isLiveError(effectiveLive, "22020A"), source = "UDS DID 020A (°CA)")
+            MetricRowWithSource("Cylinder 1 Misfires", formatLiveValue(effectiveLive, "220205"), isLiveError(effectiveLive, "220205"), source = "UDS DID 0205 (Count)")
+            MetricRowWithSource("Cylinder 2 Misfires", formatLiveValue(effectiveLive, "220206"), isLiveError(effectiveLive, "220206"), source = "UDS DID 0206 (Count)")
+            MetricRowWithSource("Cylinder 3 Misfires", formatLiveValue(effectiveLive, "220207"), isLiveError(effectiveLive, "220207"), source = "UDS DID 0207 (Count)")
+        }
+
+        // 10. Extended UDS: Chassis & 4-Wheel Dynamics (ABS J104)
+        TelemetrySectionCard(
+            title = "CHASSIS & 4-WHEEL DYNAMICS (UDS)",
+            icon = Icons.Default.DirectionsCar,
+            color = CyberCyan,
+        ) {
+            MetricRowWithSource("Brake Master Pressure", formatLiveValue(effectiveLive, "2202B3"), isLiveError(effectiveLive, "2202B3"), source = "UDS DID 02B3 (G201 bar)")
+            MetricRowWithSource("Lateral Acceleration", formatLiveValue(effectiveLive, "2202B4"), isLiveError(effectiveLive, "2202B4"), source = "UDS DID 02B4 (G200)")
+            MetricRowWithSource("Yaw Rate (Cornering)", formatLiveValue(effectiveLive, "2202B5"), isLiveError(effectiveLive, "2202B5"), source = "UDS DID 02B5 (G202)")
+            MetricRowWithSource("Wheel Speed Front-Left", formatLiveValue(effectiveLive, "2202B0"), isLiveError(effectiveLive, "2202B0"), source = "UDS DID 02B0 (G47)")
+            MetricRowWithSource("Wheel Speed Front-Right", formatLiveValue(effectiveLive, "2202B1"), isLiveError(effectiveLive, "2202B1"), source = "UDS DID 02B1 (G45)")
+            MetricRowWithSource("Wheel Speed Rear-Left", formatLiveValue(effectiveLive, "2202B6"), isLiveError(effectiveLive, "2202B6"), source = "UDS DID 02B6 (G46)")
+            MetricRowWithSource("Wheel Speed Rear-Right", formatLiveValue(effectiveLive, "2202B7"), isLiveError(effectiveLive, "2202B7"), source = "UDS DID 02B7 (G44)")
+        }
+
+        // 11. Extended UDS: Transmission & ATF (6-AT AQ250)
+        TelemetrySectionCard(
+            title = "TRANSMISSION & ATF (UDS 6-AT)",
+            icon = Icons.Default.Settings,
+            color = NeonEmerald,
+        ) {
+            MetricRowWithSource("ATF Fluid Temperature", formatLiveValue(effectiveLive, "220220"), isLiveError(effectiveLive, "220220"), source = "UDS DID 0220 (G93 °C)")
+            MetricRowWithSource("Torque Converter Slip", formatLiveValue(effectiveLive, "220221"), isLiveError(effectiveLive, "220221"), source = "UDS DID 0221 (RPM)")
+            MetricRowWithSource("AT Main Line Pressure", formatLiveValue(effectiveLive, "220222"), isLiveError(effectiveLive, "220222"), source = "UDS DID 0222 (bar)")
+        }
+
+        // 12. Extended UDS: Climatronic & 12V Battery Health (J255 & J533)
+        TelemetrySectionCard(
+            title = "CLIMATRONIC & 12V BATTERY (UDS)",
+            icon = Icons.Default.BatteryChargingFull,
+            color = Color(0xFF80CBC4),
+        ) {
+            MetricRowWithSource("A/C Refrigerant Pressure", formatLiveValue(effectiveLive, "220280"), isLiveError(effectiveLive, "220280"), source = "UDS DID 0280 (G395 bar)")
+            MetricRowWithSource("A/C Compressor Load Torque", formatLiveValue(effectiveLive, "220281"), isLiveError(effectiveLive, "220281"), source = "UDS DID 0281 (Nm)")
+            MetricRowWithSource("Evaporator Core Temp", formatLiveValue(effectiveLive, "220282"), isLiveError(effectiveLive, "220282"), source = "UDS DID 0282 (G308 °C)")
+            MetricRowWithSource("12V Battery State of Charge", formatLiveValue(effectiveLive, "220260"), isLiveError(effectiveLive, "220260"), source = "UDS DID 0260 (SoC %)")
+            MetricRowWithSource("12V Battery Resistance", formatLiveValue(effectiveLive, "220261"), isLiveError(effectiveLive, "220261"), source = "UDS DID 0261 (mΩ)")
         }
     }
 }

@@ -91,6 +91,23 @@ class PidCapabilityManager(
             capabilityMap["220200"] = CapabilityStatus.LIVE_ELIGIBLE
             pidToValidatingEcuMap.getOrPut("220200") { ConcurrentHashMap.newKeySet() }.add("77E")
         }
+        val udsSeeds = mapOf(
+            "220202" to "7E8", "220203" to "7E8", "220204" to "7E8",
+            "220205" to "7E8", "220206" to "7E8", "220207" to "7E8",
+            "220208" to "7E8", "220209" to "7E8", "22020A" to "7E8",
+            "22020B" to "7E8", "22020C" to "7E8", "220220" to "7E9",
+            "220221" to "7E9", "220222" to "7E9", "2202B0" to "77D",
+            "2202B1" to "77D", "2202B2" to "77D", "2202B3" to "77D",
+            "2202B4" to "77D", "2202B5" to "77D", "2202B6" to "77D",
+            "2202B7" to "77D", "220280" to "77B", "220281" to "77B",
+            "220282" to "77B", "220260" to "77A", "220261" to "77A"
+        )
+        for ((did, ecu) in udsSeeds) {
+            if (capabilityMap[did] == null) {
+                capabilityMap[did] = CapabilityStatus.LIVE_ELIGIBLE
+                pidToValidatingEcuMap.getOrPut(did) { ConcurrentHashMap.newKeySet() }.add(ecu)
+            }
+        }
     }
 
     private fun publishFlows() {

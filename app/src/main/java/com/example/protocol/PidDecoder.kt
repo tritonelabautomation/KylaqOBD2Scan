@@ -697,6 +697,205 @@ object PidDecoder {
                 }
             }
 
+            DecoderType.MISFIRE_COUNT_16 -> {
+                if (dataBytes.size < 2) {
+                    DecodedResult(
+                        parameterName = pidDef.name,
+                        numericValue = null,
+                        displayValue = "NO DATA",
+                        unit = pidDef.unit,
+                        rawPayloadHex = rawHex,
+                        dataBytes = dataBytes,
+                        isKnown = false
+                    )
+                } else {
+                    val count = (a shl 8) or b
+                    DecodedResult(
+                        parameterName = pidDef.name,
+                        numericValue = count.toDouble(),
+                        displayValue = "$count",
+                        unit = pidDef.unit.ifEmpty { "count" },
+                        rawPayloadHex = rawHex,
+                        dataBytes = dataBytes,
+                        isKnown = true
+                    )
+                }
+            }
+
+            DecoderType.KNOCK_RETARD_DIV_10 -> {
+                if (dataBytes.size < 2) {
+                    DecodedResult(
+                        parameterName = pidDef.name,
+                        numericValue = null,
+                        displayValue = "NO DATA",
+                        unit = pidDef.unit,
+                        rawPayloadHex = rawHex,
+                        dataBytes = dataBytes,
+                        isKnown = false
+                    )
+                } else {
+                    val raw16 = (a shl 8) or b
+                    val signedVal = if (raw16 > 32767) raw16 - 65536 else raw16
+                    val retardDeg = signedVal / 10.0
+                    val isPlausible = kotlin.math.abs(retardDeg) <= 30.0
+                    DecodedResult(
+                        parameterName = pidDef.name,
+                        numericValue = if (isPlausible) retardDeg else null,
+                        displayValue = if (isPlausible) String.format(Locale.US, "%.1f °CA", retardDeg) else "implausible raw - no data",
+                        unit = "°CA",
+                        rawPayloadHex = rawHex,
+                        dataBytes = dataBytes,
+                        isKnown = isPlausible
+                    )
+                }
+            }
+
+            DecoderType.PRESSURE_BAR_10 -> {
+                if (dataBytes.size < 2) {
+                    DecodedResult(
+                        parameterName = pidDef.name,
+                        numericValue = null,
+                        displayValue = "NO DATA",
+                        unit = pidDef.unit,
+                        rawPayloadHex = rawHex,
+                        dataBytes = dataBytes,
+                        isKnown = false
+                    )
+                } else {
+                    val raw = (a shl 8) or b
+                    val bar = raw / 10.0
+                    DecodedResult(
+                        parameterName = pidDef.name,
+                        numericValue = bar,
+                        displayValue = String.format(Locale.US, "%.1f bar", bar),
+                        unit = "bar",
+                        rawPayloadHex = rawHex,
+                        dataBytes = dataBytes,
+                        isKnown = true
+                    )
+                }
+            }
+
+            DecoderType.PRESSURE_BAR_100 -> {
+                if (dataBytes.size < 2) {
+                    DecodedResult(
+                        parameterName = pidDef.name,
+                        numericValue = null,
+                        displayValue = "NO DATA",
+                        unit = pidDef.unit,
+                        rawPayloadHex = rawHex,
+                        dataBytes = dataBytes,
+                        isKnown = false
+                    )
+                } else {
+                    val raw = (a shl 8) or b
+                    val bar = raw / 100.0
+                    DecodedResult(
+                        parameterName = pidDef.name,
+                        numericValue = bar,
+                        displayValue = String.format(Locale.US, "%.2f bar", bar),
+                        unit = "bar",
+                        rawPayloadHex = rawHex,
+                        dataBytes = dataBytes,
+                        isKnown = true
+                    )
+                }
+            }
+
+            DecoderType.WHEEL_SPEED_100 -> {
+                if (dataBytes.size < 2) {
+                    DecodedResult(
+                        parameterName = pidDef.name,
+                        numericValue = null,
+                        displayValue = "NO DATA",
+                        unit = pidDef.unit,
+                        rawPayloadHex = rawHex,
+                        dataBytes = dataBytes,
+                        isKnown = false
+                    )
+                } else {
+                    val raw = (a shl 8) or b
+                    val speedKmh = raw / 100.0
+                    val plausible = speedKmh in 0.0..320.0
+                    DecodedResult(
+                        parameterName = pidDef.name,
+                        numericValue = if (plausible) speedKmh else null,
+                        displayValue = if (plausible) String.format(Locale.US, "%.2f km/h", speedKmh) else "implausible raw - no data",
+                        unit = "km/h",
+                        rawPayloadHex = rawHex,
+                        dataBytes = dataBytes,
+                        isKnown = plausible
+                    )
+                }
+            }
+
+            DecoderType.SIGNED_16_DIV_10 -> {
+                if (dataBytes.size < 2) {
+                    DecodedResult(
+                        parameterName = pidDef.name,
+                        numericValue = null,
+                        displayValue = "NO DATA",
+                        unit = pidDef.unit,
+                        rawPayloadHex = rawHex,
+                        dataBytes = dataBytes,
+                        isKnown = false
+                    )
+                } else {
+                    val raw16 = (a shl 8) or b
+                    val signedVal = if (raw16 > 32767) raw16 - 65536 else raw16
+                    val value = signedVal / 10.0
+                    DecodedResult(
+                        parameterName = pidDef.name,
+                        numericValue = value,
+                        displayValue = String.format(Locale.US, "%.1f %s", value, pidDef.unit).trim(),
+                        unit = pidDef.unit,
+                        rawPayloadHex = rawHex,
+                        dataBytes = dataBytes,
+                        isKnown = true
+                    )
+                }
+            }
+
+            DecoderType.SIGNED_16_DIV_100 -> {
+                if (dataBytes.size < 2) {
+                    DecodedResult(
+                        parameterName = pidDef.name,
+                        numericValue = null,
+                        displayValue = "NO DATA",
+                        unit = pidDef.unit,
+                        rawPayloadHex = rawHex,
+                        dataBytes = dataBytes,
+                        isKnown = false
+                    )
+                } else {
+                    val raw16 = (a shl 8) or b
+                    val signedVal = if (raw16 > 32767) raw16 - 65536 else raw16
+                    val value = signedVal / 100.0
+                    DecodedResult(
+                        parameterName = pidDef.name,
+                        numericValue = value,
+                        displayValue = String.format(Locale.US, "%+.2f %s", value, pidDef.unit).trim(),
+                        unit = pidDef.unit,
+                        rawPayloadHex = rawHex,
+                        dataBytes = dataBytes,
+                        isKnown = true
+                    )
+                }
+            }
+
+            DecoderType.BATTERY_SOC_PCT -> {
+                val pct = a * 100.0 / 255.0
+                DecodedResult(
+                    parameterName = pidDef.name,
+                    numericValue = pct,
+                    displayValue = String.format(Locale.US, "%.1f %%", pct),
+                    unit = "%",
+                    rawPayloadHex = rawHex,
+                    dataBytes = dataBytes,
+                    isKnown = true
+                )
+            }
+
             DecoderType.CUSTOM_EXPRESSION, DecoderType.RESEARCH_RAW -> {
                 DecodedResult(
                     parameterName = pidDef.name,
