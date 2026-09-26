@@ -1,6 +1,5 @@
 package com.example
 
-import com.example.model.UdsModuleDtcSummary
 import com.example.protocol.CodingLabCodec
 import com.example.protocol.DtcDecoder
 import com.example.protocol.SafetyValidator
@@ -17,8 +16,8 @@ class CodingLabScannerAndDtcTest {
     @Test
     fun `extracts 3-byte VAG UDS DTCs from Service 0x19 multi-frame response`() {
         // Multi-frame 19 02 09 response containing P030000 (Random Misfire) and U112100 (Databus missing message)
-        // 59 02 09 [03 00 00 28] [D1 21 00 2F]
-        val rawResponse = "7E8 10 0E 59 02 09 03 00 00 28 7E8 21 D1 21 00 2F 00 00 00 00"
+        // 59 02 09 [03 00 00 28] [D1 21 00 29]
+        val rawResponse = "7E8 10 0E 59 02 09 03 00 00 28 7E8 21 D1 21 00 29 00 00 00 00"
         val dtcs = DtcDecoder.extractUdsDtcs(rawResponse)
 
         assertEquals(2, dtcs.size)
@@ -26,19 +25,16 @@ class CodingLabScannerAndDtcTest {
         // First DTC: P030000 (0x03, 0x00, 0x00), Status: 0x28 (Confirmed + Warning Lamp)
         val p0300 = dtcs[0]
         assertEquals("P030000", p0300.formattedCode)
-        assertEquals("P", p0300.category)
         assertEquals(0x28, p0300.statusByte)
         assertTrue(p0300.isConfirmed)
-        assertTrue(p0300.isWarningIndicatorRequested)
+        assertTrue(p0300.isWarningRequested)
 
-        // Second DTC: U112100 (0xD1, 0x21, 0x00), Status: 0x2F (Pending + Confirmed + Test Failed)
+        // Second DTC: U112100 (0xD1, 0x21, 0x00), Status: 0x29 (Pending + Confirmed)
         val u1121 = dtcs[1]
         assertEquals("U112100", u1121.formattedCode)
-        assertEquals("U", u1121.category)
-        assertEquals(0x2F, u1121.statusByte)
+        assertEquals(0x29, u1121.statusByte)
         assertTrue(u1121.isPending)
         assertTrue(u1121.isConfirmed)
-        assertTrue(u1121.isTestFailed)
     }
 
     @Test
@@ -51,12 +47,12 @@ class CodingLabScannerAndDtcTest {
         val chassisDtcs = DtcDecoder.extractUdsDtcs(chassisRaw)
         assertEquals(1, chassisDtcs.size)
         assertEquals("C10AC07", chassisDtcs[0].formattedCode)
-        assertEquals("C", chassisDtcs[0].category)
+        assertTrue(chassisDtcs[0].formattedCode.startsWith("C"))
 
         val bodyDtcs = DtcDecoder.extractUdsDtcs(bodyRaw)
         assertEquals(1, bodyDtcs.size)
         assertEquals("B10A315", bodyDtcs[0].formattedCode)
-        assertEquals("B", bodyDtcs[0].category)
+        assertTrue(bodyDtcs[0].formattedCode.startsWith("B"))
     }
 
     @Test

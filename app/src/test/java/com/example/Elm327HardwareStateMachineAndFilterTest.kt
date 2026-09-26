@@ -1,6 +1,8 @@
 package com.example
 
+import com.example.bluetooth.ElmResponse
 import com.example.bluetooth.ElmTransport
+import com.example.bluetooth.RawLogListener
 import com.example.model.*
 import com.example.protocol.CodingLabCodec
 import com.example.protocol.SafetyValidator
@@ -28,11 +30,17 @@ class Elm327HardwareStateMachineAndFilterTest {
      */
     class StrictElm327HardwareEmulator : ElmTransport {
         var isConnectedState = true
+        override val isConnected: Boolean get() = isConnectedState
+        override val deviceAddress: String? get() = null
+        override suspend fun connect(): Boolean = true
+        override suspend fun disconnect() {
+            isConnectedState = false
+        }
+        override fun setRawLogListener(listener: RawLogListener?) {}
+
         var currentTxHeader: String = "7E0"
         var currentRxFilter: String? = null // null means default 7E8..7EF
         val commandHistory = mutableListOf<String>()
-
-        override val isConnected: Boolean get() = isConnectedState
 
         override suspend fun sendCommand(command: String, timeoutMs: Long): ElmResponse {
             val cmd = command.trim()
@@ -143,10 +151,6 @@ class Elm327HardwareStateMachineAndFilterTest {
 
         override suspend fun initializeAdapter(initSequence: List<String>): List<Pair<String, ElmResponse>> {
             return initSequence.map { it to sendCommand(it) }
-        }
-
-        override fun disconnect() {
-            isConnectedState = false
         }
     }
 
