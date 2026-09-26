@@ -87,6 +87,10 @@ class PidCapabilityManager(
             pidToValidatingEcuMap.getOrPut(pid) { ConcurrentHashMap.newKeySet() }.add("7E8")
             pidToValidatingEcuMap.getOrPut("01$pid") { ConcurrentHashMap.newKeySet() }.add("7E8")
         }
+        if (capabilityMap["220200"] == null) {
+            capabilityMap["220200"] = CapabilityStatus.LIVE_ELIGIBLE
+            pidToValidatingEcuMap.getOrPut("220200") { ConcurrentHashMap.newKeySet() }.add("77E")
+        }
     }
 
     private fun publishFlows() {

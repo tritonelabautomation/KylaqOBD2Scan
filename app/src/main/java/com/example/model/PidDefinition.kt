@@ -463,6 +463,23 @@ object DefaultPidDefinitions {
                 description = "Actual engine percent torque output",
                 priority = PollingPriority.FAST
             ),
+            // UDS Service 0x22 Steering Wheel Angle (EPS J500 Module 44 - Method A)
+            PidDefinition(
+                id = "220200",
+                service = "22",
+                pid = "0200",
+                name = "EPS Steering Wheel Angle (UDS)",
+                shortName = "EPS Angle",
+                unit = "°",
+                canHeader = "714",
+                expectedRxId = "77E",
+                defaultIntervalMs = 150L,
+                enabled = true,
+                decoderType = DecoderType.STEERING_ANGLE_SIGNED_10,
+                formulaDisplay = "Signed16(A, B) / 10.0",
+                description = "UDS Service 0x22 DID 0200 G85 steering wheel angle from Power Steering Module 44 (J500)",
+                priority = PollingPriority.FAST
+            ),
             // ─── 0160 Range marker: PIDs supported [61-80] ────────────────────
             PidDefinition(
                 id = "0160", service = "01", pid = "60",

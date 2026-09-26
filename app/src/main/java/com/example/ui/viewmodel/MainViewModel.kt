@@ -660,7 +660,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * Authoritative vehicle-only steering wheel angle telemetry state.
      * Guaranteed to never emit synthetic, fabricated, or unverified data.
-     * Evaluates live J1979-2 Mode 01 PID B5, UDS EPS DID 0200, and UDS ABS DID 02B2.
+     * Strictly queries Method A: Extended UDS Diagnostic Queries (Service 0x22).
+     * Evaluates live UDS EPS DID 0200 (Module 44), UDS ABS DID 02B2 (Module 03), and J1979-2.
      */
     val steeringAngleState: StateFlow<com.example.ui.components.SteeringAngleData> =
         combine(
@@ -669,8 +670,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             connectionState
         ) { numMap, decodedMap, conn ->
             val isConnected = conn == ConnectionState.CONNECTED
-            // Priority resolution: 01B5 (SAE J1979-2), 220200 (UDS EPS), 2202B2 (UDS ABS)
-            val pids = listOf("01B5", "220200", "2202B2")
+            // Priority resolution: Strictly UDS Service 0x22 DIDs first
+            val pids = listOf("220200", "2202B2", "22F40D", "01B5")
             var activePid: String? = null
             var angleVal: Double? = null
             for (p in pids) {
@@ -691,16 +692,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 isConnected = isConnected,
                 lastUpdateMs = System.currentTimeMillis(),
                 sourceName = when (activePid) {
+                    "220200" -> "UDS Service 0x22 DID 0200 (EPS J500 Module 44)"
+                    "2202B2" -> "UDS Service 0x22 DID 02B2 (ABS J104 Module 03)"
+                    "22F40D" -> "UDS Service 0x22 DID F40D (VAG Direct SAS)"
                     "01B5" -> "SAE J1979-2 Mode 01 PID B5 (ESC)"
-                    "220200" -> "UDS EPS DID 0200 (J500 Module 44)"
-                    "2202B2" -> "UDS ABS DID 02B2 (J104 Module 03)"
-                    else -> "PID 01B5 / UDS 220200"
+                    else -> "UDS Service 0x22 DID 0200 (Module 44)"
                 }
             )
         }.stateIn(
             viewModelScope,
             SharingStarted.WhileSubscribed(5000),
-            com.example.ui.components.SteeringAngleData()
+            com.example.ui.components.SteeringAngleData(sourceName = "UDS Service 0x22 DID 0200 (Module 44)")
         )
     val pidRawHistory: StateFlow<Map<String, List<TransactionRecord>>> = obdScheduler.pidRawHistory
     val lastTransaction: StateFlow<TransactionRecord?> = obdScheduler.lastTransaction

@@ -122,6 +122,40 @@ class SteeringAngleDecoderTest {
     }
 
     @Test
+    fun `decodes UDS Service 0x22 DID 0200 positive response from EPS Module 44`() {
+        // UDS 0x22 Response: 0x62 0x02 0x00 0x01 0x04 -> 0x0104 = 260 -> +26.0 degrees (Right)
+        val udsPayload = listOf(0x62, 0x02, 0x00, 0x01, 0x04)
+        val result = PidDecoder.decode(pidDef220200, udsPayload)
+
+        assertTrue(result.isKnown)
+        assertEquals(26.0, result.numericValue ?: 0.0, 0.001)
+        assertTrue(result.displayValue.contains("+26.0° (Right)"))
+        assertEquals("°", result.unit)
+    }
+
+    @Test
+    fun `decodes UDS Service 0x22 DID 0200 negative turn angle from EPS Module 44`() {
+        // UDS 0x22 Response: 0x62 0x02 0x00 0xFE 0xFC -> 0xFEFC = 65276 - 65536 = -260 -> -26.0 degrees (Left)
+        val udsPayload = listOf(0x62, 0x02, 0x00, 0xFE, 0xFC)
+        val result = PidDecoder.decode(pidDef220200, udsPayload)
+
+        assertTrue(result.isKnown)
+        assertEquals(-26.0, result.numericValue ?: 0.0, 0.001)
+        assertTrue(result.displayValue.contains("-26.0° (Left)"))
+    }
+
+    @Test
+    fun `rejects UDS Service 0x22 negative response 7F 22 NRC without emitting false data`() {
+        // UDS 0x7F 0x22 0x31 (Request Out of Range)
+        val negativeResponse = listOf(0x7F, 0x22, 0x31)
+        val result = PidDecoder.decode(pidDef220200, negativeResponse)
+
+        assertFalse(result.isKnown)
+        assertNull(result.numericValue)
+        assertEquals("INVALID_RESPONSE", result.displayValue)
+    }
+
+    @Test
     fun `steering angle data marks disconnected or stale data as not valid`() {
         val staleData = SteeringAngleData(
             rawAngleDeg = 25.0,
