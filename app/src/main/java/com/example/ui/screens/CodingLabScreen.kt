@@ -114,6 +114,119 @@ fun CodingLabScreen(
                 }
             }
 
+            // ---- MQB-A0 Adaptation Channels Presets ----
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("MQB-A0 ADAPTATION CHANNELS (ONE-TOUCH INSPECT)", color = CyberCyan, fontSize = 12.sp, fontWeight = FontWeight.Black)
+                    Text("Inspect real-time state of popular vehicle customization channels without risk.", color = TextSecondaryDark, fontSize = 11.sp)
+                    
+                    CodingLabCodec.MQB_ADAPTATIONS.forEach { preset ->
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.background),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(preset.name, color = TextPrimaryDark, fontWeight = FontWeight.Bold, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                                    OutlinedButton(
+                                        onClick = {
+                                            header = preset.canHeader
+                                            did = preset.did
+                                            busy = true
+                                            scope.launch {
+                                                val r = viewModel.codingLabRead(preset.canHeader, preset.did)
+                                                result = r
+                                                history.add(0, "${preset.canHeader} 22${preset.did} (${preset.name})" to (r.nrc ?: r.payloadHex ?: r.raw.take(30)))
+                                                if (history.size > 12) history.removeAt(history.size - 1)
+                                                busy = false
+                                            }
+                                        },
+                                        enabled = !busy,
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                    ) {
+                                        Text("Inspect", fontSize = 10.sp)
+                                    }
+                                }
+                                Text("${preset.moduleName} • DID 0x${preset.did}", color = CyberCyan, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                                Text(preset.description, color = TextSecondaryDark, fontSize = 10.sp)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ---- Automated UDS Range Scanner ----
+            val isUdsScanning by viewModel.isUdsScanning.collectAsState()
+            val udsProgress by viewModel.udsScanProgress.collectAsState()
+            val udsScanStatus by viewModel.udsScanStatusText.collectAsState()
+            val discoveredUdsDids by viewModel.udsDiscoveredDids.collectAsState()
+
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("AUTOMATED UDS RANGE SCANNER", color = NeonEmerald, fontSize = 12.sp, fontWeight = FontWeight.Black)
+                    Text("Sweeps 16-bit DID blocks on any ECU to discover supported manufacturer parameters.", color = TextSecondaryDark, fontSize = 11.sp)
+                    
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                        Button(
+                            onClick = { viewModel.startUdsRangeScan(header, 0x0100, 0x03FF) },
+                            enabled = !isUdsScanning && !busy,
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = CyberCyan)
+                        ) {
+                            Text("Live 0100-03FF", fontSize = 10.sp)
+                        }
+                        Button(
+                            onClick = { viewModel.startUdsRangeScan(header, 0xF100, 0xF19F) },
+                            enabled = !isUdsScanning && !busy,
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = ElectricAmber)
+                        ) {
+                            Text("Ident F100-F19F", fontSize = 10.sp)
+                        }
+                    }
+
+                    if (isUdsScanning) {
+                        LinearProgressIndicator(
+                            progress = { udsProgress },
+                            modifier = Modifier.fillMaxWidth(),
+                            color = NeonEmerald
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(udsScanStatus, color = TextPrimaryDark, fontSize = 11.sp, modifier = Modifier.weight(1f))
+                            OutlinedButton(
+                                onClick = { viewModel.stopUdsRangeScan() },
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = WarningRed)
+                            ) {
+                                Text("Stop", fontSize = 10.sp)
+                            }
+                        }
+                    } else if (udsScanStatus.isNotBlank()) {
+                        Text(udsScanStatus, color = NeonEmerald, fontSize = 11.sp)
+                    }
+
+                    if (discoveredUdsDids.isNotEmpty()) {
+                        Text("DISCOVERED DIDs (${discoveredUdsDids.size})", color = CyberCyan, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        discoveredUdsDids.take(20).forEach { didItem ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("0x${didItem.didHex} (${didItem.header})", color = CyberCyan, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                                Text(didItem.parameterName ?: didItem.ascii.ifBlank { didItem.payloadHex }, color = TextPrimaryDark, fontSize = 11.sp)
+                            }
+                        }
+                    }
+                }
+            }
+
             // ---- ECU sweep ----
             OutlinedButton(
                 onClick = {
@@ -124,9 +237,9 @@ fun CodingLabScreen(
                         busy = false
                     }
                 },
-                enabled = !busy,
+                enabled = !busy && !isUdsScanning,
                 modifier = Modifier.fillMaxWidth()
-            ) { Text(if (busy) "SCANNING 7E0-7E7..." else "SCAN ECUs (0x22 F190 VIN sweep)") }
+            ) { Text(if (busy) "SCANNING MODULES..." else "SCAN ALL ECUs (0x22 F190 VIN sweep)") }
             sweep?.let { hits ->
                 Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {

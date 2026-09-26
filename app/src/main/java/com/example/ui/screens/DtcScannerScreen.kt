@@ -26,6 +26,8 @@ fun DtcScannerScreen(
     onBack: () -> Unit
 ) {
     val dtcs by viewModel.recordingManager.tripRepository.dtcRecordsFlow.collectAsState(initial = emptyList())
+    val isMultiEcuScanning by viewModel.isMultiEcuDtcScanning.collectAsState()
+    val multiEcuSummaries by viewModel.udsMultiEcuDtcSummaries.collectAsState()
     
     Scaffold(
         topBar = {
@@ -58,6 +60,54 @@ fun DtcScannerScreen(
         containerColor = DarkCanvas
     ) { padding ->
         Column(modifier = Modifier.padding(padding).fillMaxSize().padding(16.dp)) {
+            // Full-Vehicle OEM DTC Scan (Service 0x19)
+            Button(
+                onClick = { viewModel.scanFullVehicleUdsDtcs() },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !isMultiEcuScanning,
+                colors = ButtonDefaults.buttonColors(containerColor = NeonEmerald)
+            ) {
+                if (isMultiEcuScanning) {
+                    CircularProgressIndicator(color = Color.Black, modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Scanning 9 ECUs (UDS Service 0x19)...", color = Color.Black)
+                } else {
+                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color.Black)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Full-Vehicle Multi-ECU OEM Scan (Service 0x19)", color = Color.Black, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            if (multiEcuSummaries.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = DarkSurface)
+                ) {
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("MULTI-ECU SCAN SUMMARY", color = CyberCyan, fontWeight = FontWeight.Black, fontSize = 12.sp)
+                        multiEcuSummaries.forEach { summary ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(summary.moduleName, color = TextPrimaryDark, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                                val isClean = summary.dtcs.isEmpty()
+                                Text(
+                                    summary.status,
+                                    color = if (isClean) NeonEmerald else WarningRed,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 Button(
                     onClick = { viewModel.fetchActiveDtcs() },
@@ -66,7 +116,7 @@ fun DtcScannerScreen(
                 ) {
                     Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Scan Active")
+                    Text("Mode 03 Active")
                 }
                 
                 OutlinedButton(
@@ -74,7 +124,7 @@ fun DtcScannerScreen(
                     modifier = Modifier.weight(1f),
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = CyberCyan)
                 ) {
-                    Text("Scan Pending")
+                    Text("Mode 07 Pending")
                 }
             }
 

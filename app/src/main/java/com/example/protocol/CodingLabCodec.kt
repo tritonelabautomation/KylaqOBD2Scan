@@ -72,8 +72,89 @@ object CodingLabCodec {
         return "SILENT"
     }
 
-    /** Headers swept by the lab, in VAG-conventional order. */
-    val SWEEP_HEADERS = listOf("7E0", "7E1", "7E2", "7E3", "7E4", "7E5", "7E6", "7E7")
+    /** Headers swept by the lab, covering powertrain, chassis, body and infotainment. */
+    val SWEEP_HEADERS = listOf("7E0", "7E1", "710", "711", "713", "714", "715", "716", "740")
+
+    /** Human-readable ECU name for a CAN request header. */
+    fun ecuNameForHeader(header: String): String = when (header.uppercase()) {
+        "7E0" -> "01 Engine (ECM MED17.1.27)"
+        "7E1" -> "02 Transmission (TCU 6-AT)"
+        "710" -> "09 BCM / 19 Gateway (J519/J533)"
+        "711" -> "08 Climatronic (J255)"
+        "713" -> "03 ABS / Brakes (J104)"
+        "714" -> "44 EPS (J500) / 17 Cluster (J285)"
+        "715" -> "15 Airbag (J234)"
+        "716" -> "76 Park Assist (J446)"
+        "740" -> "5F Infotainment (MIB3)"
+        else -> "ECU Header $header"
+    }
+
+    /** Pre-configured MQB-A0 adaptation channels for inspection. */
+    val MQB_ADAPTATIONS = listOf(
+        MqbAdaptationPreset(
+            id = "NEEDLE_STAGING",
+            name = "Gauge Needle Sweep / Staging",
+            moduleName = "17 Instrument Cluster (J285)",
+            canHeader = "714",
+            did = "040F",
+            description = "Sweeps speedometer and tachometer needles to max on ignition startup.",
+            defaultInterpretation = "Channel 040F / Staging"
+        ),
+        MqbAdaptationPreset(
+            id = "ACOUSTIC_LOCK",
+            name = "Acoustic Lock Confirmation (Horn Chirp)",
+            moduleName = "09 Central Electrics (BCM)",
+            canHeader = "710",
+            did = "0225",
+            description = "Acoustic horn confirmation when all doors and boot are locked via key fob.",
+            defaultInterpretation = "Channel 0225 / Acoustic Lock"
+        ),
+        MqbAdaptationPreset(
+            id = "COMFORT_BLINKER",
+            name = "Convenience Turn Signal Cycles",
+            moduleName = "09 Central Electrics (BCM)",
+            canHeader = "710",
+            did = "0245",
+            description = "Configures touch-turn signal flash count (3, 4, or 5 cycles).",
+            defaultInterpretation = "Channel 0245 / Comfort Blinker Cycles"
+        ),
+        MqbAdaptationPreset(
+            id = "DRL_MENU",
+            name = "DRL Infotainment Menu Toggle",
+            moduleName = "09 Central Electrics (BCM)",
+            canHeader = "710",
+            did = "0268",
+            description = "Exposes Daytime Running Lights ON/OFF checkbox in the touchscreen settings menu.",
+            defaultInterpretation = "Channel 0268 / DRL Menu Switch"
+        ),
+        MqbAdaptationPreset(
+            id = "TEAR_WIPE",
+            name = "Tear-Drop After-Wipe (Wipers)",
+            moduleName = "09 Central Electrics (BCM)",
+            canHeader = "710",
+            did = "028C",
+            description = "Executes an automatic single sweep 5 seconds after windshield washer spray.",
+            defaultInterpretation = "Channel 028C / Tear-Drop Wiping"
+        ),
+        MqbAdaptationPreset(
+            id = "MIRROR_AUTOFOLD",
+            name = "Mirror Auto-Fold on Lock",
+            moduleName = "09 Central Electrics (BCM)",
+            canHeader = "710",
+            did = "02AE",
+            description = "Folds side mirrors automatically upon central locking confirmation.",
+            defaultInterpretation = "Channel 02AE / Mirror Folding"
+        ),
+        MqbAdaptationPreset(
+            id = "LAP_TIMER",
+            name = "Digital Cluster Lap Timer",
+            moduleName = "17 Instrument Cluster (J285)",
+            canHeader = "714",
+            did = "0412",
+            description = "Enables racing lap timer and oil temp page inside the multi-function display.",
+            defaultInterpretation = "Channel 0412 / Lap Timer"
+        )
+    )
 
     /** Hex pairs to printable ASCII (VIN, part numbers...). Non-printables become '.'. */
     fun hexToAscii(hex: String): String {
@@ -88,3 +169,13 @@ object CodingLabCodec {
         return sb.toString()
     }
 }
+
+data class MqbAdaptationPreset(
+    val id: String,
+    val name: String,
+    val moduleName: String,
+    val canHeader: String,
+    val did: String,
+    val description: String,
+    val defaultInterpretation: String
+)

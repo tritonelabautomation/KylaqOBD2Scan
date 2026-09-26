@@ -2057,6 +2057,165 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     data class CodingLabResult(val raw: String, val payloadHex: String?, val ascii: String?, val nrc: String?)
 
+    data class UdsDiscoveredDid(
+        val didHex: String,
+        val header: String,
+        val payloadHex: String,
+        val ascii: String,
+        val parameterName: String?,
+        val timestamp: Long = System.currentTimeMillis()
+    )
+
+    data class UdsModuleDtcSummary(
+        val header: String,
+        val moduleName: String,
+        val dtcs: List<com.example.protocol.UdsDtcRecord>,
+        val status: String
+    )
+
+    private val _udsDiscoveredDids = MutableStateFlow<List<UdsDiscoveredDid>>(emptyList())
+    val udsDiscoveredDids: StateFlow<List<UdsDiscoveredDid>> = _udsDiscoveredDids.asStateFlow()
+
+    private val _isUdsScanning = MutableStateFlow(false)
+    val isUdsScanning: StateFlow<Boolean> = _isUdsScanning.asStateFlow()
+
+    private val _udsScanProgress = MutableStateFlow(0f)
+    val udsScanProgress: StateFlow<Float> = _udsScanProgress.asStateFlow()
+
+    private val _udsScanStatusText = MutableStateFlow("Ready to scan UDS DIDs")
+    val udsScanStatusText: StateFlow<String> = _udsScanStatusText.asStateFlow()
+
+    private val _udsMultiEcuDtcSummaries = MutableStateFlow<List<UdsModuleDtcSummary>>(emptyList())
+    val udsMultiEcuDtcSummaries: StateFlow<List<UdsModuleDtcSummary>> = _udsMultiEcuDtcSummaries.asStateFlow()
+
+    private val _isMultiEcuDtcScanning = MutableStateFlow(false)
+    val isMultiEcuDtcScanning: StateFlow<Boolean> = _isMultiEcuDtcScanning.asStateFlow()
+
+    private var udsScanJob: Job? = null
+
+    fun startUdsRangeScan(header: String, startDid: Int, endDid: Int) {
+        if (_isUdsScanning.value) return
+        val transport = bluetoothManager.currentTransport() ?: return
+        if (!transport.isConnected) {
+            _udsScanStatusText.value = "Adapter disconnected - connect first"
+            return
+        }
+
+        udsScanJob = viewModelScope.launch(Dispatchers.IO) {
+            _isUdsScanning.value = true
+            _udsDiscoveredDids.value = emptyList()
+            _udsScanProgress.value = 0f
+            val total = (endDid - startDid + 1).coerceAtLeast(1)
+            val foundList = mutableListOf<UdsDiscoveredDid>()
+
+            try {
+                val headersToScan = if (header.equals("ALL", ignoreCase = true)) {
+                    com.example.protocol.CodingLabCodec.SWEEP_HEADERS
+                } else {
+                    listOf(header)
+                }
+
+                for (currentHeader in headersToScan) {
+                    if (!isActive) break
+                    transport.sendCommand("ATSH $currentHeader", 900L)
+
+                    for (didInt in startDid..endDid) {
+                        if (!isActive) break
+                        val didHex = "%04X".format(didInt)
+                        val currentIndex = (didInt - startDid + 1)
+                        _udsScanProgress.value = (currentIndex.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+                        _udsScanStatusText.value = "Scanning $currentHeader DID $didHex ($currentIndex/$total)"
+
+                        val cmd = "22$didHex"
+                        val resp = transport.sendCommand(cmd, 1500L)
+                        val raw = resp.rawText.ifBlank { resp.lines.joinToString(" ") }
+
+                        if (com.example.protocol.CodingLabCodec.classifyResponse(raw, didHex) == "POSITIVE") {
+                            val payload = com.example.protocol.CodingLabCodec.decodePositive(resp.lines, didHex)
+                                .ifBlank { com.example.protocol.CodingLabCodec.decodePositive(listOf(raw), didHex) }
+                            val ascii = com.example.protocol.CodingLabCodec.hexToAscii(payload)
+                            val recognizedName = DefaultPidDefinitions.getDefaults()
+                                .firstOrNull { it.pid.equals(didHex, ignoreCase = true) }?.name
+                            val hit = UdsDiscoveredDid(
+                                didHex = didHex,
+                                header = currentHeader,
+                                payloadHex = payload,
+                                ascii = ascii,
+                                parameterName = recognizedName
+                            )
+                            foundList.add(hit)
+                            _udsDiscoveredDids.value = foundList.toList()
+                        }
+                    }
+                }
+                transport.sendCommand("ATSH 7E0", 900L)
+                _udsScanStatusText.value = "Scan complete: ${foundList.size} valid DIDs discovered"
+            } catch (e: Exception) {
+                _udsScanStatusText.value = "Scan aborted: ${e.message}"
+            } finally {
+                _isUdsScanning.value = false
+                _udsScanProgress.value = 1f
+            }
+        }
+    }
+
+    fun stopUdsRangeScan() {
+        udsScanJob?.cancel()
+        _isUdsScanning.value = false
+        _udsScanStatusText.value = "Scan stopped by user"
+    }
+
+    fun scanFullVehicleUdsDtcs() {
+        val transport = bluetoothManager.currentTransport() ?: return
+        if (!transport.isConnected || _isMultiEcuDtcScanning.value) return
+
+        viewModelScope.launch(Dispatchers.IO) {
+            _isMultiEcuDtcScanning.value = true
+            val summaries = mutableListOf<UdsModuleDtcSummary>()
+            val allExtractedDtcs = mutableListOf<String>()
+
+            try {
+                for (header in com.example.protocol.CodingLabCodec.SWEEP_HEADERS) {
+                    val moduleName = com.example.protocol.CodingLabCodec.ecuNameForHeader(header)
+                    transport.sendCommand("ATSH $header", 900L)
+
+                    // 19 02 09: UDS ReadDTCInformation reportDTCByStatusMask (0x09: confirmed + pending)
+                    val resp = transport.sendCommand("19 02 09", 2500L)
+                    val raw = resp.rawText.ifBlank { resp.lines.joinToString(" ") }
+                    val dtcs = com.example.protocol.DtcDecoder.extractUdsDtcs(raw)
+
+                    val statusStr = if (dtcs.isEmpty()) {
+                        "HEALTHY (0 DTCs)"
+                    } else {
+                        "${dtcs.size} DTC(s) DETECTED"
+                    }
+
+                    summaries.add(
+                        UdsModuleDtcSummary(
+                            header = header,
+                            moduleName = moduleName,
+                            dtcs = dtcs,
+                            status = statusStr
+                        )
+                    )
+
+                    for (d in dtcs) {
+                        allExtractedDtcs.add(d.formattedCode)
+                    }
+                }
+                transport.sendCommand("ATSH 7E0", 900L)
+                _udsMultiEcuDtcSummaries.value = summaries
+                if (allExtractedDtcs.isNotEmpty()) {
+                    saveDtcs(allExtractedDtcs.distinct(), "CONFIRMED (UDS Multi-ECU)")
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("MainViewModel", "scanFullVehicleUdsDtcs error: ${e.message}")
+            } finally {
+                _isMultiEcuDtcScanning.value = false
+            }
+        }
+    }
+
     /** Read-only UDS 0x22 explorer (SafetyValidator blocks every write service). */
     suspend fun codingLabRead(header: String, did: String): CodingLabResult {
         val transport = bluetoothManager.currentTransport()

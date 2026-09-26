@@ -137,4 +137,42 @@ class ExtendedUdsDecoderTest {
         assertNull(res.numericValue)
         assertEquals("INVALID_RESPONSE", res.displayValue)
     }
+
+    @Test
+    fun `decodes UDS Service 0x19 multi-ECU DTC response frames`() {
+        // Frame: 59 02 FF (mask) 03 00 00 08 (P030000 Confirmed) C1 21 00 04 (U012100 Pending)
+        val payloadHex = "5902FF03000008C1210004"
+        val dtcs = com.example.protocol.DtcDecoder.extractUdsDtcs(payloadHex)
+
+        assertEquals(2, dtcs.size)
+        assertEquals("P030000", dtcs[0].formattedCode)
+        assertTrue(dtcs[0].isConfirmed)
+        assertFalse(dtcs[0].isPending)
+
+        assertEquals("U012100", dtcs[1].formattedCode)
+        assertFalse(dtcs[1].isConfirmed)
+        assertTrue(dtcs[1].isPending)
+    }
+
+    @Test
+    fun `UDS Service 0x19 returns empty list on clean ECU or negative NRC`() {
+        val cleanPayload = "590209"
+        val cleanDtcs = com.example.protocol.DtcDecoder.extractUdsDtcs(cleanPayload)
+        assertTrue(cleanDtcs.isEmpty())
+
+        val negativeNrc = "7F1931"
+        val nrcDtcs = com.example.protocol.DtcDecoder.extractUdsDtcs(negativeNrc)
+        assertTrue(nrcDtcs.isEmpty())
+    }
+
+    @Test
+    fun `MQB adaptation channels are properly registered with valid headers and DIDs`() {
+        val presets = com.example.protocol.CodingLabCodec.MQB_ADAPTATIONS
+        assertTrue(presets.isNotEmpty())
+        for (preset in presets) {
+            assertNotNull(com.example.protocol.CodingLabCodec.normalizeHeader(preset.canHeader))
+            assertNotNull(com.example.protocol.CodingLabCodec.normalizeDid(preset.did))
+            assertTrue(preset.name.isNotBlank())
+        }
+    }
 }

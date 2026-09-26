@@ -143,4 +143,73 @@ object DtcDecoder {
     }
 
     private fun List<Int>.toDtcHex(): String = joinToString("") { "%02X".format(it and 0xFF) }
+
+    /**
+     * Decodes a UDS Service 0x19 response payload (ReadDTCInformation - reportDTCByStatusMask).
+     * Format: [0x59, 0x02, availabilityMask, DTC_High, DTC_Mid, DTC_Low, Status, ...]
+     */
+    fun extractUdsDtcs(payloadHex: String): List<UdsDtcRecord> {
+        val cleanHex = payloadHex.replace(Regex("[^0-9A-Fa-f]"), "").uppercase()
+        if (cleanHex.length < 6) return emptyList()
+
+        val idx = cleanHex.indexOf("5902")
+        if (idx < 0 || idx + 6 > cleanHex.length) return emptyList()
+
+        // After "5902", the next 2 hex chars (1 byte) is DTCStatusAvailabilityMask
+        val recordsHex = cleanHex.substring(idx + 6)
+        val records = mutableListOf<UdsDtcRecord>()
+
+        var i = 0
+        while (i + 8 <= recordsHex.length) {
+            val chunk = recordsHex.substring(i, i + 8)
+            val highByte = chunk.substring(0, 2).toIntOrNull(16) ?: 0
+            val midByte = chunk.substring(2, 4).toIntOrNull(16) ?: 0
+            val lowByte = chunk.substring(4, 6).toIntOrNull(16) ?: 0
+            val statusByte = chunk.substring(6, 8).toIntOrNull(16) ?: 0
+
+            if (highByte != 0 || midByte != 0 || lowByte != 0) {
+                val systemCategory = (highByte and 0xC0) shr 6
+                val systemChar = when (systemCategory) {
+                    0 -> 'P'
+                    1 -> 'C'
+                    2 -> 'B'
+                    3 -> 'U'
+                    else -> 'P'
+                }
+                val secondChar = (highByte and 0x30) shr 4
+                val thirdChar = (highByte and 0x0F).toString(16).uppercase()
+                val fourthChar = ((midByte and 0xF0) shr 4).toString(16).uppercase()
+                val fifthChar = (midByte and 0x0F).toString(16).uppercase()
+                val sixthChar = ((lowByte and 0xF0) shr 4).toString(16).uppercase()
+                val seventhChar = (lowByte and 0x0F).toString(16).uppercase()
+
+                val formattedCode = "$systemChar$secondChar$thirdChar$fourthChar$fifthChar$sixthChar$seventhChar"
+                val vagDecimalCode = ((highByte shl 8) or midByte).toString().padStart(5, '0')
+
+                records.add(
+                    UdsDtcRecord(
+                        formattedCode = formattedCode,
+                        vagDecimalCode = vagDecimalCode,
+                        rawBytesHex = chunk,
+                        statusByte = statusByte,
+                        isConfirmed = (statusByte and 0x08) != 0,
+                        isPending = (statusByte and 0x04) != 0,
+                        isWarningRequested = (statusByte and 0x80) != 0
+                    )
+                )
+            }
+            i += 8
+        }
+        return records
+    }
 }
+
+data class UdsDtcRecord(
+    val formattedCode: String,
+    val vagDecimalCode: String?,
+    val rawBytesHex: String,
+    val statusByte: Int,
+    val isConfirmed: Boolean,
+    val isPending: Boolean,
+    val isWarningRequested: Boolean
+)
