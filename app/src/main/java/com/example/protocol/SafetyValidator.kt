@@ -139,7 +139,8 @@ object SafetyValidator {
         // Safe configuration and query AT commands exact matches
         val safeAtExact = listOf(
             "ATZ", "ATE0", "ATE1", "ATL0", "ATL1", "ATS0", "ATS1", "ATH0", "ATH1",
-            "ATDP", "ATDPN", "ATRV", "ATBI", "ATBD", "ATI", "AT@1", "ATPC", "ATCS", "ATMA"
+            "ATDP", "ATDPN", "ATRV", "ATBI", "ATBD", "ATI", "AT@1", "ATPC", "ATCS", "ATMA",
+            "ATCRA"
         )
 
         if (safeAtExact.contains(cmd)) {
@@ -149,7 +150,7 @@ object SafetyValidator {
         // Pattern matched AT commands with strictly validated suffixes
         if (cmd.matches(Regex("^ATSP[0-9A]$"))) return ValidationResult.Allowed
         if (cmd.matches(Regex("^ATSH[0-9A-F]{3,8}$"))) return ValidationResult.Allowed
-        if (cmd.matches(Regex("^ATCRA[0-9A-F]{3,8}$"))) return ValidationResult.Allowed
+        if (cmd.matches(Regex("^ATCRA([0-9A-F]{3,8})?$"))) return ValidationResult.Allowed
         if (cmd.matches(Regex("^ATCAF[01]$"))) return ValidationResult.Allowed
         if (cmd.matches(Regex("^ATST[0-9A-F]{2}$"))) return ValidationResult.Allowed
         if (cmd.matches(Regex("^ATAT[012]$"))) return ValidationResult.Allowed

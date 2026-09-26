@@ -55,6 +55,15 @@ class BluetoothManager(private val context: Context) {
     var isSimulationMode: Boolean = false
         private set
 
+    /**
+     * The transport of the currently open adapter connection, or null when disconnected.
+     *
+     * A second entry point into the app - the Android Auto dashboard - needs this so it can resume
+     * live polling on a socket the phone UI already opened instead of racing it for the single
+     * RFCOMM channel the ELM327 exposes.
+     */
+    fun currentTransport(): ElmTransport? = activeTransport
+
     val isBluetoothAvailable: Boolean
         get() = bluetoothAdapter != null
 
@@ -121,15 +130,33 @@ class BluetoothManager(private val context: Context) {
                 method.invoke(device, 1) as android.bluetooth.BluetoothSocket
             }
 
-            val transport = BluetoothElmTransport(socket)
+            var transport = BluetoothElmTransport(socket)
             transport.setRawLogListener(rawLogListener)
 
             _statusMessage.value = "Connecting to $deviceName..."
-            val connected = transport.connect()
+            var connected = transport.connect()
+
+            // QA 2026-09-09 (owner question: adapter held by another app): the ELM327
+            // exposes ONE RFCOMM channel. When the standard-UUID socket fails (channel
+            // occupied, half-open peer, quirky clone), retry once on a fresh socket via
+            // the hidden raw-channel API before declaring failure.
+            if (!connected) {
+                // Close the dead socket first so the retry starts with a fresh RFCOMM fd.
+                runCatching { socket.close() }
+                try {
+                    val method = device.javaClass.getMethod("createRfcommSocket", Int::class.javaPrimitiveType)
+                    val fallbackSocket = method.invoke(device, 1) as android.bluetooth.BluetoothSocket
+                    transport = BluetoothElmTransport(fallbackSocket)
+                    transport.setRawLogListener(rawLogListener)
+                    _statusMessage.value = "Retrying $deviceName on raw RFCOMM channel 1..."
+                    connected = transport.connect()
+                } catch (_: Exception) { }
+            }
 
             if (!connected) {
+                val kind = ConnectionFailureClassifier.classify(transport.lastConnectError)
                 _connectionState.value = ConnectionState.ERROR
-                _statusMessage.value = "Could not establish connection to $deviceName"
+                _statusMessage.value = ConnectionFailureClassifier.guidance(kind, deviceName, transport.lastConnectError)
                 return@withContext Pair(false, null)
             }
 
@@ -144,13 +171,25 @@ class BluetoothManager(private val context: Context) {
             // failed. We now require:
             //  - ATZ (reset) responded OK
             //  - ATE0 (echo off) responded OK
-            //  - ATSP6 (CAN 11-bit 500kbps) responded OK
+            //  - the configured protocol command responded OK
+            //
+            // FIX (2nd pass): the protocol command is user configurable — see
+            // SettingsRepository "init_commands" and CanProtocol: ATSP0 (auto detect),
+            // ATSP6/ATSP7 (11/29-bit @ 500k), ATSP8/ATSP9 (11/29-bit @ 250k). Matching the
+            // literal string "ATSP6" declared every other selection a failure
+            // ("Adapter failed initialization: ATSP6 failed") even when the adapter answered
+            // OK to everything it was actually sent. Any ATSP* command is now accepted, and
+            // a sequence without one is not treated as a protocol failure.
             val resetOk = initResults.firstOrNull { it.first.equals("ATZ", ignoreCase = true) }
                 ?.second?.status == com.example.model.ResponseStatus.OK
             val echoOffOk = initResults.firstOrNull { it.first.equals("ATE0", ignoreCase = true) }
                 ?.second?.status == com.example.model.ResponseStatus.OK
-            val protocolOk = initResults.firstOrNull { it.first.equals("ATSP6", ignoreCase = true) }
-                ?.second?.status == com.example.model.ResponseStatus.OK
+            val protocolResult = initResults.firstOrNull {
+                it.first.trim().uppercase().startsWith("ATSP")
+            }
+            val protocolCommand = protocolResult?.first?.trim()?.uppercase()
+            val protocolOk = protocolCommand == null ||
+                protocolResult?.second?.status == com.example.model.ResponseStatus.OK
 
             val initSuccessful = (lastInitStatus == com.example.model.ResponseStatus.OK ||
                     initResults.any { it.second.status == com.example.model.ResponseStatus.OK }) &&
@@ -166,7 +205,7 @@ class BluetoothManager(private val context: Context) {
                 val failureReasons = buildList {
                     if (!resetOk) add("ATZ failed")
                     if (!echoOffOk) add("ATE0 failed")
-                    if (!protocolOk) add("ATSP6 failed")
+                    if (!protocolOk) add((protocolCommand ?: "ATSP") + " failed")
                 }.joinToString(", ")
                 transport.disconnect()
                 _connectionState.value = ConnectionState.ERROR

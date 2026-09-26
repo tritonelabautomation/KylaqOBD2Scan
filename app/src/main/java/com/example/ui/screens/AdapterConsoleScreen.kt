@@ -140,7 +140,8 @@ fun AdapterConsoleScreen(
                     state = listState,
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(10.dp)
+                        .padding(10.dp),
+                    contentPadding = PaddingValues(bottom = 96.dp),
                 ) {
                     items(rawLogs, key = { it.id }) { log ->
                         val textColor = when {
@@ -229,7 +230,7 @@ private fun shareConsoleLog(context: Context, logText: String) {
             rawLogsDir.mkdirs()
         }
 
-        val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+        val timeStamp = com.example.data.RecordTime.format("yyyyMMdd_HHmmss", System.currentTimeMillis())
         val logFile = File(rawLogsDir, "ELM327_Console_$timeStamp.txt")
         logFile.writeText(logText)
 

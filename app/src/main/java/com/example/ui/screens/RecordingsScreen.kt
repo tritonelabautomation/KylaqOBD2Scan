@@ -6,8 +6,10 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -48,10 +50,32 @@ fun RecordingsScreen(
     val importStatusMessage by viewModel.importStatusMessage.collectAsState()
     val tripRepo = viewModel.recordingManager.tripRepository
 
+    // Unsaved raw-log recovery (owner 2026-09-15): drives killed before STOP could
+    // finalize them never reached Room, but their raw OBD log was flushed to disk line
+    // by line, so they can still be rebuilt here — no PC, no adb, no re-recording.
+    val unsavedRawLogs by viewModel.unsavedRawLogs.collectAsState()
+    val isRecovering by viewModel.isRecovering.collectAsState()
+    val recoveryNotice by viewModel.recoveryNotice.collectAsState()
+    val isMerging by viewModel.isMerging.collectAsState()
+    val mergeNotice by viewModel.mergeNotice.collectAsState()
+    LaunchedEffect(Unit) { viewModel.refreshUnsavedRawLogs() }
+
     var renamingRecording by remember { mutableStateOf<SavedRecording?>(null) }
     var deletingRecording by remember { mutableStateOf<SavedRecording?>(null) }
     var storageStats by remember { mutableStateOf<StorageStats?>(null) }
     var showStorageDialog by remember { mutableStateOf(false) }
+
+    // Merge selection (owner 2026-09-21: "there is no option make two trips to merge")
+    var selectedIds by remember { mutableStateOf(setOf<String>()) }
+    val selectionMode = selectedIds.isNotEmpty()
+
+    LaunchedEffect(mergeNotice) {
+        mergeNotice?.let {
+            Toast.makeText(context, it, Toast.LENGTH_LONG).show()
+            viewModel.clearMergeNotice()
+            selectedIds = emptySet()
+        }
+    }
 
     // SAF Open Multiple Documents Launcher
     val zipPickerLauncher = rememberLauncherForActivityResult(
@@ -65,6 +89,16 @@ fun RecordingsScreen(
     LaunchedEffect(savedRecordings) {
         storageStats = tripRepo.getStorageStats()
     }
+
+    // Cross-trip trends (rpm / speed / load / torque / idle-vs-model) computed from the
+    // stored Room telemetry samples of the newest recorded trips.
+    var trends by remember { mutableStateOf<List<com.example.analysis.TripTrendPoint>>(emptyList()) }
+    LaunchedEffect(savedRecordings.size) {
+        trends = runCatching { viewModel.computeTripTrends() }.getOrDefault(emptyList())
+    }
+
+    // Sync status — OneDrive-style (owner 2026-09-21)
+    val lastBackupMs by viewModel.settingsRepository.lastBackupTimestamp.collectAsState()
 
     LaunchedEffect(importStatusMessage) {
         importStatusMessage?.let {
@@ -101,7 +135,7 @@ fun RecordingsScreen(
                         text = "Persistent Room Database & Diagnostic Files",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 11.sp
+                        fontSize = 13.sp
                     )
                 }
             }
@@ -123,6 +157,61 @@ fun RecordingsScreen(
 
         Spacer(modifier = Modifier.height(10.dp))
 
+        // Merge banner — appears when selection mode is active
+        if (selectionMode) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                color = CyberCyan.copy(alpha = 0.14f)
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.CallMerge, contentDescription = null, tint = CyberCyan, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = "${selectedIds.size} trip(s) selected — tap to toggle, long-press any card to start. Merge stitches them by wall time into ONE trip (your 31 km fragments become one).",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = { viewModel.mergeRecordings(selectedIds.toList()) },
+                    enabled = selectedIds.size >= 2 && !isMerging,
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = NeonEmerald)
+                ) {
+                    if (isMerging) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Color.Black)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Merging…", color = Color.Black, fontWeight = FontWeight.Bold)
+                    } else {
+                        Icon(Icons.Default.CallMerge, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Merge into ONE trip", color = Color.Black, fontWeight = FontWeight.Bold)
+                    }
+                }
+                OutlinedButton(
+                    onClick = { selectedIds = emptySet() },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Cancel selection")
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+
         // Import & Storage Actions Banner
         Surface(
             modifier = Modifier.fillMaxWidth(),
@@ -138,7 +227,7 @@ fun RecordingsScreen(
                     Icon(Icons.Default.Security, contentDescription = null, tint = NeonEmerald, modifier = Modifier.size(18.dp))
                     Text(
                         text = "Policy: Persist Until User Deletes",
-                        fontSize = 11.sp,
+                        fontSize = 13.sp,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                 }
@@ -156,11 +245,119 @@ fun RecordingsScreen(
                     if (isImporting) {
                         CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Importing...", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Text("Importing...", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     } else {
                         Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(15.dp), tint = Color.White)
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Import ZIP", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Text("Import ZIP", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                }
+            }
+        }
+
+        // ── Recovery banner: unsaved raw-log sessions still on this phone ──────────
+        if (unsavedRawLogs.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(10.dp))
+            Surface(
+                modifier = Modifier.fillMaxWidth().testTag("recovery_banner"),
+                shape = RoundedCornerShape(12.dp),
+                color = ElectricAmber.copy(alpha = 0.14f)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            Icon(
+                                Icons.Default.SettingsBackupRestore,
+                                contentDescription = null,
+                                tint = ElectricAmber,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "${unsavedRawLogs.size} unsaved log session(s) found",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        Button(
+                            onClick = { viewModel.forceRecoverAllNow() },
+                            modifier = Modifier.height(28.dp),
+                            shape = RoundedCornerShape(6.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = ElectricAmber),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                        ) {
+                            Text("Recover All", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Recovery now runs BY ITSELF when the app or its keep-alive service " +
+                            "starts, so a killed drive is normally rebuilt before you ever reach " +
+                            "this screen. Anything listed here still needs a tap: its journal was " +
+                            "unreadable, or it was recorded by an older build. Every OBD line stayed " +
+                            "on disk, and Recover rebuilds the full trip — fuel, trends and X-ray.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    unsavedRawLogs.forEach { logFile ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "session " +
+                                        (com.example.analysis.RawLogRecovery.sessionIdOf(logFile.name) ?: logFile.name),
+                                    fontSize = 13.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = com.example.data.RecordTime.format("yyyy-MM-dd HH:mm", logFile.lastModified()) +
+                                        " · ${logFile.length() / 1024} KB raw log",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            // Never a dead grey disabled button (owner 2026-09-16: the
+                            // greyed spinner read as "UI stuck"). Stays amber and says
+                            // what it is doing; re-entry is guarded in the ViewModel.
+                            Button(
+                                onClick = { viewModel.recoverRawLog(logFile) },
+                                modifier = Modifier.height(30.dp).testTag("btn_recover_raw_log"),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = ElectricAmber),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)
+                            ) {
+                                if (isRecovering) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(14.dp),
+                                        color = Color.Black,
+                                        strokeWidth = 2.dp
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Recovering…", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                                } else {
+                                    Text("Recover", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                                }
+                            }
+                        }
+                    }
+                    recoveryNotice?.let {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            it,
+                            fontSize = 12.sp,
+                            lineHeight = 17.sp,
+                            color = ElectricAmber
+                        )
                     }
                 }
             }
@@ -168,48 +365,131 @@ fun RecordingsScreen(
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        if (savedRecordings.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(32.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Default.FolderOpen, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(48.dp))
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = "No saved recording runs yet.\nStart a diagnostic recording from Dashboard or import existing ZIP log bundles.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    OutlinedButton(
-                        onClick = {
-                            zipPickerLauncher.launch(arrayOf("application/zip", "application/x-zip-compressed", "*/*"))
-                        },
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Icon(Icons.Default.FileDownload, contentDescription = null, tint = CyberCyan, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Select .ZIP File to Import", color = CyberCyan)
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = PaddingValues(top = 10.dp, bottom = 96.dp)
+        ) {
+            if (savedRecordings.isEmpty()) {
+                item {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(32.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Default.FolderOpen, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(48.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = "No saved recording runs yet.\nStart a diagnostic recording from Dashboard or import existing ZIP log bundles.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        OutlinedButton(
+                            onClick = {
+                                zipPickerLauncher.launch(arrayOf("application/zip", "application/x-zip-compressed", "*/*"))
+                            },
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Icon(Icons.Default.FileDownload, contentDescription = null, tint = CyberCyan, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Select .ZIP File to Import", color = CyberCyan)
+                        }
                     }
                 }
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
+                }
+            } else {
                 items(savedRecordings, key = { it.metadata.sessionId }) { rec ->
+                    val isSelected = rec.metadata.sessionId in selectedIds
+                    // Dir mtime is the most honest "last changed" for a trip (finalize, rename, merge all touch it)
+                    val dirMtime = rec.transactionCsvFile.parentFile?.lastModified()
+                    val syncState = com.example.data.BackupSyncStatus.forTrip(
+                        lastBackupMs = lastBackupMs,
+                        endMs = null,
+                        startMs = com.example.data.RecordTime.parseMillis(rec.metadata.startTimeUtc),
+                        dirLastModifiedMs = dirMtime
+                    )
                     RecordingItemCard(
                         recording = rec,
-                        onClick = { onNavigateToTripDetail(rec.metadata.sessionId) },
+                        isSelected = isSelected,
+                        selectionMode = selectionMode,
+                        syncState = syncState,
+                        onClick = {
+                            if (selectionMode) {
+                                selectedIds = if (isSelected) selectedIds - rec.metadata.sessionId else selectedIds + rec.metadata.sessionId
+                            } else {
+                                onNavigateToTripDetail(rec.metadata.sessionId)
+                            }
+                        },
+                        onLongClick = {
+                            selectedIds = if (isSelected) selectedIds - rec.metadata.sessionId else selectedIds + rec.metadata.sessionId
+                        },
+                        onToggleSelect = {
+                            selectedIds = if (isSelected) selectedIds - rec.metadata.sessionId else selectedIds + rec.metadata.sessionId
+                        },
                         onShareFile = { file, mimeType -> shareFile(context, file, mimeType) },
                         onRename = { renamingRecording = rec },
                         onDelete = { deletingRecording = rec }
                     )
+                }
+                item {
+                // ---- Vehicle trends across recorded trips (owner-requested) ----
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            "VEHICLE TRENDS - your last ${trends.size} recorded trip(s)",
+                            color = CyberCyan, fontWeight = FontWeight.Bold, fontSize = 14.sp
+                        )
+                        if (trends.size >= 2) {
+                            TrendRow("avg engine rpm", trends.mapNotNull { it.avgRpm }, "%.0f", NeonEmerald)
+                            TrendRow("avg speed (km/h)", trends.mapNotNull { it.avgSpeedKmh }, "%.1f", CyberCyan)
+                            TrendRow("avg engine load (%)", trends.mapNotNull { it.avgLoadPct }, "%.1f", ElectricAmber)
+                            TrendRow("avg torque (Nm, from PID 0162)", trends.mapNotNull { it.avgTorqueNm }, "%.1f", NeonEmerald)
+                            TrendRow("est. mech power (kW, 2π·N·T/60)", trends.mapNotNull { it.avgPowerKw }, "%.1f", ResearchPurple)
+                            TrendRow("est. gear (most-used while moving)", trends.mapNotNull { it.modeGear?.toDouble() }, "%.0f", NeonEmerald)
+                            trends.lastOrNull()?.takeIf { it.modeGear != null }?.let { t ->
+                                Text(
+                                    "latest trip: gears ${t.gearMin}–${t.gearMax}, mostly gear ${t.modeGear} (est. from rpm/speed ratio)",
+                                    color = TextSecondaryDark, fontSize = 12.sp
+                                )
+                            }
+                            val idlePts = trends.filter { it.idleActualLh != null }
+                            if (idlePts.size >= 2) {
+                                Text(
+                                    "idle burn vs math model (model = %.2f L/h):".format(java.util.Locale.US, com.example.analysis.TripTrendAnalyzer.MODEL_IDLE_LH),
+                                    color = TextSecondaryDark, fontSize = 12.sp
+                                )
+                                SimpleLineChart(
+                                    idlePts.mapNotNull { it.idleActualLh }.map { it.toFloat() },
+                                    Modifier.fillMaxWidth().height(56.dp),
+                                    ElectricAmber
+                                )
+                                val f = idlePts.first()
+                                val l = idlePts.last()
+                                Text(
+                                    "idle ${String.format(java.util.Locale.US, "%.2f", f.idleActualLh!!)} → ${String.format("%.2f", l.idleActualLh!!)} L/h " +
+                                        "(model %.2f)".format(java.util.Locale.US, com.example.analysis.TripTrendAnalyzer.MODEL_IDLE_LH) +
+                                        (l.idleExcessPct?.let { " · latest ${if (it >= 0) "+" else ""}${String.format(java.util.Locale.US, "%.0f", it)}% vs model" } ?: ""),
+                                    color = if ((l.idleExcessPct ?: 0.0) > 25.0) WarningRed else TextSecondaryDark,
+                                    fontSize = 12.sp
+                                )
+                            }
+                        } else {
+                            Text(
+                                "Record at least 2 trips with OBD logging and the rpm / speed / load / torque " +
+                                    "and idle-vs-model trend charts appear here.",
+                                color = TextSecondaryDark, fontSize = 12.sp
+                            )
+                        }
+                    }
+                }
                 }
             }
         }
@@ -222,11 +502,11 @@ fun RecordingsScreen(
             title = { Text("Diagnostic Storage & Retention") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("• Saved Trips: ${storageStats?.tripCount ?: 0}", fontSize = 13.sp)
-                    Text("• Telemetry Samples: ${storageStats?.sampleCount ?: 0}", fontSize = 13.sp)
-                    Text("• Raw Communication Frames: ${storageStats?.rawLogCount ?: 0}", fontSize = 13.sp)
-                    Text("• Storage Engine: Room Database (Indexed) + Local Files", fontSize = 13.sp)
-                    Text("• Auto-Pruning: Disabled (All diagnostic history is preserved permanently).", fontSize = 12.sp, color = NeonEmerald)
+                    Text("• Saved Trips: ${storageStats?.tripCount ?: 0}", fontSize = 14.sp)
+                    Text("• Telemetry Samples: ${storageStats?.sampleCount ?: 0}", fontSize = 14.sp)
+                    Text("• Raw Communication Frames: ${storageStats?.rawLogCount ?: 0}", fontSize = 14.sp)
+                    Text("• Storage Engine: Room Database (Indexed) + Local Files", fontSize = 14.sp)
+                    Text("• Auto-Pruning: Disabled (All diagnostic history is preserved permanently).", fontSize = 14.sp, color = NeonEmerald)
                 }
             },
             confirmButton = {
@@ -309,10 +589,16 @@ fun RecordingsScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun RecordingItemCard(
     recording: SavedRecording,
+    isSelected: Boolean = false,
+    selectionMode: Boolean = false,
+    syncState: com.example.data.BackupSyncStatus.State = com.example.data.BackupSyncStatus.State.NEVER,
     onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
+    onToggleSelect: (() -> Unit)? = null,
     onShareFile: (File, String) -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit
@@ -322,10 +608,16 @@ fun RecordingItemCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick
+            )
             .testTag("recording_card_${meta.sessionId}"),
         shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        colors = CardDefaults.cardColors(
+            containerColor = if (isSelected) CyberCyan.copy(alpha = 0.18f) else MaterialTheme.colorScheme.surface
+        ),
+        border = if (isSelected) androidx.compose.foundation.BorderStroke(2.dp, CyberCyan) else null
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
             Row(
@@ -333,17 +625,51 @@ fun RecordingItemCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = meta.sessionName,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold
+                if (selectionMode) {
+                    Checkbox(
+                        checked = isSelected,
+                        onCheckedChange = { onToggleSelect?.invoke() },
+                        modifier = Modifier.size(24.dp)
                     )
+                    Spacer(Modifier.width(8.dp))
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = meta.sessionName,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        // OneDrive-style sync icon (owner 2026-09-21) — use core-safe icons
+                        val syncIcon = when (syncState) {
+                            com.example.data.BackupSyncStatus.State.SYNCED -> Icons.Default.CheckCircle
+                            com.example.data.BackupSyncStatus.State.PENDING -> Icons.Default.CloudUpload
+                            com.example.data.BackupSyncStatus.State.NEVER -> Icons.Default.Warning
+                        }
+                        val syncTint = when (syncState) {
+                            com.example.data.BackupSyncStatus.State.SYNCED -> NeonEmerald
+                            com.example.data.BackupSyncStatus.State.PENDING -> ElectricAmber
+                            com.example.data.BackupSyncStatus.State.NEVER -> TextSecondaryDark
+                        }
+                        val syncDesc = when (syncState) {
+                            com.example.data.BackupSyncStatus.State.SYNCED -> "Synced to Drive"
+                            com.example.data.BackupSyncStatus.State.PENDING -> "Local — needs backup"
+                            com.example.data.BackupSyncStatus.State.NEVER -> "Never backed up"
+                        }
+                        Icon(
+                            syncIcon,
+                            contentDescription = syncDesc,
+                            tint = syncTint,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
                     Text(
                         text = "ID: ${meta.sessionId} • ${meta.vehicle}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 11.sp,
+                        fontSize = 13.sp,
                         fontFamily = FontFamily.Monospace
                     )
                 }
@@ -364,21 +690,69 @@ fun RecordingItemCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "${recording.transactionCount} transactions",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = NeonEmerald,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 13.sp
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    val syncIcon2 = when (syncState) {
+                        com.example.data.BackupSyncStatus.State.SYNCED -> Icons.Default.CheckCircle
+                        com.example.data.BackupSyncStatus.State.PENDING -> Icons.Default.CloudUpload
+                        com.example.data.BackupSyncStatus.State.NEVER -> Icons.Default.Warning
+                    }
+                    val syncTint2 = when (syncState) {
+                        com.example.data.BackupSyncStatus.State.SYNCED -> NeonEmerald
+                        com.example.data.BackupSyncStatus.State.PENDING -> ElectricAmber
+                        com.example.data.BackupSyncStatus.State.NEVER -> TextSecondaryDark
+                    }
+                    Icon(syncIcon2, contentDescription = null, tint = syncTint2, modifier = Modifier.size(14.dp))
+                }
                 Text(
-                    text = "${recording.transactionCount} transactions",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = NeonEmerald,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 11.sp
-                )
-                Text(
-                    text = meta.startTimeUtc.take(19).replace("T", " "),
+                    text = com.example.data.RecordTime.dateTime(meta.startTimeUtc),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontFamily = FontFamily.Monospace,
-                    fontSize = 11.sp
+                    fontSize = 13.sp
                 )
+            }
+
+            if (meta.startFuelPercent != null && meta.endFuelPercent != null) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    val delta = meta.fuelDeltaPercent ?: (meta.endFuelPercent - meta.startFuelPercent)
+                    val isRefuel = delta >= 3.0
+                    val deltaCol = if (isRefuel) NeonEmerald else if (delta < 0) ElectricAmber else TextSecondaryDark
+                    val deltaSign = if (delta > 0) "+" else ""
+                    Surface(
+                        color = deltaCol.copy(alpha = 0.12f),
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(Icons.Default.LocalGasStation, contentDescription = null, tint = deltaCol, modifier = Modifier.size(12.dp))
+                            Text(
+                                text = "⛽ ${String.format(java.util.Locale.US, "%.1f", meta.startFuelPercent)}% → ${String.format(java.util.Locale.US, "%.1f", meta.endFuelPercent)}% ($deltaSign${String.format(java.util.Locale.US, "%.1f", delta)}%)" +
+                                    if (isRefuel) " • Refuel Brim" else "",
+                                color = deltaCol,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(10.dp))
@@ -397,7 +771,7 @@ fun RecordingItemCard(
                         shape = RoundedCornerShape(8.dp),
                         contentPadding = PaddingValues(horizontal = 4.dp)
                     ) {
-                        Text("ZIP BUNDLE", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = CyberCyan)
+                        Text("ZIP BUNDLE", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CyberCyan)
                     }
                 }
 
@@ -407,7 +781,7 @@ fun RecordingItemCard(
                     shape = RoundedCornerShape(8.dp),
                     contentPadding = PaddingValues(horizontal = 4.dp)
                 ) {
-                    Text("TX CSV", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text("TX CSV", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
 
                 OutlinedButton(
@@ -416,7 +790,7 @@ fun RecordingItemCard(
                     shape = RoundedCornerShape(8.dp),
                     contentPadding = PaddingValues(horizontal = 4.dp)
                 ) {
-                    Text("SAMPLES", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text("SAMPLES", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
 
                 OutlinedButton(
@@ -425,7 +799,7 @@ fun RecordingItemCard(
                     shape = RoundedCornerShape(8.dp),
                     contentPadding = PaddingValues(horizontal = 4.dp)
                 ) {
-                    Text("JSON", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text("JSON", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -455,5 +829,31 @@ private fun shareFile(context: Context, file: File, mimeType: String) {
         context.startActivity(chooser)
     } catch (e: Exception) {
         Toast.makeText(context, "Share error: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+    }
+}
+
+/** One labelled sparkline with first → last and drift % (needs >= 2 points to draw). */
+@Composable
+private fun TrendRow(label: String, values: List<Double>, fmt: String, color: Color) {
+    if (values.size < 2) return
+    val first = values.first()
+    val last = values.last()
+    val driftLabel = com.example.data.Fmt.driftLabel(first, last)
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(label, color = TextSecondaryDark, fontSize = 12.sp)
+            Text(
+                "${String.format(fmt, first)} → ${String.format(fmt, last)} ($driftLabel)",
+                color = color, fontSize = 12.sp, fontWeight = FontWeight.SemiBold
+            )
+        }
+        SimpleLineChart(
+            values.map { it.toFloat() },
+            Modifier.fillMaxWidth().height(48.dp),
+            color
+        )
     }
 }

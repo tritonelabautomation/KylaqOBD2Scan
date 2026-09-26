@@ -2,18 +2,33 @@ name: Build Android APK
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches:
+      - main
   push:
     branches:
       - main
+      # 2026-09-15: push runs on the working branch post the digest too - action logs and
+      # artifacts sit on domains the triage environment cannot reach, and the PR comment
+      # list is long enough that page 1 no longer shows fresh digests.
+      - "arena/*"
 
 jobs:
-  build:
+  # FIX (CI never ran the tests): this workflow only executed `assembleDebug`, so a whole
+  # batch of failing and self-contradictory unit tests shipped unnoticed. Unit tests run as
+  # their own job with their own commit status context (`ci/unit-tests`) so results are
+  # visible on every push and pull request.
+  # 2026-09-15: the "add needs: unit-tests once the suite is green" TODO is now in force -
+  # see the gate on the `build` job. Leaving the two jobs parallel meant a red suite still
+  # produced a signed APK and still published it to the rolling release that phones install
+  # from (build 10192 shipped with broken raw-log recovery this way).
+  unit-tests:
     runs-on: ubuntu-latest
 
-    # REQUIRED: Without this, GITHUB_TOKEN has zero permissions and the status
-    # API call silently fails (GitHub returns 403). We only need statuses: write.
     permissions:
       statuses: write
+      # Needed to post the test-failure digest back onto the pull request.
+      pull-requests: write
 
     steps:
       - name: Checkout source
@@ -30,8 +45,166 @@ jobs:
         with:
           gradle-version: '9.3.1'
 
+      # continue-on-error so the reporting steps below always run; the job is still
+      # failed at the end by "Fail the job when tests failed".
+      - name: Run unit tests
+        id: unit-tests
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle testDebugUnitTest -PciExcludeRobolectric=1 --stacktrace --continue 2>&1 | tee /tmp/unit-tests.log
+          STATUS=$?
+          if [ $STATUS -ne 0 ] && grep -q "ApplicationManager.getApplication() is null" /tmp/unit-tests.log; then
+            echo "KSP2 worker-init NPE flake detected - retrying once with ksp.incremental=false..."
+            gradle testDebugUnitTest -PciExcludeRobolectric=1 --stacktrace --continue -Pksp.incremental=false 2>&1 | tee /tmp/unit-tests.log
+            STATUS=$?
+          fi
+          exit $STATUS
+
+      # Actions logs and artifacts are served from domains that are not reachable from
+      # every environment that has to triage a red run, so the digest is parsed here and
+      # posted back to the pull request instead.
+      - name: Build test failure digest
+        if: always()
+        run: python3 tools/ci/collect_test_failures.py --log /tmp/unit-tests.log > /tmp/test-report.md
+
+      # Oracle guarantee: when gradle fails before/without parseable test results
+      # (compile errors, infra failures), post the raw log tail so a red run is
+      # ALWAYS diagnosable from the PR without touching the blocked log host.
+      - name: Fallback digest from log tail
+        if: always() && steps.unit-tests.outcome == 'failure'
+        run: |
+          if [ ! -s /tmp/test-report.md ]; then
+            {
+              echo "### CI failure tail (no parseable test report)"
+              echo ""
+              echo '```'
+              tail -n 100 /tmp/unit-tests.log
+              echo '```'
+            } > /tmp/test-report.md
+          fi
+
+      - name: Comment digest on the pull request
+        # Push runs post too (PR-number fixed to 1): action logs/artifacts live on domains
+        # the triage environment cannot reach, so the PR comment thread is the only
+        # reachable carrier of the unit-test digest.
+        if: always() && (github.event_name == 'pull_request' || github.event_name == 'push')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -s /tmp/test-report.md ]; then
+            PR="${{ github.event.pull_request.number }}"
+            if [ -z "$PR" ]; then PR=1; fi
+            { echo "**push run @ ${GITHUB_SHA:0:7}**"; cat /tmp/test-report.md; } > /tmp/test-report-push.md
+            gh pr comment "$PR" --body-file /tmp/test-report-push.md
+          fi
+
+      - name: Fail the job when tests failed
+        if: always() && steps.unit-tests.outcome == 'failure'
+        run: |
+          echo "Unit tests failed - see the pull-request comment and the unit-test-reports artifact."
+          exit 1
+
+      - name: Upload unit test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-reports
+          path: |
+            app/build/reports/tests/
+            app/build/test-results/
+          if-no-files-found: ignore
+
+      - name: Report commit status
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            STATE="success"
+            DESC="Unit tests passed"
+          else
+            STATE="failure"
+            DESC="Unit tests failed"
+          fi
+          gh api "repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -f state="$STATE" \
+            -f description="$DESC" \
+            -f context="ci/unit-tests" || echo "Status report failed (non-fatal)"
+
+  build:
+    # HARD GATE (2026-09-15): do not sign, publish or offer a build whose tests failed.
+    # A red suite leaves the rolling release untouched, so phones keep the last known-good
+    # build instead of being prompted to install a broken one. The failure is still reported
+    # on the commit (`ci/unit-tests`) and as a pull-request digest comment.
+    needs: unit-tests
+    runs-on: ubuntu-latest
+
+    # REQUIRED: Without this, GITHUB_TOKEN has zero permissions and the status
+    # API call silently fails (GitHub returns 403). statuses: write is for the commit
+    # badge; contents: write lets the job publish the APK to the rolling GitHub Release
+    # that the in-app updater reads (owner request 2026-09-16).
+    permissions:
+      statuses: write
+      contents: write
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle 9.3.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+
+      # ── Stable sideload signing (owner 2026-09-16) ────────────────────────────────
+      # Every build used to be signed with a fresh runner-local debug keystore, so each
+      # APK had a different signature and Android refused to install it over the previous
+      # one: updating meant uninstalling, which wiped the database, every recording and
+      # all permissions. All builds now share one stable key (keystore/sideload.p12), so
+      # the in-app updater installs in place. If the repo ever holds the key as secrets
+      # instead, SIDELOAD_KEYSTORE_BASE64 wins and the committed key is ignored.
+      - name: Resolve sideload signing key
+        env:
+          SIDELOAD_KEYSTORE_BASE64: ${{ secrets.SIDELOAD_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$SIDELOAD_KEYSTORE_BASE64" ]; then
+            mkdir -p /tmp/keys
+            printf '%s' "$SIDELOAD_KEYSTORE_BASE64" | base64 -d > /tmp/keys/sideload.p12
+            echo "SIDELOAD_KEYSTORE_PATH=/tmp/keys/sideload.p12" >> "$GITHUB_ENV"
+            echo "Signing with the secret-held keystore."
+          elif [ -f keystore/sideload.p12 ]; then
+            echo "Signing with the committed sideload keystore (keystore/sideload.p12)."
+          else
+            echo "::warning::No sideload keystore found - builds will fall back to a per-runner debug key and will NOT install over an existing install."
+          fi
+
       - name: Build debug APK
-        run: gradle assembleDebug --stacktrace
+        shell: bash
+        env:
+          # Empty when the secrets are not set; Gradle treats blank as absent and falls
+          # back to the committed key's public credentials.
+          SIDELOAD_STORE_PASSWORD: ${{ secrets.SIDELOAD_STORE_PASSWORD }}
+          SIDELOAD_KEY_PASSWORD: ${{ secrets.SIDELOAD_KEY_PASSWORD }}
+          SIDELOAD_KEY_ALIAS: ${{ secrets.SIDELOAD_KEY_ALIAS }}
+          CRASH_REPORT_TOKEN: ${{ secrets.CRASH_REPORT_TOKEN }}
+        run: |
+          set -o pipefail
+          gradle assembleDebug --stacktrace 2>&1 | tee /tmp/build.log
+          STATUS=$?
+          if [ $STATUS -ne 0 ] && grep -q "ApplicationManager.getApplication() is null" /tmp/build.log; then
+            echo "KSP2 worker-init NPE flake detected - retrying once with ksp.incremental=false..."
+            gradle assembleDebug --stacktrace -Pksp.incremental=false 2>&1 | tee /tmp/build.log
+            STATUS=$?
+          fi
+          exit $STATUS
 
       # Extract actual evaluated version metadata from the built APK using aapt.
       # This is the only reliable way to get the evaluated versionName and versionCode
@@ -78,6 +251,92 @@ jobs:
           name: KylaqOBD2Scan-debug-apk
           path: app/build/outputs/apk/debug/*.apk
 
+      # ── In-app updater feed (owner request 2026-09-16) ───────────────────────────
+      # Publishes every successful build of a working branch to ONE rolling GitHub
+      # Release under two stable asset names, which the phone reads with no token
+      # (public repo):
+      #   .../releases/latest/download/latest.json      -> versionCode, sha256, apkUrl
+      #   .../releases/latest/download/KylaqOBD2Scan.apk
+      # Push events only: a pull_request run must never publish, since its code is
+      # unreviewed and its token cannot write releases anyway.
+      - name: Publish APK to the rolling release
+        if: github.event_name == 'push' && steps.apk-meta.outputs.version_code != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPUPDATE_VC: ${{ steps.apk-meta.outputs.version_code }}
+          APPUPDATE_VN: ${{ steps.apk-meta.outputs.version_name }}
+          APPUPDATE_SHA_SHORT: ${{ steps.apk-meta.outputs.sha_short }}
+          APPUPDATE_SUBJECT: ${{ github.event.head_commit.message }}
+        run: |
+          set -euo pipefail
+          APK="$(ls app/build/outputs/apk/debug/*.apk | head -1)"
+          SHA256="$(sha256sum "$APK" | cut -d' ' -f1)"
+          SIZE="$(stat -c%s "$APK")"
+          cp "$APK" /tmp/KylaqOBD2Scan.apk
+
+          # A commit subject can contain quotes and backslashes, so it travels through
+          # the environment and is JSON-encoded by python instead of being interpolated.
+          APPUPDATE_SHA256="$SHA256" APPUPDATE_SIZE="$SIZE" \
+          APPUPDATE_APK_URL="https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/KylaqOBD2Scan.apk" \
+          python3 - <<'PY' > /tmp/latest.json
+          import datetime
+          import json
+          import os
+          import sys
+
+          env = os.environ
+          subject = env.get("APPUPDATE_SUBJECT", "").strip().splitlines()
+          json.dump(
+              {
+                  "schema": 1,
+                  "versionCode": int(env["APPUPDATE_VC"]),
+                  "versionName": env["APPUPDATE_VN"],
+                  "apkUrl": env["APPUPDATE_APK_URL"],
+                  "assetName": "KylaqOBD2Scan.apk",
+                  "sha256": env["APPUPDATE_SHA256"],
+                  "sizeBytes": int(env["APPUPDATE_SIZE"]),
+                  "publishedAt": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                  "branch": env.get("GITHUB_REF_NAME", ""),
+                  "commitSha": env.get("GITHUB_SHA", "")[:8],
+                  "commitSubject": (subject[0][:200] if subject else ""),
+                  "notes": "Build %s (versionCode %s) from %s" % (
+                      env["APPUPDATE_VN"],
+                      env["APPUPDATE_VC"],
+                      env.get("GITHUB_REF_NAME", ""),
+                  ),
+              },
+              sys.stdout,
+              indent=2,
+          )
+          PY
+
+          {
+            echo "Build ${APPUPDATE_VN} (versionCode ${APPUPDATE_VC}) from \`${GITHUB_REF_NAME}\` @ ${APPUPDATE_SHA_SHORT}."
+            echo
+            echo "Install from inside the app: **Settings → App update → Download & install**, or accept the"
+            echo "update prompt that appears when a newer build is detected at launch."
+            echo
+            echo "The APK installs **in place** over the current build (stable sideload signing key), so trips,"
+            echo "raw logs, fuel records and granted permissions all survive - no uninstall, no ZIP extraction."
+            echo
+            echo "SHA-256: \`${SHA256}\`"
+          } > /tmp/release-notes.md
+
+          # The rolling release is created once, then updated in place forever, so
+          # .../releases/latest/... always resolves to the newest build.
+          gh release create latest \
+            --target "$GITHUB_SHA" \
+            --title "Latest build (${APPUPDATE_VN}, code ${APPUPDATE_VC})" \
+            --notes-file /tmp/release-notes.md \
+            || echo "Rolling release already exists - updating it in place."
+
+          gh release upload latest /tmp/KylaqOBD2Scan.apk /tmp/latest.json --clobber
+          gh release edit latest \
+            --target "$GITHUB_SHA" \
+            --title "Latest build (${APPUPDATE_VN}, code ${APPUPDATE_VC})" \
+            --notes-file /tmp/release-notes.md
+          echo "Published ${APPUPDATE_VN} (code ${APPUPDATE_VC}) to the rolling release."
+
       - name: Build summary
         run: |
           echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
@@ -87,6 +346,7 @@ jobs:
           echo "| Version Code | ${{ steps.apk-meta.outputs.version_code }} |" >> $GITHUB_STEP_SUMMARY
           echo "| CI Run | #${{ steps.apk-meta.outputs.run_number }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Commit | \`${{ steps.apk-meta.outputs.sha_short }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| In-app update feed | https://github.com/${{ github.repository }}/releases/latest |" >> $GITHUB_STEP_SUMMARY
 
       # Self-report build outcome to the commit so the commits page shows
       # a green/red badge. Without this step the Actions run passes/fails but

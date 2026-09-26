@@ -3,6 +3,17 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!--
+      In-app updater (2026-09-16): lets the app hand a verified APK from the project's
+      GitHub Release to Android's package installer, so an update installs in place over
+      the current build - no uninstall, no lost logs, no re-granting of permissions.
+      Android 8+ still asks the owner to allow "Install unknown apps" once, and the
+      system installer always shows its own confirmation: a sideloaded app can never
+      self-install silently (only a system/store installer may).
+    -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Parked/surface car apps draw through a host-provided surface (sideload route). -->
+    <uses-permission android:name="androidx.car.app.ACCESS_SURFACE" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
@@ -10,11 +21,40 @@
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" tools:targetApi="s" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- Owner field report 2026-09-18 ("Altitude"), two levers, both needed:
+         1. PRIMARY - the recording service declares foregroundServiceType location below. Android
+            treats location access made while a location-type foreground service runs as WHILE-IN-USE
+            access, so a drive with the phone in a pocket keeps getting fixes on the "Allow only while
+            using the app" grant the owner already gave. Without the location type the same service is
+            background for location purposes and Android 10+ hands it zero fixes once the screen goes
+            off - which is exactly what blanked the 93-minute pocketed drive while a 35-minute drive
+            with the app on screen recorded a full 387-440 m trace.
+         2. BELT - ACCESS_BACKGROUND_LOCATION covers the case the location type cannot: a service that
+            has to (re)start with no activity visible needs the all-the-time grant. Granted via the
+            sanctioned per-level flow in BackgroundLocationPolicy, never a launch popup on API 30+. -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <!-- Android 14+ requires this install-time permission to start a foreground service of type
+         location at all; without it startForeground(FOREGROUND_SERVICE_TYPE_LOCATION) throws. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- KILL-AUDIT FIX D (2026-09-19): lets KeepAliveBootReceiver revive the keep-alive service
+         after a device reboot or an in-app update install - the two events that kill the process
+         while a journal may still be half-written. BOOT_COMPLETED is an explicit Android 12+
+         exemption for starting a foreground service from the background. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Zero-setup Google connection (owner 2026-09-20: "Connection with Google doesn't work"):
+         lets the system account chooser offer the phone's Google accounts to this app, so
+         "Continue with Google" works with no OAuth client registered anywhere. -->
+    <uses-permission android:name="android.permission.GET_ACCOUNTS" />
 
     <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
+    <uses-feature android:name="android.hardware.type.automotive" android:required="false" />
 
     <application
+        android:name=".KylaqApplication"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
@@ -23,6 +63,10 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.MyApplication">
+
+        <meta-data
+            android:name="distractionOptimized"
+            android:value="true" />
 
         <activity
             android:name=".MainActivity"
@@ -36,24 +80,77 @@
             </intent-filter>
         </activity>
 
+        <!-- Sideload-friendly car-launcher entry (parked-surface activity pattern):
+             CAR_LAUNCHER + NAVIGATION + APP_MAPS categories make the head-unit launcher
+             list the app even from a sideloaded APK with AA unknown-sources enabled. -->
+        <activity
+            android:name=".auto.AutoDashActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:launchMode="singleTop"
+            android:resizeableActivity="true"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density|uiMode|layoutDirection|locale"
+            android:theme="@style/Theme.MyApplication">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.CAR_LAUNCHER" />
+                <category android:name="android.intent.category.APP_MAPS" />
+            </intent-filter>
+            <layout
+                android:minWidth="1dp"
+                android:minHeight="1dp"
+                android:gravity="fill"
+                android:defaultWidth="800dp"
+                android:defaultHeight="480dp" />
+            <meta-data
+                android:name="distractionOptimized"
+                android:value="true" />
+        </activity>
+
+        <service
+            android:name=".service.ObdKeepAliveService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice|location" />
+
         <service
             android:name=".auto.ObdCarAppService"
             android:icon="@mipmap/ic_launcher"
-            android:label="OBD Logger"
+            android:label="@string/app_name"
             android:exported="true">
             <intent-filter>
                 <action android:name="androidx.car.app.CarAppService" />
                 <category android:name="androidx.car.app.category.IOT" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="androidx.car.app.CarAppService" />
+                <category android:name="androidx.car.app.category.POI" />
+            </intent-filter>
+            <!-- Car App Library spec: minCarApiLevel MUST live INSIDE the service
+                 element - the AA host reads service-level metadata only. It was
+                 application-level before (2026-09-14 owner: "why not showing in
+                 android auto"), which lets the host treat the app as incompatible. -->
+            <meta-data
+                android:name="androidx.car.app.minCarApiLevel"
+                android:value="1" />
         </service>
 
         <meta-data
-            android:name="androidx.car.app.minCarApiLevel"
-            android:value="1" />
-            
-        <meta-data
             android:name="com.google.android.gms.car.application"
             android:resource="@xml/automotive_app_desc" />
+
+        <!-- KILL-AUDIT FIX D: a reboot mid-drive or an update installed over a running app used
+             to leave the cut-off journal waiting for the owner to open the app by hand. This
+             receiver restarts the service instead: it recovers the journal and resumes the
+             auto-connect/auto-record supervisors without anyone touching the phone. -->
+        <receiver
+            android:name=".service.KeepAliveBootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
         <provider
             android:name="androidx.core.content.FileProvider"
