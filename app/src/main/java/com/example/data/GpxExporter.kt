@@ -2,10 +2,7 @@ package com.example.data
 
 import java.io.File
 import java.io.StringWriter
-import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
-import java.util.TimeZone
 
 /**
  * High-precision GPS route point for map rendering, trip replay and GPX/KML export.
@@ -31,10 +28,6 @@ object GpxExporter {
         points: List<GpsRoutePoint>,
         vehicle: String = "Škoda Kylaq 1.0 TSI"
     ): String {
-        val isoFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
-            timeZone = TimeZone.getTimeZone("UTC")
-        }
-
         val writer = StringWriter()
         writer.appendLine("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
         writer.appendLine("<gpx version=\"1.1\" creator=\"KylaqOBD2Scan\" xmlns=\"http://www.topografix.com/GPX/1/1\">")
@@ -42,7 +35,7 @@ object GpxExporter {
         writer.appendLine("    <name><![CDATA[$tripName]]></name>")
         writer.appendLine("    <desc><![CDATA[Recorded with $vehicle]]></desc>")
         if (points.isNotEmpty()) {
-            writer.appendLine("    <time>${isoFormat.format(Date(points.first().timestampMs))}</time>")
+            writer.appendLine("    <time>${RecordTime.format("yyyy-MM-dd'T'HH:mm:ssXXX", points.first().timestampMs)}</time>")
         }
         writer.appendLine("  </metadata>")
         writer.appendLine("  <trk>")
@@ -54,7 +47,7 @@ object GpxExporter {
             pt.altitudeM?.let { ele ->
                 writer.append("<ele>${String.format(Locale.US, "%.1f", ele)}</ele>")
             }
-            writer.append("<time>${isoFormat.format(Date(pt.timestampMs))}</time>")
+            writer.append("<time>${RecordTime.format("yyyy-MM-dd'T'HH:mm:ssXXX", pt.timestampMs)}</time>")
             writer.append("<extensions><speed>${String.format(Locale.US, "%.2f", pt.speedKmh / 3.6)}</speed>")
             pt.rpm?.let { rpm -> writer.append("<rpm>${rpm.toInt()}</rpm>") }
             writer.append("</extensions>")

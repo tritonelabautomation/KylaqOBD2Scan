@@ -22,8 +22,6 @@ import androidx.compose.ui.unit.sp
 import com.example.analysis.TripDriveAnalysis
 import com.example.analysis.TripFuelSummary
 import com.example.ui.theme.*
-import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 
 private val JmCardBg = Color(0xFF1E232E)
