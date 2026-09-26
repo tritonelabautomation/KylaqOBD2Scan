@@ -16,16 +16,16 @@ class CodingLabScannerAndDtcTest {
     @Test
     fun `extracts 3-byte VAG UDS DTCs from Service 0x19 multi-frame response`() {
         // Multi-frame 19 02 09 response containing P030000 (Random Misfire) and U112100 (Databus missing message)
-        // 59 02 09 [03 00 00 28] [D1 21 00 29]
-        val rawResponse = "7E8 10 0E 59 02 09 03 00 00 28 7E8 21 D1 21 00 29 00 00 00 00"
+        // 59 02 09 [03 00 00 A8] [D1 21 00 29]
+        val rawResponse = "7E8 10 0E 59 02 09 03 00 00 A8 7E8 21 D1 21 00 29 00 00 00 00"
         val dtcs = DtcDecoder.extractUdsDtcs(rawResponse)
 
         assertEquals(2, dtcs.size)
 
-        // First DTC: P030000 (0x03, 0x00, 0x00), Status: 0x28 (Confirmed + Warning Lamp)
+        // First DTC: P030000 (0x03, 0x00, 0x00), Status: 0xA8 (Confirmed + Warning Lamp)
         val p0300 = dtcs[0]
         assertEquals("P030000", p0300.formattedCode)
-        assertEquals(0x28, p0300.statusByte)
+        assertEquals(0xA8, p0300.statusByte)
         assertTrue(p0300.isConfirmed)
         assertTrue(p0300.isWarningRequested)
 
