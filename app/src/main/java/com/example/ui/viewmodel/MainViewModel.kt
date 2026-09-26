@@ -31,6 +31,7 @@ import com.example.update.AppUpdateFeed
 import com.example.update.AppUpdateInfo
 import com.example.update.UpdateManager
 import com.example.update.UpdateUiState
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
