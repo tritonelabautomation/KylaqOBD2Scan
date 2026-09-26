@@ -2110,7 +2110,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
             try {
                 val headersToScan = if (header.equals("ALL", ignoreCase = true)) {
-                    com.example.protocol.CodingLabCodec.SWEEP_HEADERS
+                    com.example.protocol.CodingLabCodec.ALL_MODULE_HEADERS
                 } else {
                     listOf(header)
                 }
@@ -2175,7 +2175,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val allExtractedDtcs = mutableListOf<String>()
 
             try {
-                for (header in com.example.protocol.CodingLabCodec.SWEEP_HEADERS) {
+                for (header in com.example.protocol.CodingLabCodec.ALL_MODULE_HEADERS) {
                     val moduleName = com.example.protocol.CodingLabCodec.ecuNameForHeader(header)
                     transport.sendCommand("ATSH $header", 900L)
 

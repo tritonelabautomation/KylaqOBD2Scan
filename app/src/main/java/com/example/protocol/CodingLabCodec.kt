@@ -72,8 +72,11 @@ object CodingLabCodec {
         return "SILENT"
     }
 
-    /** Headers swept by the lab, covering powertrain, chassis, body and infotainment. */
-    val SWEEP_HEADERS = listOf("7E0", "7E1", "710", "711", "713", "714", "715", "716", "740")
+    /** Headers swept by the lab, in VAG-conventional order. */
+    val SWEEP_HEADERS = listOf("7E0", "7E1", "7E2", "7E3", "7E4", "7E5", "7E6", "7E7")
+
+    /** Complete multi-ECU headers across powertrain, chassis, body, safety and infotainment. */
+    val ALL_MODULE_HEADERS = listOf("7E0", "7E1", "710", "711", "713", "714", "715", "716", "740")
 
     /** Human-readable ECU name for a CAN request header. */
     fun ecuNameForHeader(header: String): String = when (header.uppercase()) {
