@@ -68,7 +68,19 @@ object PidDecoder {
         // allowing malformed/unexpected responses to be silently decoded as telemetry.
         val isResearch = pidDef.isResearch || pidDef.decoderType == DecoderType.RESEARCH_RAW
 
+        val isTwoByteDid = pidDef.service.equals("22", ignoreCase = true) || pidDef.pid.length == 4
+        val didHigh = if (isTwoByteDid && pidDef.pid.length >= 4) pidDef.pid.take(2).toIntOrNull(16) else null
+        val didLow = if (isTwoByteDid && pidDef.pid.length >= 4) pidDef.pid.drop(2).take(2).toIntOrNull(16) else null
+
         val dataBytes: List<Int> = when {
+            isTwoByteDid && didHigh != null && didLow != null &&
+                payloadBytes.size >= 3 &&
+                payloadBytes[0] == expectedServiceAck &&
+                payloadBytes[1] == didHigh &&
+                payloadBytes[2] == didLow -> {
+                // UDS Service 0x22 format: [0x62, DID_HIGH, DID_LOW, data0, data1, ...]
+                payloadBytes.drop(3)
+            }
             payloadBytes.size >= 2 &&
                 payloadBytes[0] == expectedServiceAck &&
                 payloadBytes[1] == expectedPid -> {
