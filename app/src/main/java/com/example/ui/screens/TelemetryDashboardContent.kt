@@ -26,6 +26,7 @@ fun TelemetryDashboardContent(
     tripEconomy: TripEconomyStats? = null,
     drivingState: DrivingStateEngine.DrivingStateResult? = null,
     transmissionState: TransmissionState? = null,
+    steeringAngleData: com.example.ui.components.SteeringAngleData? = null,
     capabilityStatuses: Map<String, com.example.model.CapabilityStatus> = emptyMap(),
     onPidClick: (String) -> Unit = {}
 ) {
@@ -63,6 +64,13 @@ fun TelemetryDashboardContent(
         // every row clear the FAB.
         modifier = Modifier.fillMaxWidth().padding(bottom = 96.dp)
     ) {
+
+        // 0. Steering Wheel & Chassis Dynamics (Authoritative Vehicle Sensor)
+        if (steeringAngleData != null) {
+            com.example.ui.components.SteeringAngleGauge(
+                data = steeringAngleData
+            )
+        }
 
         // 1. Driving State & Transmission (Škoda Kylaq 6-Speed AT - No DSG)
         TelemetrySectionCard(

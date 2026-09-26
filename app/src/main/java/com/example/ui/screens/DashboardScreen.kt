@@ -91,6 +91,7 @@ fun DashboardScreen(
     val selectedCanProtocol by viewModel.selectedCanProtocol.collectAsState()
     val protocolHealth by viewModel.protocolHealth.collectAsState()
     val protocolResult by viewModel.protocolVerificationResult.collectAsState()
+    val steeringAngleData by viewModel.steeringAngleState.collectAsState()
 
     val realtimeEconomy by viewModel.realtimeEconomy.collectAsState()
     val acSetTempC by viewModel.acSetTempC.collectAsState()
@@ -421,6 +422,7 @@ fun DashboardScreen(
             tripEconomy = tripEconomy,
             drivingState = drivingState,
             transmissionState = transmissionState,
+            steeringAngleData = steeringAngleData,
             onPidClick = { pidId -> onNavigateToPidDetail(pidId) }
         )
 

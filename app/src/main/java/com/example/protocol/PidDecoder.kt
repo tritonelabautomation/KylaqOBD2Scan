@@ -633,6 +633,58 @@ object PidDecoder {
                 }
             }
 
+            // Steering Wheel Angle: Signed 16-bit / 10.0 (°).
+            // J1979-2 Mode 01 PID B5 & UDS Service 22 DID 0200 / 02B2.
+            // Two's complement: 0x0000 = 0.0°, 0x00A4 = +16.4° (Right), 0xFF5C = -16.4° (Left).
+            // Valid steering wheel mechanical range: -780.0° to +780.0° (max lock-to-lock).
+            // Sentinel values like 0x7FFF / 0x8000 indicate sensor uncalibrated or error.
+            DecoderType.STEERING_ANGLE_SIGNED_10 -> {
+                if (dataBytes.size < 2) {
+                    DecodedResult(
+                        parameterName = pidDef.name,
+                        numericValue = null,
+                        displayValue = "NO DATA",
+                        unit = pidDef.unit,
+                        rawPayloadHex = rawHex,
+                        dataBytes = dataBytes,
+                        isKnown = false
+                    )
+                } else {
+                    val raw16 = (a shl 8) or b
+                    val isSentinel = raw16 == 0x7FFF || raw16 == 0x8000 || raw16 == 0xFFFF
+                    val signedVal = if (raw16 > 32767) raw16 - 65536 else raw16
+                    val angleDeg = signedVal / 10.0
+                    val isPlausible = !isSentinel && kotlin.math.abs(angleDeg) <= 780.0
+
+                    if (!isPlausible) {
+                        DecodedResult(
+                            parameterName = pidDef.name,
+                            numericValue = null,
+                            displayValue = if (isSentinel) "Sensor uncalibrated / error" else "implausible raw - no data",
+                            unit = pidDef.unit,
+                            rawPayloadHex = rawHex,
+                            dataBytes = dataBytes,
+                            isKnown = false
+                        )
+                    } else {
+                        val dir = when {
+                            angleDeg > 0.5 -> "Right"
+                            angleDeg < -0.5 -> "Left"
+                            else -> "Center"
+                        }
+                        DecodedResult(
+                            parameterName = pidDef.name,
+                            numericValue = angleDeg,
+                            displayValue = String.format(Locale.US, "%+.1f° (%s)", angleDeg, dir),
+                            unit = "°",
+                            rawPayloadHex = rawHex,
+                            dataBytes = dataBytes,
+                            isKnown = true
+                        )
+                    }
+                }
+            }
+
             DecoderType.CUSTOM_EXPRESSION, DecoderType.RESEARCH_RAW -> {
                 DecodedResult(
                     parameterName = pidDef.name,

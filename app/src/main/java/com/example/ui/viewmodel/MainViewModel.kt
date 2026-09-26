@@ -656,6 +656,52 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val errorCount: StateFlow<Long> = obdScheduler.errorCount
     val liveDecodedMap: StateFlow<Map<String, String>> = obdScheduler.liveDecodedMap
     val liveNumericMap: StateFlow<Map<String, Double>> = obdScheduler.liveNumericMap
+
+    /**
+     * Authoritative vehicle-only steering wheel angle telemetry state.
+     * Guaranteed to never emit synthetic, fabricated, or unverified data.
+     * Evaluates live J1979-2 Mode 01 PID B5, UDS EPS DID 0200, and UDS ABS DID 02B2.
+     */
+    val steeringAngleState: StateFlow<com.example.ui.components.SteeringAngleData> =
+        combine(
+            obdScheduler.liveNumericMap,
+            obdScheduler.liveDecodedMap,
+            connectionState
+        ) { numMap, decodedMap, conn ->
+            val isConnected = conn == ConnectionState.CONNECTED
+            // Priority resolution: 01B5 (SAE J1979-2), 220200 (UDS EPS), 2202B2 (UDS ABS)
+            val pids = listOf("01B5", "220200", "2202B2")
+            var activePid: String? = null
+            var angleVal: Double? = null
+            for (p in pids) {
+                val v = numMap[p]
+                if (v != null) {
+                    activePid = p
+                    angleVal = v
+                    break
+                }
+            }
+
+            val decodedStr = activePid?.let { decodedMap[it] }
+            val isStale = decodedStr?.contains("(stale)") == true
+
+            com.example.ui.components.SteeringAngleData(
+                rawAngleDeg = angleVal,
+                isFresh = isConnected && angleVal != null && !isStale,
+                isConnected = isConnected,
+                lastUpdateMs = System.currentTimeMillis(),
+                sourceName = when (activePid) {
+                    "01B5" -> "SAE J1979-2 Mode 01 PID B5 (ESC)"
+                    "220200" -> "UDS EPS DID 0200 (J500 Module 44)"
+                    "2202B2" -> "UDS ABS DID 02B2 (J104 Module 03)"
+                    else -> "PID 01B5 / UDS 220200"
+                }
+            )
+        }.stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5000),
+            com.example.ui.components.SteeringAngleData()
+        )
     val pidRawHistory: StateFlow<Map<String, List<TransactionRecord>>> = obdScheduler.pidRawHistory
     val lastTransaction: StateFlow<TransactionRecord?> = obdScheduler.lastTransaction
 

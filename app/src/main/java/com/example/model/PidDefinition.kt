@@ -30,6 +30,7 @@ enum class DecoderType {
     LAMBDA_2B,            // ((A*256)+B)/32768 lambda, two bytes - J1979 PID 24-2B / 34-3B lambda half
     O2_TRIM_PAIR_2B,      // (A-128)*100/128 % and (B-128)*100/128 % - J1979 PID 55-58 secondary O2 trims
     ODOMETER_4B,          // ((A*2^24)+(B*2^16)+(C*2^8)+D)/10 km - J1979 PID A6 (car answered 00 00 86 EB = 3453.9 km)
+    STEERING_ANGLE_SIGNED_10, // (Signed16(A, B)) / 10.0 (°): -720.0° to +720.0° - J1979-2 PID B5 / UDS DID 0200
     RESEARCH_RAW,         // Preserve raw bytes without calculation
     CUSTOM_EXPRESSION     // Custom expression if user defined
 }
@@ -2063,8 +2064,33 @@ object StandardPidCatalog {
                 id = "01B5", service = "01", pid = "B5",
                 name = "Steering Wheel Angle",
                 shortName = "Steer Ang", unit = "°",
-                dataBytes = 2, decoderType = DecoderType.RESEARCH_RAW,
-                description = "Steering wheel angle (degrees, signed)",
+                dataBytes = 2, decoderType = DecoderType.STEERING_ANGLE_SIGNED_10,
+                formulaDisplay = "Signed16(A, B) / 10.0",
+                description = "Live steering wheel angle (degrees, signed: Left negative / Right positive, 0.1° resolution)",
+                priority = PollingPriority.FAST,
+                defaultIntervalMs = 150L
+            ),
+            // ─── 220200 UDS EPS Power Steering Angle (J500 / IDE00384) ──
+            PidDefinition(
+                id = "220200", service = "22", pid = "0200",
+                name = "EPS Steering Wheel Angle (UDS)",
+                shortName = "EPS Angle", unit = "°",
+                canHeader = "714", expectedRxId = "77E",
+                dataBytes = 2, decoderType = DecoderType.STEERING_ANGLE_SIGNED_10,
+                formulaDisplay = "Signed16(A, B) / 10.0",
+                description = "UDS EPS G85 steering wheel angle from Power Steering Module 44 (J500)",
+                priority = PollingPriority.FAST,
+                defaultIntervalMs = 150L
+            ),
+            // ─── 2202B2 UDS ABS Steering Angle & Dynamics (J104 / IDE00815) ──
+            PidDefinition(
+                id = "2202B2", service = "22", pid = "02B2",
+                name = "ABS Steering Angle (UDS)",
+                shortName = "ABS Steer", unit = "°",
+                canHeader = "713", expectedRxId = "77D",
+                dataBytes = 2, decoderType = DecoderType.STEERING_ANGLE_SIGNED_10,
+                formulaDisplay = "Signed16(A, B) / 10.0",
+                description = "UDS G85 steering wheel angle from ABS/ESC Brake Module 03 (J104)",
                 priority = PollingPriority.FAST,
                 defaultIntervalMs = 150L
             ),

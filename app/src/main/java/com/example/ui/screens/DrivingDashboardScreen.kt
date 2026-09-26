@@ -43,6 +43,7 @@ fun DrivingDashboardScreen(
 
     val isConnected = connectionState == ConnectionState.CONNECTED
     val acAuto by viewModel.acAutoMode.collectAsStateWithLifecycle()
+    val steeringAngleData by viewModel.steeringAngleState.collectAsStateWithLifecycle()
 
     val rpm = liveDecodedMap["010C"] ?: "--"
     val speed = liveDecodedMap["010D"] ?: "--"
@@ -386,18 +387,19 @@ fun DrivingDashboardScreen(
                         .weight(1f),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    val steerAngle = steeringAngleData.rawAngleDeg?.let { String.format(java.util.Locale.US, "%+.1f°", it) } ?: "--"
+                    HudGaugeCard(
+                        title = "STEER ANGLE",
+                        value = if (steeringAngleData.isValid) steerAngle else "--",
+                        icon = Icons.Default.DirectionsCar,
+                        color = if (steeringAngleData.isValid) CyberCyan else TextSecondaryDark,
+                        modifier = Modifier.weight(1f)
+                    )
                     HudGaugeCard(
                         title = "VOLTAGE",
                         value = voltage,
                         icon = Icons.Default.BatteryChargingFull,
                         color = NeonEmerald,
-                        modifier = Modifier.weight(1f)
-                    )
-                    HudGaugeCard(
-                        title = "THROTTLE",
-                        value = throttle,
-                        icon = Icons.Default.Tune,
-                        color = ElectricAmber,
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -416,10 +418,10 @@ fun DrivingDashboardScreen(
                         modifier = Modifier.weight(1f)
                     )
                     HudGaugeCard(
-                        title = "INTAKE TEMP",
-                        value = iat,
-                        icon = Icons.Default.Air,
-                        color = Color(0xFF81D4FA),
+                        title = "THROTTLE",
+                        value = throttle,
+                        icon = Icons.Default.Tune,
+                        color = ElectricAmber,
                         modifier = Modifier.weight(1f)
                     )
                 }
