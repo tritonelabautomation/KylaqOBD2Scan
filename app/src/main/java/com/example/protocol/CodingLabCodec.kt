@@ -41,16 +41,31 @@ object CodingLabCodec {
     /** True with the NRC byte when the response is a UDS negative response for [service]. */
     fun negativeNrc(hexPayload: String, service: String = "22"): String? {
         val clean = hexPayload.replace(" ", "").uppercase()
-        return if (clean.startsWith("7F$service") && clean.length >= 6) clean.substring(4, 6) else null
+        val idx = clean.indexOf("7F$service")
+        return if (idx >= 0 && clean.length >= idx + 6) clean.substring(idx + 4, idx + 6) else null
     }
 
     /** Joins multi-ECU/multi-frame 62<DID> payloads and strips the echo header. */
     fun decodePositive(lines: List<String>, did: String): String {
         val sb = StringBuilder()
+        var foundEcho = false
+        val didClean = did.replace(" ", "").uppercase()
         for (line in lines) {
             val clean = line.replace(" ", "").uppercase()
-            val idx = clean.indexOf("62$did")
-            if (idx >= 0) sb.append(clean.substring(idx + 4 + 2))
+            val idx = clean.indexOf("62$didClean")
+            if (idx >= 0) {
+                foundEcho = true
+                sb.append(clean.substring(idx + 2 + didClean.length))
+            } else if (foundEcho) {
+                // ISO-TP Consecutive frame: e.g. "7E8215045504332544730" -> strip CAN ID "7E8" and PCI byte "21"
+                if (clean.length > 5 && clean[3] == '2') {
+                    sb.append(clean.substring(5))
+                } else if (clean.length > 2 && clean.startsWith("2")) {
+                    sb.append(clean.substring(2))
+                } else {
+                    sb.append(clean)
+                }
+            }
         }
         return sb.toString()
     }

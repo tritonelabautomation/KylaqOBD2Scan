@@ -149,7 +149,13 @@ object DtcDecoder {
      * Format: [0x59, 0x02, availabilityMask, DTC_High, DTC_Mid, DTC_Low, Status, ...]
      */
     fun extractUdsDtcs(payloadHex: String): List<UdsDtcRecord> {
-        val cleanHex = payloadHex.replace(Regex("[^0-9A-Fa-f]"), "").uppercase()
+        val lines = payloadHex.split(Regex("[\\r\\n|]+")).map { it.trim() }.filter { it.isNotBlank() }
+        val reassembled = com.example.protocol.IsoTpParser.reassembleLines(lines)
+        val cleanHex = if (reassembled.isNotEmpty()) {
+            reassembled.joinToString("") { it.reconstructedPayloadHex }
+        } else {
+            payloadHex.replace(Regex("[^0-9A-Fa-f]"), "").uppercase()
+        }
         if (cleanHex.length < 6) return emptyList()
 
         val idx = cleanHex.indexOf("5902")
