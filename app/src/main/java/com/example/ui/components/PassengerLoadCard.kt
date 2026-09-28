@@ -39,7 +39,7 @@ import androidx.compose.ui.unit.sp
 import com.example.analysis.PassengerLoadAnalyzer
 import com.example.ui.theme.CyberCyan
 import com.example.ui.theme.DarkSurface
-import com.example.ui.theme.DarkSurfaceVariant
+import com.example.ui.theme.DarkSurfaceElevated
 import com.example.ui.theme.ElectricAmber
 import com.example.ui.theme.NeonEmerald
 import com.example.ui.theme.ResearchPurple
@@ -298,7 +298,7 @@ fun PassengerLoadCard(
                     }
                 }
                 Surface(
-                    color = if (sp.sportShiftsCount > 0) ElectricAmber.copy(alpha = 0.15f) else DarkSurfaceVariant,
+                    color = if (sp.sportShiftsCount > 0) ElectricAmber.copy(alpha = 0.15f) else DarkSurfaceElevated,
                     shape = RoundedCornerShape(6.dp),
                     modifier = Modifier.weight(1f)
                 ) {
