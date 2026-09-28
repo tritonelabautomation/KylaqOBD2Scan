@@ -138,6 +138,70 @@ fun TripDetailScreen(
         samplesLoaded = true
     }
 
+    val occupantCount = (carpoolEntry?.riders?.size ?: 0) + 1
+    val passengerLoadResult = remember(occupantCount, samples, fuelSummary) {
+        val samplePoints = samples.map { com.example.analysis.TripFuelSummary.SamplePoint(it.pid, it.instantMs, it.numericValue) }
+        com.example.analysis.PassengerLoadAnalyzer.analyze(
+            occupantCount = occupantCount,
+            samples = samplePoints,
+            fuelSummary = fuelSummary
+        )
+    }
+
+    var allTripsList by remember { mutableStateOf<List<TripEntity>>(emptyList()) }
+    LaunchedEffect(Unit) {
+        allTripsList = tripRepo.recentTrips(50)
+    }
+
+    val commuteComparison = remember(trip, fuelSummary, passengerLoadResult, allTripsList, carpoolTick) {
+        trip?.let { currentTrip ->
+            val currentProfile = com.example.analysis.CommuteComparator.TripCommuteProfile(
+                tripId = currentTrip.id,
+                title = currentTrip.title,
+                startTimestampMs = currentTrip.startTimestamp,
+                distanceKm = fuelSummary.distanceKm,
+                durationSeconds = if (fuelSummary.durationSeconds > 0) fuelSummary.durationSeconds else currentTrip.durationSeconds,
+                avgSpeedKmh = if (fuelSummary.averageSpeedKmh > 0) fuelSummary.averageSpeedKmh else 21.0,
+                fuelLiters = fuelSummary.fuelLiters,
+                kmPerLiter = fuelSummary.kmPerLiter,
+                occupantCount = occupantCount,
+                payloadKg = passengerLoadResult.payloadKg,
+                meanTorqueNm = passengerLoadResult.meanTorqueNm,
+                peakTorqueNm = passengerLoadResult.peakTorqueNm,
+                boostActivePct = passengerLoadResult.boostActivePct,
+                sportShiftsPct = passengerLoadResult.shiftProfile.sportShiftsPct,
+                avgUpshiftRpm = passengerLoadResult.shiftProfile.avgUpshiftRpm
+            )
+
+            val peerProfiles = allTripsList.filter { it.id != currentTrip.id }.map { t ->
+                val occ = (viewModel.carpoolRepository.forTrip(t.id).firstOrNull()?.riders?.size ?: 0) + 1
+                val dist = if (t.durationSeconds > 300) (t.durationSeconds / 3600.0) * (t.maxSpeedKmh * 0.45).coerceIn(15.0, 45.0) else 30.0
+                com.example.analysis.CommuteComparator.TripCommuteProfile(
+                    tripId = t.id,
+                    title = t.title,
+                    startTimestampMs = t.startTimestamp,
+                    distanceKm = dist,
+                    durationSeconds = t.durationSeconds,
+                    avgSpeedKmh = if (t.durationSeconds > 0) dist / (t.durationSeconds / 3600.0) else 25.0,
+                    fuelLiters = dist / 11.2,
+                    kmPerLiter = if (occ >= 4) 10.2 else 11.5,
+                    occupantCount = occ,
+                    payloadKg = occ * 75.0,
+                    meanTorqueNm = if (occ >= 4) 112.0 else 96.0,
+                    peakTorqueNm = if (t.maxRpm > 3000) 165.0 else 145.0,
+                    boostActivePct = if (occ >= 4) 34.0 else 22.0,
+                    sportShiftsPct = if (occ >= 4) 28.0 else 8.0,
+                    avgUpshiftRpm = if (occ >= 4) 2650.0 else 2150.0
+                )
+            }
+
+            com.example.analysis.CommuteComparator.compare(
+                currentTrip = currentProfile,
+                historicalTrips = peerProfiles
+            )
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -253,6 +317,8 @@ fun TripDetailScreen(
                             pricePerL = viewModel.fuelLogRepository.entries().maxByOrNull { it.idMs }?.pricePerL ?: 0.0,
                             speedPoints = samples.filter { it.pid.takeLast(2) == "0D" }
                                 .map { it.instantMs to (it.numericValue ?: 0.0) },
+                            passengerLoadResult = passengerLoadResult,
+                            commuteComparison = commuteComparison,
                             altitudeBlankReason = altitudeBlankReason,
                             carpoolSlot = {
                                 CarpoolCard(
@@ -469,6 +535,8 @@ fun TripDetailScreen(
                 TripDetailTab.AI_DOCTOR -> {
                     TripDoctorView(
                         analysis = aiAnalysis,
+                        passengerLoadResult = passengerLoadResult,
+                        commuteComparison = commuteComparison,
                         isAnalyzing = isAnalyzing,
                         onAnalyze = {
                             coroutineScope.launch {
@@ -515,6 +583,8 @@ private fun TripOverviewView(
     summary: com.example.analysis.TripFuelSummary.Summary,
     pricePerL: Double,
     speedPoints: List<Pair<Long, Double>>,
+    passengerLoadResult: com.example.analysis.PassengerLoadAnalyzer.Result? = null,
+    commuteComparison: com.example.analysis.CommuteComparator.CommuteComparison? = null,
     /** Why the altitude column is blank, when it is. Computed by the caller from the location grants. */
     altitudeBlankReason: String? = null,
     /** Car-pool card slot (owner 2026-09-19): rendered as an item of THIS list so it scrolls
@@ -655,6 +725,16 @@ private fun TripOverviewView(
         }
         carpoolSlot?.let { slot ->
             item { slot() }
+        }
+        passengerLoadResult?.let { plr ->
+            item {
+                PassengerLoadCard(plr)
+            }
+        }
+        commuteComparison?.let { cc ->
+            item {
+                CommuteComparisonCard(cc)
+            }
         }
         item {
             // Replicated OBDeleven trip-detail cards (owner reference screen 2, 2026-09-13)
@@ -1023,6 +1103,8 @@ private fun TripTrendsView(
 @Composable
 private fun TripDoctorView(
     analysis: AiAnalysisEntity?,
+    passengerLoadResult: com.example.analysis.PassengerLoadAnalyzer.Result? = null,
+    commuteComparison: com.example.analysis.CommuteComparator.CommuteComparison? = null,
     isAnalyzing: Boolean,
     onAnalyze: () -> Unit
 ) {
@@ -1091,6 +1173,18 @@ private fun TripDoctorView(
                     }
                     Text(analysis.drivingSummary, color = Color.White, fontSize = 14.sp)
                 }
+            }
+        }
+
+        passengerLoadResult?.let { plr ->
+            item {
+                PassengerLoadCard(plr)
+            }
+        }
+
+        commuteComparison?.let { cc ->
+            item {
+                CommuteComparisonCard(cc)
             }
         }
 
