@@ -424,6 +424,22 @@ class CloudBackupManager(
                 )
             }
 
+            settingsRepository.driveTreeUri()?.let { tree ->
+                val treeUri = android.net.Uri.parse(tree)
+                val backups = com.example.backup.DriveBackupClient.listBackups(context, treeUri)
+                if (backups.isNotEmpty()) {
+                    val newest = backups.first()
+                    val res = com.example.backup.DriveBackupClient.restoreBackup(context, newest.uri, recordingManager)
+                    val msg = "Restore completed from Drive (${newest.name}): $res"
+                    _syncStatusMessage.value = msg
+                    return@withContext BackupSyncResult(
+                        success = true,
+                        restoredCount = 1,
+                        message = msg
+                    )
+                }
+            }
+
             val cloudFolder = File(context.filesDir, "cloud_drive_backup")
             val backupZips = cloudFolder.listFiles()?.filter { it.name.endsWith(".zip", ignoreCase = true) } ?: emptyList()
 
