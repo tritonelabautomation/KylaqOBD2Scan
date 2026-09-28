@@ -1024,8 +1024,12 @@ fun SettingsScreen(
                         ) {
                             Button(
                                 onClick = {
-                                    coroutineScope.launch {
-                                        cloudManager.performBackupNow()
+                                    if (settingsRepo.driveTreeUri() == null) {
+                                        onOpenDriveBackup()
+                                    } else {
+                                        coroutineScope.launch {
+                                            cloudManager.performBackupNow()
+                                        }
                                     }
                                 },
                                 modifier = Modifier.weight(1f).testTag("btn_backup_now"),
@@ -1045,8 +1049,12 @@ fun SettingsScreen(
 
                             OutlinedButton(
                                 onClick = {
-                                    coroutineScope.launch {
-                                        cloudManager.restoreFromCloud()
+                                    if (settingsRepo.driveTreeUri() == null) {
+                                        onOpenDriveBackup()
+                                    } else {
+                                        coroutineScope.launch {
+                                            cloudManager.restoreFromCloud()
+                                        }
                                     }
                                 },
                                 modifier = Modifier.weight(1f).testTag("btn_restore_cloud"),
