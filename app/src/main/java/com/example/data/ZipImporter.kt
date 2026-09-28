@@ -29,7 +29,7 @@ data class ZipImportResult(
 
 object ZipImporter {
 
-    private const val MAX_ZIP_UNCOMPRESSED_BYTES = 100 * 1024 * 1024L // 100MB safety ceiling
+    private const val MAX_ZIP_UNCOMPRESSED_BYTES = 2048 * 1024 * 1024L // 2GB safety ceiling for multi-month backups
 
     /**
      * Imports a user-selected ZIP from a content Uri (SAF / ACTION_OPEN_DOCUMENT).
@@ -544,7 +544,7 @@ object ZipImporter {
                             while (zis.read(buffer).also { len = it } > 0) {
                                 totalBytesRead += len
                                 if (totalBytesRead > MAX_ZIP_UNCOMPRESSED_BYTES) {
-                                    throw IllegalStateException("Zip decompression size exceeded security threshold of 100MB.")
+                                    throw IllegalStateException("Zip decompression size exceeded safety ceiling of 2GB.")
                                 }
                                 fos.write(buffer, 0, len)
                             }
