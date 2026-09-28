@@ -24,6 +24,4 @@ __pycache__/
 # QA fix: release signing material must never be committable (build.gradle.kts fallback path)
 my-upload-key.jks
 *.jks
-*.keystore
-keystore/
 image-search/
