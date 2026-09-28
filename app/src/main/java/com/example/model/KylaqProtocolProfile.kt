@@ -5,9 +5,9 @@ import android.util.Log
 /**
  * Authoritative protocol profile for the Skoda Kylaq 1.0 TSI (EA211).
  *
- * FIX P0-2: Extended ECU mapping to handle non-standard CAN IDs.
- * The original implementation defaulted to 7DF for unknown ECUs, which caused
- * broadcast requests instead of targeted requests to specific ECUs.
+ * Full VW Group MQB-A0 multi-ECU physical addressing matrix covering Powertrain,
+ * Transmission, Chassis/ABS, Power Steering (EPS), Climatronic, CAN Gateway,
+ * Central Electrics (BCM), Airbag, and Instrument Cluster.
  */
 object KylaqProtocolProfile {
     private const val TAG = "KylaqProtocolProfile"
@@ -30,17 +30,34 @@ object KylaqProtocolProfile {
     const val NORMAL_ADDRESSING = true
 
     /**
-     * FIX P0-2: Standard ECU mapping for VW Group MQB platform.
+     * Standard ECU mapping for VW Group MQB platform.
+     * Maps RX CAN response IDs to corresponding TX CAN request headers.
      */
     val STANDARD_ECU_MAPPING = mapOf(
-        "7E8" to "7E0",
-        "7E9" to "7E1",
+        "7E8" to "7E0", // Module 01: Engine ECM (Bosch MED17.1.27)
+        "7E9" to "7E1", // Module 02: Transmission TCU (Aisin AQ250 6-AT)
         "7EA" to "7E2",
         "7EB" to "7E3",
         "7EC" to "7E4",
         "7ED" to "7E5",
         "7EE" to "7E6",
-        "7EF" to "7E7"
+        "7EF" to "7E7",
+        "77D" to "713", // Module 03: ABS / ESP / Brakes (J104)
+        "77E" to "714", // Module 44: Steering Assist / EPS (J500)
+        "77B" to "711", // Module 08: Air Conditioning / Climatronic (J255)
+        "77A" to "710", // Module 19: CAN Gateway (J533)
+        "772" to "708", // Module 09: Central Electrics / BCM (J519)
+        "77F" to "715", // Module 15: Airbag / Module 17: Instruments (J285)
+        "780" to "716", // Module 76: Park Assist (J446)
+        "773" to "740"  // Module 5F: Information Electronics / MIB3
+    )
+
+    /**
+     * Known physical TX CAN headers across all MQB modules.
+     */
+    val ALL_PHYSICAL_TX_HEADERS = setOf(
+        "7E0", "7E1", "7E2", "7E3", "7E4", "7E5", "7E6", "7E7",
+        "713", "714", "711", "710", "708", "715", "716", "740"
     )
 
     private val dynamicEcuMapping = mutableMapOf<String, String>()
@@ -82,6 +99,10 @@ object KylaqProtocolProfile {
 
     fun getPhysicalRequestId(rxCanId: String): String {
         val upper = rxCanId.uppercase()
+        // If rxCanId is ALREADY a valid TX CAN header, return it directly
+        if (upper in ALL_PHYSICAL_TX_HEADERS || upper in PHYSICAL_REQUEST_RANGE || upper in STANDARD_ECU_MAPPING.values) {
+            return upper
+        }
         STANDARD_ECU_MAPPING[upper]?.let { return it }
         dynamicEcuMapping[upper]?.let { return it }
         val idx = TYPICAL_RESPONSE_RANGE.indexOf(upper)
@@ -92,8 +113,18 @@ object KylaqProtocolProfile {
         return FUNCTIONAL_REQUEST_ID
     }
 
+    fun getExpectedRxId(txCanId: String): String? {
+        val upper = txCanId.uppercase()
+        // If already an RX CAN ID, return it
+        if (upper in STANDARD_ECU_MAPPING.keys || upper in TYPICAL_RESPONSE_RANGE) {
+            return upper
+        }
+        return STANDARD_ECU_MAPPING.entries.firstOrNull { it.value == upper }?.key
+    }
+
     fun calculateRequestIdFromResponse(rxCanId: String): String? {
         val upper = rxCanId.uppercase()
+        STANDARD_ECU_MAPPING[upper]?.let { return it }
         if (upper !in TYPICAL_RESPONSE_RANGE) return null
         val idx = TYPICAL_RESPONSE_RANGE.indexOf(upper)
         return PHYSICAL_REQUEST_RANGE.getOrNull(idx)

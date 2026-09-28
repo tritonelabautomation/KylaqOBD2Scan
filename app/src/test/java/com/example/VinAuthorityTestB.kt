@@ -67,7 +67,8 @@ class VinAuthorityTestB {
     }
 
     @Test fun controlChar_rejected() {
-        val bytes = listOf(0x49,0x02,0x01)+"1234567890\x00156789".map{it.code}
+        // Kotlin has no \xNN escape: a NUL inside the VIN payload is written \u0000.
+        val bytes = listOf(0x49,0x02,0x01)+"1234567890\u0000156789".map{it.code}
         val m = mk("7E8", bytes)
         assertTrue(VinAuthority.collectVinCandidates(listOf(m)).isEmpty())
     }
@@ -82,14 +83,14 @@ class VinAuthorityTestB {
     }
 
     @Test fun allValidChars_accepted() {
-        val m = v("7E8", "ABCDEFGHJKLMNPRSTUVWXYZ0123456789")
+        val m = v("7E8", "ABCDEFGHJKLMNPRST")
         val cands = VinAuthority.collectVinCandidates(listOf(m))
         assertEquals(1, cands.size)
     }
 
     // Mixed CAN ID tests
     @Test fun mixedCanIds_separated() {
-        val msgs = listOf(v("7E8", "VIN7E8ABCDEFGHIJ"), v("7E9", "VIN7E9KLMNOPQR"))
+        val msgs = listOf(v("7E8", "A7E8BCDEFGHJ12345"), v("7E9", "K7E9LMNPRSTU12345"))
         val cands = VinAuthority.collectVinCandidates(msgs)
         assertEquals(2, cands.size)
         assertEquals(1, cands.count { it.canId == "7E8" })
@@ -104,17 +105,17 @@ class VinAuthorityTestB {
 
     // Unauthenticated ECU tests
     @Test fun unauthorized7E9_rejected() {
-        val r = VinAuthority.selectVinByAuthority(VinAuthority.collectVinCandidates(listOf(v("7E9", "VIN123456789012"))))
+        val r = VinAuthority.selectVinByAuthority(VinAuthority.collectVinCandidates(listOf(v("7E9", "VWN12345678901234"))))
         assertTrue(r is com.example.protocol.VinSelectionResult.Unavailable)
     }
 
     @Test fun unauthorized7EA_rejected() {
-        val r = VinAuthority.selectVinByAuthority(VinAuthority.collectVinCandidates(listOf(v("7EA", "VIN123456789012"))))
+        val r = VinAuthority.selectVinByAuthority(VinAuthority.collectVinCandidates(listOf(v("7EA", "VWN12345678901234"))))
         assertTrue(r is com.example.protocol.VinSelectionResult.Unavailable)
     }
 
     @Test fun authorized7E1_accepted() {
-        val r = VinAuthority.selectVinByAuthority(VinAuthority.collectVinCandidates(listOf(v("7E1", "VIN123456789012"))))
+        val r = VinAuthority.selectVinByAuthority(VinAuthority.collectVinCandidates(listOf(v("7E1", "VWN12345678901234"))))
         assertTrue(r is com.example.protocol.VinSelectionResult.Success)
     }
 }

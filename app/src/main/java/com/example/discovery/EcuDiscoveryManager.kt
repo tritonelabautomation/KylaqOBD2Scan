@@ -169,12 +169,13 @@ class EcuDiscoveryManager(
 
         val logLines = mutableListOf<String>()
         fun log(msg: String) {
-            logLines.add("[${SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date())}] $msg")
+            logLines.add("[${com.example.data.RecordTime.format("HH:mm:ss.SSS", System.currentTimeMillis())}] $msg")
         }
 
-        val startTimeUtc = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
-            timeZone = TimeZone.getTimeZone("UTC")
-        }.format(Date())
+        // IST with offset (owner 2026-09-17). The discovery export used to carry a UTC run stamp
+        // next to raw log lines in local time - two clocks five and a half hours apart in the one
+        // document the owner audits.
+        val startTimeUtc = com.example.data.RecordTime.stamp()
 
         log("Starting ECU Discovery for Škoda Kylaq (ISO 15765-4 CAN 11-bit 500k, 7DF functional request)")
 
