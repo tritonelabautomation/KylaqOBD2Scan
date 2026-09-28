@@ -135,9 +135,41 @@ object PassengerLoadAnalyzer {
             .mapNotNull { p -> p.value?.let { p.timestampMs to PowertrainModel.torqueNmFromPercent(it, torqueRef) } }
             .sortedBy { it.first }
 
-        val meanTorque = if (torqueSeries.isNotEmpty()) torqueSeries.map { it.second }.average() else fuelSummary.meanTorqueNm
-        val peakTorque = torqueSeries.maxOfOrNull { it.second } ?: fuelSummary.peakTorqueNm
         val ratedTorque = torqueRef
+
+        val modeledTorques = mutableListOf<Double>()
+        if (torqueSeries.isEmpty() && speedSeries.isNotEmpty() && rpmSeries.isNotEmpty()) {
+            for (i in 1 until speedSeries.size) {
+                val (t0, v0) = speedSeries[i - 1]
+                val (t1, v1) = speedSeries[i]
+                val dtSec = (t1 - t0) / 1000.0
+                if (dtSec in 0.2..5.0 && v1 >= 5.0) {
+                    val accel = ((v1 - v0) / 3.6) / dtSec
+                    val powerKw = PowertrainModel.powerDemandKw(v1, accel, totalMassKg)
+                    val rpm = valueAt(rpmSeries, t1) ?: (v1 * 40.0)
+                    if (rpm >= 800.0) {
+                        val tNm = (powerKw * 9549.297 / rpm).coerceIn(10.0, ratedTorque)
+                        modeledTorques.add(tNm)
+                    }
+                }
+            }
+        }
+
+        val meanTorque = if (torqueSeries.isNotEmpty()) {
+            torqueSeries.map { it.second }.average()
+        } else if (fuelSummary.meanTorqueNm != null) {
+            fuelSummary.meanTorqueNm
+        } else if (modeledTorques.isNotEmpty()) {
+            modeledTorques.average()
+        } else null
+
+        val peakTorque = if (torqueSeries.isNotEmpty()) {
+            torqueSeries.maxOfOrNull { it.second }
+        } else if (fuelSummary.peakTorqueNm != null) {
+            fuelSummary.peakTorqueNm
+        } else if (modeledTorques.isNotEmpty()) {
+            modeledTorques.maxOrNull()
+        } else null
 
         val torqueUtilPct = if (peakTorque != null && ratedTorque > 0) (peakTorque / ratedTorque) * 100.0 else null
 
@@ -155,7 +187,12 @@ object PassengerLoadAnalyzer {
                 }
             }
         }
-        val meanAccelTorque = if (accelTorques.isNotEmpty()) accelTorques.average() else null
+        val meanAccelTorque = if (accelTorques.isNotEmpty()) {
+            accelTorques.average()
+        } else if (modeledTorques.isNotEmpty()) {
+            val highLoad = modeledTorques.filter { it > (meanTorque ?: 30.0) }
+            if (highLoad.isNotEmpty()) highLoad.average() else null
+        } else null
 
         // Turbo Boost & MAP Analysis
         var boostSeconds = 0.0
