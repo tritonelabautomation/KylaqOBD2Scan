@@ -25,3 +25,5 @@ __pycache__/
 my-upload-key.jks
 *.jks
 *.keystore
+keystore/
+image-search/

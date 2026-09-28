@@ -466,15 +466,6 @@ fun TripDetailScreen(
                         }
                     )
                 }
-                                // Owner 2026-09-17: "gear display not working bro" - at the
-                                // 4-overlay cap a 5th tap used to be SILENTLY DROPPED, which
-                                // read as a dead chip. Now the newest signal swaps out so
-                                // every tap visibly does something.
-                                else -> selectedTrendPids.dropLast(1) + pid
-                            }
-                        }
-                    )
-                }
                 TripDetailTab.AI_DOCTOR -> {
                     TripDoctorView(
                         analysis = aiAnalysis,

@@ -1,0 +1,64 @@
+name: Crash Auto Triage
+
+# When app auto-creates GitHub Issue with label crash-auto, this workflow triages it
+# so Arena agent can work without user intervention (owner 2026-09-23)
+
+on:
+  issues:
+    types: [opened, labeled]
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  triage:
+    if: contains(github.event.issue.labels.*.name, 'crash-auto')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Auto comment triage checklist
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.payload.issue;
+            // Avoid double comment
+            const comments = await github.rest.issues.listComments({
+              ...context.repo,
+              issue_number: issue.number,
+              per_page: 20
+            });
+            if (comments.data.some(c => c.body.includes('Crash Auto Triage'))) {
+              console.log('Already triaged');
+              return;
+            }
+            const body = `
+            ### Crash Auto Triage 🤖
+
+            This crash was auto-reported from the app (no manual upload).
+
+            **Agent access:**
+            - \`gh issue view ${issue.number} --json body\`
+            - Crash file in \`crashes/inbox/\` if dispatched via workflow
+            - Firebase Crashlytics console if configured
+
+            **Checklist for fix:**
+            - [ ] Parse stacktrace — identify file:line
+            - [ ] Check if duplicate of recent crash-auto issue
+            - [ ] Fix in \`arena/*\` branch, push, verify CI 814 tests GREEN
+            - [ ] Close issue with commit SHA when fixed
+
+            **Labels:** crash-auto, auto-reported
+            **Repo:** ${{ github.repository }}
+            **When:** ${new Date().toISOString()}
+            `;
+            await github.rest.issues.createComment({
+              ...context.repo,
+              issue_number: issue.number,
+              body: body
+            });
+            // Ensure labels
+            await github.rest.issues.addLabels({
+              ...context.repo,
+              issue_number: issue.number,
+              labels: ['crash-auto','triage-auto']
+            });
