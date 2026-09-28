@@ -417,8 +417,8 @@ fun TripDetailScreen(
                                 haltsDurationSec = fuelSummary.startStop.engineOffSeconds.toLong(),
                                 idlingsCount = if (fuelSummary.idleSeconds > 5.0) 1 else 0,
                                 idlingsDurationSec = fuelSummary.idleSeconds.toLong(),
-                                fromAddress = if (gpsPoints.isNotEmpty()) "Origin (${String.format(java.util.Locale.US, "%.4f", gpsPoints.first().lat)}, ${String.format(java.util.Locale.US, "%.4f", gpsPoints.first().lon)})" else "No GPS fix logged",
-                                toAddress = if (gpsPoints.isNotEmpty()) "Destination (${String.format(java.util.Locale.US, "%.4f", gpsPoints.last().lat)}, ${String.format(java.util.Locale.US, "%.4f", gpsPoints.last().lon)})" else "No GPS fix logged",
+                                fromAddress = if (gpsPoints.isNotEmpty()) "Origin (${String.format(java.util.Locale.US, "%.4f", gpsPoints.first().latitude)}, ${String.format(java.util.Locale.US, "%.4f", gpsPoints.first().longitude)})" else "No GPS fix logged",
+                                toAddress = if (gpsPoints.isNotEmpty()) "Destination (${String.format(java.util.Locale.US, "%.4f", gpsPoints.last().latitude)}, ${String.format(java.util.Locale.US, "%.4f", gpsPoints.last().longitude)})" else "No GPS fix logged",
                                 hasGpsRoute = gpsPoints.isNotEmpty()
                             )
                         }
@@ -633,8 +633,8 @@ private fun TripOverviewView(
                 haltsDurationSec = summary.startStop.engineOffSeconds.toLong(),
                 idlingsCount = if (summary.idleSeconds > 5.0) 1 else 0,
                 idlingsDurationSec = summary.idleSeconds.toLong(),
-                fromAddress = if (gpsPoints.isNotEmpty()) "Origin (${String.format(java.util.Locale.US, "%.4f", gpsPoints.first().lat)}, ${String.format(java.util.Locale.US, "%.4f", gpsPoints.first().lon)})" else "No GPS fix logged",
-                toAddress = if (gpsPoints.isNotEmpty()) "Destination (${String.format(java.util.Locale.US, "%.4f", gpsPoints.last().lat)}, ${String.format(java.util.Locale.US, "%.4f", gpsPoints.last().lon)})" else "No GPS fix logged",
+                fromAddress = if (gpsPoints.isNotEmpty()) "Origin (${String.format(java.util.Locale.US, "%.4f", gpsPoints.first().latitude)}, ${String.format(java.util.Locale.US, "%.4f", gpsPoints.first().longitude)})" else "No GPS fix logged",
+                toAddress = if (gpsPoints.isNotEmpty()) "Destination (${String.format(java.util.Locale.US, "%.4f", gpsPoints.last().latitude)}, ${String.format(java.util.Locale.US, "%.4f", gpsPoints.last().longitude)})" else "No GPS fix logged",
                 hasGpsRoute = gpsPoints.isNotEmpty()
             )
         }
@@ -1725,7 +1725,7 @@ private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summar
 
                     body = "AC (measured from voltage ripple): ON " +
                         "${String.format(java.util.Locale.US, "%.0f", ac.acOnSeconds / 60.0)} min of " +
-                        "${String.format(java.util.Locale.US, "%.0f", (if (summary.durationSeconds in 1L..86400L) summary.durationSeconds else trip.durationSeconds.coerceIn(1L, 86400L)) / 60.0)} min" +
+                        "${String.format(java.util.Locale.US, "%.0f", summary.durationSeconds.coerceIn(1L, 86400L) / 60.0)} min" +
                         switchNote +
                         " • quiet baseline ±${String.format(java.util.Locale.US, "%.2f", ac.quietMadV ?: 0.0)} V" +
                         (if (ac.confidence < 1.8) " • weak separation - treat as a hint" else "")
