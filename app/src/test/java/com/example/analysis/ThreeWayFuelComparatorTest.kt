@@ -191,4 +191,29 @@ class ThreeWayFuelComparatorTest {
         assertEquals(3.14, comparison.factor2TankFloatDelta.fuelLiters!!, 0.01)
         assertEquals(31.54 / 3.14, comparison.factor2TankFloatDelta.economyKmL!!, 0.1)
     }
+
+    @Test
+    fun testMidClusterScanner_NoisyOcrVariationsAndDecimalCommas() {
+        val noisyText = """
+            17:28
+            31,0 °C
+            1:27h
+            31 km
+            Avg. 9,8
+            km/l
+            Avg. 21 km/h
+            Since start
+            4052 km
+            210 km
+        """.trimIndent()
+
+        val parsed = MidClusterScanner.parseFromText(noisyText, "trip_noisy")
+        assertNotNull(parsed)
+        assertEquals(9.8, parsed!!.avgFuelEconomyKmL, 0.01)
+        assertEquals(31.0, parsed.distanceKm, 0.01)
+        assertEquals(87, parsed.durationMinutes)
+        assertEquals(21.0, parsed.avgSpeedKmh, 0.01)
+        assertEquals(4052.0, parsed.totalOdometerKm!!, 0.01)
+        assertEquals(210.0, parsed.rangeKm!!, 0.01)
+    }
 }
