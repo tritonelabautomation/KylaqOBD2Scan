@@ -255,4 +255,16 @@ class BluetoothManager(private val context: Context) {
         _connectedDeviceName.value = null
         _statusMessage.value = "Disconnected"
     }
+
+    /**
+     * Synchronously marks connection as disconnected when an out-of-range or socket broken event is detected.
+     */
+    fun markDisconnected(reason: String = "Disconnected") {
+        try {
+            activeTransport = null
+        } catch (_: Exception) {}
+        _connectionState.value = ConnectionState.DISCONNECTED
+        _connectedDeviceName.value = null
+        _statusMessage.value = reason
+    }
 }

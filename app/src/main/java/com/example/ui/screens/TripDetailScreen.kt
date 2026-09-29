@@ -737,6 +737,12 @@ private fun TripOverviewView(
             }
         }
         item {
+            ThreeWayFuelCard(
+                tripId = trip.id,
+                fuelSummary = summary
+            )
+        }
+        item {
             // Replicated OBDeleven trip-detail cards (owner reference screen 2, 2026-09-13)
             // Owner field report 2026-09-18 ("Altitude"): a 1 h 33 min pocketed-phone drive on
             // Android 10+ has no GPS fixes at all without 'Allow all the time', and the old footnote
@@ -1186,6 +1192,13 @@ private fun TripDoctorView(
             item {
                 CommuteComparisonCard(cc)
             }
+        }
+
+        item {
+            ThreeWayFuelCard(
+                tripId = trip.id,
+                fuelSummary = summary
+            )
         }
 
         item {

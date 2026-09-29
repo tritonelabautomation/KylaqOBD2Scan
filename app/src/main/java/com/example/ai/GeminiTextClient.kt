@@ -81,6 +81,14 @@ object GeminiTextClient {
                     "Extract fuel/service receipt fields. Reply with ONLY JSON: " +
                         "{\"liters\":number|null,\"price_per_litre\":number|null,\"total\":number|null," +
                         "\"vendor\":string|null,\"category\":\"Fuel\"|\"Service\"|\"Expense\"|null}"
+                scanCustomJson(imageBytes, instruction, mime)?.let { parseReceiptJson(it) }
+            }.getOrNull()
+        }
+
+    suspend fun scanCustomJson(imageBytes: ByteArray, instruction: String, mime: String = "image/jpeg"): String? =
+        withContext(Dispatchers.IO) {
+            if (!isConfigured()) return@withContext null
+            runCatching {
                 val body = JSONObject().apply {
                     put(
                         "contents",
@@ -101,7 +109,7 @@ object GeminiTextClient {
                         )
                     )
                 }
-                post(body)?.let { parseReceiptJson(it) }
+                post(body)
             }.getOrNull()
         }
 

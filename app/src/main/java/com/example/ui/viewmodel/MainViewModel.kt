@@ -707,6 +707,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val pidRawHistory: StateFlow<Map<String, List<TransactionRecord>>> = obdScheduler.pidRawHistory
     val lastTransaction: StateFlow<TransactionRecord?> = obdScheduler.lastTransaction
 
+    fun lastCanRxAgeMs(): Long = obdScheduler.lastSuccessfulCanRxAgeMs()
+
     // Powertrain Intelligence & Trust Model Streams
     val liveTelemetryMap = obdScheduler.liveTelemetryMap
     /** Per-PID capability verdicts so dashboard tiles can say WHY a value is missing. */

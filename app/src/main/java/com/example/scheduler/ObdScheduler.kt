@@ -82,6 +82,12 @@ class ObdScheduler(
     private val _errorCount = MutableStateFlow(0L)
     val errorCount: StateFlow<Long> = _errorCount.asStateFlow()
 
+    private var consecutiveCommFailures = 0
+    private var lastSuccessfulCanRxMonotonic = 0L
+
+    fun lastSuccessfulCanRxAgeMs(): Long =
+        if (lastSuccessfulCanRxMonotonic > 0L) (SystemClock.elapsedRealtime() - lastSuccessfulCanRxMonotonic).coerceAtLeast(0L) else Long.MAX_VALUE
+
     /**
      * FIX (dead dashboard regression): all live telemetry now flows through a single
      * store that publishes BOTH the ECU-aware view ("7E8_010C") and the plain-PID view
@@ -91,7 +97,6 @@ class ObdScheduler(
 
     // High-fidelity telemetry items conforming to the Trust Model (keyed "ECU_PID")
     val liveTelemetryMap: StateFlow<Map<String, LiveTelemetryValue>> = telemetryStore.telemetryMap
-
     // Display and numeric maps for UI widgets (keyed by plain PID id, e.g. "010C")
     val liveDecodedMap: StateFlow<Map<String, String>> = telemetryStore.decodedMap
 
@@ -476,6 +481,18 @@ class ObdScheduler(
 
         if (elmResponse.status != ResponseStatus.OK) {
             _errorCount.value++
+            if (elmResponse.status == ResponseStatus.TIMEOUT ||
+                elmResponse.status == ResponseStatus.UNABLE_TO_CONNECT ||
+                elmResponse.status == ResponseStatus.CAN_ERROR ||
+                elmResponse.status == ResponseStatus.BUS_INIT_ERROR) {
+                consecutiveCommFailures++
+                if (consecutiveCommFailures >= 8 && _isPolling.value) {
+                    android.util.Log.w("ObdScheduler", "Heartbeat watchdog: $consecutiveCommFailures consecutive timeouts. Bluetooth out of range.")
+                    com.example.di.AppContainer.bluetoothManager.markDisconnected("Bluetooth adapter out of range / disconnected")
+                    stopPolling()
+                    return
+                }
+            }
             val errorRecord = TransactionRecord(
                 timestampUtc = rxUtc,
                 timestampMonotonic = rxMonotonic,
@@ -585,6 +602,8 @@ class ObdScheduler(
         }
 
         _canResponseCount.value += isoTpMessages.size
+        consecutiveCommFailures = 0
+        lastSuccessfulCanRxMonotonic = rxMonotonic
 
         // Evidence over verdict (owner 2026-09-19): a connect-time probe can judge NO_RESPONSE
         // while the ECU is still waking, and that verdict used to stick for the whole session -
