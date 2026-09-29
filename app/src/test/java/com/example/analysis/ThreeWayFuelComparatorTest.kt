@@ -125,4 +125,70 @@ class ThreeWayFuelComparatorTest {
         assertEquals(4021.0, parsed.totalOdometerKm!!, 0.01)
         assertEquals(29.5, parsed.ambientTempC!!, 0.01)
     }
+
+    @Test
+    fun testMidClusterScanner_ExactOwnerKylaqClusterSnapshot() {
+        val ownerClusterOcrText = """
+            17:28
+            31.0°c
+            1:27 h
+            31 km
+            Avg. 9.8 km/l
+            Avg. 21 km/h
+            Since start
+            4052 km
+            210 km
+        """.trimIndent()
+
+        val parsed = MidClusterScanner.parseFromText(ownerClusterOcrText, "trip_da5654ff")
+        assertNotNull(parsed)
+        assertEquals("trip_da5654ff", parsed!!.tripId)
+        assertEquals(87, parsed.durationMinutes) // 1 hr 27 min
+        assertEquals("1:27 h", parsed.durationText)
+        assertEquals(31.0, parsed.distanceKm, 0.01)
+        assertEquals(9.8, parsed.avgFuelEconomyKmL, 0.01)
+        assertEquals(21.0, parsed.avgSpeedKmh, 0.01)
+        assertEquals(4052.0, parsed.totalOdometerKm!!, 0.01)
+        assertEquals(210.0, parsed.rangeKm!!, 0.01)
+        assertEquals(31.0, parsed.ambientTempC!!, 0.01)
+        assertEquals("Since start", parsed.mode)
+        assertEquals("17:28", parsed.timeOfDay)
+
+        // Test 3-way comparator with this exact cluster data:
+        // Fuel summary from OBD: 31.54 km, 3.04 L consumed (10.37 km/L)
+        val summary = TripFuelSummary.Summary(
+            fuelLiters = 3.04,
+            distanceKm = 31.54,
+            kmPerLiter = 10.37,
+            durationSeconds = 5400L,
+            averageSpeedKmh = 21.0,
+            movingAverageSpeedKmh = 23.0,
+            maxSpeedKmh = 65.0,
+            coastSeconds = 110.0,
+            idleSeconds = 480.0,
+            speedHistogram = emptyList(),
+            sampleCount = 500,
+            hasSpeedSeries = true,
+            hasFuelSeries = true,
+            startFuelPercent = 50.0,
+            endFuelPercent = 43.02, // drop 6.98% * 45L = 3.14L -> 10.04 km/L
+            fuelDeltaPercent = -6.98,
+            fuelDeltaLiters = 3.14
+        )
+
+        val comparison = ThreeWayFuelComparator.compare("trip_da5654ff", summary, parsed)
+
+        // Factor 3: Ground Truth Baseline
+        assertEquals(9.8, comparison.factor3ClusterMid.economyKmL!!, 0.01)
+        assertEquals(31.0 / 9.8, comparison.factor3ClusterMid.fuelLiters!!, 0.01)
+
+        // Factor 1: OBD Injection Integration (10.37 km/L vs MID 9.8 km/L -> +5.8% delta)
+        assertEquals(3.04, comparison.factor1ObdIntegration.fuelLiters!!, 0.01)
+        assertEquals(10.37, comparison.factor1ObdIntegration.economyKmL!!, 0.01)
+        assertEquals(5.81, comparison.factor1ObdIntegration.errorPctVsMid!!, 0.1)
+
+        // Factor 2: Tank Float Level Delta (10.04 km/L vs MID 9.8 km/L -> +2.4% delta)
+        assertEquals(3.14, comparison.factor2TankFloatDelta.fuelLiters!!, 0.01)
+        assertEquals(31.54 / 3.14, comparison.factor2TankFloatDelta.economyKmL!!, 0.1)
+    }
 }

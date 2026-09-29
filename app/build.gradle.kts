@@ -222,6 +222,8 @@ dependencies {
   implementation(libs.firebase.appcheck.debug)
   implementation("com.google.firebase:firebase-crashlytics:19.4.4")
   implementation("com.google.firebase:firebase-analytics:22.4.0")
+  implementation(libs.coil.compose)
+  implementation(libs.mlkit.text.recognition)
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.kotlinx.coroutines.core)
   implementation(libs.logging.interceptor)

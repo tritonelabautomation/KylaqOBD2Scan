@@ -1,30 +1,36 @@
 package com.example.analysis
 
 import android.content.Context
+import android.graphics.BitmapFactory
 import android.net.Uri
 import com.example.ai.GeminiTextClient
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.util.regex.Pattern
+import kotlin.coroutines.resume
 
 /**
  * Image OCR & Pattern Recognition Scanner for Škoda Virtual Cockpit / MID Cluster screens.
  *
  * Extracts:
- *  - Duration (e.g. "1:23 h" -> 83 minutes)
+ *  - Duration (e.g. "1:27 h" -> 87 minutes)
  *  - Distance (e.g. "31 km" -> 31.0 km)
- *  - Average Fuel Economy (e.g. "Avg. 9.1 km/l" -> 9.1 km/L)
- *  - Average Speed (e.g. "Avg. 23 km/h" -> 23 km/h)
- *  - Total Odometer (e.g. "4021 km")
- *  - Range to Empty (e.g. "240 km")
- *  - Ambient Temperature (e.g. "29.5 °C")
+ *  - Average Fuel Economy (e.g. "Avg. 9.8 km/l" -> 9.8 km/L)
+ *  - Average Speed (e.g. "Avg. 21 km/h" -> 21 km/h)
+ *  - Total Odometer (e.g. "4052 km")
+ *  - Range to Empty (e.g. "210 km")
+ *  - Ambient Temperature (e.g. "31.0 °C")
  *  - Mode (e.g. "Since start")
  */
 object MidClusterScanner {
 
     /**
-     * Scans an image URI using AI Vision when configured, or pattern recognition.
+     * Scans an image URI using on-device ML Kit OCR, with Gemini Vision AI fallback.
      */
     suspend fun scanClusterImage(
         context: Context,
@@ -46,14 +52,54 @@ object MidClusterScanner {
         tripId: String = "",
         photoUri: String? = null
     ): MidClusterData? = withContext(Dispatchers.IO) {
-        // Path 1: Gemini AI Vision (when configured)
-        if (GeminiTextClient.isConfigured()) {
-            val aiResult = scanWithGeminiVision(bytes, tripId, photoUri)
-            if (aiResult != null) return@withContext aiResult
+        // Path 1: On-device ML Kit Text Recognition (fast, offline, privacy-first)
+        val onDeviceText = scanOnDeviceMlKit(bytes)
+        if (!onDeviceText.isNullOrBlank()) {
+            val parsed = parseFromText(onDeviceText, tripId, photoUri)
+            if (parsed != null && parsed.avgFuelEconomyKmL > 0.0) {
+                return@withContext parsed
+            }
         }
 
-        // Path 2: On-device image OCR / Pattern extractor
+        // Path 2: Gemini AI Vision (when configured and online)
+        if (GeminiTextClient.isConfigured()) {
+            val aiResult = scanWithGeminiVision(bytes, tripId, photoUri)
+            if (aiResult != null && aiResult.avgFuelEconomyKmL > 0.0) {
+                return@withContext aiResult
+            }
+        }
+
+        // If partial data was detected on-device (e.g. distance without economy), still return it
+        if (!onDeviceText.isNullOrBlank()) {
+            val partial = parseFromText(onDeviceText, tripId, photoUri)
+            if (partial != null) return@withContext partial
+        }
+
         null
+    }
+
+    /**
+     * On-device ML Kit OCR execution on raw image bytes.
+     */
+    suspend fun scanOnDeviceMlKit(imageBytes: ByteArray): String? = suspendCancellableCoroutine { continuation ->
+        runCatching {
+            val bitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
+            if (bitmap == null) {
+                continuation.resume(null)
+                return@runCatching
+            }
+            val image = InputImage.fromBitmap(bitmap, 0)
+            val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+            recognizer.process(image)
+                .addOnSuccessListener { visionText ->
+                    continuation.resume(visionText.text)
+                }
+                .addOnFailureListener {
+                    continuation.resume(null)
+                }
+        }.onFailure {
+            continuation.resume(null)
+        }
     }
 
     /**
@@ -70,16 +116,16 @@ object MidClusterScanner {
                 Extract the trip statistics visible on the screen.
                 Reply with ONLY a JSON object in this exact schema:
                 {
-                  "duration_text": "1:23 h",
-                  "duration_minutes": 83,
+                  "duration_text": "1:27 h",
+                  "duration_minutes": 87,
                   "distance_km": 31.0,
-                  "fuel_economy_km_l": 9.1,
-                  "avg_speed_km_h": 23.0,
-                  "odometer_km": 4021.0,
-                  "range_km": 240.0,
-                  "ambient_temp_c": 29.5,
+                  "fuel_economy_km_l": 9.8,
+                  "avg_speed_km_h": 21.0,
+                  "odometer_km": 4052.0,
+                  "range_km": 210.0,
+                  "ambient_temp_c": 31.0,
                   "mode": "Since start",
-                  "time_of_day": "9:07"
+                  "time_of_day": "17:28"
                 }
             """.trimIndent()
 
@@ -138,19 +184,24 @@ object MidClusterScanner {
     ): MidClusterData? {
         val normalized = text.replace(",", ".")
 
-        // Economy: e.g. "Avg. 9.1 km/l" or "9.1 km/l" or "9.1 kmpl"
-        val econMatch = Pattern.compile("(?:Avg\\.?\\s*)?(\\d+(?:\\.\\d+)?)\\s*(?:km\\/l|kmpl|km\\/L)", Pattern.CASE_INSENSITIVE).matcher(normalized)
+        // Economy: e.g. "Avg. 9.8 km/l" or "9.8 km/l" or "Avg 9.8 kmpl" or "Avg. 9.8 km/L"
+        val econMatch = Pattern.compile(
+            "(?:Avg\\.?|Average)?\\s*[:\\s]?\\s*(\\d+(?:\\.\\d+)?)\\s*(?:km\\s*\\/\\s*l|kmpl|km\\s*\\/\\s*L|l\\s*\\/\\s*100\\s*km)",
+            Pattern.CASE_INSENSITIVE
+        ).matcher(normalized)
         val economy = if (econMatch.find()) econMatch.group(1)?.toDoubleOrNull() ?: 0.0 else 0.0
 
-        // Avg Speed: e.g. "Avg. 23 km/h" or "23 km/h"
-        val speedMatch = Pattern.compile("(?:Avg\\.?\\s*)?(\\d+(?:\\.\\d+)?)\\s*km\\/h", Pattern.CASE_INSENSITIVE).matcher(normalized)
+        // Avg Speed: e.g. "Avg. 21 km/h" or "21 km/h" or "Avg 21 km/h"
+        val speedMatch = Pattern.compile(
+            "(?:Avg\\.?|Average)?\\s*[:\\s]?\\s*(\\d+(?:\\.\\d+)?)\\s*km\\s*\\/\\s*h",
+            Pattern.CASE_INSENSITIVE
+        ).matcher(normalized)
         val avgSpeed = if (speedMatch.find()) speedMatch.group(1)?.toDoubleOrNull() ?: 0.0 else 0.0
 
-        // Duration: prioritize explicit "1:23 h" with 'h'
+        // Duration: prioritize explicit "1:27 h" or "1:27h" or "45 min"
         val explicitDurMatch = Pattern.compile("(\\d{1,2}):(\\d{2})\\s*h", Pattern.CASE_INSENSITIVE).matcher(normalized)
         var durText = "0:00 h"
         var durMin = 0
-        var clockTime: String? = null
 
         if (explicitDurMatch.find()) {
             val hours = explicitDurMatch.group(1)?.toIntOrNull() ?: 0
@@ -158,39 +209,53 @@ object MidClusterScanner {
             durMin = hours * 60 + mins
             durText = "$hours:${String.format(java.util.Locale.US, "%02d", mins)} h"
         } else {
-            // Check for general time formats
-            val generalTimeMatch = Pattern.compile("(\\d{1,2}):(\\d{2})", Pattern.CASE_INSENSITIVE).matcher(normalized)
-            if (generalTimeMatch.find()) {
-                val hours = generalTimeMatch.group(1)?.toIntOrNull() ?: 0
-                val mins = generalTimeMatch.group(2)?.toIntOrNull() ?: 0
-                durMin = hours * 60 + mins
-                durText = "$hours:${String.format(java.util.Locale.US, "%02d", mins)} h"
+            val minMatch = Pattern.compile("(\\d+)\\s*(?:min|mins)", Pattern.CASE_INSENSITIVE).matcher(normalized)
+            if (minMatch.find()) {
+                val mins = minMatch.group(1)?.toIntOrNull() ?: 0
+                durMin = mins
+                durText = "${mins / 60}:${String.format(java.util.Locale.US, "%02d", mins % 60)} h"
+            } else {
+                val generalTimeMatch = Pattern.compile("(\\d{1,2}):(\\d{2})").matcher(normalized)
+                if (generalTimeMatch.find()) {
+                    val hours = generalTimeMatch.group(1)?.toIntOrNull() ?: 0
+                    val mins = generalTimeMatch.group(2)?.toIntOrNull() ?: 0
+                    durMin = hours * 60 + mins
+                    durText = "$hours:${String.format(java.util.Locale.US, "%02d", mins)} h"
+                }
             }
         }
 
-        // Separate time of day if present (e.g. "9:07")
+        // Clock Time of day if present (e.g. "17:28")
+        var clockTime: String? = null
         val clockMatch = Pattern.compile("(?<!:)(\\b\\d{1,2}:\\d{2}\\b)(?!\\s*h)", Pattern.CASE_INSENSITIVE).matcher(normalized)
         if (clockMatch.find()) {
             clockTime = clockMatch.group(1)
         }
 
-        // Distance and Odometer: extract all numbers with "km"
+        // Distance and Odometer and Range:
+        // Match numbers followed by km (not km/h or km/l)
         val kmMatches = mutableListOf<Double>()
-        val kmMatcher = Pattern.compile("(\\d+(?:\\.\\d+)?)\\s*km(?!\\/)", Pattern.CASE_INSENSITIVE).matcher(normalized)
+        val kmMatcher = Pattern.compile("(\\d+(?:\\.\\d+)?)\\s*km(?!\\s*\\/)", Pattern.CASE_INSENSITIVE).matcher(normalized)
         while (kmMatcher.find()) {
             kmMatcher.group(1)?.toDoubleOrNull()?.let { kmMatches.add(it) }
         }
 
-        // Odometer is typically >= 1000 km, trip distance is < 1000 km
-        val distance = kmMatches.firstOrNull { it < 1000.0 } ?: 0.0
+        // Trip distance is typically the first number < 1000 km (or within central cluster)
+        val distance = kmMatches.firstOrNull { it in 0.1..999.0 } ?: 0.0
         val odo = kmMatches.firstOrNull { it >= 1000.0 }
+        val remainingKms = kmMatches.filter { it in 0.1..999.0 && it != distance }
+        val range = remainingKms.lastOrNull()
 
-        // Range / DTE (e.g. "240 km" after odo)
-        val range = kmMatches.filter { it < 1000.0 && it != distance }.lastOrNull()
-
-        // Temp: e.g. "29.5°C" or "29.5 C"
-        val tempMatch = Pattern.compile("(\\d{1,2}(?:\\.\\d+)?)\\s*°?[cC]", Pattern.CASE_INSENSITIVE).matcher(normalized)
+        // Ambient temperature: e.g. "31.0°c", "31.0°C", "31.0 C"
+        val tempMatch = Pattern.compile("(\\d{1,2}(?:\\.\\d+)?)\\s*°?\\s*[cC]\\b", Pattern.CASE_INSENSITIVE).matcher(normalized)
         val temp = if (tempMatch.find()) tempMatch.group(1)?.toDoubleOrNull() else null
+
+        // Mode detection
+        val mode = when {
+            normalized.contains("refuel", ignoreCase = true) -> "Since refuel"
+            normalized.contains("long", ignoreCase = true) -> "Long-term"
+            else -> "Since start"
+        }
 
         if (distance <= 0.0 && economy <= 0.0 && durMin <= 0) return null
 
@@ -204,14 +269,14 @@ object MidClusterScanner {
             totalOdometerKm = odo,
             rangeKm = range,
             ambientTempC = temp,
-            mode = if (normalized.contains("refuel", ignoreCase = true)) "Since refuel" else if (normalized.contains("long", ignoreCase = true)) "Long-term" else "Since start",
+            mode = mode,
             timeOfDay = clockTime,
             photoUri = photoUri
         )
     }
 
     /**
-     * Converts "1:23 h" or "83 min" to integer minutes.
+     * Converts "1:27 h" or "87 min" to integer minutes.
      */
     fun parseDurationTextToMinutes(durationText: String): Int {
         val clean = durationText.trim()
