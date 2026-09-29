@@ -232,12 +232,14 @@ object PassengerLoadAnalyzer {
         val shiftProfile = analyzeShiftProfile(speedSeries, rpmSeries)
 
         // Engine Health & Overkill Verdict
-        val verdict = evaluateOverkillVerdict(
+        val verdict = evaluateEngineVerdict(
+            totalOccupants = totalOccupants,
+            payloadKg = payloadKg,
             totalMassKg = totalMassKg,
-            passengerCount = passengerCount,
-            peakTorqueNm = peakTorque ?: 120.0,
+            peakTorqueNm = peakTorque,
             ratedTorqueNm = ratedTorque,
-            peakCoolantC = peakCoolant ?: 90.0,
+            peakCoolantC = peakCoolant,
+            maxRpm = maxRpm,
             boostActivePct = boostActivePct,
             sportShiftsPct = shiftProfile.sportShiftsPct
         )
@@ -367,7 +369,7 @@ object PassengerLoadAnalyzer {
                 }
             }
         }
-        val sportHoldPct = if (totalMovingSec > 5.0) (sportHoldSec / totalMovingSec) * 100.0 else 0.0
+        val sportHoldPct = if (totalMovingSec > 0.0) (sportHoldSec / totalMovingSec) * 100.0 else 0.0
 
         val detectedMode = when {
             sportHoldPct >= 20.0 || (avgUpshiftRpm != null && avgUpshiftRpm >= 2350.0) || sportPct >= 25.0 -> "SPORT (S)"
@@ -394,45 +396,56 @@ object PassengerLoadAnalyzer {
     /**
      * Evaluates whether the engine was overstressed or operated safely within design limits.
      */
-    fun evaluateOverkillVerdict(
+    fun evaluateEngineVerdict(
+        totalOccupants: Int,
+        payloadKg: Double,
         totalMassKg: Double,
-        passengerCount: Int,
-        peakTorqueNm: Double,
+        peakTorqueNm: Double?,
         ratedTorqueNm: Double,
-        peakCoolantC: Double,
+        peakCoolantC: Double?,
+        maxRpm: Double?,
         boostActivePct: Double,
         sportShiftsPct: Double
     ): EngineOverkillVerdict {
-        val mechanicalHeadroom = if (ratedTorqueNm > 0) max(0.0, ((ratedTorqueNm - peakTorqueNm) / ratedTorqueNm) * 100.0) else 0.0
-        val thermalHeadroom = max(0.0, MAX_SAFE_COOLANT_C - peakCoolantC)
+        val peakT = peakTorqueNm ?: 150.0
+        val peakC = peakCoolantC ?: 90.0
+        val maxR = maxRpm ?: 3500.0
 
-        val isOverkill = mechanicalHeadroom >= 15.0 && thermalHeadroom >= 8.0 && boostActivePct < 60.0
+        val mechanicalHeadroom = max(0.0, (1.0 - (peakT / ratedTorqueNm)) * 100.0)
+        val thermalHeadroom = max(0.0, MAX_SAFE_COOLANT_C - peakC)
 
-        val level = when {
-            peakCoolantC > 105.0 || mechanicalHeadroom < 5.0 -> VerdictLevel.HEAVY_LOAD
-            passengerCount >= 3 || totalMassKg >= 1450.0 -> VerdictLevel.MODERATE_LOAD
-            else -> VerdictLevel.COMFORTABLE
-        }
+        val isOverkill = peakT > 195.0 || peakC > MAX_SAFE_COOLANT_C || maxR > 6200.0
 
-        val headline = when {
-            passengerCount >= 3 && isOverkill ->
-                "Effortless Full-Load Performance: EA211 1.0 TSI operates well within thermal & torque margins with $passengerCount passengers."
-            passengerCount in 1..2 ->
-                "Balanced Carpool Operation: Engine delivered responsive acceleration with ${String.format(Locale.US, "%.0f", mechanicalHeadroom)}% mechanical reserve."
-            else ->
-                "Light Solo Operation: Single occupant baseline: EA211 operated under minimal mechanical load with ${String.format(Locale.US, "%.0f", mechanicalHeadroom)}% reserve torque."
-        }
-
-        val explanation = buildString {
-            append("Peak torque reached ${String.format(Locale.US, "%.0f", peakTorqueNm)} Nm of the ${ratedTorqueNm.toInt()} Nm factory rating (${String.format(Locale.US, "%.0f", mechanicalHeadroom)}% safety margin). ")
-            append("Coolant stabilized at ${String.format(Locale.US, "%.1f", peakCoolantC)}°C (${String.format(Locale.US, "%.1f", thermalHeadroom)}°C thermal headroom). ")
-            if (boostActivePct > 20.0) {
-                append("Turbo boost was active for ${String.format(Locale.US, "%.0f", boostActivePct)}% of driving time to maintain brisk momentum. ")
+        val (level, headline, explanation) = when {
+            isOverkill -> {
+                Triple(
+                    VerdictLevel.OVERLOADED,
+                    "⚠️ Elevated Powertrain Load Recorded",
+                    "Telemetry captured peak torque of ${String.format(Locale.US, "%.0f", peakT)} Nm or coolant peaking at ${peakC.toInt()}°C. Engine operated near maximum thermal limits."
+                )
             }
-            if (sportShiftsPct > 20.0) {
-                append("Higher shift RPMs (~${String.format(Locale.US, "%.0f", sportShiftsPct)}% in Sport/Load band) protected the engine from lugging by keeping the turbo directly in its 1750–4000 RPM peak torque plateau.")
-            } else {
-                append("Transmission maintained efficient low-RPM cruising without lugging or knocking.")
+            totalOccupants >= 4 -> {
+                Triple(
+                    VerdictLevel.COMFORTABLE,
+                    "✅ Zero Engine Overkill — EA211 Coped Comfortably",
+                    "Carrying $totalOccupants occupants (+${payloadKg.toInt()} kg payload, total mass ${totalMassKg.toInt()} kg), the EA211 1.0 TSI evo2 operated with ${String.format(Locale.US, "%.0f", mechanicalHeadroom)}% torque headroom (peak: ${String.format(Locale.US, "%.0f", peakT)} Nm / $ratedTorqueNm Nm rated) and ${String.format(Locale.US, "%.0f", thermalHeadroom)}°C thermal margin (coolant: ${peakC.toInt()}°C). " +
+                        (if (sportShiftsPct > 20.0) "Higher shift RPMs (~${String.format(Locale.US, "%.0f", sportShiftsPct)}% in Sport/Load band) protected the engine from lugging by keeping the turbo directly in its 1750–4000 RPM peak torque plateau."
+                        else "Transmission shift mapping maintained smooth, efficient power delivery.")
+                )
+            }
+            totalOccupants in 2..3 -> {
+                Triple(
+                    VerdictLevel.COMFORTABLE,
+                    "✅ Optimal Powertrain Efficiency",
+                    "Driving with $totalOccupants occupants (+${payloadKg.toInt()} kg payload), the EA211 operated with ${String.format(Locale.US, "%.0f", mechanicalHeadroom)}% torque headroom and stable ${peakC.toInt()}°C coolant."
+                )
+            }
+            else -> {
+                Triple(
+                    VerdictLevel.COMFORTABLE,
+                    "✅ Light Solo Operation",
+                    "Single occupant baseline: EA211 operated under minimal mechanical load with ${String.format(Locale.US, "%.0f", mechanicalHeadroom)}% reserve torque."
+                )
             }
         }
 
