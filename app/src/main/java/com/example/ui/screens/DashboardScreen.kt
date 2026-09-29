@@ -513,8 +513,8 @@ fun VehicleStatusHeader(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                val isBt = connectionState == ConnectionState.CONNECTED
-                val isEcu = isBt && (protocolHealth == ProtocolHealth.WORKING || protocolHealth == ProtocolHealth.PARTIAL) && (viewModel.lastCanRxAgeMs() < 20_000L)
+        val isBt = connectionState == ConnectionState.CONNECTED
+        val isEcu = isBt && (protocolHealth == ProtocolHealth.WORKING || protocolHealth == ProtocolHealth.PARTIAL)
                 StatusBadge(label = "Bluetooth", isActive = isBt)
                 StatusBadge(label = "Adapter", isActive = isBt)
                 StatusBadge(label = "CAN", isActive = isEcu)

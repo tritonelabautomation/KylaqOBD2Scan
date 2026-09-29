@@ -1195,13 +1195,6 @@ private fun TripDoctorView(
         }
 
         item {
-            ThreeWayFuelCard(
-                tripId = trip.id,
-                fuelSummary = summary
-            )
-        }
-
-        item {
             DoctorSection("Engine Powertrain Behavior", analysis.engineBehavior)
         }
 
