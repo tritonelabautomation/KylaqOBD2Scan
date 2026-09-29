@@ -138,32 +138,55 @@ object MidClusterScanner {
     ): MidClusterData? {
         val normalized = text.replace(",", ".")
 
-        // Distance: e.g. "31 km" or "31.0 km"
-        val distMatch = Pattern.compile("(\\d+(?:\\.\\d+)?)\\s*km", Pattern.CASE_INSENSITIVE).matcher(normalized)
-        val distance = if (distMatch.find()) distMatch.group(1)?.toDoubleOrNull() ?: 0.0 else 0.0
-
-        // Economy: e.g. "Avg. 9.1 km/l" or "9.1 km/l"
-        val econMatch = Pattern.compile("(?:Avg\\.?\\s*)?(\\d+(?:\\.\\d+)?)\\s*km\\/l", Pattern.CASE_INSENSITIVE).matcher(normalized)
+        // Economy: e.g. "Avg. 9.1 km/l" or "9.1 km/l" or "9.1 kmpl"
+        val econMatch = Pattern.compile("(?:Avg\\.?\\s*)?(\\d+(?:\\.\\d+)?)\\s*(?:km\\/l|kmpl|km\\/L)", Pattern.CASE_INSENSITIVE).matcher(normalized)
         val economy = if (econMatch.find()) econMatch.group(1)?.toDoubleOrNull() ?: 0.0 else 0.0
 
         // Avg Speed: e.g. "Avg. 23 km/h" or "23 km/h"
         val speedMatch = Pattern.compile("(?:Avg\\.?\\s*)?(\\d+(?:\\.\\d+)?)\\s*km\\/h", Pattern.CASE_INSENSITIVE).matcher(normalized)
         val avgSpeed = if (speedMatch.find()) speedMatch.group(1)?.toDoubleOrNull() ?: 0.0 else 0.0
 
-        // Duration: e.g. "1:23 h" or "1:23"
-        val durMatch = Pattern.compile("(\\d{1,2}):(\\d{2})\\s*h?", Pattern.CASE_INSENSITIVE).matcher(normalized)
+        // Duration: prioritize explicit "1:23 h" with 'h'
+        val explicitDurMatch = Pattern.compile("(\\d{1,2}):(\\d{2})\\s*h", Pattern.CASE_INSENSITIVE).matcher(normalized)
         var durText = "0:00 h"
         var durMin = 0
-        if (durMatch.find()) {
-            val hours = durMatch.group(1)?.toIntOrNull() ?: 0
-            val mins = durMatch.group(2)?.toIntOrNull() ?: 0
+        var clockTime: String? = null
+
+        if (explicitDurMatch.find()) {
+            val hours = explicitDurMatch.group(1)?.toIntOrNull() ?: 0
+            val mins = explicitDurMatch.group(2)?.toIntOrNull() ?: 0
             durMin = hours * 60 + mins
             durText = "$hours:${String.format(java.util.Locale.US, "%02d", mins)} h"
+        } else {
+            // Check for general time formats
+            val generalTimeMatch = Pattern.compile("(\\d{1,2}):(\\d{2})", Pattern.CASE_INSENSITIVE).matcher(normalized)
+            if (generalTimeMatch.find()) {
+                val hours = generalTimeMatch.group(1)?.toIntOrNull() ?: 0
+                val mins = generalTimeMatch.group(2)?.toIntOrNull() ?: 0
+                durMin = hours * 60 + mins
+                durText = "$hours:${String.format(java.util.Locale.US, "%02d", mins)} h"
+            }
         }
 
-        // Total Odo: e.g. "4021 km"
-        val odoMatch = Pattern.compile("(\\d{4,6})\\s*km", Pattern.CASE_INSENSITIVE).matcher(normalized)
-        val odo = if (odoMatch.find()) odoMatch.group(1)?.toDoubleOrNull() else null
+        // Separate time of day if present (e.g. "9:07")
+        val clockMatch = Pattern.compile("(?<!:)(\\b\\d{1,2}:\\d{2}\\b)(?!\\s*h)", Pattern.CASE_INSENSITIVE).matcher(normalized)
+        if (clockMatch.find()) {
+            clockTime = clockMatch.group(1)
+        }
+
+        // Distance and Odometer: extract all numbers with "km"
+        val kmMatches = mutableListOf<Double>()
+        val kmMatcher = Pattern.compile("(\\d+(?:\\.\\d+)?)\\s*km(?!\\/)", Pattern.CASE_INSENSITIVE).matcher(normalized)
+        while (kmMatcher.find()) {
+            kmMatcher.group(1)?.toDoubleOrNull()?.let { kmMatches.add(it) }
+        }
+
+        // Odometer is typically >= 1000 km, trip distance is < 1000 km
+        val distance = kmMatches.firstOrNull { it < 1000.0 } ?: 0.0
+        val odo = kmMatches.firstOrNull { it >= 1000.0 }
+
+        // Range / DTE (e.g. "240 km" after odo)
+        val range = kmMatches.filter { it < 1000.0 && it != distance }.lastOrNull()
 
         // Temp: e.g. "29.5°C" or "29.5 C"
         val tempMatch = Pattern.compile("(\\d{1,2}(?:\\.\\d+)?)\\s*°?[cC]", Pattern.CASE_INSENSITIVE).matcher(normalized)
@@ -179,8 +202,10 @@ object MidClusterScanner {
             avgFuelEconomyKmL = economy,
             avgSpeedKmh = avgSpeed,
             totalOdometerKm = odo,
+            rangeKm = range,
             ambientTempC = temp,
             mode = if (normalized.contains("refuel", ignoreCase = true)) "Since refuel" else if (normalized.contains("long", ignoreCase = true)) "Long-term" else "Since start",
+            timeOfDay = clockTime,
             photoUri = photoUri
         )
     }
