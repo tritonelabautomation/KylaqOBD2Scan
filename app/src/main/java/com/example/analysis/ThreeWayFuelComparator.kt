@@ -16,8 +16,8 @@ import kotlin.math.abs
  *
  *  2. **Factor 2 (Tank Float Level Delta PID 012F %)**:
  *     Fuel tank float level percentage drop ($\Delta \text{Level} = \text{Start \%} - \text{End \%}$)
- *     multiplied by 45.0 L tank capacity. Subject to float potentiometer step quantization (~0.5%
- *     resolution = ±0.225 L), fuel slosh, vehicle tilt, and thermal expansion.
+ *     multiplied by 50.0 L tank capacity. Subject to float potentiometer step quantization (~0.5%
+ *     resolution = ±0.25 L), fuel slosh, vehicle tilt, and thermal expansion.
  *
  *  3. **Factor 3 (Vehicle Instrument Cluster MID "Since Start")**:
  *     Ground-truth cluster readout calculated by the Bosch/Continental ECU from injector pulse
@@ -141,7 +141,7 @@ object ThreeWayFuelComparator {
         val f2Explanation = when {
             f2ErrorPct == null -> "PID 012F fuel tank level was unmeasured or fuel level change was smaller than sensor resolution."
             abs(f2ErrorPct) <= 8.0 -> "Tank float level sensor tracked fuel drawdown consistently across this distance."
-            else -> "The mechanical fuel float has ~0.5% step resolution (±0.23 L on a 45L tank) and is susceptible to road incline tilt and cornering slosh over short trips."
+            else -> "The mechanical fuel float has ~0.5% step resolution (±0.25 L on a 50L tank) and is susceptible to road incline tilt and cornering slosh over short trips."
         }
 
         val factor2 = FactorResult(

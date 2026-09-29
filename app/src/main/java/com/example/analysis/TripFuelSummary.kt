@@ -262,14 +262,39 @@ object TripFuelSummary {
 
         val levelSeries = (byPid["012F"] ?: byPid["2F"] ?: emptyList())
             .mapNotNull { p -> p.value?.let { p.timestampMs to it } }
+            .filter { it.second in 0.0..100.0 }
             .sortedBy { it.first }
-        val startFuelPercent = levelSeries.firstOrNull()?.second
-        val endFuelPercent = levelSeries.lastOrNull()?.second
+
+        // Windowed median filtering rejects fuel slosh, incline tilt, and braking spikes
+        fun windowMedian(list: List<Double>): Double? {
+            if (list.isEmpty()) return null
+            val sorted = list.sorted()
+            val mid = sorted.size / 2
+            return if (sorted.size % 2 == 1) sorted[mid] else (sorted[mid - 1] + sorted[mid]) / 2.0
+        }
+
+        val startFuelPercent = when {
+            levelSeries.isEmpty() -> null
+            levelSeries.size < 6 -> levelSeries.first().second
+            else -> {
+                val windowSize = (levelSeries.size / 5).coerceIn(3, 10)
+                windowMedian(levelSeries.take(windowSize).map { it.second })
+            }
+        }
+        val endFuelPercent = when {
+            levelSeries.isEmpty() -> null
+            levelSeries.size < 6 -> levelSeries.last().second
+            else -> {
+                val windowSize = (levelSeries.size / 5).coerceIn(3, 10)
+                windowMedian(levelSeries.takeLast(windowSize).map { it.second })
+            }
+        }
+
         val fuelDeltaPercent = if (startFuelPercent != null && endFuelPercent != null) {
             endFuelPercent - startFuelPercent
         } else null
         val fuelDeltaLiters = if (fuelDeltaPercent != null) {
-            kotlin.math.abs(fuelDeltaPercent) / 100.0 * 50.0
+            kotlin.math.abs(fuelDeltaPercent) / 100.0 * com.example.engine.PowertrainModel.TANK_CAPACITY_L
         } else null
         val isRefuelBrimEvent = (fuelDeltaPercent ?: 0.0) >= 3.0
 
