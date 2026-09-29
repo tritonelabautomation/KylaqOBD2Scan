@@ -21,7 +21,7 @@ class ThreeWayFuelComparatorTest {
         )
 
         // Factor 1 (OBD Mass Integration): 3.48 L consumed -> 8.91 km/L (~2.1% delta from MID)
-        // Factor 2 (Float Delta): 4.50 L consumed -> 6.89 km/L (~24.3% delta from float steps on 50L tank)
+        // Factor 2 (Float Delta): 4.05 L consumed -> 7.65 km/L (~15.9% delta from float steps on 45L tank)
         val summary = TripFuelSummary.Summary(
             fuelLiters = 3.48,
             distanceKm = 31.0,
@@ -38,8 +38,8 @@ class ThreeWayFuelComparatorTest {
             hasFuelSeries = true,
             startFuelPercent = 45.0,
             endFuelPercent = 36.0,
-            fuelDeltaPercent = -9.0, // 9% of 50L = 4.50 L
-            fuelDeltaLiters = 4.50
+            fuelDeltaPercent = -9.0, // 9% of 45L = 4.05 L
+            fuelDeltaLiters = 4.05
         )
 
         val result = ThreeWayFuelComparator.compare("test_trip_1", summary, midData)
@@ -56,8 +56,8 @@ class ThreeWayFuelComparatorTest {
         assertTrue(kotlin.math.abs(result.factor1ObdIntegration.errorPctVsMid!!) < 5.0)
 
         // Assert Factor 2 (Tank Float Delta)
-        assertEquals(4.50, result.factor2TankFloatDelta.fuelLiters!!, 0.01)
-        assertEquals(31.0 / 4.50, result.factor2TankFloatDelta.economyKmL!!, 0.01)
+        assertEquals(4.05, result.factor2TankFloatDelta.fuelLiters!!, 0.01)
+        assertEquals(31.0 / 4.05, result.factor2TankFloatDelta.economyKmL!!, 0.01)
 
         // Factor 1 must win as the closest physical factor to MID
         assertEquals(1, result.closestFactorNumber)
