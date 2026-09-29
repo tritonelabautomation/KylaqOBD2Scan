@@ -226,12 +226,36 @@ fun PassengerLoadCard(
 
             // Section 3: Transmission Shift Points & Sport Mode Analysis
             val sp = result.shiftProfile
-            Text(
-                text = "TRANSMISSION SHIFT DYNAMICS (AQ250 6-SPEED AT)",
-                color = TextSecondaryDark,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "TRANSMISSION SHIFT DYNAMICS (AQ250 6-SPEED AT)",
+                    color = TextSecondaryDark,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                val badgeColor = when (sp.detectedMode) {
+                    "SPORT (S)" -> ElectricAmber
+                    "ECO (D)" -> NeonEmerald
+                    else -> CyberCyan
+                }
+                Surface(
+                    color = badgeColor.copy(alpha = 0.15f),
+                    shape = RoundedCornerShape(4.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, badgeColor.copy(alpha = 0.35f))
+                ) {
+                    Text(
+                        text = sp.detectedMode,
+                        color = badgeColor,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+            }
             Spacer(modifier = Modifier.height(6.dp))
 
             Row(
@@ -251,7 +275,7 @@ fun PassengerLoadCard(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = sp.avgUpshiftRpm?.let { "${String.format(Locale.US, "%.0f", it)} RPM" } ?: "--",
-                        color = if ((sp.avgUpshiftRpm ?: 0.0) > 2600.0) ElectricAmber else TextPrimaryDark,
+                        color = if ((sp.avgUpshiftRpm ?: 0.0) >= 2350.0) ElectricAmber else TextPrimaryDark,
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp,
                         fontFamily = FontFamily.Monospace
@@ -261,7 +285,7 @@ fun PassengerLoadCard(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "${String.format(Locale.US, "%.0f", sp.sportModeHoldPct)}%",
-                        color = if (sp.sportModeHoldPct > 15.0) ElectricAmber else TextPrimaryDark,
+                        color = if (sp.sportModeHoldPct >= 20.0) ElectricAmber else TextPrimaryDark,
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp,
                         fontFamily = FontFamily.Monospace
@@ -283,7 +307,7 @@ fun PassengerLoadCard(
                     modifier = Modifier.weight(1f)
                 ) {
                     Column(modifier = Modifier.padding(6.dp)) {
-                        Text("D-ECO (<2.2k)", color = NeonEmerald, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        Text("D-ECO (<2.0k)", color = NeonEmerald, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                         Text("${sp.ecoShiftsCount} (${String.format(Locale.US, "%.0f", sp.ecoShiftsPct)}%)", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
                 }
@@ -293,17 +317,17 @@ fun PassengerLoadCard(
                     modifier = Modifier.weight(1f)
                 ) {
                     Column(modifier = Modifier.padding(6.dp)) {
-                        Text("NORMAL (2.2-2.8k)", color = CyberCyan, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        Text("NORMAL (2.0-2.45k)", color = CyberCyan, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                         Text("${sp.normalShiftsCount} (${String.format(Locale.US, "%.0f", sp.normalShiftsPct)}%)", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
                 }
                 Surface(
-                    color = if (sp.sportShiftsCount > 0) ElectricAmber.copy(alpha = 0.15f) else DarkSurfaceElevated,
+                    color = if (sp.sportShiftsCount > 0 || sp.sportModeHoldPct >= 20.0) ElectricAmber.copy(alpha = 0.15f) else DarkSurfaceElevated,
                     shape = RoundedCornerShape(6.dp),
                     modifier = Modifier.weight(1f)
                 ) {
                     Column(modifier = Modifier.padding(6.dp)) {
-                        Text("SPORT/LOAD (>2.8k)", color = if (sp.sportShiftsCount > 0) ElectricAmber else TextSecondaryDark, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        Text("SPORT (>2.45k)", color = if (sp.sportShiftsCount > 0 || sp.sportModeHoldPct >= 20.0) ElectricAmber else TextSecondaryDark, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                         Text("${sp.sportShiftsCount} (${String.format(Locale.US, "%.0f", sp.sportShiftsPct)}%)", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
                 }

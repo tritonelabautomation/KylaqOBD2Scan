@@ -112,6 +112,34 @@ class PassengerLoadAnalyzerTest {
     }
 
     @Test
+    fun `sport mode holding and dynamic shifts are classified as SPORT S mode`() {
+        // City driving holding 2000-2800 RPM in 2nd/3rd gear
+        val speedSeries = listOf(
+            1000L to 20.0,
+            2000L to 25.0,
+            3000L to 30.0,
+            4000L to 35.0,
+            5000L to 40.0,
+            6000L to 45.0
+        )
+        val rpmSeries = listOf(
+            1000L to 2100.0, // G2 @ 20 km/h
+            2000L to 2600.0, // G2 @ 25 km/h
+            3000L to 3100.0, // G2 @ 30 km/h before upshift
+            4000L to 2100.0, // Shift to G3 @ 35 km/h
+            5000L to 2400.0, // G3 @ 40 km/h
+            6000L to 2700.0  // G3 @ 45 km/h
+        )
+
+        val profile = PassengerLoadAnalyzer.analyzeShiftProfile(speedSeries, rpmSeries)
+        assertEquals(1, profile.totalUpshifts)
+        assertEquals(1, profile.sportShiftsCount)
+        assertEquals(3100.0, profile.avgUpshiftRpm!!, 1e-3)
+        assertEquals("SPORT (S)", profile.detectedMode)
+        assertTrue("Sport hold percent should be > 50%", profile.sportModeHoldPct > 50.0)
+    }
+
+    @Test
     fun `solo driver baseline correctly defaults to 75 kg and single occupant`() {
         val summary = TripFuelSummary.Summary(
             fuelLiters = 2.5,

@@ -1,21 +1,19 @@
 package com.example.analysis
 
-import com.example.engine.Aq250GearModel
 import com.example.engine.PowertrainModel
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.max
 
 /**
- * Passenger Payload, Engine Work & Transmission Shift Behavior Analyzer for Škoda Kylaq 1.0 TSI (EA211).
+ * Passenger Load, Operating Mass & Engine Effort Analyzer for Škoda Kylaq 1.0 TSI (EA211).
  *
- * Evaluates:
- * 1. Payload & Mass Dynamics: Vehicle kerb mass (1200 kg) + driver & carpool passengers (75-80 kg/person).
- * 2. Engine Work & Torque Demand: Mean/peak torque (PID 0162/0163) vs 178 Nm EA211 rated limit, acceleration torque.
- * 3. Turbocharger Boost Demand: MAP (PID 010B) & Boost relative to atmospheric pressure (101.3 kPa).
- * 4. Transmission Shift Behavior & Sports Mode: Upshift RPM distribution (Eco <2.2k, Normal 2.2-2.8k, Sport/Load >2.8k)
- *    and high-RPM holding duration (~3k RPM shift points in Sport / Heavy Load).
- * 5. Authentic EA211 Overkill & Health Verdict: Reassurance based on factory mechanical/thermal engineering limits.
+ * Derives:
+ * 1. Occupant Payload & Total Vehicle Operating Mass (Solo baseline 1275 kg vs Carpool up to 1575 kg).
+ * 2. Specific Fuel Economy under Load (L/100km per Tonne & L/100km per Passenger).
+ * 3. Engine Mechanical Torque Demand & Turbo Boost Utilization % (PID 0162 / 010B).
+ * 4. Transmission Shift Dynamics (AQ250 6-Speed AT Shift Bands: Eco <2.0k, Normal 2.0-2.45k, Sport >=2.45k RPM).
+ * 5. Authentic "EA211 Overkill" & Powertrain Health Verdict (proves 1.0 TSI comfortably handles 5 passengers).
  *
  * Pure and fully JVM-unit-testable; no Android platform dependencies.
  */
@@ -24,9 +22,9 @@ object PassengerLoadAnalyzer {
     const val DEFAULT_OCCUPANT_KG = 75.0
     const val ATMOSPHERIC_KPA = 101.3
     const val BOOST_THRESHOLD_KPA = 105.0 // MAP above 105 kPa indicates positive turbo boost
-    const val SPORT_RPM_SHIFT_THRESHOLD = 2800.0 // Shifts above 2800 RPM characteristic of Sport Mode / Heavy Load
-    const val ECO_RPM_SHIFT_THRESHOLD = 2200.0 // Shifts below 2200 RPM characteristic of Eco D-Mode
-    const val SPORT_HOLD_RPM_THRESHOLD = 2600.0 // Cruising/acceleration holding >2600 RPM in low gears
+    const val SPORT_RPM_SHIFT_THRESHOLD = 2450.0 // Shifts at or above 2450 RPM characteristic of Sport Mode / Heavy Load
+    const val ECO_RPM_SHIFT_THRESHOLD = 2000.0 // Shifts below 2000 RPM characteristic of Eco D-Mode
+    const val SPORT_HOLD_RPM_THRESHOLD = 1950.0 // Moving at city speeds holding >=1950 RPM in lower gears (vs D-mode 1200-1500 RPM)
     const val MAX_SAFE_COOLANT_C = 108.0 // EA211 thermal management derating ceiling
 
     enum class VerdictLevel {
@@ -56,7 +54,8 @@ object PassengerLoadAnalyzer {
         val avgUpshiftRpm: Double?,
         val sportModeHoldSeconds: Double,
         val sportModeHoldPct: Double,
-        val shiftEvents: List<ShiftEvent>
+        val detectedMode: String = "DRIVE (D)", // "SPORT (S)", "DRIVE (D)", "ECO (D)"
+        val shiftEvents: List<ShiftEvent> = emptyList()
     )
 
     data class EngineOverkillVerdict(
@@ -180,7 +179,6 @@ object PassengerLoadAnalyzer {
             val (t1, v1) = speedSeries[i]
             val dtSec = (t1 - t0) / 1000.0
             if (dtSec in 0.5..10.0 && (v1 - v0) / dtSec >= 0.5) {
-                // Find matching torque near t1
                 val tVal = valueAt(torqueSeries, t1)
                 if (tVal != null && tVal > 10.0) {
                     accelTorques.add(tVal)
@@ -217,30 +215,29 @@ object PassengerLoadAnalyzer {
         val peakBoostBar = max(0.0, (maxMap - ATMOSPHERIC_KPA) / 100.0)
 
         val peakCoolant = coolantSeries.maxOfOrNull { it.second }
-        val maxRpm = rpmSeries.maxOfOrNull { it.second } ?: fuelSummary.maxSpeedKmh
+        val maxRpm = rpmSeries.maxOfOrNull { it.second }
 
-        // Shift behavior & Sport Mode detection
+        // Specific Fuel Metrics
+        val distance = if (fuelSummary.distanceKm > 0.1) fuelSummary.distanceKm else 1.0
+        val fuelL = fuelSummary.fuelLiters
+        val specificFuelPerTonne = if (totalMassKg > 0 && distance > 0) {
+            (fuelL / (distance * (totalMassKg / 1000.0))) * 100.0
+        } else null
+
+        val fuelPerPax100Km = if (totalOccupants > 0 && distance > 0) {
+            (fuelL / (distance * totalOccupants)) * 100.0
+        } else null
+
+        // Shift Profile Analysis
         val shiftProfile = analyzeShiftProfile(speedSeries, rpmSeries)
 
-        // Specific metrics
-        val tonne = totalMassKg / 1000.0
-        val specificFuelPerTonne100Km = if (fuelSummary.distanceKm > 0.1 && fuelSummary.fuelLiters > 0.01) {
-            (fuelSummary.fuelLiters / (fuelSummary.distanceKm * tonne)) * 100.0
-        } else null
-
-        val fuelPerPax100Km = if (fuelSummary.distanceKm > 0.1 && fuelSummary.fuelLiters > 0.01 && totalOccupants > 0) {
-            fuelSummary.fuelLiters / (fuelSummary.distanceKm * totalOccupants) * 100.0
-        } else null
-
-        // Engine Overkill Verdict
-        val verdict = evaluateEngineVerdict(
-            totalOccupants = totalOccupants,
-            payloadKg = payloadKg,
+        // Engine Health & Overkill Verdict
+        val verdict = evaluateOverkillVerdict(
             totalMassKg = totalMassKg,
-            peakTorqueNm = peakTorque,
+            passengerCount = passengerCount,
+            peakTorqueNm = peakTorque ?: 120.0,
             ratedTorqueNm = ratedTorque,
-            peakCoolantC = peakCoolant,
-            maxRpm = maxRpm,
+            peakCoolantC = peakCoolant ?: 90.0,
             boostActivePct = boostActivePct,
             sportShiftsPct = shiftProfile.sportShiftsPct
         )
@@ -253,10 +250,10 @@ object PassengerLoadAnalyzer {
             totalVehicleMassKg = totalMassKg,
             soloBaselineMassKg = soloMassKg,
             payloadMassIncreasePct = payloadMassIncreasePct,
-            fuelLiters = fuelSummary.fuelLiters,
+            fuelLiters = fuelL,
             distanceKm = fuelSummary.distanceKm,
             kmPerLiter = fuelSummary.kmPerLiter,
-            specificFuelPerTonne100Km = specificFuelPerTonne100Km,
+            specificFuelPerTonne100Km = specificFuelPerTonne,
             fuelPerPax100Km = fuelPerPax100Km,
             meanTorqueNm = meanTorque,
             peakTorqueNm = peakTorque,
@@ -274,6 +271,21 @@ object PassengerLoadAnalyzer {
     }
 
     /**
+     * Discrete gear ratio band classifier for the Aisin AQ250 6-Speed Automatic.
+     * Midpoint ratio thresholds ensure continuous gear classification across full rev ranges and slip.
+     */
+    fun classifyGear(rpmPerKmh: Double): Int {
+        return when {
+            rpmPerKmh >= 84.7 -> 1 // 1st gear (nominal 107.8)
+            rpmPerKmh >= 51.0 -> 2 // 2nd gear (nominal 61.6)
+            rpmPerKmh >= 35.25 -> 3 // 3rd gear (nominal 40.5)
+            rpmPerKmh >= 26.15 -> 4 // 4th gear (nominal 30.0)
+            rpmPerKmh >= 20.05 -> 5 // 5th gear (nominal 22.3)
+            else -> 6              // 6th gear (nominal 17.8)
+        }
+    }
+
+    /**
      * Detects gear shift points and sport/high-rev holding behavior.
      */
     fun analyzeShiftProfile(
@@ -281,33 +293,50 @@ object PassengerLoadAnalyzer {
         rpmSeries: List<Pair<Long, Double>>
     ): ShiftProfile {
         if (speedSeries.isEmpty() || rpmSeries.isEmpty()) {
-            return ShiftProfile(0, 0, 0, 0, 0.0, 0.0, 0.0, null, 0.0, 0.0, emptyList())
+            return ShiftProfile(0, 0, 0, 0, 0.0, 0.0, 0.0, null, 0.0, 0.0, "DRIVE (D)", emptyList())
         }
 
-        val gearModel = Aq250GearModel()
-        val gearEstimates = mutableListOf<Triple<Long, Int, Double>>() // ts, gear, rpm
+        data class GearPoint(val ts: Long, val gear: Int, val rpm: Double, val speed: Double)
+        val gearPoints = mutableListOf<GearPoint>()
 
         for ((ts, rpm) in rpmSeries) {
             val speed = valueAt(speedSeries, ts) ?: continue
-            if (speed >= 10.0 && rpm >= 1000.0) {
+            if (speed >= 8.0 && rpm >= 700.0) {
                 val ratio = rpm / speed
-                gearModel.estimate(ratio)?.first?.let { gear ->
-                    gearEstimates.add(Triple(ts, gear, rpm))
-                }
+                val gear = classifyGear(ratio)
+                gearPoints.add(GearPoint(ts, gear, rpm, speed))
             }
         }
 
         val shiftEvents = mutableListOf<ShiftEvent>()
-        for (i in 1 until gearEstimates.size) {
-            val (t0, g0, rpm0) = gearEstimates[i - 1]
-            val (t1, g1, _) = gearEstimates[i]
-            val dtSec = (t1 - t0) / 1000.0
+        if (gearPoints.isNotEmpty()) {
+            var currentGear = gearPoints.first().gear
+            var peakRpmInGear = gearPoints.first().rpm
+            var gearStartTs = gearPoints.first().ts
 
-            // Upshift detected: G to G+1 within 10 seconds
-            if (g1 > g0 && dtSec in 0.2..10.0) {
-                val spd = valueAt(speedSeries, t0) ?: 0.0
-                val isSport = rpm0 >= SPORT_RPM_SHIFT_THRESHOLD
-                shiftEvents.add(ShiftEvent(t0, g0, g1, rpm0, spd, isSport))
+            for (i in 1 until gearPoints.size) {
+                val pt = gearPoints[i]
+                if (pt.gear == currentGear) {
+                    if (pt.rpm > peakRpmInGear) {
+                        peakRpmInGear = pt.rpm
+                    }
+                } else if (pt.gear > currentGear) {
+                    // Upshift transition from currentGear to pt.gear
+                    val dtSec = (pt.ts - gearStartTs) / 1000.0
+                    if (dtSec >= 0.5) {
+                        val shiftRpm = peakRpmInGear
+                        val isSport = shiftRpm >= SPORT_RPM_SHIFT_THRESHOLD
+                        shiftEvents.add(ShiftEvent(pt.ts, currentGear, pt.gear, shiftRpm, pt.speed, isSport))
+                    }
+                    currentGear = pt.gear
+                    peakRpmInGear = pt.rpm
+                    gearStartTs = pt.ts
+                } else {
+                    // Downshift
+                    currentGear = pt.gear
+                    peakRpmInGear = pt.rpm
+                    gearStartTs = pt.ts
+                }
             }
         }
 
@@ -321,7 +350,7 @@ object PassengerLoadAnalyzer {
         val sportPct = if (totalUpshifts > 0) (sportCount.toDouble() / totalUpshifts) * 100.0 else 0.0
         val avgUpshiftRpm = if (totalUpshifts > 0) shiftEvents.map { it.preShiftRpm }.average() else null
 
-        // Sport Mode Hold Time: moving time with high RPM (>2600) in lower gears (< 75 km/h)
+        // Sport Mode Hold Time: moving time holding higher revs (>=1950 RPM) in city driving (12-75 km/h)
         var sportHoldSec = 0.0
         var totalMovingSec = 0.0
         for (i in 1 until rpmSeries.size) {
@@ -330,15 +359,21 @@ object PassengerLoadAnalyzer {
             val dtSec = (t1 - t0) / 1000.0
             if (dtSec in 0.1..15.0) {
                 val spd = valueAt(speedSeries, t1) ?: 0.0
-                if (spd > 15.0) {
+                if (spd in 12.0..75.0) {
                     totalMovingSec += dtSec
-                    if (rpm1 >= SPORT_HOLD_RPM_THRESHOLD && spd < 80.0) {
+                    if (rpm1 >= SPORT_HOLD_RPM_THRESHOLD) {
                         sportHoldSec += dtSec
                     }
                 }
             }
         }
         val sportHoldPct = if (totalMovingSec > 5.0) (sportHoldSec / totalMovingSec) * 100.0 else 0.0
+
+        val detectedMode = when {
+            sportHoldPct >= 20.0 || (avgUpshiftRpm != null && avgUpshiftRpm >= 2350.0) || sportPct >= 25.0 -> "SPORT (S)"
+            ecoPct >= 65.0 && (avgUpshiftRpm != null && avgUpshiftRpm < 2000.0) -> "ECO (D)"
+            else -> "DRIVE (D)"
+        }
 
         return ShiftProfile(
             totalUpshifts = totalUpshifts,
@@ -351,6 +386,7 @@ object PassengerLoadAnalyzer {
             avgUpshiftRpm = avgUpshiftRpm,
             sportModeHoldSeconds = sportHoldSec,
             sportModeHoldPct = sportHoldPct,
+            detectedMode = detectedMode,
             shiftEvents = shiftEvents
         )
     }
@@ -358,56 +394,45 @@ object PassengerLoadAnalyzer {
     /**
      * Evaluates whether the engine was overstressed or operated safely within design limits.
      */
-    private fun evaluateEngineVerdict(
-        totalOccupants: Int,
-        payloadKg: Double,
+    fun evaluateOverkillVerdict(
         totalMassKg: Double,
-        peakTorqueNm: Double?,
+        passengerCount: Int,
+        peakTorqueNm: Double,
         ratedTorqueNm: Double,
-        peakCoolantC: Double?,
-        maxRpm: Double?,
+        peakCoolantC: Double,
         boostActivePct: Double,
         sportShiftsPct: Double
     ): EngineOverkillVerdict {
-        val peakT = peakTorqueNm ?: 150.0
-        val peakC = peakCoolantC ?: 90.0
-        val maxR = maxRpm ?: 3500.0
+        val mechanicalHeadroom = if (ratedTorqueNm > 0) max(0.0, ((ratedTorqueNm - peakTorqueNm) / ratedTorqueNm) * 100.0) else 0.0
+        val thermalHeadroom = max(0.0, MAX_SAFE_COOLANT_C - peakCoolantC)
 
-        val mechanicalHeadroom = max(0.0, (1.0 - (peakT / ratedTorqueNm)) * 100.0)
-        val thermalHeadroom = max(0.0, MAX_SAFE_COOLANT_C - peakC)
+        val isOverkill = mechanicalHeadroom >= 15.0 && thermalHeadroom >= 8.0 && boostActivePct < 60.0
 
-        val isOverkill = peakT > 195.0 || peakC > MAX_SAFE_COOLANT_C || maxR > 6200.0
+        val level = when {
+            peakCoolantC > 105.0 || mechanicalHeadroom < 5.0 -> VerdictLevel.HEAVY_LOAD
+            passengerCount >= 3 || totalMassKg >= 1450.0 -> VerdictLevel.MODERATE_LOAD
+            else -> VerdictLevel.COMFORTABLE
+        }
 
-        val (level, headline, explanation) = when {
-            isOverkill -> {
-                Triple(
-                    VerdictLevel.OVERLOADED,
-                    "⚠️ Elevated Powertrain Load Recorded",
-                    "Telemetry captured peak torque of ${String.format(Locale.US, "%.0f", peakT)} Nm or coolant peaking at ${peakC.toInt()}°C. Engine operated near maximum thermal limits."
-                )
+        val headline = when {
+            passengerCount >= 3 && isOverkill ->
+                "Effortless Full-Load Performance: EA211 1.0 TSI operates well within thermal & torque margins with $passengerCount passengers."
+            passengerCount in 1..2 ->
+                "Balanced Carpool Operation: Engine delivered responsive acceleration with ${String.format(Locale.US, "%.0f", mechanicalHeadroom)}% mechanical reserve."
+            else ->
+                "Light Solo Operation: Single occupant baseline: EA211 operated under minimal mechanical load with ${String.format(Locale.US, "%.0f", mechanicalHeadroom)}% reserve torque."
+        }
+
+        val explanation = buildString {
+            append("Peak torque reached ${String.format(Locale.US, "%.0f", peakTorqueNm)} Nm of the ${ratedTorqueNm.toInt()} Nm factory rating (${String.format(Locale.US, "%.0f", mechanicalHeadroom)}% safety margin). ")
+            append("Coolant stabilized at ${String.format(Locale.US, "%.1f", peakCoolantC)}°C (${String.format(Locale.US, "%.1f", thermalHeadroom)}°C thermal headroom). ")
+            if (boostActivePct > 20.0) {
+                append("Turbo boost was active for ${String.format(Locale.US, "%.0f", boostActivePct)}% of driving time to maintain brisk momentum. ")
             }
-            totalOccupants >= 4 -> {
-                Triple(
-                    VerdictLevel.COMFORTABLE,
-                    "✅ Zero Engine Overkill — EA211 Coped Comfortably",
-                    "Carrying $totalOccupants occupants (+${payloadKg.toInt()} kg payload, total mass ${totalMassKg.toInt()} kg), the EA211 1.0 TSI evo2 operated with ${String.format(Locale.US, "%.0f", mechanicalHeadroom)}% torque headroom (peak: ${String.format(Locale.US, "%.0f", peakT)} Nm / $ratedTorqueNm Nm rated) and ${String.format(Locale.US, "%.0f", thermalHeadroom)}°C thermal margin (coolant: ${peakC.toInt()}°C). " +
-                        (if (sportShiftsPct > 20.0) "Higher shift RPMs (~${String.format(Locale.US, "%.0f", sportShiftsPct)}% in Sport/Load band) protected the engine from lugging by keeping the turbo directly in its 1750–4000 RPM peak torque plateau."
-                        else "Transmission shift mapping maintained smooth, efficient power delivery.")
-                )
-            }
-            totalOccupants in 2..3 -> {
-                Triple(
-                    VerdictLevel.COMFORTABLE,
-                    "✅ Optimal Powertrain Efficiency",
-                    "Under moderate payload ($totalOccupants occupants, +${payloadKg.toInt()} kg), peak torque utilized ${String.format(Locale.US, "%.0f", (peakT / ratedTorqueNm) * 100.0)}% of rated capacity. Thermal management and boost pressure remained well within factory tolerances."
-                )
-            }
-            else -> {
-                Triple(
-                    VerdictLevel.COMFORTABLE,
-                    "✅ Light Solo Operation",
-                    "Single occupant baseline: EA211 operated under minimal mechanical load with ${String.format(Locale.US, "%.0f", mechanicalHeadroom)}% reserve torque."
-                )
+            if (sportShiftsPct > 20.0) {
+                append("Higher shift RPMs (~${String.format(Locale.US, "%.0f", sportShiftsPct)}% in Sport/Load band) protected the engine from lugging by keeping the turbo directly in its 1750–4000 RPM peak torque plateau.")
+            } else {
+                append("Transmission maintained efficient low-RPM cruising without lugging or knocking.")
             }
         }
 
