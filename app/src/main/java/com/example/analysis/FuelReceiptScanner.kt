@@ -36,7 +36,12 @@ data class FuelReceiptData(
     val timestampUtc: String? = null,
     val photoUri: String? = null,
     val rawText: String? = null
-)
+) {
+    val litres: Double? get() = liters
+    val stationName: String? get() = station
+    val fuelGrade: String? get() = grade
+    val nozzle: String? get() = nozzleNumber
+}
 
 /**
  * Multi-Pass High-Precision Fuel Receipt & Petrol Pump Dispenser OCR Engine.
@@ -50,6 +55,11 @@ data class FuelReceiptData(
  * 6. Dispenser Nozzle Number / Bay
  */
 object FuelReceiptScanner {
+
+    suspend fun scanReceipt(
+        context: Context,
+        imageUri: Uri
+    ): FuelReceiptData? = scanReceiptImage(context, imageUri)
 
     suspend fun scanReceiptImage(
         context: Context,
@@ -216,8 +226,9 @@ object FuelReceiptScanner {
     }
 
     private suspend fun runCloudReceiptOcr(bitmap: Bitmap, photoUri: String?): FuelReceiptData? {
-        val prompt = "Analyze this fuel receipt photo or petrol pump dispenser screen. Return a strict JSON with: {\"liters\": double, \"pricePerL\": double, \"totalAmount\": double, \"station\": string, \"grade\": string, \"nozzleNumber\": string}"
-        val response = GeminiTextClient.generate(prompt) ?: return null
+        val system = "Analyze this fuel receipt photo or petrol pump dispenser screen. Return a strict JSON with: {\"liters\": double, \"pricePerL\": double, \"totalAmount\": double, \"station\": string, \"grade\": string, \"nozzleNumber\": string}"
+        val user = "Extract fuel pump receipt details."
+        val response = GeminiTextClient.generate(system, user) ?: return null
         return try {
             val clean = response.substringAfter("{").substringBeforeLast("}")
             val json = JSONObject("{$clean}")
