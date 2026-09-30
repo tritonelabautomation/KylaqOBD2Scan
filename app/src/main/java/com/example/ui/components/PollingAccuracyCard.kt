@@ -136,11 +136,6 @@ fun PollingAccuracyCard(
                             selectedContainerColor = modeColor.copy(alpha = 0.15f),
                             selectedLabelColor = modeColor
                         ),
-                        border = FilterChipDefaults.filterChipBorder(
-                            borderColor = if (isSelected) modeColor else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
-                            selectedBorderColor = modeColor,
-                            borderWidth = if (isSelected) 1.5.dp else 1.dp
-                        ),
                         modifier = Modifier
                             .weight(1f)
                             .testTag("chip_mode_${mode.name}")
