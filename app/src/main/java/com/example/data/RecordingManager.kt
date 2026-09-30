@@ -639,7 +639,6 @@ class RecordingManager(
             }.getOrNull()
         } else null
 
-        val journalRoute = journal.routeFile(sessionId)
         val destRouteFile = File(sessionDir, "${sessionId}_route.csv")
         val gpxFile = File(sessionDir, "${sessionId}_route.gpx")
         val kmlFile = File(sessionDir, "${sessionId}_route.kml")

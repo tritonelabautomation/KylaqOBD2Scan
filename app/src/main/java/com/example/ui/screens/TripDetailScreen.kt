@@ -520,8 +520,9 @@ fun TripDetailScreen(
                             if (selectedTrendPids == listOf(com.example.analysis.TripTrendAnalyzer.PID_ALTITUDE_GPS) &&
                                 samples.none { it.altitudeM != null } && trendRoutePts.none { it.altitudeM != null }
                             ) {
+                                val minTime: Long? = samples.minOfOrNull { it.instantMs } ?: trendRoutePts.minOfOrNull { it.timestampMs }
                                 com.example.service.BackgroundLocationPolicy.altitudeBlankReason(
-                                    bgLocationState, samples.minOfOrNull { it.instantMs } ?: trendRoutePts.minOfOrNull { it.timeMs }
+                                    bgLocationState, minTime
                                 )
                             } else {
                                 null
@@ -930,7 +931,7 @@ private data class TrendChannel(
 @Composable
 private fun TripTrendsView(
     samples: List<TelemetrySampleEntity>,
-    routePoints: List<com.example.data.GpxExporter.RoutePoint> = emptyList(),
+    routePoints: List<com.example.data.GpsRoutePoint> = emptyList(),
     selectedPids: List<String>,
     onTogglePid: (String) -> Unit,
     /** Shown under the empty chart only when the Altitude channel is the one with nothing to draw. */
@@ -1003,8 +1004,8 @@ private fun TripTrendsView(
             if (fromSamples.size >= 2) {
                 fromSamples
             } else {
-                routePoints.filter { it.altitudeM != null && it.timeMs > 0L }
-                    .map { it.timeMs to it.altitudeM!! }
+                routePoints.filter { it.altitudeM != null && it.timestampMs > 0L }
+                    .map { it.timestampMs to it.altitudeM!! }
                     .sortedBy { it.first }
             }
         } else {
