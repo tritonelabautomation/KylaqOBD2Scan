@@ -159,67 +159,101 @@ fun CarpoolScreen(
                         }
                     }
                 }
-                monthEntries.forEach { e ->
-                val ms = CarpoolCodec.whenMs(e) ?: e.idMs
-                val syncState = com.example.data.BackupSyncStatus.forItem(lastBackupMs, e.idMs)
-                Card(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surface
-                    )
-                ) {
-                    Column(Modifier.padding(12.dp)) {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    com.example.data.RecordTime.format("yyyy-MM-dd HH:mm", ms),
-                                    color = TextPrimaryDark, fontWeight = FontWeight.SemiBold, fontSize = 13.sp
-                                )
-                                Spacer(Modifier.width(6.dp))
-                                val syncIcon = when (syncState) {
-                                    com.example.data.BackupSyncStatus.State.SYNCED -> Icons.Default.CheckCircle
-                                    com.example.data.BackupSyncStatus.State.PENDING -> Icons.Default.CloudUpload
-                                    com.example.data.BackupSyncStatus.State.NEVER -> Icons.Default.Warning
-                                }
-                                val syncTint = when (syncState) {
-                                    com.example.data.BackupSyncStatus.State.SYNCED -> NeonEmerald
-                                    com.example.data.BackupSyncStatus.State.PENDING -> ElectricAmber
-                                    com.example.data.BackupSyncStatus.State.NEVER -> TextSecondaryDark
-                                }
-                                Icon(syncIcon, contentDescription = null, tint = syncTint, modifier = Modifier.size(14.dp))
-                            }
+                monthEntries.groupBy {
+                    com.example.data.RecordTime.format("yyyy-MM-dd", CarpoolCodec.whenMs(it) ?: it.idMs)
+                }.forEach { (dayKey, dayEntries) ->
+                    val firstMs = CarpoolCodec.whenMs(dayEntries.first()) ?: dayEntries.first().idMs
+                    val dayDisplay = com.example.data.RecordTime.format("d MMM yyyy (EEEE)", firstMs)
+                    val dayEarned = dayEntries.sumOf { it.earned }
+                    val dayKm = dayEntries.sumOf { it.distanceKm }
+
+                    Surface(
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 2.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             Text(
-                                String.format(java.util.Locale.US, "₹%.0f", e.earned),
-                                color = NeonEmerald, fontWeight = FontWeight.Bold, fontSize = 14.sp
+                                text = "📅 $dayDisplay",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimaryDark
+                            )
+                            Text(
+                                text = "${dayEntries.size} ride(s) · ${String.format(java.util.Locale.US, "%.1f", dayKm)} km · ₹${String.format(java.util.Locale.US, "%.0f", dayEarned)} earned",
+                                fontSize = 11.sp,
+                                color = NeonEmerald,
+                                fontWeight = FontWeight.SemiBold
                             )
                         }
-                        Text(
-                            String.format(java.util.Locale.US, "%.1f km trip", e.distanceKm) + " · " +
-                                e.riders.joinToString(", ") { r ->
-                                    val d = r.effectiveDistance(e.distanceKm)
-                                    (r.name.ifBlank { "rider" }) + " " +
-                                        String.format(java.util.Locale.US, "₹%.0f (%.1f km, ₹%.1f/km)", r.amount, d, if (d > 0.1) r.amount / d else 0.0)
-                                },
-                            color = TextSecondaryDark, fontSize = 12.sp
-                        )
-                        e.tripId?.let { id ->
-                            Text(
-                                "Linked: " + (tripTitles[id] ?: "trip"),
-                                color = NeonEmerald, fontSize = 11.sp
+                    }
+
+                    dayEntries.forEach { e ->
+                        val ms = CarpoolCodec.whenMs(e) ?: e.idMs
+                        val syncState = com.example.data.BackupSyncStatus.forItem(lastBackupMs, e.idMs)
+                        Card(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surface
                             )
-                        } ?: Text(
-                            "No saved trip covers this time - standalone.",
-                            color = WarningRed, fontSize = 11.sp
-                        )
-                        Row {
-                            TextButton(onClick = { editTarget = e }) { Text("Edit") }
-                            TextButton(onClick = { viewModel.deleteCarpool(e.idMs) }) {
-                                Text("Delete", color = WarningRed)
+                        ) {
+                            Column(Modifier.padding(12.dp)) {
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            com.example.data.RecordTime.format("yyyy-MM-dd HH:mm", ms),
+                                            color = TextPrimaryDark, fontWeight = FontWeight.SemiBold, fontSize = 13.sp
+                                        )
+                                        Spacer(Modifier.width(6.dp))
+                                        val syncIcon = when (syncState) {
+                                            com.example.data.BackupSyncStatus.State.SYNCED -> Icons.Default.CheckCircle
+                                            com.example.data.BackupSyncStatus.State.PENDING -> Icons.Default.CloudUpload
+                                            com.example.data.BackupSyncStatus.State.NEVER -> Icons.Default.Warning
+                                        }
+                                        val syncTint = when (syncState) {
+                                            com.example.data.BackupSyncStatus.State.SYNCED -> NeonEmerald
+                                            com.example.data.BackupSyncStatus.State.PENDING -> ElectricAmber
+                                            com.example.data.BackupSyncStatus.State.NEVER -> TextSecondaryDark
+                                        }
+                                        Icon(syncIcon, contentDescription = null, tint = syncTint, modifier = Modifier.size(14.dp))
+                                    }
+                                    Text(
+                                        String.format(java.util.Locale.US, "₹%.0f", e.earned),
+                                        color = NeonEmerald, fontWeight = FontWeight.Bold, fontSize = 14.sp
+                                    )
+                                }
+                                Text(
+                                    String.format(java.util.Locale.US, "%.1f km trip", e.distanceKm) + " · " +
+                                        e.riders.joinToString(", ") { r ->
+                                            val d = r.effectiveDistance(e.distanceKm)
+                                            (r.name.ifBlank { "rider" }) + " " +
+                                                String.format(java.util.Locale.US, "₹%.0f (%.1f km, ₹%.1f/km)", r.amount, d, if (d > 0.1) r.amount / d else 0.0)
+                                        },
+                                    color = TextSecondaryDark, fontSize = 12.sp
+                                )
+                                e.tripId?.let { id ->
+                                    Text(
+                                        "Linked: " + (tripTitles[id] ?: "trip"),
+                                        color = NeonEmerald, fontSize = 11.sp
+                                    )
+                                } ?: Text(
+                                    "No saved trip covers this time - standalone.",
+                                    color = WarningRed, fontSize = 11.sp
+                                )
+                                Row {
+                                    TextButton(onClick = { editTarget = e }) { Text("Edit") }
+                                    TextButton(onClick = { viewModel.deleteCarpool(e.idMs) }) {
+                                        Text("Delete", color = WarningRed)
+                                    }
+                                }
                             }
                         }
                     }
-                }
                 }
                 Spacer(Modifier.height(8.dp))
             }

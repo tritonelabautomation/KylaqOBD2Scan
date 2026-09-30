@@ -31,6 +31,7 @@ import com.example.update.AppUpdateFeed
 import com.example.update.AppUpdateInfo
 import com.example.update.UpdateManager
 import com.example.update.UpdateUiState
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -398,6 +399,64 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             .groupBy { com.example.data.RecordTime.format("yyyy-MM", it.idMs) }
             .mapValues { (_, monthEntries) -> monthEntries.sumOf { it.totalCost } }
         return com.example.data.CarpoolCodec.withRefuelFuel(rows, refuelByMonth)
+    }
+
+    /**
+     * Aggregates trips into IST day groups and monthly summaries with fuel spend,
+     * car pool earnings, net effective prices and ₹/km (owner request 2026-09-30).
+     */
+    suspend fun loadDayWiseAggregation(): com.example.analysis.DailyTripCostAggregator.AggregationResult = withContext(Dispatchers.Default) {
+        val saved = savedRecordings.value
+        val carpools = carpoolRepository.entries()
+        val fuelLogs = fuelLogRepository.entries()
+        val latestPrice = fuelLogs.maxByOrNull { it.idMs }?.pricePerL ?: com.example.analysis.DailyTripCostAggregator.DEFAULT_FUEL_PRICE_INR
+        val repo = recordingManager.tripRepository
+
+        val tripIds = saved.map { it.metadata.sessionId }
+        val samples = if (tripIds.isNotEmpty()) {
+            try {
+                repo.samplesForTrips(tripIds, listOf("019D", "9D", "015E", "5E", "010D", "0D", "01A6", "A6", "012F", "2F"))
+            } catch (_: Exception) {
+                emptyList()
+            }
+        } else emptyList()
+
+        val samplesByTrip = samples.groupBy { it.tripId }
+
+        val tripInputs = saved.map { rec ->
+            val sList = samplesByTrip[rec.metadata.sessionId] ?: emptyList()
+            val sPoints = sList.map { com.example.analysis.TripFuelSummary.SamplePoint(it.pid, it.instantMs, it.numericValue) }
+            val summary = if (sPoints.isNotEmpty()) {
+                com.example.analysis.TripFuelSummary.summarize(sPoints)
+            } else null
+
+            val startMs = com.example.data.RecordTime.parseMillis(rec.metadata.startTimeUtc)
+                ?: rec.jsonFile.lastModified()
+
+            com.example.analysis.DailyTripCostAggregator.TripRecordInput(
+                tripId = rec.metadata.sessionId,
+                sessionName = rec.metadata.sessionName,
+                startTimeUtc = rec.metadata.startTimeUtc,
+                startTimestampMs = startMs,
+                durationSeconds = summary?.durationSeconds ?: 0L,
+                distanceKm = summary?.distanceKm ?: 0.0,
+                fuelLiters = summary?.fuelLiters ?: 0.0,
+                kmPerLiter = summary?.kmPerLiter,
+                startFuelPercent = rec.metadata.startFuelPercent ?: summary?.startFuelPercent,
+                endFuelPercent = rec.metadata.endFuelPercent ?: summary?.endFuelPercent,
+                fuelDeltaPercent = rec.metadata.fuelDeltaPercent ?: summary?.fuelDeltaPercent,
+                isRefuelBrimEvent = summary?.isRefuelBrimEvent ?: false,
+                transactionCount = rec.transactionCount
+            )
+        }
+
+        com.example.analysis.DailyTripCostAggregator.aggregate(
+            trips = tripInputs,
+            carpoolEntries = carpools,
+            fuelLogs = fuelLogs,
+            fuelPricePerL = latestPrice,
+            nowMs = System.currentTimeMillis()
+        )
     }
 
     fun noteBackgroundLocationDeclined() {

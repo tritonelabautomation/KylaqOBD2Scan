@@ -29,8 +29,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.core.content.FileProvider
+import com.example.analysis.DailyTripCostAggregator
 import com.example.data.SavedRecording
 import com.example.data.db.StorageStats
+import com.example.ui.components.DayCostGroupCard
+import com.example.ui.components.MonthlyPriceCard
+import com.example.ui.screens.CarpoolDialog
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.MainViewModel
 import kotlinx.coroutines.launch
@@ -95,6 +99,17 @@ fun RecordingsScreen(
     var trends by remember { mutableStateOf<List<com.example.analysis.TripTrendPoint>>(emptyList()) }
     LaunchedEffect(savedRecordings.size) {
         trends = runCatching { viewModel.computeTripTrends() }.getOrDefault(emptyList())
+    }
+
+    // Monthly Price Card & Day-Wise Grouping Aggregator (owner request 2026-09-30)
+    val carpoolTick by viewModel.carpoolRepository.changeTick.collectAsState()
+    var aggregationResult by remember { mutableStateOf<DailyTripCostAggregator.AggregationResult?>(null) }
+    var selectedMonthIndex by remember { mutableStateOf(0) }
+    var viewAllMonths by remember { mutableStateOf(false) }
+    var carpoolTargetTrip by remember { mutableStateOf<DailyTripCostAggregator.DayTripItem?>(null) }
+
+    LaunchedEffect(savedRecordings, carpoolTick) {
+        aggregationResult = runCatching { viewModel.loadDayWiseAggregation() }.getOrNull()
     }
 
     // Sync status — OneDrive-style (owner 2026-09-21)
@@ -379,77 +394,181 @@ fun RecordingsScreen(
 
         Spacer(modifier = Modifier.height(12.dp))
 
+        val agg = aggregationResult
+        val months = agg?.allMonthSummaries ?: emptyList()
+        val activeMonth = months.getOrNull(selectedMonthIndex) ?: agg?.currentMonthSummary
+        val savedRecordingsMap = remember(savedRecordings) {
+            savedRecordings.associateBy { it.metadata.sessionId }
+        }
+
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(10.dp),
             contentPadding = PaddingValues(top = 10.dp, bottom = 96.dp)
         ) {
-            if (savedRecordings.isEmpty()) {
-                item {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(32.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Default.FolderOpen, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(48.dp))
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text(
-                            text = "No saved recording runs yet.\nStart a diagnostic recording from Dashboard or import existing ZIP log bundles.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        OutlinedButton(
-                            onClick = {
-                                zipPickerLauncher.launch(arrayOf("application/zip", "application/x-zip-compressed", "*/*"))
-                            },
-                            shape = RoundedCornerShape(8.dp)
+            if (activeMonth != null) {
+                item(key = "monthly_price_card") {
+                    MonthlyPriceCard(
+                        monthSummary = activeMonth,
+                        availableMonths = months,
+                        selectedMonthIndex = selectedMonthIndex,
+                        onPreviousMonth = { if (selectedMonthIndex > 0) selectedMonthIndex-- },
+                        onNextMonth = { if (selectedMonthIndex < months.size - 1) selectedMonthIndex++ },
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
+                }
+
+                if (savedRecordings.isNotEmpty()) {
+                    item(key = "month_filter_tabs") {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Default.FileDownload, contentDescription = null, tint = CyberCyan, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Select .ZIP File to Import", color = CyberCyan)
+                            FilterChip(
+                                selected = !viewAllMonths,
+                                onClick = { viewAllMonths = false },
+                                label = {
+                                    Text(
+                                        text = "${activeMonth.displayMonth} (${activeMonth.totalTrips})",
+                                        fontSize = 12.sp,
+                                        fontWeight = if (!viewAllMonths) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = CyberCyan.copy(alpha = 0.2f),
+                                    selectedLabelColor = CyberCyan
+                                )
+                            )
+
+                            FilterChip(
+                                selected = viewAllMonths,
+                                onClick = { viewAllMonths = true },
+                                label = {
+                                    Text(
+                                        text = "All Days (${savedRecordings.size})",
+                                        fontSize = 12.sp,
+                                        fontWeight = if (viewAllMonths) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = CyberCyan.copy(alpha = 0.2f),
+                                    selectedLabelColor = CyberCyan
+                                )
+                            )
                         }
                     }
                 }
+            }
+
+            if (savedRecordings.isEmpty()) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(32.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(Icons.Default.FolderOpen, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(48.dp))
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = "No saved recording runs yet.\nStart a diagnostic recording from Dashboard or import existing ZIP log bundles.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            OutlinedButton(
+                                onClick = {
+                                    zipPickerLauncher.launch(arrayOf("application/zip", "application/x-zip-compressed", "*/*"))
+                                },
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Icon(Icons.Default.FileDownload, contentDescription = null, tint = CyberCyan, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Select .ZIP File to Import", color = CyberCyan)
+                            }
+                        }
+                    }
                 }
             } else {
-                items(savedRecordings, key = { it.metadata.sessionId }) { rec ->
-                    val isSelected = rec.metadata.sessionId in selectedIds
-                    // Dir mtime is the most honest "last changed" for a trip (finalize, rename, merge all touch it)
-                    val dirMtime = rec.transactionCsvFile.parentFile?.lastModified()
-                    val syncState = com.example.data.BackupSyncStatus.forTrip(
-                        lastBackupMs = lastBackupMs,
-                        endMs = null,
-                        startMs = com.example.data.RecordTime.parseMillis(rec.metadata.startTimeUtc),
-                        dirLastModifiedMs = dirMtime
-                    )
-                    RecordingItemCard(
-                        recording = rec,
-                        isSelected = isSelected,
-                        selectionMode = selectionMode,
-                        syncState = syncState,
-                        onClick = {
-                            if (selectionMode) {
-                                selectedIds = if (isSelected) selectedIds - rec.metadata.sessionId else selectedIds + rec.metadata.sessionId
-                            } else {
-                                onNavigateToTripDetail(rec.metadata.sessionId)
-                            }
-                        },
-                        onLongClick = {
-                            selectedIds = if (isSelected) selectedIds - rec.metadata.sessionId else selectedIds + rec.metadata.sessionId
-                        },
-                        onToggleSelect = {
-                            selectedIds = if (isSelected) selectedIds - rec.metadata.sessionId else selectedIds + rec.metadata.sessionId
-                        },
-                        onShareFile = { file, mimeType -> shareFile(context, file, mimeType) },
-                        onRename = { renamingRecording = rec },
-                        onDelete = { deletingRecording = rec }
-                    )
+                val dayGroupsToShow = if (viewAllMonths) {
+                    agg?.dayGroups ?: emptyList()
+                } else {
+                    agg?.dayGroups?.filter { it.dateKey.startsWith(activeMonth?.monthKey ?: "") } ?: emptyList()
                 }
-                item {
+
+                if (dayGroupsToShow.isEmpty()) {
+                    item(key = "no_trips_in_month") {
+                        Card(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        ) {
+                            Column(
+                                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = "No recorded trips in ${activeMonth?.displayMonth ?: "this month"}",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = TextSecondaryDark
+                                )
+                                Spacer(Modifier.height(6.dp))
+                                TextButton(onClick = { viewAllMonths = true }) {
+                                    Text("View all recorded days (${savedRecordings.size} trips)")
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    dayGroupsToShow.forEach { dayGroup ->
+                        item(key = "day_header_${dayGroup.dateKey}") {
+                            DayCostGroupCard(dayGroup = dayGroup)
+                        }
+
+                        items(dayGroup.trips, key = { it.tripId }) { tripItem ->
+                            val rec = savedRecordingsMap[tripItem.tripId]
+                            if (rec != null) {
+                                val isSelected = rec.metadata.sessionId in selectedIds
+                                val dirMtime = rec.transactionCsvFile.parentFile?.lastModified()
+                                val syncState = com.example.data.BackupSyncStatus.forTrip(
+                                    lastBackupMs = lastBackupMs,
+                                    endMs = null,
+                                    startMs = com.example.data.RecordTime.parseMillis(rec.metadata.startTimeUtc),
+                                    dirLastModifiedMs = dirMtime
+                                )
+                                RecordingItemCard(
+                                    recording = rec,
+                                    tripItem = tripItem,
+                                    isSelected = isSelected,
+                                    selectionMode = selectionMode,
+                                    syncState = syncState,
+                                    onClick = {
+                                        if (selectionMode) {
+                                            selectedIds = if (isSelected) selectedIds - rec.metadata.sessionId else selectedIds + rec.metadata.sessionId
+                                        } else {
+                                            onNavigateToTripDetail(rec.metadata.sessionId)
+                                        }
+                                    },
+                                    onLongClick = {
+                                        selectedIds = if (isSelected) selectedIds - rec.metadata.sessionId else selectedIds + rec.metadata.sessionId
+                                    },
+                                    onToggleSelect = {
+                                        selectedIds = if (isSelected) selectedIds - rec.metadata.sessionId else selectedIds + rec.metadata.sessionId
+                                    },
+                                    onShareFile = { file, mimeType -> shareFile(context, file, mimeType) },
+                                    onRename = { renamingRecording = rec },
+                                    onDelete = { deletingRecording = rec },
+                                    onAddOrEditCarpool = { carpoolTargetTrip = tripItem }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                item(key = "vehicle_trends_card") {
                 // ---- Vehicle trends across recorded trips (owner-requested) ----
                 Card(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
@@ -601,12 +720,38 @@ fun RecordingsScreen(
             }
         )
     }
+
+    // Carpool Add / Edit Dialog (owner request 2026-09-30)
+    carpoolTargetTrip?.let { tripItem ->
+        CarpoolDialog(
+            existing = tripItem.carpoolEntry,
+            defaultDistanceKm = tripItem.distanceKm,
+            defaultWhenMs = tripItem.startMs,
+            onDismiss = { carpoolTargetTrip = null },
+            onSave = { d, riders, whenMs ->
+                coroutineScope.launch {
+                    viewModel.saveCarpool(
+                        com.example.data.CarpoolCodec.CarpoolEntry(
+                            idMs = tripItem.carpoolEntry?.idMs ?: whenMs,
+                            tripId = tripItem.tripId,
+                            dateUtc = com.example.data.RecordTime.stamp(whenMs),
+                            distanceKm = d,
+                            riders = riders
+                        )
+                    )
+                    carpoolTargetTrip = null
+                    Toast.makeText(context, "Carpool details saved for trip", Toast.LENGTH_SHORT).show()
+                }
+            }
+        )
+    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun RecordingItemCard(
     recording: SavedRecording,
+    tripItem: com.example.analysis.DailyTripCostAggregator.DayTripItem? = null,
     isSelected: Boolean = false,
     selectionMode: Boolean = false,
     syncState: com.example.data.BackupSyncStatus.State = com.example.data.BackupSyncStatus.State.NEVER,
@@ -615,7 +760,8 @@ fun RecordingItemCard(
     onToggleSelect: (() -> Unit)? = null,
     onShareFile: (File, String) -> Unit,
     onRename: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onAddOrEditCarpool: (() -> Unit)? = null
 ) {
     val meta = recording.metadata
 
@@ -634,6 +780,7 @@ fun RecordingItemCard(
         border = if (isSelected) androidx.compose.foundation.BorderStroke(2.dp, CyberCyan) else null
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
+            // Row 1: Checkbox, Name, Commute Tag, Sync icon, Action icons
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -656,6 +803,7 @@ fun RecordingItemCard(
                             modifier = Modifier.weight(1f, fill = false)
                         )
                         Spacer(Modifier.width(6.dp))
+
                         // OneDrive-style sync icon (owner 2026-09-21) — use core-safe icons
                         val syncIcon = when (syncState) {
                             com.example.data.BackupSyncStatus.State.SYNCED -> Icons.Default.CheckCircle
@@ -679,12 +827,40 @@ fun RecordingItemCard(
                             modifier = Modifier.size(16.dp)
                         )
                     }
+
+                    // Commute Slot Tag & Time
+                    if (tripItem != null) {
+                        val slotColor = when (tripItem.commuteSlot) {
+                            com.example.analysis.CommuteComparator.CommuteSlot.MORNING -> CyberCyan
+                            com.example.analysis.CommuteComparator.CommuteSlot.EVENING -> ElectricAmber
+                            com.example.analysis.CommuteComparator.CommuteSlot.OFF_PEAK -> TextSecondaryDark
+                        }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(top = 2.dp)
+                        ) {
+                            Surface(
+                                color = slotColor.copy(alpha = 0.14f),
+                                shape = RoundedCornerShape(4.dp)
+                            ) {
+                                Text(
+                                    text = "${tripItem.commuteSlotLabel} · ${tripItem.timeLabel}",
+                                    color = slotColor,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                    }
+
                     Text(
                         text = "ID: ${meta.sessionId} • ${meta.vehicle}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 13.sp,
-                        fontFamily = FontFamily.Monospace
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.padding(top = 2.dp)
                     )
                 }
 
@@ -700,41 +876,158 @@ fun RecordingItemCard(
 
             Spacer(modifier = Modifier.height(8.dp))
 
+            // Row 2: Distance, Duration, Fuel, Economy, Transactions
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = "${recording.transactionCount} transactions",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = NeonEmerald,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 13.sp
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    val syncIcon2 = when (syncState) {
-                        com.example.data.BackupSyncStatus.State.SYNCED -> Icons.Default.CheckCircle
-                        com.example.data.BackupSyncStatus.State.PENDING -> Icons.Default.CloudUpload
-                        com.example.data.BackupSyncStatus.State.NEVER -> Icons.Default.Warning
+                if (tripItem != null && (tripItem.distanceKm > 0.05 || tripItem.fuelLiters > 0.01)) {
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "${String.format(java.util.Locale.US, "%.1f", tripItem.distanceKm)} km",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimaryDark,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 13.sp
+                            )
+                            if (tripItem.durationSeconds > 0) {
+                                val mins = tripItem.durationSeconds / 60
+                                Text(
+                                    text = " · ${mins}m",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextSecondaryDark,
+                                    fontSize = 12.sp
+                                )
+                            }
+                            Text(
+                                text = " · ${String.format(java.util.Locale.US, "%.2f", tripItem.fuelLiters)} L (₹${String.format(java.util.Locale.US, "%.0f", tripItem.fuelCost)})",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Bold,
+                                color = ElectricAmber,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 12.sp
+                            )
+                        }
+                        tripItem.kmPerLiter?.let { kmL ->
+                            Text(
+                                text = "${String.format(java.util.Locale.US, "%.1f", kmL)} km/L",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = NeonEmerald,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
                     }
-                    val syncTint2 = when (syncState) {
-                        com.example.data.BackupSyncStatus.State.SYNCED -> NeonEmerald
-                        com.example.data.BackupSyncStatus.State.PENDING -> ElectricAmber
-                        com.example.data.BackupSyncStatus.State.NEVER -> TextSecondaryDark
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "${recording.transactionCount} transactions",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = NeonEmerald,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 13.sp
+                        )
                     }
-                    Icon(syncIcon2, contentDescription = null, tint = syncTint2, modifier = Modifier.size(14.dp))
                 }
+
                 Text(
                     text = com.example.data.RecordTime.dateTime(meta.startTimeUtc),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontFamily = FontFamily.Monospace,
-                    fontSize = 13.sp
+                    fontSize = 12.sp
                 )
             }
 
+            // Row 3: Carpool details & Net Trip cost
+            if (tripItem?.carpoolEntry != null) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Surface(
+                    color = NeonEmerald.copy(alpha = 0.10f),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Groups, contentDescription = null, tint = NeonEmerald, modifier = Modifier.size(14.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text(
+                                    text = "Carpool: ${tripItem.carpoolRiderCount} rider(s) (${tripItem.riderNames.joinToString(", ")})",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = TextPrimaryDark
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    text = "₹${String.format(java.util.Locale.US, "%.0f", tripItem.carpoolEarned)}",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = NeonEmerald,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(top = 2.dp)
+                            ) {
+                                val netColor = if (tripItem.isTripProfit) NeonEmerald else ElectricAmber
+                                val netTxt = if (tripItem.isTripProfit) {
+                                    "Net: +₹${String.format(java.util.Locale.US, "%.0f", tripItem.carpoolEarned - tripItem.fuelCost)} Surplus (Profit)"
+                                } else {
+                                    "Net Cost: ₹${String.format(java.util.Locale.US, "%.0f", tripItem.netTripCost)}"
+                                }
+                                Text(
+                                    text = netTxt,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = netColor,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                        }
+
+                        if (onAddOrEditCarpool != null) {
+                            TextButton(
+                                onClick = onAddOrEditCarpool,
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                                modifier = Modifier.height(28.dp)
+                            ) {
+                                Text("Edit", fontSize = 11.sp, color = CyberCyan)
+                            }
+                        }
+                    }
+                }
+            } else if (onAddOrEditCarpool != null) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(
+                        onClick = onAddOrEditCarpool,
+                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                        modifier = Modifier.height(26.dp)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, tint = NeonEmerald, modifier = Modifier.size(12.dp))
+                        Spacer(Modifier.width(3.dp))
+                        Text("Add Carpool", fontSize = 11.sp, color = NeonEmerald)
+                    }
+                }
+            }
+
+            // Row 4: Tank level % (PID 012F)
             if (meta.startFuelPercent != null && meta.endFuelPercent != null) {
                 Spacer(modifier = Modifier.height(6.dp))
                 Row(
@@ -769,9 +1062,9 @@ fun RecordingItemCard(
                 }
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
-            Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
             Spacer(modifier = Modifier.height(8.dp))
+            Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+            Spacer(modifier = Modifier.height(6.dp))
 
             // Export Actions Row
             Row(
@@ -781,39 +1074,39 @@ fun RecordingItemCard(
                 if (recording.zipFile != null && recording.zipFile.exists()) {
                     OutlinedButton(
                         onClick = { onShareFile(recording.zipFile, "application/zip") },
-                        modifier = Modifier.weight(1f).height(36.dp),
+                        modifier = Modifier.weight(1f).height(34.dp),
                         shape = RoundedCornerShape(8.dp),
                         contentPadding = PaddingValues(horizontal = 4.dp)
                     ) {
-                        Text("ZIP BUNDLE", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CyberCyan)
+                        Text("ZIP BUNDLE", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = CyberCyan)
                     }
                 }
 
                 OutlinedButton(
                     onClick = { onShareFile(recording.transactionCsvFile, "text/csv") },
-                    modifier = Modifier.weight(1f).height(36.dp),
+                    modifier = Modifier.weight(1f).height(34.dp),
                     shape = RoundedCornerShape(8.dp),
                     contentPadding = PaddingValues(horizontal = 4.dp)
                 ) {
-                    Text("TX CSV", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("TX CSV", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
 
                 OutlinedButton(
                     onClick = { onShareFile(recording.samplesCsvFile, "text/csv") },
-                    modifier = Modifier.weight(1f).height(36.dp),
+                    modifier = Modifier.weight(1f).height(34.dp),
                     shape = RoundedCornerShape(8.dp),
                     contentPadding = PaddingValues(horizontal = 4.dp)
                 ) {
-                    Text("SAMPLES", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("SAMPLES", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
 
                 OutlinedButton(
                     onClick = { onShareFile(recording.jsonFile, "application/json") },
-                    modifier = Modifier.weight(1f).height(36.dp),
+                    modifier = Modifier.weight(1f).height(34.dp),
                     shape = RoundedCornerShape(8.dp),
                     contentPadding = PaddingValues(horizontal = 4.dp)
                 ) {
-                    Text("JSON", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("JSON", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
