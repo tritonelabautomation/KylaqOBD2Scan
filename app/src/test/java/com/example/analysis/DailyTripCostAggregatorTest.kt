@@ -337,4 +337,53 @@ class DailyTripCostAggregatorTest {
         assertEquals(7500.0 / 700.0, augSummary.netCostPerKm!!, 0.001)
         assertEquals(2, augSummary.fuelLogs.size)
     }
+
+    @Test
+    fun `test unlogged drive gap detection between consecutive trips`() {
+        val trip1Start = istEpoch(2026, 9, 30, 9, 0)
+        val trip2Start = istEpoch(2026, 9, 30, 16, 30)
+
+        // Trip 1: 4050.0 km -> 4080.0 km
+        // Trip 2: 4095.0 km -> 4115.0 km (Gap of 15.0 km between 4080.0 and 4095.0)
+        val trips = listOf(
+            DailyTripCostAggregator.TripRecordInput(
+                tripId = "trip_1",
+                sessionName = "Morning Commute",
+                startTimeUtc = RecordTime.stamp(trip1Start),
+                startTimestampMs = trip1Start,
+                durationSeconds = 1800L,
+                distanceKm = 30.0,
+                startOdometerKm = 4050.0,
+                endOdometerKm = 4080.0
+            ),
+            DailyTripCostAggregator.TripRecordInput(
+                tripId = "trip_2",
+                sessionName = "Evening Ride",
+                startTimeUtc = RecordTime.stamp(trip2Start),
+                startTimestampMs = trip2Start,
+                durationSeconds = 3600L,
+                distanceKm = 20.0,
+                startOdometerKm = 4095.0,
+                endOdometerKm = 4115.0
+            )
+        )
+
+        val result = DailyTripCostAggregator.aggregate(
+            trips = trips,
+            carpoolEntries = emptyList(),
+            fuelLogs = emptyList(),
+            nowMs = trip2Start
+        )
+
+        val dayGroup = result.dayGroups.first()
+        val trip2Item = dayGroup.trips.first { it.tripId == "trip_2" }
+        val trip1Item = dayGroup.trips.first { it.tripId == "trip_1" }
+
+        assertNull(trip1Item.unloggedOdoGapKm) // First trip has no gap before it
+        assertNotNull(trip2Item.unloggedOdoGapKm)
+        assertEquals(15.0, trip2Item.unloggedOdoGapKm!!, 0.001)
+        assertEquals(4080.0, trip2Item.prevTripEndOdoKm!!, 0.001)
+        assertEquals(15.0, dayGroup.totalDayUnloggedGapKm, 0.001)
+        assertEquals(15.0, result.currentMonthSummary.totalUnloggedOdoGapKm, 0.001)
+    }
 }

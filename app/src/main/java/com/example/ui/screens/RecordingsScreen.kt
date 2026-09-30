@@ -645,30 +645,70 @@ fun RecordingsScreen(
                                     startMs = com.example.data.RecordTime.parseMillis(rec.metadata.startTimeUtc),
                                     dirLastModifiedMs = dirMtime
                                 )
-                                RecordingItemCard(
-                                    recording = rec,
-                                    tripItem = tripItem,
-                                    isSelected = isSelected,
-                                    selectionMode = selectionMode,
-                                    syncState = syncState,
-                                    onClick = {
-                                        if (selectionMode) {
-                                            selectedIds = if (isSelected) selectedIds - rec.metadata.sessionId else selectedIds + rec.metadata.sessionId
-                                        } else {
-                                            onNavigateToTripDetail(rec.metadata.sessionId)
+                                Column {
+                                    if (tripItem.unloggedOdoGapKm != null && tripItem.unloggedOdoGapKm >= 0.5) {
+                                        Surface(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 4.dp, vertical = 3.dp),
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = WarningRed.copy(alpha = 0.12f),
+                                            border = androidx.compose.foundation.BorderStroke(1.dp, WarningRed.copy(alpha = 0.45f))
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Warning,
+                                                    contentDescription = null,
+                                                    tint = WarningRed,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Column {
+                                                    Text(
+                                                        text = "MISSED TRIP / UNLOGGED GAP: +${String.format(java.util.Locale.US, "%.1f", tripItem.unloggedOdoGapKm)} km",
+                                                        color = WarningRed,
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 11.sp,
+                                                        fontFamily = FontFamily.Monospace
+                                                    )
+                                                    Text(
+                                                        text = "Cluster ODO advanced from ${String.format(java.util.Locale.US, "%.1f", tripItem.prevTripEndOdoKm ?: 0.0)} km → ${String.format(java.util.Locale.US, "%.1f", tripItem.startOdometerKm ?: 0.0)} km between trips without OBD logging.",
+                                                        color = TextSecondaryDark,
+                                                        fontSize = 11.sp
+                                                    )
+                                                }
+                                            }
                                         }
-                                    },
-                                    onLongClick = {
-                                        selectedIds = if (isSelected) selectedIds - rec.metadata.sessionId else selectedIds + rec.metadata.sessionId
-                                    },
-                                    onToggleSelect = {
-                                        selectedIds = if (isSelected) selectedIds - rec.metadata.sessionId else selectedIds + rec.metadata.sessionId
-                                    },
-                                    onShareFile = { file, mimeType -> shareFile(context, file, mimeType) },
-                                    onRename = { renamingRecording = rec },
-                                    onDelete = { deletingRecording = rec },
-                                    onAddOrEditCarpool = { carpoolTargetTrip = tripItem }
-                                )
+                                    }
+
+                                    RecordingItemCard(
+                                        recording = rec,
+                                        tripItem = tripItem,
+                                        isSelected = isSelected,
+                                        selectionMode = selectionMode,
+                                        syncState = syncState,
+                                        onClick = {
+                                            if (selectionMode) {
+                                                selectedIds = if (isSelected) selectedIds - rec.metadata.sessionId else selectedIds + rec.metadata.sessionId
+                                            } else {
+                                                onNavigateToTripDetail(rec.metadata.sessionId)
+                                            }
+                                        },
+                                        onLongClick = {
+                                            selectedIds = if (isSelected) selectedIds - rec.metadata.sessionId else selectedIds + rec.metadata.sessionId
+                                        },
+                                        onToggleSelect = {
+                                            selectedIds = if (isSelected) selectedIds - rec.metadata.sessionId else selectedIds + rec.metadata.sessionId
+                                        },
+                                        onShareFile = { file, mimeType -> shareFile(context, file, mimeType) },
+                                        onRename = { renamingRecording = rec },
+                                        onDelete = { deletingRecording = rec },
+                                        onAddOrEditCarpool = { carpoolTargetTrip = tripItem }
+                                    )
+                                }
                             }
                         }
                     }

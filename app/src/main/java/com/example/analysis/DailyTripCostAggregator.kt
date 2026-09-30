@@ -69,7 +69,11 @@ object DailyTripCostAggregator {
         val isTripProfit: Boolean,
         val transactionCount: Int = 0,
         val startOdometerKm: Double? = null,
-        val endOdometerKm: Double? = null
+        val endOdometerKm: Double? = null,
+        /** Unlogged odometer gap in km if previous trip's end ODO < this trip's start ODO (e.g. >= 0.5 km missed drive). */
+        val unloggedOdoGapKm: Double? = null,
+        val prevTripEndOdoKm: Double? = null,
+        val prevTripEndMs: Long? = null
     )
 
     data class DayTripGroup(
@@ -92,7 +96,8 @@ object DailyTripCostAggregator {
         val tripCount: Int,
         val trips: List<DayTripItem>,
         val dayStartOdometerKm: Double? = null,
-        val dayEndOdometerKm: Double? = null
+        val dayEndOdometerKm: Double? = null,
+        val totalDayUnloggedGapKm: Double = 0.0
     )
 
     data class MonthPriceSummary(
@@ -117,6 +122,7 @@ object DailyTripCostAggregator {
         val totalCarpoolRides: Int,
         val avgKmPerLiter: Double?,
         val distanceSource: String = "OBD_TRIPS", // "OBD_TRIPS", "REFUEL_ODOMETER", "NONE"
+        val totalUnloggedOdoGapKm: Double = 0.0,
         val fuelLogs: List<FuelLogCodec.FuelEntry> = emptyList(),
         val carpoolLogs: List<CarpoolCodec.CarpoolEntry> = emptyList()
     )
@@ -164,6 +170,23 @@ object DailyTripCostAggregator {
             )
         }
 
+        // Chronologically precompute unlogged ODO gaps between consecutive trips (owner query 2026-09-30)
+        val sortedTripsChronological = trips.sortedBy { it.startTimestampMs }
+        val tripGaps = mutableMapOf<String, Triple<Double, Double, Long>>() // tripId -> (gapKm, prevEndOdo, prevEndMs)
+        for (i in 1 until sortedTripsChronological.size) {
+            val prev = sortedTripsChronological[i - 1]
+            val curr = sortedTripsChronological[i]
+            val prevEndOdo = prev.endOdometerKm ?: prev.startOdometerKm?.let { it + prev.distanceKm }
+            val currStartOdo = curr.startOdometerKm
+            if (prevEndOdo != null && currStartOdo != null) {
+                val gap = currStartOdo - prevEndOdo
+                if (gap >= 0.5) { // 0.5 km or more unlogged driving gap between trips
+                    val prevEndMs = prev.startTimestampMs + prev.durationSeconds * 1000L
+                    tripGaps[curr.tripId] = Triple(gap, prevEndOdo, prevEndMs)
+                }
+            }
+        }
+
         // Convert each TripRecordInput into a DayTripItem
         val dayTripItems = trips.map { trip ->
             val startMs = trip.startTimestampMs
@@ -201,6 +224,8 @@ object DailyTripCostAggregator {
                 CommuteComparator.CommuteSlot.OFF_PEAK -> "Off-Peak Drive"
             }
 
+            val gapInfo = tripGaps[trip.tripId]
+
             DayTripItem(
                 tripId = trip.tripId,
                 title = trip.sessionName,
@@ -225,7 +250,10 @@ object DailyTripCostAggregator {
                 isTripProfit = isProfit,
                 transactionCount = trip.transactionCount,
                 startOdometerKm = trip.startOdometerKm,
-                endOdometerKm = trip.endOdometerKm
+                endOdometerKm = trip.endOdometerKm,
+                unloggedOdoGapKm = gapInfo?.first,
+                prevTripEndOdoKm = gapInfo?.second,
+                prevTripEndMs = gapInfo?.third
             )
         }
 
@@ -254,6 +282,7 @@ object DailyTripCostAggregator {
 
             val dayStartOdo = items.mapNotNull { it.startOdometerKm }.minOrNull()
             val dayEndOdo = items.mapNotNull { it.endOdometerKm }.maxOrNull()
+            val dayUnloggedGap = items.mapNotNull { it.unloggedOdoGapKm }.sum()
 
             DayTripGroup(
                 dateKey = dateKey,
@@ -275,7 +304,8 @@ object DailyTripCostAggregator {
                 tripCount = items.size,
                 trips = items.sortedByDescending { it.startMs },
                 dayStartOdometerKm = dayStartOdo,
-                dayEndOdometerKm = dayEndOdo
+                dayEndOdometerKm = dayEndOdo,
+                totalDayUnloggedGapKm = dayUnloggedGap
             )
         }.sortedByDescending { it.dateKey }
 
@@ -360,6 +390,8 @@ object DailyTripCostAggregator {
 
             val displayMonth = RecordTime.format("MMMM yyyy", sampleMs)
 
+            val totalMonthUnloggedGap = monthTrips.mapNotNull { it.unloggedOdoGapKm }.sum()
+
             MonthPriceSummary(
                 monthKey = monthKey,
                 displayMonth = displayMonth,
@@ -382,6 +414,7 @@ object DailyTripCostAggregator {
                 totalCarpoolRides = monthCarpool.size,
                 avgKmPerLiter = avgKmL,
                 distanceSource = distanceSource,
+                totalUnloggedOdoGapKm = totalMonthUnloggedGap,
                 fuelLogs = monthFuelLogs.sortedByDescending { it.idMs },
                 carpoolLogs = monthCarpool.sortedByDescending { CarpoolCodec.whenMs(it) ?: it.idMs }
             )
