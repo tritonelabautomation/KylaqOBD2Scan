@@ -20,6 +20,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.FuelLogCodec
+import com.example.data.BunkNozzleStore
+import com.example.data.RefuelBunkRecord
+import com.example.ui.components.BunkNozzleCard
+import com.example.ui.components.RefuelLoggingDialog
 import com.example.ui.components.XyPlot
 import com.example.ui.components.XySeries
 import com.example.ui.theme.CyberCyan
@@ -136,6 +140,13 @@ fun FuelCostsScreen(
                     capacityL = capacityL,
                     tab = ddTab,
                     onTab = { ddTab = it }
+                )
+            }
+
+            // Petrol Bunk & Dispenser Nozzle Auto-Cut Profiler
+            item {
+                BunkNozzleCard(
+                    onOpenLogger = { editTarget = null; showAdd = true }
                 )
             }
 
@@ -378,37 +389,37 @@ fun FuelCostsScreen(
     }
 
     if (showAdd) {
-        RefuelDialog(
+        RefuelLoggingDialog(
+            initialLiters = editTarget?.liters ?: receiptPrefill?.liters,
+            initialPrice = editTarget?.pricePerL,
+            initialOdoKm = editTarget?.odometerKm ?: receiptPrefill?.odoKm ?: odoNow,
+            initialPreLevelPct = receiptPrefill?.levelBeforePct,
+            initialPostLevelPct = receiptPrefill?.levelAfterPct ?: levelNow,
+            initialStation = editTarget?.station ?: "",
+            initialGrade = editTarget?.grade ?: FuelLogCodec.GRADE_X95,
+            initialNote = editTarget?.note ?: "",
             onDismiss = { showAdd = false; editTarget = null; receiptPrefill = null },
-            editEntry = editTarget,
-            prefill = receiptPrefill,
-            recentStations = entries.map { it.station }.filter { it.isNotBlank() }.distinct().take(4),
-            onSave = { liters, price, odo, station, grade, note, partial, dateStr, timeStr ->
-                val cal = java.util.Calendar.getInstance()
-                val dp = dateStr.split('-')
-                val tp = timeStr.split(':')
-                if (dp.size == 3 && tp.size == 2) {
-                    cal.set(dp[0].toIntOrNull() ?: cal.get(java.util.Calendar.YEAR),
-                        (dp[1].toIntOrNull() ?: 1) - 1, dp[2].toIntOrNull() ?: 1,
-                        tp[0].toIntOrNull() ?: 12, tp[1].toIntOrNull() ?: 0, 0)
-                }
+            onSaved = { record ->
                 editTarget?.let { repo.delete(it.idMs) }
-                val ms = cal.timeInMillis
-                // IST with offset (owner 2026-09-17). The fuel log groups and displays on
-                // dateUtc.take(10), so this is what decides which DAY a fill-up belongs to - and
-                // in UTC a fill-up made before 05:30 IST was filed under the previous date.
-                val utc = com.example.data.RecordTime.stamp(ms)
                 repo.add(
                     FuelLogCodec.FuelEntry(
-                        idMs = ms, dateUtc = utc, liters = liters, pricePerL = price,
-                        odometerKm = odo, station = station, grade = grade, note = note,
-                        partial = partial
+                        idMs = record.idMs,
+                        dateUtc = record.timestampUtc,
+                        liters = record.pumpLitres,
+                        pricePerL = record.pricePerL,
+                        odometerKm = record.odometerKm,
+                        station = record.stationName,
+                        grade = record.fuelGrade,
+                        note = record.note,
+                        partial = false
                     )
                 )
-                viewModel.calibrateAfterFuelEntry(liters, odo, partial)
+                viewModel.calibrateAfterFuelEntry(record.pumpLitres, record.odometerKm, false)
                 viewModel.triggerImmediateBackup()
-                if (grade != FuelLogCodec.GRADE_UNKNOWN) viewModel.tagFuelGrade(grade)
-                odo?.let { viewModel.maintenanceRepository.setCurrentOdometerKm(it) }
+                if (record.fuelGrade != FuelLogCodec.GRADE_UNKNOWN) {
+                    viewModel.tagFuelGrade(record.fuelGrade)
+                }
+                record.odometerKm?.let { viewModel.maintenanceRepository.setCurrentOdometerKm(it) }
                 refresh++
                 showAdd = false
                 editTarget = null
@@ -436,214 +447,6 @@ private fun FuelStatChip(label: String, value: String, color: Color, modifier: M
         Text(label, color = TextSecondaryDark, fontSize = 9.sp)
         Text(value, color = color, fontSize = 14.sp, fontWeight = FontWeight.Bold)
     }
-}
-
-@Composable
-private fun RefuelDialog(
-    onDismiss: () -> Unit,
-    editEntry: FuelLogCodec.FuelEntry? = null,
-    prefill: MainViewModel.ReceiptPrefill? = null,
-    recentStations: List<String>,
-    onSave: (Double, Double, Double?, String, String, String, Boolean, String, String) -> Unit
-) {
-    var liters by remember { mutableStateOf("") }
-    var price by remember { mutableStateOf("") }
-    var total by remember { mutableStateOf("") }
-    var odo by remember { mutableStateOf("") }
-    var station by remember { mutableStateOf("") }
-    var grade by remember { mutableStateOf(FuelLogCodec.GRADE_UNKNOWN) }
-    var note by remember { mutableStateOf("") }
-    var partial by remember { mutableStateOf(false) }
-    val nowCal = java.util.Calendar.getInstance()
-    var dateStr by remember {
-        mutableStateOf(String.format(java.util.Locale.US, "%04d-%02d-%02d",
-            nowCal.get(java.util.Calendar.YEAR), nowCal.get(java.util.Calendar.MONTH) + 1, nowCal.get(java.util.Calendar.DAY_OF_MONTH)))
-    }
-    var timeStr by remember {
-        mutableStateOf(String.format(java.util.Locale.US, "%02d:%02d",
-            nowCal.get(java.util.Calendar.HOUR_OF_DAY), nowCal.get(java.util.Calendar.MINUTE)))
-    }
-    val grades = listOf(FuelLogCodec.GRADE_UNKNOWN, FuelLogCodec.GRADE_X95, FuelLogCodec.GRADE_REGULAR)
-
-    LaunchedEffect(editEntry) {
-        editEntry?.let { e ->
-            liters = String.format(Locale.US, "%.2f", e.liters)
-            price = String.format(Locale.US, "%.2f", e.pricePerL)
-            total = String.format(Locale.US, "%.2f", e.liters * e.pricePerL)
-            odo = e.odometerKm?.let { String.format(Locale.US, "%.0f", it) } ?: ""
-            station = e.station
-            grade = e.grade
-            note = e.note
-            partial = e.partial
-            // Pinned to IST rather than TimeZone.getDefault(): this splits into the date and time
-            // columns of a fuel record, so a device set to another zone used to file the fill-up
-            // under a different day - and a fill-up at 00:20 IST would land on the previous date.
-            val local = com.example.data.RecordTime.format("yyyy-MM-dd'T'HH:mm", e.idMs)
-            val parts = local.split('T')
-            dateStr = parts[0]
-            timeStr = parts.getOrNull(1) ?: "12:00"
-        }
-    }
-
-    LaunchedEffect(prefill) {
-        if (editEntry == null && prefill != null) {
-            // Detected-refuel prefill: litres are the level-rise ESTIMATE (the owner replaces
-            // them with the pump's number - that replacement is what calibrates the event), and
-            // the form is pinned to the restart instant in IST, the closest observed time to the
-            // engine-off fill, so the receipt lands on the right day.
-            liters = String.format(Locale.US, "%.1f", prefill.liters)
-            prefill.odoKm?.let { odo = String.format(Locale.US, "%.0f", it) }
-            val local = com.example.data.RecordTime.format("yyyy-MM-dd'T'HH:mm", prefill.whenMs)
-            val parts = local.split('T')
-            dateStr = parts[0]
-            timeStr = parts.getOrNull(1) ?: "12:00"
-        }
-    }
-
-    // VehIQ's receipt scanner, free: pick a receipt photo, Gemini extracts litres/price/station
-    // and prefills the form. Disabled (with a hint) when no API key is configured.
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val scope = rememberCoroutineScope()
-    var scanning by remember { mutableStateOf(false) }
-    val voiceEntry = com.example.ui.components.rememberVoiceLauncher { transcript ->
-        com.example.data.VoiceParse.liters(transcript)?.let { l ->
-            liters = String.format(java.util.Locale.US, "%.2f", l)
-            price.toDoubleOrNull()?.let { p -> if (p > 0) total = String.format(java.util.Locale.US, "%.0f", l * p) }
-        }
-        com.example.data.VoiceParse.price(transcript)?.let { p ->
-            price = String.format(java.util.Locale.US, "%.2f", p)
-            liters.toDoubleOrNull()?.let { l -> total = String.format(java.util.Locale.US, "%.0f", l * p) }
-        }
-    }
-    val pickReceipt = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.GetContent()
-    ) { uri ->
-        if (uri == null) {
-            scanning = false
-            return@rememberLauncherForActivityResult
-        }
-        scope.launch {
-            val bytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
-            }
-            val scan = bytes?.let { com.example.ai.GeminiTextClient.scanReceipt(it) }
-            if (scan != null) {
-                scan.liters?.let { liters = String.format(java.util.Locale.US, "%.2f", it) }
-                scan.pricePerL?.let { price = String.format(java.util.Locale.US, "%.2f", it) }
-                scan.vendor?.let { station = it }
-            }
-            scanning = false
-        }
-    }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (editEntry != null) "Edit refuel" else "Log a refuel") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                // VehIQ "Adding Fuel": fill any two of litres / price / total - the third computes.
-                TextField(
-                    value = liters,
-                    onValueChange = {
-                        liters = it
-                        val l = it.toDoubleOrNull()
-                        val p = price.toDoubleOrNull()
-                        if (l != null && p != null && p > 0) total = String.format(java.util.Locale.US, "%.0f", l * p)
-                    },
-                    label = { Text("Litres") }, singleLine = true
-                )
-                TextField(
-                    value = price,
-                    onValueChange = {
-                        price = it
-                        val p = it.toDoubleOrNull()
-                        val l = liters.toDoubleOrNull()
-                        val t = total.toDoubleOrNull()
-                        if (p != null && p > 0) {
-                            if (l != null) total = String.format(java.util.Locale.US, "%.0f", l * p)
-                            else if (t != null) liters = String.format(java.util.Locale.US, "%.2f", t / p)
-                        }
-                    },
-                    label = { Text("Price ₹/L") }, singleLine = true
-                )
-                TextField(
-                    value = total,
-                    onValueChange = {
-                        total = it
-                        val t = it.toDoubleOrNull()
-                        val p = price.toDoubleOrNull()
-                        val l = liters.toDoubleOrNull()
-                        if (t != null && p != null && p > 0 && l == null) {
-                            liters = String.format(java.util.Locale.US, "%.2f", t / p)
-                        }
-                    },
-                    label = { Text("Total ₹ (auto)") }, singleLine = true
-                )
-                TextField(value = odo, onValueChange = { odo = it }, label = { Text("Odometer km (optional)") }, singleLine = true)
-                TextField(value = station, onValueChange = { station = it }, label = { Text("Station (optional)") }, singleLine = true)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    TextField(value = dateStr, onValueChange = { dateStr = it }, label = { Text("Date") }, singleLine = true, modifier = Modifier.weight(1f))
-                    TextField(value = timeStr, onValueChange = { timeStr = it }, label = { Text("Time") }, singleLine = true, modifier = Modifier.weight(1f))
-                }
-                if (recentStations.isNotEmpty()) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        recentStations.take(3).forEach { st ->
-                            FilterChip(selected = station == st, onClick = { station = st }, label = { Text(st.take(14), fontSize = 10.sp) })
-                        }
-                    }
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Missed previous fill-up (partial tank)", color = TextSecondaryDark, fontSize = 11.sp, modifier = Modifier.weight(1f))
-                    Switch(checked = partial, onCheckedChange = { partial = it })
-                }
-                TextField(value = note, onValueChange = { note = it }, label = { Text("Note (optional)") }, singleLine = true)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    grades.forEach { g ->
-                        FilterChip(
-                            selected = grade == g,
-                            onClick = { grade = g },
-                            label = { Text(g, fontSize = 11.sp) }
-                        )
-                    }
-                }
-                OutlinedButton(
-                    onClick = { scanning = true; pickReceipt.launch("image/*") },
-                    enabled = !scanning && com.example.ai.GeminiTextClient.isConfigured()
-                ) {
-                    Icon(Icons.Default.DocumentScanner, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text(if (scanning) "Scanning receipt..." else "Scan receipt (AI)", fontSize = 12.sp)
-                }
-                if (!com.example.ai.GeminiTextClient.isConfigured()) {
-                    Text(
-                        "Receipt scan needs a Gemini key: set GEMINI_API_KEY in .env and rebuild.",
-                        fontSize = 10.sp, color = TextSecondaryDark
-                    )
-                }
-                TextButton(onClick = { runCatching { voiceEntry.launch(com.example.ui.components.voiceIntent()) } }) {
-                    Icon(Icons.Default.Mic, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Voice: \"filled 35 litres at 108 rupees per litre\"", fontSize = 11.sp)
-                }
-                Text(
-                    "Grade stamps the live OBD tank segment for the X95-vs-regular comparison.",
-                    fontSize = 10.sp, color = TextSecondaryDark
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    val l = liters.toDoubleOrNull()
-                    val p = price.toDoubleOrNull()
-                    if (l != null && p != null && l > 0) {
-                        onSave(l, p, odo.toDoubleOrNull(), station.trim(), grade, note.trim(), partial, dateStr, timeStr)
-                    }
-                }
-            ) { Text("Save") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
-    )
 }
 
 /**

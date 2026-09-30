@@ -229,9 +229,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val restartRefuel = recordingManager.restartRefuel
 
     /** Prefill for the Fuel & Costs receipt dialog when the owner answers the prompt. */
-    data class ReceiptPrefill(val liters: Double, val odoKm: Double?, val whenMs: Long)
+    data class ReceiptPrefill(
+        val liters: Double,
+        val odoKm: Double?,
+        val whenMs: Long,
+        val levelBeforePct: Double? = null,
+        val levelAfterPct: Double? = null
+    )
 
-    private val _receiptPrefill = MutableStateFlow<ReceiptPrefill?>(null)
+    private val _receiptPrefill = MutableStateFlow<ReceiptPrefill?> (null)
     val receiptPrefill: StateFlow<ReceiptPrefill?> = _receiptPrefill
 
     fun consumeReceiptPrefill() { _receiptPrefill.value = null }
@@ -244,7 +250,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun answerRestartRefuel(addReceipt: Boolean) {
         val c = recordingManager.restartRefuel.value ?: return
-        if (addReceipt) _receiptPrefill.value = ReceiptPrefill(c.estLitres, c.odoKm, c.idMs)
+        if (addReceipt) _receiptPrefill.value = ReceiptPrefill(
+            liters = c.estLitres,
+            odoKm = c.odoKm,
+            whenMs = c.idMs,
+            levelBeforePct = c.levelBeforePct,
+            levelAfterPct = c.levelAfterPct
+        )
         recordingManager.clearRestartRefuel()
         viewModelScope.launch {
             com.example.di.AppContainer.settingsRepository.setRestartRefuelDismissedMs(c.idMs)
