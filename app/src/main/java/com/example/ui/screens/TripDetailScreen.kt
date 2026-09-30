@@ -1682,6 +1682,47 @@ private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summar
                     }
                 }
             }
+
+            // Cluster Odometer Start vs End (PID 01A6)
+            if (summary.startOdometerKm != null || summary.endOdometerKm != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text("CLUSTER ODOMETER (PID 01A6)", color = CyberCyan, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Spacer(modifier = Modifier.height(2.dp))
+                        val startOdo = summary.startOdometerKm?.let { String.format(java.util.Locale.US, "%,.1f km", it) } ?: "--"
+                        val endOdo = summary.endOdometerKm?.let { String.format(java.util.Locale.US, "%,.1f km", it) } ?: "--"
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = "Start $startOdo → End $endOdo",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    }
+                    Surface(
+                        color = CyberCyan.copy(alpha = 0.15f),
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Text(
+                            text = "Δ ${String.format(java.util.Locale.US, "%.1f km", summary.distanceKm)}",
+                            color = CyberCyan,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
+            }
             val startStop = summary.startStop
             if (startStop.stopEvents > 0) {
                 Spacer(modifier = Modifier.height(6.dp))

@@ -73,6 +73,22 @@ class TripFuelSummaryTest {
     }
 
     @Test
+    fun `extracts cluster start and end odometer from PID 01A6 samples`() {
+        val samples = listOf(
+            point("01A6", 1_000_000L, 5420.0),
+            point("010D", 1_000_000L, 50.0),
+            point("015E", 1_000_000L, 2.5),
+            point("010D", 1_060_000L, 60.0),
+            point("015E", 1_060_000L, 3.0),
+            point("01A6", 1_060_000L, 5452.1)
+        )
+        val s = TripFuelSummary.summarize(samples)
+        assertEquals(5420.0, s.startOdometerKm!!, 0.01)
+        assertEquals(5452.1, s.endOdometerKm!!, 0.01)
+        assertEquals(32.1, s.distanceKm, 0.01)
+    }
+
+    @Test
     fun `mass flow converts through petrol density`() {
         val samples = mutableListOf<TripFuelSummary.SamplePoint>()
         var ts = 0L

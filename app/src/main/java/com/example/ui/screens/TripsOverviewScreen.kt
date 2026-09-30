@@ -395,6 +395,18 @@ private fun TripRow(trip: WeeklyTripOverview.TripCard, price: Double, onOpenTrip
                         fontWeight = FontWeight.Medium
                     )
                 }
+                if (trip.startOdometerKm != null || trip.endOdometerKm != null) {
+                    Spacer(Modifier.height(3.dp))
+                    val startOdo = trip.startOdometerKm?.let { "%,.1f".format(it) } ?: "--"
+                    val endOdo = trip.endOdometerKm?.let { "%,.1f".format(it) } ?: "--"
+                    Text(
+                        "🛣️ ODO: %s → %s km".format(startOdo, endOdo),
+                        color = TtLink,
+                        fontSize = 11.sp,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
             }
             Text(timeFmt.format(Date(trip.startMs)), color = TtGray, fontSize = 11.sp)
             Spacer(Modifier.width(8.dp))

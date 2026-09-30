@@ -42,7 +42,9 @@ object WeeklyTripOverview {
         val startFuelPercent: Double? = null,
         val endFuelPercent: Double? = null,
         val fuelDeltaPercent: Double? = null,
-        val isRefuelBrimEvent: Boolean = false
+        val isRefuelBrimEvent: Boolean = false,
+        val startOdometerKm: Double? = null,
+        val endOdometerKm: Double? = null
     )
 
     data class DayBucket(val label: String, val minutes: Map<DriveBand, Double>)
@@ -185,7 +187,9 @@ object WeeklyTripOverview {
                 startFuelPercent = t.summary.startFuelPercent,
                 endFuelPercent = t.summary.endFuelPercent,
                 fuelDeltaPercent = t.summary.fuelDeltaPercent,
-                isRefuelBrimEvent = t.summary.isRefuelBrimEvent
+                isRefuelBrimEvent = t.summary.isRefuelBrimEvent,
+                startOdometerKm = t.summary.startOdometerKm,
+                endOdometerKm = t.summary.endOdometerKm
             )
         }
 

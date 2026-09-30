@@ -104,13 +104,24 @@ fun DayCostGroupCard(
                     }
                 }
 
-                Text(
-                    text = "${dayGroup.tripCount} trip(s) · ${String.format(Locale.US, "%.1f", dayGroup.totalDayDistanceKm)} km",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = TextSecondaryDark,
-                    fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace
-                )
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        text = "${dayGroup.tripCount} trip(s) · ${String.format(Locale.US, "%.1f", dayGroup.totalDayDistanceKm)} km",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondaryDark,
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                    if (dayGroup.dayStartOdometerKm != null && dayGroup.dayEndOdometerKm != null) {
+                        Text(
+                            text = "ODO: ${String.format(Locale.US, "%,.1f", dayGroup.dayStartOdometerKm)} → ${String.format(Locale.US, "%,.1f", dayGroup.dayEndOdometerKm)} km",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = CyberCyan.copy(alpha = 0.85f),
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
             }
 
             Spacer(Modifier.height(8.dp))

@@ -446,7 +446,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 endFuelPercent = rec.metadata.endFuelPercent ?: summary?.endFuelPercent,
                 fuelDeltaPercent = rec.metadata.fuelDeltaPercent ?: summary?.fuelDeltaPercent,
                 isRefuelBrimEvent = summary?.isRefuelBrimEvent ?: false,
-                transactionCount = rec.transactionCount
+                transactionCount = rec.transactionCount,
+                startOdometerKm = summary?.startOdometerKm,
+                endOdometerKm = summary?.endOdometerKm
             )
         }
 

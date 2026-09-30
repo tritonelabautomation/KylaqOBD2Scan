@@ -944,6 +944,32 @@ fun RecordingItemCard(
                 )
             }
 
+            // Odometer Start & End display (PID 01A6)
+            if (tripItem?.startOdometerKm != null || tripItem?.endOdometerKm != null) {
+                val startOdoStr = tripItem.startOdometerKm?.let { String.format(java.util.Locale.US, "%,.1f km", it) } ?: "--"
+                val endOdoStr = tripItem.endOdometerKm?.let { String.format(java.util.Locale.US, "%,.1f km", it) } ?: "--"
+                Spacer(modifier = Modifier.height(4.dp))
+                Surface(
+                    color = CyberCyan.copy(alpha = 0.08f),
+                    shape = RoundedCornerShape(6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(Icons.Default.Speed, contentDescription = null, tint = CyberCyan, modifier = Modifier.size(12.dp))
+                        Text(
+                            text = "ODO: Start $startOdoStr → End $endOdoStr",
+                            color = CyberCyan,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
+            }
+
             // Row 3: Carpool details & Net Trip cost
             if (tripItem?.carpoolEntry != null) {
                 Spacer(modifier = Modifier.height(6.dp))

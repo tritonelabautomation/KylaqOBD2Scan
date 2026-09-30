@@ -91,7 +91,11 @@ object TripFuelSummary {
         /** Approximate liters from % delta and standard tank capacity (50L). */
         val fuelDeltaLiters: Double? = null,
         /** True if level rose by >= 3.0% during the trip indicating a refuel / brim event. */
-        val isRefuelBrimEvent: Boolean = false
+        val isRefuelBrimEvent: Boolean = false,
+        /** Odometer reading at trip start (PID 01A6 km). */
+        val startOdometerKm: Double? = null,
+        /** Odometer reading at trip end (PID 01A6 km). */
+        val endOdometerKm: Double? = null
     ) {
         val litersPer100Km: Double?
             get() = if (distanceKm > 0.05) fuelLiters / distanceKm * 100.0 else null
@@ -141,11 +145,13 @@ object TripFuelSummary {
         // Distance: prefer odometer (PID 01A6) when it answered — it's the cluster's own
         // kilometres and survives any speed-integration glitch (owner 2026-09-21: recovered
         // 45 957-tx trip showed 0.1 km). Fall back to speed integration.
-        val odoSeries = (byPid["01A6"] ?: emptyList())
+        val odoSeries = (byPid["01A6"] ?: byPid["A6"] ?: emptyList())
             .mapNotNull { p -> p.value?.let { p.timestampMs to it } }
             .sortedBy { it.first }
         var distanceKm = 0.0
         var odoDistanceUsed = false
+        var startOdo: Double? = odoSeries.firstOrNull()?.second
+        var endOdo: Double? = odoSeries.lastOrNull()?.second
         if (odoSeries.size >= 2) {
             val firstOdo = odoSeries.first().second
             val lastOdo = odoSeries.last().second
@@ -298,6 +304,14 @@ object TripFuelSummary {
         } else null
         val isRefuelBrimEvent = (fuelDeltaPercent ?: 0.0) >= 3.0
 
+        if (startOdo != null && endOdo != null && kotlin.math.abs(endOdo - startOdo) < 0.01 && distanceKm > 0.05) {
+            endOdo = startOdo + distanceKm
+        } else if (startOdo != null && endOdo == null && distanceKm > 0.05) {
+            endOdo = startOdo + distanceKm
+        } else if (startOdo == null && endOdo != null && distanceKm > 0.05) {
+            startOdo = endOdo - distanceKm
+        }
+
         return Summary(
             fuelLiters = fuelLiters,
             distanceKm = distanceKm,
@@ -325,7 +339,9 @@ object TripFuelSummary {
             endFuelPercent = endFuelPercent,
             fuelDeltaPercent = fuelDeltaPercent,
             fuelDeltaLiters = fuelDeltaLiters,
-            isRefuelBrimEvent = isRefuelBrimEvent
+            isRefuelBrimEvent = isRefuelBrimEvent,
+            startOdometerKm = startOdo,
+            endOdometerKm = endOdo
         )
     }
 

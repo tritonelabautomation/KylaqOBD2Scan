@@ -37,7 +37,9 @@ class DailyTripCostAggregatorTest {
                 durationSeconds = 2400L, // 40 min
                 distanceKm = 32.0,
                 fuelLiters = 1.2, // 1.2 L @ 100/L = ₹120 fuel
-                kmPerLiter = 26.67
+                kmPerLiter = 26.67,
+                startOdometerKm = 5200.0,
+                endOdometerKm = 5232.0
             ),
             DailyTripCostAggregator.TripRecordInput(
                 tripId = "trip_sep30_pm",
@@ -47,7 +49,9 @@ class DailyTripCostAggregatorTest {
                 durationSeconds = 2700L, // 45 min
                 distanceKm = 32.0,
                 fuelLiters = 1.3, // 1.3 L @ 100/L = ₹130 fuel
-                kmPerLiter = 24.6
+                kmPerLiter = 24.6,
+                startOdometerKm = 5232.0,
+                endOdometerKm = 5264.0
             ),
             DailyTripCostAggregator.TripRecordInput(
                 tripId = "trip_sep29_am",
@@ -57,7 +61,9 @@ class DailyTripCostAggregatorTest {
                 durationSeconds = 1800L,
                 distanceKm = 20.0,
                 fuelLiters = 1.0, // 1.0 L = ₹100
-                kmPerLiter = 20.0
+                kmPerLiter = 20.0,
+                startOdometerKm = 5180.0,
+                endOdometerKm = 5200.0
             )
         )
 
@@ -127,6 +133,8 @@ class DailyTripCostAggregatorTest {
         assertEquals(70.0, sep30Group.daySurplusOrProfit, 0.001)
         assertEquals(0.0, sep30Group.dayOutOfPocket, 0.001)
         assertEquals(-70.0 / 64.0, sep30Group.netCostPerKm!!, 0.001)
+        assertEquals(5200.0, sep30Group.dayStartOdometerKm!!, 0.001)
+        assertEquals(5264.0, sep30Group.dayEndOdometerKm!!, 0.001)
 
         // Verify trips within Sep 30
         val amTrip = sep30Group.trips.first { it.tripId == "trip_sep30_am" }
@@ -136,6 +144,8 @@ class DailyTripCostAggregatorTest {
         assertEquals(120.0, amTrip.fuelCost, 0.001)
         assertEquals(-40.0, amTrip.netTripCost, 0.001) // ₹40 profit on AM trip
         assertTrue(amTrip.isTripProfit)
+        assertEquals(5200.0, amTrip.startOdometerKm!!, 0.001)
+        assertEquals(5232.0, amTrip.endOdometerKm!!, 0.001)
 
         val pmTrip = sep30Group.trips.first { it.tripId == "trip_sep30_pm" }
         assertEquals(CommuteComparator.CommuteSlot.EVENING, pmTrip.commuteSlot)

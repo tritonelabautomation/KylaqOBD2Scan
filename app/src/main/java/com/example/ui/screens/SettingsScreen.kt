@@ -282,6 +282,13 @@ fun SettingsScreen(
                 }
             }
 
+            // OBD Polling Speed & Data Accuracy Breakdown (Safe vs Normal vs Fast)
+            com.example.ui.components.PollingAccuracyCard(
+                currentMode = pollingMode,
+                onModeSelected = { viewModel.setPollingSpeedMode(it) },
+                initiallyExpanded = true
+            )
+
             // Section 3: Safe Storage & Retention Policy
             // PID management was an orphaned route (registered in MainActivity but never
             // navigated to) - the navigation audit wired it here so every screen is reachable.

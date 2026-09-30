@@ -722,80 +722,13 @@ fun PollingModeSelector(
     observedGapMs: Long? = null,
     livePids: Int = 0
 ) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .testTag("polling_mode_card"),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-    ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = "Polling Mode: ${currentMode.displayName}",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = currentMode.description,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 11.sp
-                )
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                PollingSpeedMode.values().forEach { mode ->
-                    val isSelected = mode == currentMode
-                    FilterChip(
-                        selected = isSelected,
-                        onClick = { onModeSelected(mode) },
-                        label = {
-                            Text(
-                                text = "${mode.displayName} (${(mode.multiplier * 250).toInt()}ms)",
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                fontSize = 11.sp
-                            )
-                        },
-                        modifier = Modifier.weight(1f).testTag("chip_mode_${mode.name}")
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-            // The honest layer under the promise: 125/250/500 ms is the per-COMMAND target; the
-            // serial round trip over Bluetooth governs what each tile actually gets. One full
-            // cycle = every live PID once, serially - that is the real per-signal refresh rate.
-            Text(
-                text = if (observedGapMs == null || livePids == 0) {
-                    "Observed: not connected yet. Once the link is live this shows what YOUR " +
-                        "adapter sustains per request - the number that decides how often each " +
-                        "tile refreshes, not the mode label."
-                } else {
-                    String.format(
-                        Locale.US,
-                        "Observed on this link: ~%d ms per request (%.1f req/s). One full cycle over %d live PIDs ≈ %.1f s - that is how often each signal refreshes. The CAN bus (500 kbit/s) is never the limit; the ELM327 serial round trip is.",
-                        observedGapMs,
-                        com.example.scheduler.PollCadence.reqPerSec(observedGapMs),
-                        livePids,
-                        com.example.scheduler.PollCadence.cycleSeconds(observedGapMs, livePids)
-                    )
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 10.sp
-            )
-        }
-    }
+    com.example.ui.components.PollingAccuracyCard(
+        currentMode = currentMode,
+        onModeSelected = onModeSelected,
+        observedGapMs = observedGapMs,
+        livePids = livePids,
+        initiallyExpanded = false
+    )
 }
 
 data class TelemetryItem(

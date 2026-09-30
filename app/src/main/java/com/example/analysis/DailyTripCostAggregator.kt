@@ -40,7 +40,9 @@ object DailyTripCostAggregator {
         val endFuelPercent: Double? = null,
         val fuelDeltaPercent: Double? = null,
         val isRefuelBrimEvent: Boolean = false,
-        val transactionCount: Int = 0
+        val transactionCount: Int = 0,
+        val startOdometerKm: Double? = null,
+        val endOdometerKm: Double? = null
     )
 
     data class DayTripItem(
@@ -65,7 +67,9 @@ object DailyTripCostAggregator {
         val riderNames: List<String>,
         val netTripCost: Double, // fuelCost - carpoolEarned
         val isTripProfit: Boolean,
-        val transactionCount: Int = 0
+        val transactionCount: Int = 0,
+        val startOdometerKm: Double? = null,
+        val endOdometerKm: Double? = null
     )
 
     data class DayTripGroup(
@@ -86,7 +90,9 @@ object DailyTripCostAggregator {
         val netCostPerKm: Double?,
         val grossCostPerKm: Double?,
         val tripCount: Int,
-        val trips: List<DayTripItem>
+        val trips: List<DayTripItem>,
+        val dayStartOdometerKm: Double? = null,
+        val dayEndOdometerKm: Double? = null
     )
 
     data class MonthPriceSummary(
@@ -214,7 +220,9 @@ object DailyTripCostAggregator {
                 riderNames = riderNames,
                 netTripCost = netCost,
                 isTripProfit = isProfit,
-                transactionCount = trip.transactionCount
+                transactionCount = trip.transactionCount,
+                startOdometerKm = trip.startOdometerKm,
+                endOdometerKm = trip.endOdometerKm
             )
         }
 
@@ -241,6 +249,9 @@ object DailyTripCostAggregator {
             val netCostPerKm = if (totalDistance > 0.05) netDayCost / totalDistance else null
             val grossCostPerKm = if (totalDistance > 0.05) totalFuelCost / totalDistance else null
 
+            val dayStartOdo = items.mapNotNull { it.startOdometerKm }.minOrNull()
+            val dayEndOdo = items.mapNotNull { it.endOdometerKm }.maxOrNull()
+
             DayTripGroup(
                 dateKey = dateKey,
                 displayDate = displayDate,
@@ -259,7 +270,9 @@ object DailyTripCostAggregator {
                 netCostPerKm = netCostPerKm,
                 grossCostPerKm = grossCostPerKm,
                 tripCount = items.size,
-                trips = items.sortedByDescending { it.startMs }
+                trips = items.sortedByDescending { it.startMs },
+                dayStartOdometerKm = dayStartOdo,
+                dayEndOdometerKm = dayEndOdo
             )
         }.sortedByDescending { it.dateKey }
 
