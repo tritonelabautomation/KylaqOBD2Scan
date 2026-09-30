@@ -2626,6 +2626,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private val _adapterBenchmarkReport = MutableStateFlow<com.example.discovery.AdapterBenchmarkReport?>(null)
+    val adapterBenchmarkReport: StateFlow<com.example.discovery.AdapterBenchmarkReport?> = _adapterBenchmarkReport
+
+    private val _isBenchmarkingAdapter = MutableStateFlow(false)
+    val isBenchmarkingAdapter: StateFlow<Boolean> = _isBenchmarkingAdapter
+
+    fun runAdapterBenchmark() {
+        val transport = activeTransport
+        if (transport == null || !transport.isConnected) {
+            _manualCommandError.value = "Connect to an OBD adapter before running hardware benchmark"
+            return
+        }
+
+        viewModelScope.launch {
+            _isBenchmarkingAdapter.value = true
+            _manualCommandError.value = null
+            try {
+                val report = com.example.discovery.AdapterCapabilityProfiler.runBenchmark(transport)
+                _adapterBenchmarkReport.value = report
+            } catch (e: Exception) {
+                _manualCommandError.value = "Benchmark failed: ${e.message}"
+            } finally {
+                _isBenchmarkingAdapter.value = false
+            }
+        }
+    }
+
     fun clearRawLog() {
         rawLogManager.clear()
     }
