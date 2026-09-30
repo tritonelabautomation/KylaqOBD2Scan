@@ -120,9 +120,8 @@ object FuelReceiptScanner {
                 }
         }
 
-    fun parseReceiptText(text: String, photoUri: String?): FuelReceiptData? {
+    fun parseReceiptText(text: String, photoUri: String? = null): FuelReceiptData? {
         if (text.isBlank()) return null
-        val lines = text.lines().map { it.trim() }.filter { it.isNotBlank() }
 
         var liters: Double? = null
         var pricePerL: Double? = null
@@ -134,47 +133,52 @@ object FuelReceiptScanner {
         // 1. Station Brand Matcher
         val fullTextUpper = text.uppercase()
         station = when {
-            fullTextUpper.contains("INDIAN OIL") || fullTextUpper.contains("IOCL") || fullTextUpper.contains("INDANE") -> "Indian Oil (IOCL)"
-            fullTextUpper.contains("HINDUSTAN PETROLEUM") || fullTextUpper.contains("HPCL") || fullTextUpper.contains("HP AUTO") -> "Hindustan Petroleum (HPCL)"
-            fullTextUpper.contains("BHARAT PETROLEUM") || fullTextUpper.contains("BPCL") || fullTextUpper.contains("SPEED") -> "Bharat Petroleum (BPCL)"
+            fullTextUpper.contains("INDIAN OIL") || fullTextUpper.contains("INDIANOIL") || fullTextUpper.contains("IOCL") || fullTextUpper.contains("INDANE") -> "IndianOil"
+            fullTextUpper.contains("HINDUSTAN PETROLEUM") || fullTextUpper.contains("HPCL") || fullTextUpper.contains("HP AUTO") -> "HPCL"
+            fullTextUpper.contains("BHARAT PETROLEUM") || fullTextUpper.contains("BPCL") -> "BPCL"
             fullTextUpper.contains("SHELL") -> "Shell"
             fullTextUpper.contains("JIO-BP") || fullTextUpper.contains("JIO BP") || fullTextUpper.contains("RELIANCE") -> "Jio-bp"
             fullTextUpper.contains("NAYARA") || fullTextUpper.contains("ESSAR") -> "Nayara Energy"
-            else -> null
+            else -> "Petrol Pump"
         }
 
         // 2. Fuel Grade Matcher
         grade = when {
-            fullTextUpper.contains("XP95") || fullTextUpper.contains("XP 95") -> "X95"
-            fullTextUpper.contains("POWER95") || fullTextUpper.contains("POWER 95") || fullTextUpper.contains("POWER") -> "X95"
-            fullTextUpper.contains("SPEED97") || fullTextUpper.contains("SPEED 97") || fullTextUpper.contains("SPEED") -> "X95"
-            fullTextUpper.contains("PETROL") || fullTextUpper.contains("MOTOR SPIRIT") || fullTextUpper.contains("MS") -> "REGULAR"
+            fullTextUpper.contains("POWER 95") || fullTextUpper.contains("POWER95") -> "POWER 95"
+            fullTextUpper.contains("XP95") || fullTextUpper.contains("XP 95") -> "XP95"
+            fullTextUpper.contains("SPEED 97") || fullTextUpper.contains("SPEED97") -> "SPEED 97"
+            fullTextUpper.contains("SPEED") -> "Speed"
+            fullTextUpper.contains("POWER") -> "Power"
+            fullTextUpper.contains("X95") -> "X95"
+            fullTextUpper.contains("PETROL") || fullTextUpper.contains("MOTOR SPIRIT") || fullTextUpper.contains("MS") || fullTextUpper.contains("UNLEADED") -> "Regular Petrol"
+            fullTextUpper.contains("DIESEL") || fullTextUpper.contains("HSD") -> "Diesel"
             else -> "X95"
         }
 
         // 3. Nozzle Number Matcher (e.g., "Nozzle : 02", "Nozzle No: 4", "NZ: 3", "Pump: 2")
-        val nozzlePattern = Pattern.compile("(?i)(?:nozzle|pump|nz|bay)[\\s:#._-]*([0-9]{1,2})")
+        val nozzlePattern = Pattern.compile("(?i)(?:nozzle\\s*no|nozzle|pump\\s*no|pump|nz|bay)[\\s:#._-]*([0-9]{1,2})")
         val nozzleMatcher = nozzlePattern.matcher(text)
         if (nozzleMatcher.find()) {
-            nozzle = "Nozzle #${nozzleMatcher.group(1)}"
+            val num = nozzleMatcher.group(1)?.toIntOrNull()
+            nozzle = if (num != null) "Nozzle #$num" else "Nozzle #${nozzleMatcher.group(1)}"
         }
 
         // 4. Volume / Liters Matcher (e.g. "Volume: 38.54", "Qty: 35.20 Ltr", "38.54 L")
-        val volumePattern = Pattern.compile("(?i)(?:volume|qty|quantity|litres|ltrs|vol)[\\s:#._-]*([0-9]{1,3}(?:\\.[0-9]{1,3})?)")
+        val volumePattern = Pattern.compile("(?i)(?:volume|qty\\s*\\(l\\)|qty|quantity|litres|ltrs|vol\\s*\\(l\\)|vol)[\\s:#._-]*([0-9]{1,3}(?:\\.[0-9]{1,3})?)")
         val volumeMatcher = volumePattern.matcher(text)
         if (volumeMatcher.find()) {
             liters = volumeMatcher.group(1)?.toDoubleOrNull()
         }
 
         // 5. Rate / Price per Liter Matcher (e.g. "Rate: 107.50", "Price/Ltr: 115.72", "₹107.50")
-        val ratePattern = Pattern.compile("(?i)(?:rate|price\\/ltr|unit\\s*price|price\\/l|rsp)[\\s:#._-]*₹?\\s*([0-9]{2,3}(?:\\.[0-9]{1,2})?)")
+        val ratePattern = Pattern.compile("(?i)(?:rate\\/l|rate|price\\/ltr|price\\/l|price|unit\\s*price|rsp)[\\s:#._-]*₹?\\s*(?:rs\\.?\\s*)?([0-9]{2,3}(?:\\.[0-9]{1,2})?)")
         val rateMatcher = ratePattern.matcher(text)
         if (rateMatcher.find()) {
             pricePerL = rateMatcher.group(1)?.toDoubleOrNull()
         }
 
         // 6. Total Amount Matcher (e.g. "Amount: 4144.00", "Total: 4144", "Net Amount: 3500.00")
-        val amountPattern = Pattern.compile("(?i)(?:amount|total|net\\s*amt|sale)[\\s:#._-]*₹?\\s*([0-9]{3,6}(?:\\.[0-9]{1,2})?)")
+        val amountPattern = Pattern.compile("(?i)(?:net\\s*amount|total\\s*sale|amount|total|net\\s*amt|sale)[\\s:#._-]*₹?\\s*(?:rs\\.?\\s*)?([0-9]{3,6}(?:\\.[0-9]{1,2})?)")
         val amountMatcher = amountPattern.matcher(text)
         if (amountMatcher.find()) {
             totalAmount = amountMatcher.group(1)?.toDoubleOrNull()
