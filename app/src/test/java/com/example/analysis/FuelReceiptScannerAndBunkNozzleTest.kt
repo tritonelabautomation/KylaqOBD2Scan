@@ -27,12 +27,13 @@ class FuelReceiptScannerAndBunkNozzleTest {
         val parsed = FuelReceiptScanner.parseReceiptText(receiptOcrText)
 
         assertNotNull(parsed)
-        assertEquals(38.54, parsed.litres!!, 0.001)
-        assertEquals(108.50, parsed.pricePerL!!, 0.001)
-        assertEquals(4181.59, parsed.totalAmount!!, 0.01)
-        assertEquals("HPCL", parsed.stationName)
-        assertEquals("POWER 95", parsed.fuelGrade)
-        assertEquals("Nozzle #2", parsed.nozzle)
+        val p = checkNotNull(parsed)
+        assertEquals(38.54, p.litres!!, 0.001)
+        assertEquals(108.50, p.pricePerL!!, 0.001)
+        assertEquals(4181.59, p.totalAmount!!, 0.01)
+        assertEquals("HPCL", p.stationName)
+        assertEquals("POWER 95", p.fuelGrade)
+        assertEquals("Nozzle #2", p.nozzle)
     }
 
     @Test
@@ -51,12 +52,13 @@ class FuelReceiptScannerAndBunkNozzleTest {
         val parsed = FuelReceiptScanner.parseReceiptText(receiptOcrText)
 
         assertNotNull(parsed)
-        assertEquals(42.10, parsed.litres!!, 0.001)
-        assertEquals(109.20, parsed.pricePerL!!, 0.001)
-        assertEquals(4597.32, parsed.totalAmount!!, 0.01)
-        assertEquals("IndianOil", parsed.stationName)
-        assertEquals("XP95", parsed.fuelGrade)
-        assertEquals("Nozzle #4", parsed.nozzle)
+        val p = checkNotNull(parsed)
+        assertEquals(42.10, p.litres!!, 0.001)
+        assertEquals(109.20, p.pricePerL!!, 0.001)
+        assertEquals(4597.32, p.totalAmount!!, 0.01)
+        assertEquals("IndianOil", p.stationName)
+        assertEquals("XP95", p.fuelGrade)
+        assertEquals("Nozzle #4", p.nozzle)
     }
 
     @Test
@@ -74,11 +76,12 @@ class FuelReceiptScannerAndBunkNozzleTest {
         val parsed = FuelReceiptScanner.parseReceiptText(receiptOcrText)
 
         assertNotNull(parsed)
-        assertEquals(25.00, parsed.litres!!, 0.001)
-        assertEquals(114.80, parsed.pricePerL!!, 0.001)
-        assertEquals(2870.00, parsed.totalAmount!!, 0.01)
-        assertEquals("Shell", parsed.stationName)
-        assertEquals("Nozzle #1", parsed.nozzle)
+        val p = checkNotNull(parsed)
+        assertEquals(25.00, p.litres!!, 0.001)
+        assertEquals(114.80, p.pricePerL!!, 0.001)
+        assertEquals(2870.00, p.totalAmount!!, 0.01)
+        assertEquals("Shell", p.stationName)
+        assertEquals("Nozzle #1", p.nozzle)
     }
 
     @Test
