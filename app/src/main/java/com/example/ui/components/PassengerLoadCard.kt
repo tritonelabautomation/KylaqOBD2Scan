@@ -48,6 +48,10 @@ import com.example.ui.theme.TextSecondaryDark
 import com.example.ui.theme.WarningRed
 import java.util.Locale
 
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.filled.ElectricBolt
+import androidx.compose.material.icons.filled.DirectionsCar
+
 /**
  * Passenger Load, Engine Work & Transmission Shift Dynamics Card.
  *
@@ -55,12 +59,14 @@ import java.util.Locale
  * 1. Occupant payload and vehicle operating mass.
  * 2. Specific fuel burn (L / tonne·100km & L / pax·100km).
  * 3. Engine torque demand, turbo boost time and thermal load.
- * 4. AQ250 transmission shift RPM profile (Eco vs Normal vs Sport/Load ~3k RPM).
+ * 4. AQ250 transmission shift RPM profile with Manual D / S Flip Switch.
  * 5. Authentic EA211 Overkill & Health Verdict.
  */
 @Composable
 fun PassengerLoadCard(
     result: PassengerLoadAnalyzer.Result,
+    selectedMode: String? = null,
+    onModeChange: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     Card(
@@ -248,12 +254,84 @@ fun PassengerLoadCard(
                     border = androidx.compose.foundation.BorderStroke(1.dp, badgeColor.copy(alpha = 0.35f))
                 ) {
                     Text(
-                        text = sp.detectedMode,
+                        text = sp.detectedMode + if (selectedMode != null) " (MANUAL)" else "",
                         color = badgeColor,
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                     )
+                }
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // Manual Drive Mode Selector Flip Switch (D vs S Mode)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(DarkSurfaceElevated, RoundedCornerShape(8.dp))
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                val isDActive = sp.detectedMode == "DRIVE (D)" || sp.detectedMode == "ECO (D)"
+                val isSActive = sp.detectedMode == "SPORT (S)"
+
+                Surface(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { onModeChange?.invoke("DRIVE (D)") },
+                    shape = RoundedCornerShape(6.dp),
+                    color = if (isDActive) CyberCyan.copy(alpha = 0.22f) else Color.Transparent,
+                    border = if (isDActive) androidx.compose.foundation.BorderStroke(1.dp, CyberCyan.copy(alpha = 0.8f)) else null
+                ) {
+                    Row(
+                        modifier = Modifier.padding(vertical = 6.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.DirectionsCar,
+                            contentDescription = null,
+                            tint = if (isDActive) CyberCyan else TextSecondaryDark,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "D - DRIVE",
+                            color = if (isDActive) CyberCyan else TextSecondaryDark,
+                            fontWeight = if (isDActive) FontWeight.Bold else FontWeight.Medium,
+                            fontSize = 11.sp
+                        )
+                    }
+                }
+
+                Surface(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { onModeChange?.invoke("SPORT (S)") },
+                    shape = RoundedCornerShape(6.dp),
+                    color = if (isSActive) ElectricAmber.copy(alpha = 0.22f) else Color.Transparent,
+                    border = if (isSActive) androidx.compose.foundation.BorderStroke(1.dp, ElectricAmber.copy(alpha = 0.8f)) else null
+                ) {
+                    Row(
+                        modifier = Modifier.padding(vertical = 6.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ElectricBolt,
+                            contentDescription = null,
+                            tint = if (isSActive) ElectricAmber else TextSecondaryDark,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "S - SPORT",
+                            color = if (isSActive) ElectricAmber else TextSecondaryDark,
+                            fontWeight = if (isSActive) FontWeight.Bold else FontWeight.Medium,
+                            fontSize = 11.sp
+                        )
+                    }
                 }
             }
             Spacer(modifier = Modifier.height(6.dp))

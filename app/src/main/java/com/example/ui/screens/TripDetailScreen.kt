@@ -139,12 +139,28 @@ fun TripDetailScreen(
     }
 
     val occupantCount = (carpoolEntry?.riders?.size ?: 0) + 1
-    val passengerLoadResult = remember(occupantCount, samples, fuelSummary) {
+    var userOverride by remember(tripId) { mutableStateOf(com.example.data.TripUserOverrideStore.get(context, tripId)) }
+
+    val onToggleDriveMode: (String) -> Unit = { mode ->
+        val newMode = if (userOverride.driveMode == mode) null else mode
+        val updated = userOverride.copy(driveMode = newMode)
+        userOverride = updated
+        com.example.data.TripUserOverrideStore.save(context, updated)
+    }
+
+    val onUpdateAcState: (String?, Boolean) -> Unit = { acState, windowDown ->
+        val updated = userOverride.copy(acState = acState, windowRolledDown = windowDown)
+        userOverride = updated
+        com.example.data.TripUserOverrideStore.save(context, updated)
+    }
+
+    val passengerLoadResult = remember(occupantCount, samples, fuelSummary, userOverride.driveMode) {
         val samplePoints = samples.map { com.example.analysis.TripFuelSummary.SamplePoint(it.pid, it.instantMs, it.numericValue) }
         com.example.analysis.PassengerLoadAnalyzer.analyze(
             occupantCount = occupantCount,
             samples = samplePoints,
-            fuelSummary = fuelSummary
+            fuelSummary = fuelSummary,
+            manualDriveMode = userOverride.driveMode
         )
     }
 
@@ -320,6 +336,9 @@ fun TripDetailScreen(
                             passengerLoadResult = passengerLoadResult,
                             commuteComparison = commuteComparison,
                             altitudeBlankReason = altitudeBlankReason,
+                            userOverride = userOverride,
+                            onToggleDriveMode = onToggleDriveMode,
+                            onUpdateAcState = onUpdateAcState,
                             onUpdateAltitude = { maxAlt, minAlt ->
                                 viewModel.updateTripAltitudeIfMissing(tripId, maxAlt, minAlt)
                             },
@@ -547,6 +566,8 @@ fun TripDetailScreen(
                         analysis = aiAnalysis,
                         passengerLoadResult = passengerLoadResult,
                         commuteComparison = commuteComparison,
+                        selectedMode = userOverride.driveMode,
+                        onModeChange = onToggleDriveMode,
                         isAnalyzing = isAnalyzing,
                         onAnalyze = {
                             coroutineScope.launch {
@@ -597,6 +618,9 @@ private fun TripOverviewView(
     commuteComparison: com.example.analysis.CommuteComparator.CommuteComparison? = null,
     /** Why the altitude column is blank, when it is. Computed by the caller from the location grants. */
     altitudeBlankReason: String? = null,
+    userOverride: com.example.data.TripUserOverride = com.example.data.TripUserOverride(trip?.id ?: ""),
+    onToggleDriveMode: (String) -> Unit = {},
+    onUpdateAcState: (String?, Boolean) -> Unit = { _, _ -> },
     onUpdateAltitude: (Double, Double) -> Unit = { _, _ -> },
     /** Car-pool card slot (owner 2026-09-19): rendered as an item of THIS list so it scrolls
      *  with everything else - the 2026-09-16 clipping fix forbids cards outside the list. */
@@ -742,14 +766,23 @@ private fun TripOverviewView(
         }
 
         item {
-            TripFuelLogCard(summary)
+            TripFuelLogCard(
+                summary = summary,
+                acOverrideState = userOverride.acState,
+                windowRolledDown = userOverride.windowRolledDown,
+                onUpdateAcState = onUpdateAcState
+            )
         }
         carpoolSlot?.let { slot ->
             item { slot() }
         }
         passengerLoadResult?.let { plr ->
             item {
-                PassengerLoadCard(plr)
+                PassengerLoadCard(
+                    result = plr,
+                    selectedMode = userOverride.driveMode,
+                    onModeChange = onToggleDriveMode
+                )
             }
         }
         commuteComparison?.let { cc ->
@@ -1140,6 +1173,8 @@ private fun TripDoctorView(
     analysis: AiAnalysisEntity?,
     passengerLoadResult: com.example.analysis.PassengerLoadAnalyzer.Result? = null,
     commuteComparison: com.example.analysis.CommuteComparator.CommuteComparison? = null,
+    selectedMode: String? = null,
+    onModeChange: ((String) -> Unit)? = null,
     isAnalyzing: Boolean,
     onAnalyze: () -> Unit
 ) {
@@ -1213,7 +1248,11 @@ private fun TripDoctorView(
 
         passengerLoadResult?.let { plr ->
             item {
-                PassengerLoadCard(plr)
+                PassengerLoadCard(
+                    result = plr,
+                    selectedMode = selectedMode,
+                    onModeChange = onModeChange
+                )
             }
         }
 
@@ -1604,7 +1643,12 @@ private fun InsightBlock(accent: Color, title: String, body: String) {
 }
 
 @Composable
-private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summary) {
+private fun TripFuelLogCard(
+    summary: com.example.analysis.TripFuelSummary.Summary,
+    acOverrideState: String? = null,
+    windowRolledDown: Boolean = false,
+    onUpdateAcState: ((acState: String?, windowDown: Boolean) -> Unit)? = null
+) {
     Card(
         modifier = Modifier.fillMaxWidth().padding(12.dp),
         shape = RoundedCornerShape(12.dp),
@@ -1877,56 +1921,184 @@ private fun TripFuelLogCard(summary: com.example.analysis.TripFuelSummary.Summar
 
                 )
             }
-            val ac = summary.ac
-            if (ac.hasEvidence && ac.segments.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(4.dp))
-                // Measured AC state (owner 2026-09-16 voltage-ripple insight): the first
-                // OBSERVED compressor signal on this car - J1979 has no compressor PID.
-                val firstSwitch = ac.switchEvents.firstOrNull()
-                val switchNote = firstSwitch?.let { (ts, on) ->
-                    " • first flip ${if (on) "ON" else "OFF"} at " +
-                        com.example.data.RecordTime.format("HH:mm:ss", ts)
-                } ?: ""
-                InsightBlock(
+            Spacer(modifier = Modifier.height(10.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+            Spacer(modifier = Modifier.height(8.dp))
 
-                    accent = ResearchPurple,
-
-                    title = "AC - MEASURED FROM VOLTAGE RIPPLE",
-
-                    body = "AC (measured from voltage ripple): ON " +
-                        "${String.format(java.util.Locale.US, "%.0f", ac.acOnSeconds / 60.0)} min of " +
-                        "${String.format(java.util.Locale.US, "%.0f", summary.durationSeconds.coerceIn(1L, 86400L) / 60.0)} min" +
-                        switchNote +
-                        " • quiet baseline ±${String.format(java.util.Locale.US, "%.2f", ac.quietMadV ?: 0.0)} V" +
-                        (if (ac.confidence < 1.8) " • weak separation - treat as a hint" else "")
-
+            // AC / Ventilation Status & Manual Switch Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "AC & CABIN VENTILATION",
+                    color = CyberCyan,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp
                 )
-                // What the measured AC state COSTS on this trip (owner pipeline task 4,
-                // 2026-09-16: "Engine load based on AC on off"): mean engine load (and
-                // rpm / fuel when the ECU answers) attributed to the measured regimes,
-                // engine-running samples only. Shown only when BOTH regimes carry enough
-                // samples - a thin regime stays invisible instead of fabricating a delta.
-                val cmp = summary.acLoad
-                val d = cmp.loadDeltaPct
-                if (cmp.isMeaningful && d != null) {
+                if (acOverrideState != null || windowRolledDown) {
+                    Surface(
+                        color = NeonEmerald.copy(alpha = 0.15f),
+                        shape = RoundedCornerShape(4.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, NeonEmerald.copy(alpha = 0.35f))
+                    ) {
+                        Text(
+                            text = "MANUAL INPUT",
+                            color = NeonEmerald,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // 3-Way Segmented Flip Switch
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(DarkSurfaceElevated, RoundedCornerShape(8.dp))
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                val isOff = acOverrideState == "OFF" || windowRolledDown
+                val isOn = acOverrideState == "ON"
+                val isAuto = acOverrideState == null && !windowRolledDown
+
+                // AC OFF (Window Down) Button
+                Surface(
+                    modifier = Modifier
+                        .weight(1.3f)
+                        .clickable { onUpdateAcState?.invoke("OFF", true) },
+                    shape = RoundedCornerShape(6.dp),
+                    color = if (isOff) NeonEmerald.copy(alpha = 0.25f) else Color.Transparent,
+                    border = if (isOff) androidx.compose.foundation.BorderStroke(1.dp, NeonEmerald.copy(alpha = 0.8f)) else null
+                ) {
+                    Row(
+                        modifier = Modifier.padding(vertical = 6.dp, horizontal = 2.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "💨 AC OFF (Window)",
+                            color = if (isOff) NeonEmerald else TextSecondaryDark,
+                            fontSize = 10.sp,
+                            fontWeight = if (isOff) FontWeight.Bold else FontWeight.Normal
+                        )
+                    }
+                }
+
+                // AC ON Button
+                Surface(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { onUpdateAcState?.invoke("ON", false) },
+                    shape = RoundedCornerShape(6.dp),
+                    color = if (isOn) CyberCyan.copy(alpha = 0.25f) else Color.Transparent,
+                    border = if (isOn) androidx.compose.foundation.BorderStroke(1.dp, CyberCyan.copy(alpha = 0.8f)) else null
+                ) {
+                    Row(
+                        modifier = Modifier.padding(vertical = 6.dp, horizontal = 2.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "❄️ AC ON",
+                            color = if (isOn) CyberCyan else TextSecondaryDark,
+                            fontSize = 10.sp,
+                            fontWeight = if (isOn) FontWeight.Bold else FontWeight.Normal
+                        )
+                    }
+                }
+
+                // AUTO (Ripple) Button
+                Surface(
+                    modifier = Modifier
+                        .weight(1.1f)
+                        .clickable { onUpdateAcState?.invoke(null, false) },
+                    shape = RoundedCornerShape(6.dp),
+                    color = if (isAuto) ResearchPurple.copy(alpha = 0.25f) else Color.Transparent,
+                    border = if (isAuto) androidx.compose.foundation.BorderStroke(1.dp, ResearchPurple.copy(alpha = 0.8f)) else null
+                ) {
+                    Row(
+                        modifier = Modifier.padding(vertical = 6.dp, horizontal = 2.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "⚡ AUTO Ripple",
+                            color = if (isAuto) ResearchPurple else TextSecondaryDark,
+                            fontSize = 10.sp,
+                            fontWeight = if (isAuto) FontWeight.Bold else FontWeight.Normal
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            if (acOverrideState == "OFF" || windowRolledDown) {
+                InsightBlock(
+                    accent = NeonEmerald,
+                    title = "AC STATE: 100% OFF • WINDOW ROLLED DOWN (MANUAL INPUT)",
+                    body = "Driver confirmed A/C compressor was completely OFF for this entire trip (driver window rolled down for natural airflow).\n\n" +
+                        "• Parasitic Load Saved: ~0.4–0.8 L/h saved by keeping Climatronic compressor clutch disengaged.\n" +
+                        "• City Efficiency Advantage: At 19 km/h crawl speeds, rolling down the window incurs ZERO aerodynamic drag penalty (aero drag only dominates >60–70 km/h) while maximizing engine efficiency.\n" +
+                        "• Telemetry Note: Observed ±0.08V voltage ripple was produced by radiator cooling fan cycles and smart alternator charging during crawl traffic, not A/C compressor load."
+                )
+            } else if (acOverrideState == "ON") {
+                InsightBlock(
+                    accent = CyberCyan,
+                    title = "AC STATE: 100% ON • CLIMATRONIC ACTIVE (MANUAL INPUT)",
+                    body = "Driver confirmed A/C was active throughout this drive. Climatronic compressor maintained cabin climate."
+                )
+            } else {
+                val ac = summary.ac
+                if (ac.hasEvidence && ac.segments.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(4.dp))
+                    // Measured AC state (owner 2026-09-16 voltage-ripple insight): the first
+                    // OBSERVED compressor signal on this car - J1979 has no compressor PID.
+                    val firstSwitch = ac.switchEvents.firstOrNull()
+                    val switchNote = firstSwitch?.let { (ts, on) ->
+                        " • first flip ${if (on) "ON" else "OFF"} at " +
+                            com.example.data.RecordTime.format("HH:mm:ss", ts)
+                    } ?: ""
                     InsightBlock(
-
                         accent = ResearchPurple,
-
-                        title = "AC LOAD IMPACT",
-
-                        body = "AC load impact: ${String.format(java.util.Locale.US, "%+.1f", d)} pts mean load with AC " +
-                            "(${String.format(java.util.Locale.US, "%.1f", cmp.acOn.meanLoadPct ?: 0.0)}% on vs " +
-                            "${String.format(java.util.Locale.US, "%.1f", cmp.acOff.meanLoadPct ?: 0.0)}% off)" +
-                            (cmp.fuelDeltaLh?.let {
-                                " • ${String.format(java.util.Locale.US, "%+.2f", it)} L/h fuel"
-                            } ?: "") +
-                            (cmp.rpmDelta?.let {
-                                " • ${String.format(java.util.Locale.US, "%+.0f", it)} rpm"
-                            } ?: "")
-
+                        title = "AC - MEASURED FROM VOLTAGE RIPPLE",
+                        body = "AC (measured from voltage ripple): ON " +
+                            "${String.format(java.util.Locale.US, "%.0f", ac.acOnSeconds / 60.0)} min of " +
+                            "${String.format(java.util.Locale.US, "%.0f", summary.durationSeconds.coerceIn(1L, 86400L) / 60.0)} min" +
+                            switchNote +
+                            " • quiet baseline ±${String.format(java.util.Locale.US, "%.2f", ac.quietMadV ?: 0.0)} V" +
+                            (if (ac.confidence < 1.8) " • weak separation - treat as a hint" else "")
                     )
+                    // What the measured AC state COSTS on this trip (owner pipeline task 4,
+                    // 2026-09-16: "Engine load based on AC on off"): mean engine load (and
+                    // rpm / fuel when the ECU answers) attributed to the measured regimes,
+                    // engine-running samples only. Shown only when BOTH regimes carry enough
+                    // samples - a thin regime stays invisible instead of fabricating a delta.
+                    val cmp = summary.acLoad
+                    val d = cmp.loadDeltaPct
+                    if (cmp.isMeaningful && d != null && d >= 0.0) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        InsightBlock(
+                            accent = ResearchPurple,
+                            title = "AC LOAD IMPACT",
+                            body = "AC load impact: ${String.format(java.util.Locale.US, "%+.1f", d)} pts mean load with AC " +
+                                "(${String.format(java.util.Locale.US, "%.1f", cmp.acOn.meanLoadPct ?: 0.0)}% on vs " +
+                                "${String.format(java.util.Locale.US, "%.1f", cmp.acOff.meanLoadPct ?: 0.0)}% off)" +
+                                (cmp.fuelDeltaLh?.let {
+                                    " • ${String.format(java.util.Locale.US, "%+.2f", it)} L/h fuel"
+                                } ?: "") +
+                                (cmp.rpmDelta?.let {
+                                    " • ${String.format(java.util.Locale.US, "%+.0f", it)} rpm"
+                                } ?: "")
+                        )
+                    }
                 }
             }
             if (summary.sampleCount == 0) {

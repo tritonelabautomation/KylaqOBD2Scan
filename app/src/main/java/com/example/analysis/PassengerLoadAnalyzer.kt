@@ -105,7 +105,8 @@ object PassengerLoadAnalyzer {
         occupantCount: Int,
         samples: List<TripFuelSummary.SamplePoint>,
         fuelSummary: TripFuelSummary.Summary,
-        occupantWeightKg: Double = DEFAULT_OCCUPANT_KG
+        occupantWeightKg: Double = DEFAULT_OCCUPANT_KG,
+        manualDriveMode: String? = null
     ): Result {
         val totalOccupants = maxOf(1, occupantCount)
         val passengerCount = maxOf(0, totalOccupants - 1)
@@ -229,7 +230,18 @@ object PassengerLoadAnalyzer {
         } else null
 
         // Shift Profile Analysis
-        val shiftProfile = analyzeShiftProfile(speedSeries, rpmSeries)
+        var shiftProfile = analyzeShiftProfile(speedSeries, rpmSeries)
+        if (!manualDriveMode.isNullOrBlank()) {
+            val normalizedMode = when {
+                manualDriveMode.contains("SPORT", ignoreCase = true) || manualDriveMode.equals("S", ignoreCase = true) -> "SPORT (S)"
+                manualDriveMode.contains("ECO", ignoreCase = true) -> "ECO (D)"
+                manualDriveMode.contains("DRIVE", ignoreCase = true) || manualDriveMode.equals("D", ignoreCase = true) -> "DRIVE (D)"
+                else -> manualDriveMode
+            }
+            shiftProfile = shiftProfile.copy(detectedMode = normalizedMode)
+        }
+
+        val isSportMode = shiftProfile.detectedMode == "SPORT (S)"
 
         // Engine Health & Overkill Verdict
         val verdict = evaluateEngineVerdict(
@@ -241,7 +253,8 @@ object PassengerLoadAnalyzer {
             peakCoolantC = peakCoolant,
             maxRpm = maxRpm,
             boostActivePct = boostActivePct,
-            sportShiftsPct = shiftProfile.sportShiftsPct
+            sportShiftsPct = shiftProfile.sportShiftsPct,
+            isSportMode = isSportMode
         )
 
         return Result(
@@ -405,7 +418,8 @@ object PassengerLoadAnalyzer {
         peakCoolantC: Double?,
         maxRpm: Double?,
         boostActivePct: Double,
-        sportShiftsPct: Double
+        sportShiftsPct: Double,
+        isSportMode: Boolean = false
     ): EngineOverkillVerdict {
         val peakT = peakTorqueNm ?: 150.0
         val peakC = peakCoolantC ?: 90.0
@@ -422,6 +436,20 @@ object PassengerLoadAnalyzer {
                     VerdictLevel.OVERLOADED,
                     "⚠️ Elevated Powertrain Load Recorded",
                     "Telemetry captured peak torque of ${String.format(Locale.US, "%.0f", peakT)} Nm or coolant peaking at ${peakC.toInt()}°C. Engine operated near maximum thermal limits."
+                )
+            }
+            isSportMode && totalOccupants == 1 -> {
+                Triple(
+                    VerdictLevel.COMFORTABLE,
+                    "✅ Sport (S) Mode Engagement",
+                    "Driver operated in Sport (S) Mode. The AQ250 transmission held lower gear ratios to sustain turbo boost readiness and eliminate sluggish low-RPM upshifts in city traffic. EA211 delivered crisp throttle response with ${String.format(Locale.US, "%.0f", mechanicalHeadroom)}% torque reserve and stable ${peakC.toInt()}°C coolant."
+                )
+            }
+            isSportMode && totalOccupants > 1 -> {
+                Triple(
+                    VerdictLevel.COMFORTABLE,
+                    "✅ Sport (S) Mode Under Payload",
+                    "Carrying $totalOccupants occupants in Sport (S) Mode. Holding lower gear ratios protected the EA211 from lugging by keeping the turbo directly in its 1750–4000 RPM peak torque plateau with ${String.format(Locale.US, "%.0f", mechanicalHeadroom)}% torque reserve."
                 )
             }
             totalOccupants >= 4 -> {

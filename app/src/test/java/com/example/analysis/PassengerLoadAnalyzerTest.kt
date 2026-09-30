@@ -171,4 +171,35 @@ class PassengerLoadAnalyzerTest {
         assertEquals(0.0, result.payloadMassIncreasePct, 1e-3)
         assertEquals(PassengerLoadAnalyzer.VerdictLevel.COMFORTABLE, result.verdict.level)
     }
+
+    @Test
+    fun `manual drive mode override updates detectedMode and verdict to Sport S mode`() {
+        val summary = TripFuelSummary.Summary(
+            fuelLiters = 2.71,
+            distanceKm = 31.4,
+            kmPerLiter = 11.6,
+            durationSeconds = 5900L,
+            averageSpeedKmh = 19.0,
+            movingAverageSpeedKmh = 22.0,
+            maxSpeedKmh = 69.0,
+            coastSeconds = 100.0,
+            idleSeconds = 400.0,
+            speedHistogram = emptyList(),
+            sampleCount = 100,
+            meanTorqueNm = 26.0,
+            peakTorqueNm = 163.0,
+            torqueReferenceNm = 175.0
+        )
+
+        val result = PassengerLoadAnalyzer.analyze(
+            occupantCount = 1,
+            samples = emptyList(),
+            fuelSummary = summary,
+            manualDriveMode = "SPORT (S)"
+        )
+
+        assertEquals("SPORT (S)", result.shiftProfile.detectedMode)
+        assertTrue(result.verdict.headline.contains("Sport (S)"))
+        assertTrue(result.verdict.explanation.contains("Sport (S)"))
+    }
 }
