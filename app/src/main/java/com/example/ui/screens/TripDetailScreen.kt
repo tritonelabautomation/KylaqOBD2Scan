@@ -320,6 +320,9 @@ fun TripDetailScreen(
                             passengerLoadResult = passengerLoadResult,
                             commuteComparison = commuteComparison,
                             altitudeBlankReason = altitudeBlankReason,
+                            onUpdateAltitude = { maxAlt, minAlt ->
+                                viewModel.updateTripAltitudeIfMissing(tripId, maxAlt, minAlt)
+                            },
                             carpoolSlot = {
                                 CarpoolCard(
                                     entry = carpoolEntry,
@@ -502,17 +505,23 @@ fun TripDetailScreen(
                     }
                 }
                 TripDetailTab.TRENDS -> {
+                    val trendRoutePts = remember(tripId) {
+                        val sessionDir = File(context.filesDir, "recordings/session_$tripId")
+                        val routeFile = File(sessionDir, "${tripId}_route.csv")
+                        if (routeFile.exists()) com.example.data.GpxExporter.readRoutePointsFromCsv(routeFile) else emptyList()
+                    }
                     TripTrendsView(
                         samples = samples,
+                        routePoints = trendRoutePts,
                         selectedPids = selectedTrendPids,
                         // Only the Altitude channel gets the permission explanation: naming it while
                         // the owner is looking at torque or coolant would be a lie about that series.
                         altitudeEmptyHint =
                             if (selectedTrendPids == listOf(com.example.analysis.TripTrendAnalyzer.PID_ALTITUDE_GPS) &&
-                                samples.none { it.altitudeM != null }
+                                samples.none { it.altitudeM != null } && trendRoutePts.none { it.altitudeM != null }
                             ) {
                                 com.example.service.BackgroundLocationPolicy.altitudeBlankReason(
-                                    bgLocationState, samples.minOfOrNull { it.instantMs }
+                                    bgLocationState, samples.minOfOrNull { it.instantMs } ?: trendRoutePts.minOfOrNull { it.timeMs }
                                 )
                             } else {
                                 null
@@ -587,6 +596,7 @@ private fun TripOverviewView(
     commuteComparison: com.example.analysis.CommuteComparator.CommuteComparison? = null,
     /** Why the altitude column is blank, when it is. Computed by the caller from the location grants. */
     altitudeBlankReason: String? = null,
+    onUpdateAltitude: (Double, Double) -> Unit = { _, _ -> },
     /** Car-pool card slot (owner 2026-09-19): rendered as an item of THIS list so it scrolls
      *  with everything else - the 2026-09-16 clipping fix forbids cards outside the list. */
     carpoolSlot: (@Composable () -> Unit)? = null,
@@ -646,6 +656,16 @@ private fun TripOverviewView(
         val sessionDir = File(context.filesDir, "recordings/session_${trip.id}")
         val routeFile = File(sessionDir, "${trip.id}_route.csv")
         if (routeFile.exists()) com.example.data.GpxExporter.readRoutePointsFromCsv(routeFile) else emptyList()
+    }
+
+    val validGpsAlts = remember(gpsPoints) { gpsPoints.mapNotNull { it.altitudeM } }
+    val effectiveMaxAlt = trip.maxAltitudeM ?: validGpsAlts.maxOrNull()
+    val effectiveMinAlt = trip.minAltitudeM ?: validGpsAlts.minOrNull()
+
+    LaunchedEffect(trip.id, effectiveMaxAlt, effectiveMinAlt) {
+        if ((trip.maxAltitudeM == null || trip.minAltitudeM == null) && effectiveMaxAlt != null && effectiveMinAlt != null) {
+            onUpdateAltitude(effectiveMaxAlt, effectiveMinAlt)
+        }
     }
 
     LazyColumn(
@@ -751,9 +771,9 @@ private fun TripOverviewView(
                 summary = summary,
                 pricePerL = pricePerL,
                 speedPoints = speedPoints,
-                maxAltitudeM = trip.maxAltitudeM,
-                minAltitudeM = trip.minAltitudeM,
-                altitudeBlankReason = if (trip.maxAltitudeM == null) altitudeBlankReason else null
+                maxAltitudeM = effectiveMaxAlt,
+                minAltitudeM = effectiveMinAlt,
+                altitudeBlankReason = if (effectiveMaxAlt == null) altitudeBlankReason else null
             )
         }
         item {
@@ -910,6 +930,7 @@ private data class TrendChannel(
 @Composable
 private fun TripTrendsView(
     samples: List<TelemetrySampleEntity>,
+    routePoints: List<com.example.data.GpxExporter.RoutePoint> = emptyList(),
     selectedPids: List<String>,
     onTogglePid: (String) -> Unit,
     /** Shown under the empty chart only when the Altitude channel is the one with nothing to draw. */
@@ -974,11 +995,18 @@ private fun TripTrendsView(
                 value = { it.numericValue }
             )
         } else if (ch.pid == com.example.analysis.TripTrendAnalyzer.PID_ALTITUDE_GPS) {
-            com.example.analysis.TripTrendAnalyzer.altitudePoints(
+            val fromSamples = com.example.analysis.TripTrendAnalyzer.altitudePoints(
                 samples,
                 timestamp = { it.instantMs },
                 altitudeM = { it.altitudeM }
             )
+            if (fromSamples.size >= 2) {
+                fromSamples
+            } else {
+                routePoints.filter { it.altitudeM != null && it.timeMs > 0L }
+                    .map { it.timeMs to it.altitudeM!! }
+                    .sortedBy { it.first }
+            }
         } else {
             val valid = samples.filter { it.instantMs in com.example.data.RecordTime.MIN_PLAUSIBLE_EPOCH_MS..com.example.data.RecordTime.MAX_PLAUSIBLE_EPOCH_MS }
                 .ifEmpty { samples }

@@ -119,6 +119,16 @@ class TripRepository(context: Context) {
         tripDao.updateTrip(trip)
     }
 
+    suspend fun updateTripAltitude(tripId: String, maxAlt: Double?, minAlt: Double?) = withContext(Dispatchers.IO) {
+        val trip = tripDao.getTripById(tripId)
+        if (trip != null && (trip.maxAltitudeM == null || trip.minAltitudeM == null) && (maxAlt != null || minAlt != null)) {
+            tripDao.updateTrip(trip.copy(
+                maxAltitudeM = maxAlt ?: trip.maxAltitudeM,
+                minAltitudeM = minAlt ?: trip.minAltitudeM
+            ))
+        }
+    }
+
     private val refuelDao = db.refuelEventDao()
 
     suspend fun insertRefuelEvent(e: RefuelEventEntity) = withContext(Dispatchers.IO) {

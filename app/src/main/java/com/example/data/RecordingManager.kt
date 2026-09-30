@@ -573,10 +573,19 @@ class RecordingManager(
         // Fall back to reducing the persisted rows through the same plausibility gate; null only
         // when no row ever held an altitude. Never invented, never lost.
         val liveAlt = com.example.di.AppContainer.tripAltitudeStats()
+        val journalRoute = journal.routeFile(sessionId)
+        val routePtsAlts = if (journalRoute.exists() && journalRoute.length() > 0) {
+            GpxExporter.readRoutePointsFromCsv(journalRoute).mapNotNull { it.altitudeM }
+        } else emptyList()
+
         val altStats = if (liveAlt != null && liveAlt.sampleCount > 0) {
             liveAlt
-        } else {
+        } else if (sampleList.any { it.altitudeM != null }) {
             com.example.analysis.AltitudeStats.reduce(sampleList.mapNotNull { it.altitudeM })
+        } else if (routePtsAlts.isNotEmpty()) {
+            com.example.analysis.AltitudeStats.reduce(routePtsAlts)
+        } else {
+            null
         }
         // Battery voltage extremes (owner pipeline task 3, 2026-09-16), reduced from the real 0142
         // samples exactly like the altitude window.

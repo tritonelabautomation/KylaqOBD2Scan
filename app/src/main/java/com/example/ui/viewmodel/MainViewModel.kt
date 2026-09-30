@@ -366,6 +366,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     suspend fun tripTitleMap(): Map<String, String> =
         recordingManager.tripRepository.allTripsChronological().associate { it.id to it.title }
 
+    fun updateTripAltitudeIfMissing(tripId: String, maxAlt: Double?, minAlt: Double?) {
+        if (maxAlt == null && minAlt == null) return
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                recordingManager.tripRepository.updateTripAltitude(tripId, maxAlt, minAlt)
+            } catch (e: Exception) {
+                android.util.Log.w("MainViewModel", "failed to update altitude for trip $tripId", e)
+            }
+        }
+    }
+
     /**
      * Save a car-pool ride, auto-linking it to whichever saved trip's time window covers the
      * ride's own date and time (owner 2026-09-19: "based on date & time input in car pool logging
