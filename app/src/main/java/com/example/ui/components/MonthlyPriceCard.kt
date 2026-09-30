@@ -232,9 +232,19 @@ fun MonthlyPriceCard(
 
                 val grossRateSub = monthSummary.grossCostPerKm?.let {
                     "Gross: ₹" + String.format(Locale.US, "%.2f", it) + "/km"
-                } ?: "Total: ${String.format(Locale.US, "%.0f", monthSummary.totalDistanceKm)} km"
+                } ?: if (monthSummary.totalDistanceKm > 0.0) {
+                    "Total: ${String.format(Locale.US, "%.1f", monthSummary.totalDistanceKm)} km"
+                } else if (monthSummary.fuelLogs.isNotEmpty()) {
+                    "${monthSummary.fuelLogs.size} fill-up(s)"
+                } else {
+                    "Total: 0 km"
+                }
 
-                val rateColor = if (monthSummary.isSurplus) NeonEmerald else CyberCyan
+                val rateColor = when {
+                    monthSummary.isSurplus -> NeonEmerald
+                    monthSummary.netCostPerKm != null -> CyberCyan
+                    else -> TextSecondaryDark
+                }
 
                 MetricTile(
                     title = "NET PRICE / KM",
@@ -263,10 +273,23 @@ fun MonthlyPriceCard(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.DirectionsCar, contentDescription = null, tint = CyberCyan, modifier = Modifier.size(14.dp))
+                        Icon(
+                            if (monthSummary.totalTrips > 0) Icons.Default.DirectionsCar else Icons.Default.LocalGasStation,
+                            contentDescription = null,
+                            tint = CyberCyan,
+                            modifier = Modifier.size(14.dp)
+                        )
                         Spacer(Modifier.width(4.dp))
                         Text(
-                            text = "${monthSummary.totalTrips} drives · ${String.format(Locale.US, "%.1f", monthSummary.totalDistanceKm)} km",
+                            text = if (monthSummary.totalTrips > 0) {
+                                "${monthSummary.totalTrips} drives · ${String.format(Locale.US, "%.1f", monthSummary.totalDistanceKm)} km"
+                            } else if (monthSummary.totalDistanceKm > 0.0) {
+                                "${monthSummary.fuelLogs.size} fill-up(s) · ${String.format(Locale.US, "%.1f", monthSummary.totalDistanceKm)} km (Odo)"
+                            } else if (monthSummary.fuelLogs.isNotEmpty()) {
+                                "${monthSummary.fuelLogs.size} fill-up(s) · ${String.format(Locale.US, "%.1f L refilled", monthSummary.totalRefuelLiters)}"
+                            } else {
+                                "0 drives · 0.0 km"
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = TextSecondaryDark,
                             fontSize = 11.sp

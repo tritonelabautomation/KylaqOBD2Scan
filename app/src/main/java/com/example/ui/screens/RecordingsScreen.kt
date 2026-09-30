@@ -500,22 +500,126 @@ fun RecordingsScreen(
                 }
 
                 if (dayGroupsToShow.isEmpty()) {
+                    val monthFuelLogs = activeMonth?.fuelLogs ?: emptyList()
+                    val monthCarpools = activeMonth?.carpoolLogs ?: emptyList()
+
+                    if (monthFuelLogs.isNotEmpty() || monthCarpools.isNotEmpty()) {
+                        item(key = "month_fuel_ledger_card") {
+                            Card(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                shape = RoundedCornerShape(14.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(Icons.Default.LocalGasStation, contentDescription = null, tint = ElectricAmber, modifier = Modifier.size(18.dp))
+                                            Spacer(Modifier.width(8.dp))
+                                            Text(
+                                                text = "${activeMonth?.displayMonth} Fuel Fill-Ups (${monthFuelLogs.size})",
+                                                style = MaterialTheme.typography.titleSmall,
+                                                fontWeight = FontWeight.Bold,
+                                                color = TextPrimaryDark
+                                            )
+                                        }
+                                        Text(
+                                            text = "₹${String.format(Locale.US, "%.0f", activeMonth?.totalRefuelSpend ?: 0.0)}",
+                                            fontWeight = FontWeight.Bold,
+                                            color = ElectricAmber,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 13.sp
+                                        )
+                                    }
+
+                                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
+
+                                    monthFuelLogs.forEach { log ->
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Column {
+                                                Text(
+                                                    text = com.example.data.RecordTime.format("d MMM yyyy", log.idMs) +
+                                                        if (log.station.isNotBlank()) " · ${log.station}" else "",
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = TextPrimaryDark
+                                                )
+                                                Text(
+                                                    text = "${String.format(Locale.US, "%.1f L", log.liters)} @ ₹${String.format(Locale.US, "%.1f", log.pricePerL)}/L (${log.grade})" +
+                                                        (log.odometerKm?.let { " · ODO: ${String.format(Locale.US, "%,.0f km", it)}" } ?: ""),
+                                                    fontSize = 11.sp,
+                                                    color = TextSecondaryDark,
+                                                    fontFamily = FontFamily.Monospace
+                                                )
+                                            }
+
+                                            Text(
+                                                text = "₹${String.format(Locale.US, "%.0f", log.totalCost)}",
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = TextPrimaryDark,
+                                                fontFamily = FontFamily.Monospace
+                                            )
+                                        }
+                                    }
+
+                                    if (monthCarpools.isNotEmpty()) {
+                                        Spacer(Modifier.height(4.dp))
+                                        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Icon(Icons.Default.Groups, contentDescription = null, tint = NeonEmerald, modifier = Modifier.size(16.dp))
+                                                Spacer(Modifier.width(6.dp))
+                                                Text(
+                                                    text = "Carpool Rides (${monthCarpools.size})",
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = NeonEmerald
+                                                )
+                                            }
+                                            Text(
+                                                text = "+₹${String.format(Locale.US, "%.0f", activeMonth?.totalCarpoolEarned ?: 0.0)}",
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = NeonEmerald,
+                                                fontFamily = FontFamily.Monospace
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     item(key = "no_trips_in_month") {
                         Card(
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
                             shape = RoundedCornerShape(12.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
                         ) {
                             Column(
-                                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                                modifier = Modifier.fillMaxWidth().padding(14.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
                                 Text(
-                                    text = "No recorded trips in ${activeMonth?.displayMonth ?: "this month"}",
+                                    text = "No OBD diagnostic trips recorded in ${activeMonth?.displayMonth ?: "this month"}",
                                     style = MaterialTheme.typography.bodyMedium,
-                                    color = TextSecondaryDark
+                                    color = TextSecondaryDark,
+                                    fontSize = 12.sp
                                 )
-                                Spacer(Modifier.height(6.dp))
+                                Spacer(Modifier.height(4.dp))
                                 TextButton(onClick = { viewAllMonths = true }) {
                                     Text("View all recorded days (${savedRecordings.size} trips)")
                                 }

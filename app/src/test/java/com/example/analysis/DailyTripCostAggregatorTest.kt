@@ -292,4 +292,49 @@ class DailyTripCostAggregatorTest {
         assertEquals(100.0, month.surplusAmount, 0.001)
         assertEquals(-2.0, month.netCostPerKm!!, 0.001) // -100 / 50 = -2.0 Rs/km (2 Rs/km profit)
     }
+
+    @Test
+    fun `test historical month with refuel logs derives odometer distance`() {
+        val aug10 = istEpoch(2026, 8, 10, 10, 0)
+        val aug25 = istEpoch(2026, 8, 25, 12, 0)
+        val sep15 = istEpoch(2026, 9, 15, 10, 0)
+
+        val fuelLogs = listOf(
+            FuelLogCodec.FuelEntry(
+                idMs = aug10,
+                dateUtc = RecordTime.stamp(aug10),
+                liters = 35.0,
+                pricePerL = 100.0,
+                odometerKm = 3500.0,
+                station = "IOCL",
+                grade = FuelLogCodec.GRADE_X95,
+                note = ""
+            ),
+            FuelLogCodec.FuelEntry(
+                idMs = aug25,
+                dateUtc = RecordTime.stamp(aug25),
+                liters = 40.0,
+                pricePerL = 100.0,
+                odometerKm = 4200.0,
+                station = "HPCL",
+                grade = FuelLogCodec.GRADE_X95,
+                note = ""
+            )
+        )
+
+        val result = DailyTripCostAggregator.aggregate(
+            trips = emptyList(),
+            carpoolEntries = emptyList(),
+            fuelLogs = fuelLogs,
+            fuelPricePerL = 100.0,
+            nowMs = sep15
+        )
+
+        val augSummary = result.allMonthSummaries.first { it.monthKey == "2026-08" }
+        assertEquals(75.0, augSummary.totalRefuelLiters, 0.001)
+        assertEquals(7500.0, augSummary.totalRefuelSpend, 0.001)
+        assertEquals(700.0, augSummary.totalDistanceKm, 0.001) // 4200 - 3500 = 700 km
+        assertEquals(7500.0 / 700.0, augSummary.netCostPerKm!!, 0.001)
+        assertEquals(2, augSummary.fuelLogs.size)
+    }
 }

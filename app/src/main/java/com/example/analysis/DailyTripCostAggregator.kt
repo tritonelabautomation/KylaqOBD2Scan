@@ -115,7 +115,10 @@ object DailyTripCostAggregator {
         val grossCostPerKm: Double?,
         val totalTrips: Int,
         val totalCarpoolRides: Int,
-        val avgKmPerLiter: Double?
+        val avgKmPerLiter: Double?,
+        val distanceSource: String = "OBD_TRIPS", // "OBD_TRIPS", "REFUEL_ODOMETER", "NONE"
+        val fuelLogs: List<FuelLogCodec.FuelEntry> = emptyList(),
+        val carpoolLogs: List<CarpoolCodec.CarpoolEntry> = emptyList()
     )
 
     data class AggregationResult(
@@ -276,6 +279,17 @@ object DailyTripCostAggregator {
             )
         }.sortedByDescending { it.dateKey }
 
+        // Precompute odometer delta for each fuel log from its preceding fuel log
+        val sortedFuelLogs = fuelLogs.sortedBy { it.idMs }
+        val fuelLogDeltas = mutableMapOf<Long, Double>()
+        for (i in 1 until sortedFuelLogs.size) {
+            val prev = sortedFuelLogs[i - 1]
+            val curr = sortedFuelLogs[i]
+            if (prev.odometerKm != null && curr.odometerKm != null && curr.odometerKm > prev.odometerKm) {
+                fuelLogDeltas[curr.idMs] = curr.odometerKm - prev.odometerKm
+            }
+        }
+
         // Monthly Aggregations
         val fuelLogsByMonth = fuelLogs.groupBy {
             RecordTime.format("yyyy-MM", it.idMs)
@@ -313,9 +327,29 @@ object DailyTripCostAggregator {
             val netEffective = primaryFuelSpend - carpoolEarned
             val isSurplus = carpoolEarned >= primaryFuelSpend
 
-            val netCostPerKm = if (tripDistance > 0.05) netEffective / tripDistance else null
-            val grossCostPerKm = if (tripDistance > 0.05) primaryFuelSpend / tripDistance else null
-            val avgKmL = if (tripDistance > 0.1 && tripFuelLiters > 0.05) tripDistance / tripFuelLiters else null
+            // Odometer distance from fuel logs if no OBD trips exist or if refuel logs provide distance
+            val fuelLogOdoDist = monthFuelLogs.sumOf { fuelLogDeltas[it.idMs] ?: 0.0 }
+            val effectiveDistance = if (tripDistance > 0.05) {
+                tripDistance
+            } else if (fuelLogOdoDist > 0.05) {
+                fuelLogOdoDist
+            } else {
+                val minOdo = monthFuelLogs.mapNotNull { it.odometerKm }.minOrNull()
+                val maxOdo = monthFuelLogs.mapNotNull { it.odometerKm }.maxOrNull()
+                if (minOdo != null && maxOdo != null && maxOdo > minOdo) maxOdo - minOdo else 0.0
+            }
+
+            val distanceSource = if (tripDistance > 0.05) {
+                "OBD_TRIPS"
+            } else if (effectiveDistance > 0.05) {
+                "REFUEL_ODOMETER"
+            } else {
+                "NONE"
+            }
+
+            val netCostPerKm = if (effectiveDistance > 0.05) netEffective / effectiveDistance else null
+            val grossCostPerKm = if (effectiveDistance > 0.05) primaryFuelSpend / effectiveDistance else null
+            val avgKmL = if (effectiveDistance > 0.1 && primaryFuelLiters > 0.05) effectiveDistance / primaryFuelLiters else null
 
             // Display month name (e.g., "September 2026")
             val sampleMs = monthTrips.firstOrNull()?.startMs
@@ -341,12 +375,15 @@ object DailyTripCostAggregator {
                 isSurplus = isSurplus,
                 surplusAmount = if (isSurplus) carpoolEarned - primaryFuelSpend else 0.0,
                 netOutOfPocket = if (!isSurplus) primaryFuelSpend - carpoolEarned else 0.0,
-                totalDistanceKm = tripDistance,
+                totalDistanceKm = effectiveDistance,
                 netCostPerKm = netCostPerKm,
                 grossCostPerKm = grossCostPerKm,
                 totalTrips = monthTrips.size,
                 totalCarpoolRides = monthCarpool.size,
-                avgKmPerLiter = avgKmL
+                avgKmPerLiter = avgKmL,
+                distanceSource = distanceSource,
+                fuelLogs = monthFuelLogs.sortedByDescending { it.idMs },
+                carpoolLogs = monthCarpool.sortedByDescending { CarpoolCodec.whenMs(it) ?: it.idMs }
             )
         }
 
