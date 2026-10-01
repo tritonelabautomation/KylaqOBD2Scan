@@ -203,12 +203,15 @@ fun DashboardScreen(
         var showBatchTestDialog by remember { mutableStateOf(false) }
         var showDiagnosticsDialog by remember { mutableStateOf(false) }
 
+        val hardwareInfo by viewModel.adapterHardwareClassification.collectAsState()
+
         // Protocol Verification Selector
         ProtocolVerificationControl(
             selectedProtocol = selectedCanProtocol,
             health = protocolHealth,
             result = protocolResult,
             isConnected = isConnected,
+            hardwareInfo = hardwareInfo,
             onProtocolSelected = { viewModel.selectCanProtocol(it) },
             onVerify = { viewModel.verifySelectedProtocol() },
             onShowBatchTest = { showBatchTestDialog = true },
@@ -904,6 +907,7 @@ fun ProtocolVerificationControl(
     health: ProtocolHealth,
     result: ProtocolVerificationResult?,
     isConnected: Boolean,
+    hardwareInfo: MainViewModel.AdapterHardwareClassification? = null,
     onProtocolSelected: (CanProtocol) -> Unit,
     onVerify: () -> Unit,
     onShowBatchTest: () -> Unit,
@@ -944,6 +948,50 @@ fun ProtocolVerificationControl(
                                 expanded = false
                             }
                         )
+                    }
+                }
+            }
+
+            // Hardware Classification Badge (Shows if Clone or Genuine STN/PIC)
+            if (isConnected && hardwareInfo != null) {
+                Spacer(modifier = Modifier.height(10.dp))
+                val badgeBg = when {
+                    hardwareInfo.isClone -> WarningRed.copy(alpha = 0.15f)
+                    hardwareInfo.isStn -> CyberCyan.copy(alpha = 0.15f)
+                    else -> NeonEmerald.copy(alpha = 0.15f)
+                }
+                val badgeBorder = when {
+                    hardwareInfo.isClone -> WarningRed.copy(alpha = 0.5f)
+                    hardwareInfo.isStn -> CyberCyan.copy(alpha = 0.5f)
+                    else -> NeonEmerald.copy(alpha = 0.5f)
+                }
+                val badgeTint = when {
+                    hardwareInfo.isClone -> ElectricAmber
+                    hardwareInfo.isStn -> CyberCyan
+                    else -> NeonEmerald
+                }
+                val icon = when {
+                    hardwareInfo.isClone -> Icons.Default.Warning
+                    hardwareInfo.isStn -> Icons.Default.Verified
+                    else -> Icons.Default.Memory
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = badgeBg,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, badgeBorder),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(icon, contentDescription = null, tint = badgeTint, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Column {
+                            Text(hardwareInfo.label, color = badgeTint, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            Text(hardwareInfo.description, color = TextSecondaryDark, fontSize = 9.sp)
+                        }
                     }
                 }
             }

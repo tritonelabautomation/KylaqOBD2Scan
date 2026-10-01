@@ -568,6 +568,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _protocolVerificationResult = MutableStateFlow<com.example.model.ProtocolVerificationResult?>(null)
     val protocolVerificationResult: StateFlow<com.example.model.ProtocolVerificationResult?> = _protocolVerificationResult.asStateFlow()
 
+    data class AdapterHardwareClassification(
+        val rawFirmware: String?,
+        val isStn: Boolean = false,
+        val isClone: Boolean = false,
+        val label: String = "Adapter Connected",
+        val description: String = ""
+    )
+
+    private val _adapterHardwareClassification = MutableStateFlow<AdapterHardwareClassification?>(null)
+    val adapterHardwareClassification: StateFlow<AdapterHardwareClassification?> = _adapterHardwareClassification.asStateFlow()
+
     private val _adapterVoltage = MutableStateFlow<String?>(null)
     val adapterVoltage: StateFlow<String?> = _adapterVoltage.asStateFlow()
 
@@ -1278,7 +1289,41 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _adapterVoltage.value = if (voltageResp.status == com.example.model.ResponseStatus.OK) voltageResp.rawText.trim() else null
 
         val firmwareResp = transport.sendCommand("ATI", 1000)
-        _adapterFirmware.value = if (firmwareResp.status == com.example.model.ResponseStatus.OK) firmwareResp.rawText.trim() else null
+        val fw = if (firmwareResp.status == com.example.model.ResponseStatus.OK) firmwareResp.rawText.trim() else null
+        _adapterFirmware.value = fw
+
+        val at1Resp = transport.sendCommand("AT@1", 1000).rawText.trim()
+        val at2Resp = transport.sendCommand("AT@2", 1000).rawText.trim()
+        val stiResp = transport.sendCommand("STI", 1000).rawText.trim()
+
+        val isStn = stiResp.isNotBlank() && !stiResp.contains("?") && !stiResp.contains("ERROR") &&
+                (stiResp.contains("STN") || stiResp.contains("OBDLink") || stiResp.contains("vLinker"))
+        val isClone = (fw?.contains("v1.5", ignoreCase = true) == true) ||
+                (fw?.contains("v2.1", ignoreCase = true) == true) ||
+                at1Resp.contains("?") || at2Resp.contains("?")
+
+        val label = when {
+            transport is com.example.bluetooth.SimulationTransport -> "Virtual Simulation Adapter"
+            isStn -> "STN Processor (${stiResp.take(16)})"
+            !isClone && fw != null && fw.contains("v1.4") -> "PIC18F25K80 (${fw.take(14)})"
+            isClone -> "Clone Device (${fw?.take(14) ?: "ELM327 v1.5"})"
+            else -> fw?.take(16) ?: "ELM327 Compatible"
+        }
+
+        val desc = when {
+            isStn -> "Authentic STN chip: High bandwidth, full multi-frame ISO-TP and custom CAN headers."
+            !isClone && fw != null && fw.contains("v1.4") -> "Authentic PIC18F microchip: Reliable 500k CAN and standard UDS support."
+            isClone -> "Counterfeit/budget clone: Uses 64-byte RAM buffer; recommended to use Safe or Normal polling mode."
+            else -> "Standard OBD-II diagnostic interface."
+        }
+
+        _adapterHardwareClassification.value = AdapterHardwareClassification(
+            rawFirmware = fw,
+            isStn = isStn,
+            isClone = isClone,
+            label = label,
+            description = desc
+        )
     }
 
     fun startSimulationMode() {
@@ -1302,6 +1347,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             obdScheduler.stopPolling()
             bluetoothManager.disconnect()
             com.example.di.AppContainer.protocolHealth.value = com.example.model.ProtocolHealth.UNKNOWN
+            _adapterHardwareClassification.value = null
+            _adapterFirmware.value = null
+            _adapterVoltage.value = null
             activeTransport = null
         }
     }
