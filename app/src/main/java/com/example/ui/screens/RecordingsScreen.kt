@@ -1124,59 +1124,80 @@ fun RecordingItemCard(
                     shape = RoundedCornerShape(8.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                        // Top row: Rider Names & Total Carpool Earned
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                modifier = Modifier.weight(1f).padding(end = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                                 Icon(Icons.Default.Groups, contentDescription = null, tint = NeonEmerald, modifier = Modifier.size(14.dp))
                                 Spacer(Modifier.width(4.dp))
-                                Text(
-                                    text = "Carpool: ${tripItem.carpoolRiderCount} rider(s) (${tripItem.riderNames.joinToString(", ")})",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = TextPrimaryDark
-                                )
-                                Spacer(Modifier.width(6.dp))
-                                Text(
-                                    text = "₹${String.format(java.util.Locale.US, "%.0f", tripItem.carpoolEarned)}",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = NeonEmerald,
-                                    fontFamily = FontFamily.Monospace
-                                )
-                            }
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(top = 2.dp)
-                            ) {
-                                val netColor = if (tripItem.isTripProfit) NeonEmerald else ElectricAmber
-                                val netTxt = if (tripItem.isTripProfit) {
-                                    "Net: +₹${String.format(java.util.Locale.US, "%.0f", tripItem.carpoolEarned - tripItem.fuelCost)} Surplus (Profit)"
+                                val riderText = if (tripItem.riderNames.isNotEmpty()) {
+                                    "Carpool: ${tripItem.carpoolRiderCount} rider(s) (${tripItem.riderNames.joinToString(", ")})"
                                 } else {
-                                    "Net Cost: ₹${String.format(java.util.Locale.US, "%.0f", tripItem.netTripCost)}"
+                                    "Carpool: ${tripItem.carpoolRiderCount} rider(s)"
                                 }
                                 Text(
-                                    text = netTxt,
+                                    text = riderText,
                                     fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = netColor,
-                                    fontFamily = FontFamily.Monospace
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = TextPrimaryDark,
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                                 )
                             }
+                            Text(
+                                text = "₹${String.format(java.util.Locale.US, "%.0f", tripItem.carpoolEarned)}",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = NeonEmerald,
+                                fontFamily = FontFamily.Monospace,
+                                maxLines = 1,
+                                softWrap = false
+                            )
                         }
 
-                        if (onAddOrEditCarpool != null) {
-                            TextButton(
-                                onClick = onAddOrEditCarpool,
-                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
-                                modifier = Modifier.height(28.dp)
-                            ) {
-                                Text("Edit", fontSize = 11.sp, color = CyberCyan)
+                        // Bottom row: Net Cost/Surplus Profit & Edit Button
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            val netColor = if (tripItem.isTripProfit) NeonEmerald else ElectricAmber
+                            val netTxt = if (tripItem.isTripProfit) {
+                                "Net: +₹${String.format(java.util.Locale.US, "%.0f", tripItem.carpoolEarned - tripItem.fuelCost)} Surplus (Profit)"
+                            } else {
+                                "Net Cost: ₹${String.format(java.util.Locale.US, "%.0f", tripItem.netTripCost)}"
+                            }
+                            Text(
+                                text = netTxt,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = netColor,
+                                fontFamily = FontFamily.Monospace,
+                                modifier = Modifier.weight(1f)
+                            )
+
+                            if (onAddOrEditCarpool != null) {
+                                Text(
+                                    text = "Edit",
+                                    fontSize = 11.sp,
+                                    color = CyberCyan,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier
+                                        .clickable { onAddOrEditCarpool() }
+                                        .padding(start = 8.dp, top = 2.dp, bottom = 2.dp)
+                                )
                             }
                         }
                     }
