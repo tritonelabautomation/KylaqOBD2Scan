@@ -482,8 +482,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
 
-        val userOverrides = tripIds.associateWith { com.example.data.TripUserOverrideStore.get(appContext, it) }
-        val bunkRecords = com.example.data.BunkNozzleStore.getAll(appContext)
+        val ctx = getApplication<Application>()
+        val userOverrides = tripIds.associateWith { com.example.data.TripUserOverrideStore.get(ctx, it) }
+        val bunkRecords = com.example.data.BunkNozzleStore.getAll(ctx)
 
         com.example.analysis.DailyTripCostAggregator.aggregate(
             trips = tripInputs,
@@ -497,7 +498,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setTripFuelTag(tripId: String, station: String, grade: String, additive: String?, dosageMl: Double?) {
-        val current = com.example.data.TripUserOverrideStore.get(appContext, tripId)
+        val ctx = getApplication<Application>()
+        val current = com.example.data.TripUserOverrideStore.get(ctx, tripId)
         val brand = com.example.analysis.FuelBrandTagger.detectBrand(station)
         val updated = current.copy(
             fuelBrand = brand.displayName,
@@ -505,9 +507,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             fuelGrade = grade,
             fuelAdditive = additive
         )
-        com.example.data.TripUserOverrideStore.save(appContext, updated)
+        com.example.data.TripUserOverrideStore.save(ctx, updated)
         viewModelScope.launch {
-            loadSavedRecordings()
+            recordingManager.loadSavedRecordings()
             triggerImmediateBackup()
         }
     }
