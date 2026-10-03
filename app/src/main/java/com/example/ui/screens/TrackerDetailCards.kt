@@ -83,6 +83,18 @@ fun TrackerSummaryCards(
                 TkStat(Icons.Default.Speed, "%.0f km/h".format(summary.averageSpeedKmh), "Avg speed", withDivider = true)
                 TkStat(Icons.Default.RocketLaunch, "%.0f km/h".format(summary.maxSpeedKmh), "Max speed")
             }
+            if (summary.startOdometerKm != null || summary.endOdometerKm != null) {
+                TkDivider()
+                val startOdo = summary.startOdometerKm?.let { "%,.1f km".format(it) } ?: "--"
+                val endOdo = summary.endOdometerKm?.let { "%,.1f km".format(it) } ?: "--"
+                val delta = if (summary.startOdometerKm != null && summary.endOdometerKm != null) {
+                    summary.endOdometerKm - summary.startOdometerKm
+                } else summary.distanceKm
+                TkRow {
+                    TkStat(Icons.Default.Speed, startOdo, "Start ODO (01A6)", withDivider = true)
+                    TkStat(Icons.Default.Flag, "$endOdo (+%.1f km)".format(delta), "End ODO (Δ)")
+                }
+            }
             TkDivider()
             val altDiff = if (maxAltitudeM != null && minAltitudeM != null) maxAltitudeM - minAltitudeM else null
             TkRow {

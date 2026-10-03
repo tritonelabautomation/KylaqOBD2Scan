@@ -163,11 +163,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     suspend fun currentLevelPct(): Double? =
         currentPidValue("012F")
             ?: com.example.di.AppContainer.settingsRepository.lastLevelStamp()?.second
+            ?: recordingManager.tripRepository.refuelEvents().maxByOrNull { it.tsEndMs }?.levelAfterPct
+
+    suspend fun lastRecordedLevelPct(): Double? =
+        com.example.di.AppContainer.settingsRepository.lastLevelStamp()?.second
+            ?: recordingManager.tripRepository.refuelEvents().maxByOrNull { it.tsEndMs }?.levelBeforePct
+            ?: currentLevelPct()
 
     private suspend fun currentPidValue(pid: String): Double? =
         if (recordingManager.isRecording.value) {
+            val normPid = com.example.analysis.TripFuelSummary.normalizePidKey(pid)
             recordingManager.currentTransactions.value
-                .lastOrNull { it.pid == pid && it.decodedValue != null }?.decodedValue
+                .lastOrNull { com.example.analysis.TripFuelSummary.normalizePidKey(it.pid) == normPid && it.decodedValue != null }?.decodedValue
         } else {
             recordingManager.tripRepository.latestNumericFor(pid)
         }

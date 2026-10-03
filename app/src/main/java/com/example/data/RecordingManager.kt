@@ -399,8 +399,9 @@ class RecordingManager(
         if (!_isRecording.value) return
 
         // Restart-refuel check: the first valid level row of this session, once (RestartRefuel).
+        val normPid = com.example.analysis.TripFuelSummary.normalizePidKey(tx.pid)
         if (restartLevelCheckArmed &&
-            tx.pid == com.example.analysis.RefuelEventDetector.PID_LEVEL &&
+            normPid == com.example.analysis.RefuelEventDetector.PID_LEVEL &&
             tx.decodedValue != null
         ) {
             restartLevelCheckArmed = false
@@ -806,7 +807,7 @@ class RecordingManager(
             com.example.analysis.SinceRefuelStats.Row(
                 com.example.data.RecordTime.instantOf(tx.timestampMonotonic, tx.timestampUtc)
                     ?: tx.timestampMonotonic,
-                tx.pid,
+                com.example.analysis.TripFuelSummary.normalizePidKey(tx.pid),
                 tx.decodedValue
             )
         }
@@ -821,9 +822,9 @@ class RecordingManager(
      * at the start of the next) becomes a visible event without re-driving anything. Idempotent:
      * event ids REPLACE, and the pref guard runs the pass exactly once.
      */
-    suspend fun backfillRefuelEvents() = withContext(Dispatchers.IO) {
+    suspend fun backfillRefuelEvents(force: Boolean = false) = withContext(Dispatchers.IO) {
         val settings = com.example.di.AppContainer.settingsRepository
-        if (settings.refuelBackfillDone()) return@withContext
+        if (settings.refuelBackfillDone() && !force) return@withContext
         runCatching {
             for (trip in tripRepository.allTripsChronological()) {
                 val rows = tripRepository.samplesForTripPids(
@@ -832,14 +833,19 @@ class RecordingManager(
                         com.example.analysis.RefuelEventDetector.PID_LEVEL,
                         com.example.analysis.RefuelEventDetector.PID_SPEED,
                         com.example.analysis.RefuelEventDetector.PID_ODO,
-                        com.example.analysis.RefuelEventDetector.PID_RPM
+                        com.example.analysis.RefuelEventDetector.PID_RPM,
+                        "2F", "0D", "A6", "0C"
                     )
                 )
                 if (rows.isEmpty()) continue
                 persistRefuelEvents(
                     com.example.analysis.RefuelSessionScan.scan(
                         rows.map {
-                            com.example.analysis.SinceRefuelStats.Row(it.timestamp, it.pid, it.numericValue)
+                            com.example.analysis.SinceRefuelStats.Row(
+                                it.timestamp,
+                                com.example.analysis.TripFuelSummary.normalizePidKey(it.pid),
+                                it.numericValue
+                            )
                         }
                     ),
                     settings

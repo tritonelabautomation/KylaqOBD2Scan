@@ -389,11 +389,14 @@ fun FuelCostsScreen(
     }
 
     if (showAdd) {
+        val fallbackPreLevel = refuelEvents.firstOrNull()?.levelBeforePct
+            ?: viewModel.settingsRepository.lastLevelStamp()?.second
+            ?: levelNow
         RefuelLoggingDialog(
             initialLiters = editTarget?.liters ?: receiptPrefill?.liters,
             initialPrice = editTarget?.pricePerL,
             initialOdoKm = editTarget?.odometerKm ?: receiptPrefill?.odoKm ?: odoNow,
-            initialPreLevelPct = receiptPrefill?.levelBeforePct,
+            initialPreLevelPct = receiptPrefill?.levelBeforePct ?: fallbackPreLevel,
             initialPostLevelPct = receiptPrefill?.levelAfterPct ?: levelNow,
             initialStation = editTarget?.station ?: "",
             initialGrade = editTarget?.grade ?: FuelLogCodec.GRADE_X95,

@@ -80,7 +80,12 @@ class TripRepository(context: Context) {
     }
 
     suspend fun samplesForTrips(tripIds: List<String>, pids: List<String>): List<TelemetrySampleEntity> = withContext(Dispatchers.IO) {
-        if (tripIds.isEmpty()) emptyList() else sampleDao.getSamplesForTrips(tripIds, pids)
+        if (tripIds.isEmpty()) emptyList() else {
+            val expanded = pids.flatMap { p ->
+                listOf(p, if (p.startsWith("01")) p.substring(2) else "01$p")
+            }.distinct()
+            sampleDao.getSamplesForTrips(tripIds, expanded)
+        }
     }
 
     suspend fun trendSamples(tripIds: List<String>): List<TelemetrySampleEntity> = withContext(Dispatchers.IO) {
@@ -150,14 +155,25 @@ class TripRepository(context: Context) {
     }
 
     suspend fun samplesSince(ts: Long, pids: List<String>): List<SampleRow> =
-        withContext(Dispatchers.IO) { sampleDao.samplesSince(ts, pids) }
+        withContext(Dispatchers.IO) {
+            val expanded = pids.flatMap { p ->
+                listOf(p, if (p.startsWith("01")) p.substring(2) else "01$p")
+            }.distinct()
+            sampleDao.samplesSince(ts, expanded)
+        }
 
     suspend fun latestNumericFor(pid: String): Double? = withContext(Dispatchers.IO) {
-        sampleDao.latestNumericFor(pid)
+        val alt = if (pid.startsWith("01")) pid.substring(2) else "01$pid"
+        sampleDao.latestNumericFor(pid) ?: sampleDao.latestNumericFor(alt)
     }
 
     suspend fun samplesForTripPids(tripId: String, pids: List<String>): List<SampleRow> =
-        withContext(Dispatchers.IO) { sampleDao.samplesForTripPids(tripId, pids) }
+        withContext(Dispatchers.IO) {
+            val expanded = pids.flatMap { p ->
+                listOf(p, if (p.startsWith("01")) p.substring(2) else "01$p")
+            }.distinct()
+            sampleDao.samplesForTripPids(tripId, expanded)
+        }
 
     suspend fun allTripsChronological(): List<TripEntity> = withContext(Dispatchers.IO) {
         tripDao.getAllTrips().reversed()

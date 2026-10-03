@@ -333,6 +333,7 @@ fun TripDetailScreen(
                             pricePerL = viewModel.fuelLogRepository.entries().maxByOrNull { it.idMs }?.pricePerL ?: 0.0,
                             speedPoints = samples.filter { it.pid.takeLast(2) == "0D" }
                                 .map { it.instantMs to (it.numericValue ?: 0.0) },
+                            sampleAltitudes = samples.mapNotNull { it.altitudeM },
                             passengerLoadResult = passengerLoadResult,
                             commuteComparison = commuteComparison,
                             altitudeBlankReason = altitudeBlankReason,
@@ -427,8 +428,14 @@ fun TripDetailScreen(
 
                     val gpsPoints = remember(tripId) {
                         val sessionDir = File(context.filesDir, "recordings/session_$tripId")
-                        val routeFile = File(sessionDir, "${tripId}_route.csv")
-                        if (routeFile.exists()) com.example.data.GpxExporter.readRoutePointsFromCsv(routeFile) else emptyList()
+                        val candidates = listOf(
+                            File(sessionDir, "${tripId}_route.csv"),
+                            File(sessionDir, "route.csv"),
+                            File(context.filesDir, "recordings/${tripId}_route.csv"),
+                            File(context.filesDir, "trips/${tripId}_route.csv")
+                        )
+                        val routeFile = candidates.firstOrNull { it.exists() }
+                        if (routeFile != null) com.example.data.GpxExporter.readRoutePointsFromCsv(routeFile) else emptyList()
                     }
                     var isBusiness by remember { mutableStateOf(true) }
                     val driveAnalysis = remember(fuelSummary, samples) {
@@ -614,6 +621,7 @@ private fun TripOverviewView(
     summary: com.example.analysis.TripFuelSummary.Summary,
     pricePerL: Double,
     speedPoints: List<Pair<Long, Double>>,
+    sampleAltitudes: List<Double> = emptyList(),
     passengerLoadResult: com.example.analysis.PassengerLoadAnalyzer.Result? = null,
     commuteComparison: com.example.analysis.CommuteComparator.CommuteComparison? = null,
     /** Why the altitude column is blank, when it is. Computed by the caller from the location grants. */
@@ -679,13 +687,19 @@ private fun TripOverviewView(
 
     val gpsPoints = remember(trip.id) {
         val sessionDir = File(context.filesDir, "recordings/session_${trip.id}")
-        val routeFile = File(sessionDir, "${trip.id}_route.csv")
-        if (routeFile.exists()) com.example.data.GpxExporter.readRoutePointsFromCsv(routeFile) else emptyList()
+        val candidates = listOf(
+            File(sessionDir, "${trip.id}_route.csv"),
+            File(sessionDir, "route.csv"),
+            File(context.filesDir, "recordings/${trip.id}_route.csv"),
+            File(context.filesDir, "trips/${trip.id}_route.csv")
+        )
+        val routeFile = candidates.firstOrNull { it.exists() }
+        if (routeFile != null) com.example.data.GpxExporter.readRoutePointsFromCsv(routeFile) else emptyList()
     }
 
     val validGpsAlts = remember(gpsPoints) { gpsPoints.mapNotNull { it.altitudeM } }
-    val effectiveMaxAlt = trip.maxAltitudeM ?: validGpsAlts.maxOrNull()
-    val effectiveMinAlt = trip.minAltitudeM ?: validGpsAlts.minOrNull()
+    val effectiveMaxAlt = trip.maxAltitudeM ?: validGpsAlts.maxOrNull() ?: sampleAltitudes.maxOrNull()
+    val effectiveMinAlt = trip.minAltitudeM ?: validGpsAlts.minOrNull() ?: sampleAltitudes.minOrNull()
 
     LaunchedEffect(trip.id, effectiveMaxAlt, effectiveMinAlt) {
         if ((trip.maxAltitudeM == null || trip.minAltitudeM == null) && effectiveMaxAlt != null && effectiveMinAlt != null) {
@@ -1781,19 +1795,22 @@ private fun TripFuelLogCard(
                             )
                         }
                     }
-                    Surface(
-                        color = CyberCyan.copy(alpha = 0.15f),
-                        shape = RoundedCornerShape(6.dp)
-                    ) {
-                        Text(
-                            text = "Δ ${String.format(java.util.Locale.US, "%.1f km", summary.distanceKm)}",
-                            color = CyberCyan,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 11.sp,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
-                            fontFamily = FontFamily.Monospace
-                        )
-                    }
+                        val deltaKm = if (summary.startOdometerKm != null && summary.endOdometerKm != null) {
+                            summary.endOdometerKm - summary.startOdometerKm
+                        } else summary.distanceKm
+                        Surface(
+                            color = CyberCyan.copy(alpha = 0.15f),
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Text(
+                                text = "Δ +${String.format(java.util.Locale.US, "%.1f km", deltaKm)}",
+                                color = CyberCyan,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
                 }
             }
             val startStop = summary.startStop

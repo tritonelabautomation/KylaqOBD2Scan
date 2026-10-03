@@ -232,6 +232,42 @@ class RefuelSessionScanTest {
         assertEquals(0L to 90.0, res.firstLevel)
         assertEquals(Triple(20L, 87.5, null), res.lastLevel)
     }
+
+    @Test
+    fun scansTwoHexPidVariantsIdentically() {
+        val res = RefuelSessionScan.scan(
+            listOf(
+                row(0, "2F", 25.9),
+                row(5, "A6", 4206.1),
+                row(10, "0D", 0.0),
+                row(50, "2F", 93.7),
+                row(100, "0D", 25.0)
+            )
+        )
+        assertEquals(1, res.events.size)
+        assertEquals(25.9, res.events[0].levelBeforePct, 1e-9)
+        assertEquals(93.7, res.events[0].levelAfterPct, 1e-9)
+        assertEquals(67.8, res.events[0].risePct, 1e-9)
+        assertEquals(4206.1, res.firstOdo!!, 1e-9)
+    }
+
+    @Test
+    fun largeCrossSessionJumpIsDetectedReliably() {
+        // Owner 2026-10-03: tank jumped 25.9% -> 93.7% (+67.8%) across sessions
+        val ev = RefuelEventDetector.crossSession(
+            prevTsMs = 1_000_000,
+            prevLevelPct = 25.9,
+            prevOdoKm = 4206.1,
+            firstTsMs = 2_000_000,
+            firstLevelPct = 93.7,
+            firstOdoKm = 4210.4
+        )
+        assertTrue(ev!!.betweenSessions)
+        assertEquals(25.9, ev.levelBeforePct, 1e-9)
+        assertEquals(93.7, ev.levelAfterPct, 1e-9)
+        assertEquals(67.8, ev.risePct, 1e-6)
+        assertEquals(4210.4, ev.odoKm!!, 1e-9)
+    }
 }
 
 /**

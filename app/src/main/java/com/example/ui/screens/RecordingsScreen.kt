@@ -1092,8 +1092,12 @@ fun RecordingItemCard(
 
             // Odometer Start & End display (PID 01A6)
             if (tripItem?.startOdometerKm != null || tripItem?.endOdometerKm != null) {
-                val startOdoStr = tripItem.startOdometerKm?.let { String.format(java.util.Locale.US, "%,.1f km", it) } ?: "--"
-                val endOdoStr = tripItem.endOdometerKm?.let { String.format(java.util.Locale.US, "%,.1f km", it) } ?: "--"
+                val startOdo = tripItem.startOdometerKm
+                val endOdo = tripItem.endOdometerKm
+                val startOdoStr = startOdo?.let { String.format(java.util.Locale.US, "%,.1f km", it) } ?: "--"
+                val endOdoStr = endOdo?.let { String.format(java.util.Locale.US, "%,.1f km", it) } ?: "--"
+                val delta = if (startOdo != null && endOdo != null) endOdo - startOdo else null
+                val deltaStr = delta?.let { String.format(java.util.Locale.US, " (Δ +%.1f km)", it) } ?: ""
                 Spacer(modifier = Modifier.height(4.dp))
                 Surface(
                     color = CyberCyan.copy(alpha = 0.08f),
@@ -1106,7 +1110,7 @@ fun RecordingItemCard(
                     ) {
                         Icon(Icons.Default.Speed, contentDescription = null, tint = CyberCyan, modifier = Modifier.size(12.dp))
                         Text(
-                            text = "ODO: Start $startOdoStr → End $endOdoStr",
+                            text = "ODO: Start $startOdoStr → End $endOdoStr$deltaStr",
                             color = CyberCyan,
                             fontWeight = FontWeight.Medium,
                             fontSize = 11.sp,

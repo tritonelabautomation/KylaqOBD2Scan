@@ -108,7 +108,8 @@ object TripTrendAnalyzer {
             val prevRpm = lastRpm
             val prevSpeed = lastSpeed
             val prevFuel = lastFuelLh
-            when (x.pid) {
+            val normPid = TripFuelSummary.normalizePidKey(x.pid)
+            when (normPid) {
                 PID_RPM -> {
                     rpmSum += v; rpmN++; lastRpm = v
                     lastRpmTs = x.ts; lastRpmV = v

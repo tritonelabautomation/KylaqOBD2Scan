@@ -155,8 +155,8 @@ fun RefuelLoggingDialog(
 
     // Calculations for dynamic 3-factor calibration preview
     val pumpLVal = liters.toDoubleOrNull() ?: 0.0
-    val preLvlVal = preLevelPct.toDoubleOrNull() ?: 0.0
-    val postLvlVal = postLevelPct.toDoubleOrNull() ?: 100.0
+    val preLvlVal = preLevelPct.toDoubleOrNull() ?: initialPreLevelPct ?: 0.0
+    val postLvlVal = postLevelPct.toDoubleOrNull() ?: initialPostLevelPct ?: 100.0
     val deltaLvlVal = maxOf(0.0, postLvlVal - preLvlVal)
     val floatLVal = (deltaLvlVal / 100.0) * 50.0
     val floatErrorPct = if (pumpLVal > 0.1) ((pumpLVal - floatLVal) / pumpLVal) * 100.0 else 0.0
@@ -464,8 +464,8 @@ fun RefuelLoggingDialog(
                     val lVal = liters.toDoubleOrNull()
                     val pVal = price.toDoubleOrNull() ?: 0.0
                     val totVal = total.toDoubleOrNull() ?: (if (lVal != null) lVal * pVal else 0.0)
-                    val cutVal = postLevelPct.toDoubleOrNull() ?: 100.0
-                    val startVal = preLevelPct.toDoubleOrNull() ?: 0.0
+                    val cutVal = postLevelPct.toDoubleOrNull() ?: initialPostLevelPct ?: 100.0
+                    val startVal = preLevelPct.toDoubleOrNull() ?: initialPreLevelPct ?: 0.0
                     val odoVal = odo.toDoubleOrNull()
                     val distVal = midDistanceKm.toDoubleOrNull()
                     val econVal = midEconomyKmL.toDoubleOrNull()

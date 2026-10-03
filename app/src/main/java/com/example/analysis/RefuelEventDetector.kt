@@ -41,7 +41,8 @@ class RefuelEventDetector(private val minRisePct: Double = DEFAULT_MIN_RISE_PCT)
     /** Feeds one decoded row. Returns an event exactly once, when a stationary window closes. */
     fun onSample(s: Sample): Detected? {
         val v = s.value ?: return null
-        return when (s.pid) {
+        val pidKey = TripFuelSummary.normalizePidKey(s.pid)
+        return when (pidKey) {
             PID_SPEED -> {
                 val nowStationary = v < STOP_KMH
                 val closed = if (stationary && !nowStationary) closeWindow(s.tsMs) else null
@@ -133,10 +134,12 @@ class RefuelEventDetector(private val minRisePct: Double = DEFAULT_MIN_RISE_PCT)
             firstOdoKm: Double?,
             minRisePct: Double = DEFAULT_MIN_RISE_PCT
         ): Detected? {
-            if (firstTsMs <= prevTsMs) return null
-            if (firstLevelPct - prevLevelPct < minRisePct) return null
+            val rise = firstLevelPct - prevLevelPct
+            if (rise < minRisePct) return null
+            val startMs = minOf(prevTsMs, firstTsMs)
+            val endMs = maxOf(prevTsMs, firstTsMs).let { if (it == startMs) it + 1 else it }
             return Detected(
-                prevTsMs, firstTsMs, prevLevelPct, firstLevelPct,
+                startMs, endMs, prevLevelPct, firstLevelPct,
                 firstOdoKm ?: prevOdoKm, true
             )
         }
@@ -174,7 +177,8 @@ object RefuelSessionScan {
         for (r in rows.sortedBy { it.tsMs }) {
             lastTs = r.tsMs
             val v = r.value
-            when (r.pid) {
+            val normPid = TripFuelSummary.normalizePidKey(r.pid)
+            when (normPid) {
                 RefuelEventDetector.PID_LEVEL -> if (v != null) {
                     if (firstLevel == null) firstLevel = r.tsMs to v
                     lastLevel = Triple(r.tsMs, v, lastOdo)
@@ -184,7 +188,7 @@ object RefuelSessionScan {
                     lastOdo = v
                 }
             }
-            detector.onSample(RefuelEventDetector.Sample(r.tsMs, r.pid, v))?.let { events += it }
+            detector.onSample(RefuelEventDetector.Sample(r.tsMs, normPid, v))?.let { events += it }
         }
         lastTs?.let { end -> detector.onSessionEnd(end)?.let { events += it } }
         return Result(events, firstLevel, lastLevel, firstOdo)
@@ -223,7 +227,8 @@ object SinceRefuelStats {
         var firstOdo: Double? = null
         var maxOdo: Double? = null
         for (r in sorted) {
-            if (r.pid != RefuelEventDetector.PID_ODO) continue
+            val normPid = TripFuelSummary.normalizePidKey(r.pid)
+            if (normPid != RefuelEventDetector.PID_ODO) continue
             val v = r.value ?: continue
             if (firstOdo == null) firstOdo = v
             maxOdo = maxOf(maxOdo ?: v, v)
@@ -234,7 +239,8 @@ object SinceRefuelStats {
         var prevRateTs: Long? = null
         var rateLh: Double? = null
         for (r in sorted) {
-            when (r.pid) {
+            val normPid = TripFuelSummary.normalizePidKey(r.pid)
+            when (normPid) {
                 "019D" -> {
                     val gps = r.value ?: continue
                     commitRate(prevRateTs, r.tsMs, rateLh)?.let { fuelLiters += it }

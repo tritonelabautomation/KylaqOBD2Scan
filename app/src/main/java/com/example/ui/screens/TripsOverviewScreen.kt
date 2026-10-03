@@ -399,8 +399,12 @@ private fun TripRow(trip: WeeklyTripOverview.TripCard, price: Double, onOpenTrip
                     Spacer(Modifier.height(3.dp))
                     val startOdo = trip.startOdometerKm?.let { "%,.1f".format(it) } ?: "--"
                     val endOdo = trip.endOdometerKm?.let { "%,.1f".format(it) } ?: "--"
+                    val delta = if (trip.startOdometerKm != null && trip.endOdometerKm != null) {
+                        trip.endOdometerKm - trip.startOdometerKm
+                    } else null
+                    val deltaStr = delta?.let { " (Δ +%.1f km)".format(it) } ?: ""
                     Text(
-                        "🛣️ ODO: %s → %s km".format(startOdo, endOdo),
+                        "🛣️ ODO: %s → %s km%s".format(startOdo, endOdo, deltaStr),
                         color = TtLink,
                         fontSize = 11.sp,
                         fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
