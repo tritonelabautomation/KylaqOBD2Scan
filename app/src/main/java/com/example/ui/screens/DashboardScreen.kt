@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import java.util.Locale
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
@@ -15,6 +16,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import com.example.ui.components.AcClimateCard
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -45,20 +47,44 @@ fun DashboardScreen(
     onNavigateToTrips: () -> Unit,
     onNavigateToHud: () -> Unit,
     onNavigateToSettings: () -> Unit = {},
+    onOpenDrawer: () -> Unit = {},
     onNavigateToPidScanner: () -> Unit = {},
+    onNavigateToDtc: () -> Unit = {},
     onOpenConnectDialog: () -> Unit
 ) {
     val connectionState by viewModel.connectionState.collectAsState()
     val connectedDeviceName by viewModel.connectedDeviceName.collectAsState()
     val isPolling by viewModel.isPolling.collectAsState()
+    val autoStopNotice by viewModel.autoStopNotice.collectAsState()
+    // What the automatic crash recovery did on this launch (owner 2026-09-17: "today logs not
+    // saved unable to recover it"). Shown on the landing screen because a rescued trip that
+    // reappears with no explanation looks like a bug, and one that stays missing looks like the
+    // app lost it.
+    val autoRecoveryNotice by viewModel.autoRecoveryNotice.collectAsState()
+    val gpsData by viewModel.gpsData.collectAsState()
+    val gpsStatus by viewModel.gpsManager.gpsStatus.collectAsState()
     val transactionCount by viewModel.transactionCount.collectAsState()
     val canResponseCount by viewModel.canResponseCount.collectAsState()
     val errorCount by viewModel.errorCount.collectAsState()
     val liveDecodedMap by viewModel.liveDecodedMap.collectAsState()
+    val liveNumericMap by viewModel.liveNumericMap.collectAsState()
+    val pidCapabilities by viewModel.pidCapabilities.collectAsState()
     val pidRawHistory by viewModel.pidRawHistory.collectAsState()
     val isRecording by viewModel.isRecording.collectAsState()
     val recordingDurationSeconds by viewModel.recordingDurationSeconds.collectAsState()
     val pollingMode by viewModel.pollingMode.collectAsState()
+
+    // Observed link reality for the polling card (owner 2026-09-19): the mode label promises a
+    // per-command interval; this is what the ELM327's serial round trip actually sustains.
+    var observedGap by remember { mutableStateOf<Long?>(null) }
+    var livePids by remember { mutableStateOf(0) }
+    LaunchedEffect(isPolling, pollingMode) {
+        while (true) {
+            observedGap = viewModel.obdScheduler.observedGapMs()
+            livePids = viewModel.obdScheduler.liveEligiblePidCount()
+            kotlinx.coroutines.delay(3_000)
+        }
+    }
     val vehicleName by viewModel.vehicleName.collectAsState()
     val vehicleVin by viewModel.vehicleVin.collectAsState()
     val savedRecordings by viewModel.savedRecordings.collectAsState()
@@ -66,9 +92,22 @@ fun DashboardScreen(
     val selectedCanProtocol by viewModel.selectedCanProtocol.collectAsState()
     val protocolHealth by viewModel.protocolHealth.collectAsState()
     val protocolResult by viewModel.protocolVerificationResult.collectAsState()
-    val gpsData by viewModel.gpsData.collectAsState()
+    val steeringAngleData by viewModel.steeringAngleState.collectAsState()
 
     val realtimeEconomy by viewModel.realtimeEconomy.collectAsState()
+    val acSetTempC by viewModel.acSetTempC.collectAsState()
+    val acAutoMode by viewModel.acAutoMode.collectAsState()
+    var acTagUi by remember { mutableStateOf(viewModel.rideAc) }
+    val acLearning = remember(viewModel, connectionState, acTagUi) { viewModel.acLearning() }
+    // 2026-09-13 inconsistency fix: decoded strings carry units ("12 km/h"), so
+    // toDoubleOrNull() on them was ALWAYS null -> acSpeed stuck at 0.0 and the AC
+    // ON-vs-OFF learning gate (speed > 5 km/h) could never open. Use the numeric view.
+    val acSpeed = liveNumericMap["010D"] ?: 0.0
+    val acBaselineLh = remember(realtimeEconomy, acSpeed) {
+        val kmL = realtimeEconomy?.smoothedKmL
+        if (acSpeed > 5.0 && kmL != null && kmL > 0.5) acSpeed / kmL
+        else realtimeEconomy?.idleConsumptionLh
+    }
     val tripEconomy by viewModel.tripEconomy.collectAsState()
     val drivingState by viewModel.drivingState.collectAsState()
     val transmissionState by viewModel.transmissionState.collectAsState()
@@ -97,6 +136,12 @@ fun DashboardScreen(
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(
+                    onClick = onOpenDrawer,
+                    modifier = Modifier.testTag("btn_dashboard_menu")
+                ) {
+                    Icon(Icons.Default.Menu, contentDescription = "Menu", tint = CyberCyan)
+                }
+                IconButton(
                     onClick = onNavigateToSettings,
                     modifier = Modifier.testTag("btn_dashboard_settings")
                 ) {
@@ -105,6 +150,27 @@ fun DashboardScreen(
             }
         }
         
+        // AC & CLIMATE BEHAVIOUR (additive 2026-09-09): tag, AUTO flag, setpoint vs
+        // PID 0146 ambient delta, modelled compressor fuel price, learned ON-vs-OFF economy.
+        AcClimateCard(
+            acTag = acTagUi,
+            onCycleAc = {
+                val next = when (acTagUi) { "OFF" -> "AC"; "AC" -> "BLOWER"; else -> "OFF" }
+                viewModel.setRideAc(next)
+                acTagUi = next
+            },
+            autoMode = acAutoMode,
+            onToggleAuto = { viewModel.setAcAutoMode(!acAutoMode) },
+            setTempC = acSetTempC,
+            onSetTemp = { viewModel.setAcSetTempC(it) },
+            ambientC = numericWithStaleFallback(liveNumericMap["0146"], liveDecodedMap["0146"]),
+            baselineLh = acBaselineLh,
+            onKmL = acLearning?.onKmL,
+            offKmL = acLearning?.offKmL,
+            learnedRides = acLearning?.rides ?: 0,
+            connected = isConnected
+        )
+
         // Vehicle & Connection Status Banner
         VehicleStatusHeader(
             vehicleName = vehicleName,
@@ -128,7 +194,8 @@ fun DashboardScreen(
             onHudClick = onNavigateToHud,
             onTripsClick = onNavigateToTrips,
             onRawMonitorClick = onNavigateToRawMonitor,
-            onPidScannerClick = onNavigateToPidScanner
+            onPidScannerClick = onNavigateToPidScanner,
+            onDtcClick = onNavigateToDtc
         )
 
         Spacer(modifier = Modifier.height(14.dp))
@@ -136,12 +203,15 @@ fun DashboardScreen(
         var showBatchTestDialog by remember { mutableStateOf(false) }
         var showDiagnosticsDialog by remember { mutableStateOf(false) }
 
+        val hardwareInfo by viewModel.adapterHardwareClassification.collectAsState()
+
         // Protocol Verification Selector
         ProtocolVerificationControl(
             selectedProtocol = selectedCanProtocol,
             health = protocolHealth,
             result = protocolResult,
             isConnected = isConnected,
+            hardwareInfo = hardwareInfo,
             onProtocolSelected = { viewModel.selectCanProtocol(it) },
             onVerify = { viewModel.verifySelectedProtocol() },
             onShowBatchTest = { showBatchTestDialog = true },
@@ -185,6 +255,22 @@ fun DashboardScreen(
             transactionCount = transactionCount,
             canResponseCount = canResponseCount,
             errorCount = errorCount,
+            autoStopNotice = autoStopNotice,
+            autoRecoveryNotice = autoRecoveryNotice,
+            gpsNotice = gpsNoticeFor(
+                isRecording = isRecording,
+                fixAvailable = gpsData.isAvailable,
+                fixHasAltitude = gpsData.hasAltitude,
+                gpsStatus = gpsStatus,
+                altitudeM = gpsData.altitudeMeters
+            )?.first,
+            gpsNoticeTone = gpsNoticeFor(
+                isRecording = isRecording,
+                fixAvailable = gpsData.isAvailable,
+                fixHasAltitude = gpsData.hasAltitude,
+                gpsStatus = gpsStatus,
+                altitudeM = gpsData.altitudeMeters
+            )?.second ?: 1,
             onStartRecording = { viewModel.startRecording() },
             onStopRecording = { viewModel.stopRecording() },
             onTogglePolling = { viewModel.togglePolling() }
@@ -195,7 +281,9 @@ fun DashboardScreen(
         // Polling Mode Selector (Safe / Normal / Fast)
         PollingModeSelector(
             currentMode = pollingMode,
-            onModeSelected = { viewModel.setPollingSpeedMode(it) }
+            onModeSelected = { viewModel.setPollingSpeedMode(it) },
+            observedGapMs = observedGap,
+            livePids = livePids
         )
 
         Spacer(modifier = Modifier.height(18.dp))
@@ -331,16 +419,18 @@ fun DashboardScreen(
         }
 
         TelemetryDashboardContent(
+            capabilityStatuses = pidCapabilities,
             gpsData = gpsData,
             liveMap = liveDecodedMap,
             realtimeEconomy = realtimeEconomy,
             tripEconomy = tripEconomy,
             drivingState = drivingState,
             transmissionState = transmissionState,
+            steeringAngleData = steeringAngleData,
             onPidClick = { pidId -> onNavigateToPidDetail(pidId) }
         )
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(96.dp)) // FAB clearance (QA/QC 2026-09-13)
     }
 }
 
@@ -383,7 +473,11 @@ fun VehicleStatusHeader(
                             fontFamily = FontFamily.Monospace,
                             color = CyberCyan
                         )
-                        if (connectionState == ConnectionState.CONNECTED && vehicleVin == null) {
+                        // A failed attempt must not hide the retry: "VIN Unavailable" with no
+                        // button left the owner with nothing to press (owner 2026-09-19).
+                        if (connectionState == ConnectionState.CONNECTED &&
+                            (vehicleVin == null || vehicleVin == "VIN Unavailable")
+                        ) {
                             Spacer(modifier = Modifier.width(8.dp))
                             TextButton(onClick = onFetchVinClick, contentPadding = PaddingValues(0.dp), modifier = Modifier.height(20.dp)) {
                                 Text("READ VIN", fontSize = 10.sp)
@@ -422,14 +516,42 @@ fun VehicleStatusHeader(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                val isBt = connectionState == ConnectionState.CONNECTED
-                val isEcu = protocolHealth == ProtocolHealth.WORKING || protocolHealth == ProtocolHealth.PARTIAL
+        val isBt = connectionState == ConnectionState.CONNECTED
+        val isEcu = isBt && (protocolHealth == ProtocolHealth.WORKING || protocolHealth == ProtocolHealth.PARTIAL)
                 StatusBadge(label = "Bluetooth", isActive = isBt)
                 StatusBadge(label = "Adapter", isActive = isBt)
                 StatusBadge(label = "CAN", isActive = isEcu)
                 StatusBadge(label = "ECU", isActive = isEcu)
             }
         }
+    }
+}
+
+/**
+ * GPS/altitude status line for the recording bar (owner 2026-09-16: "Still Altitude
+ * logs are missing very very bad"). GPS failures - permission denied, provider off,
+ * waiting for first fix - used to be completely silent, so a whole trip could log null
+ * altitude with no clue why. Pure function, pinned by unit tests.
+ * Tone: 0 = altitude logging (green), 1 = degraded/waiting (amber), 2 = blocked (red).
+ */
+fun gpsNoticeFor(
+    isRecording: Boolean,
+    fixAvailable: Boolean,
+    fixHasAltitude: Boolean,
+    gpsStatus: String,
+    altitudeM: Double
+): Pair<String, Int>? {
+    if (!isRecording) return null
+    return when {
+        fixAvailable && fixHasAltitude ->
+            "GPS FIX - altitude logging - " +
+                String.format(java.util.Locale.US, "%.0f", altitudeM) + " m" to 0
+        fixAvailable -> "GPS fix - this fix carries no altitude" to 1
+        gpsStatus == com.example.data.GpsManager.STATUS_PERMISSION_DENIED ->
+            "GPS BLOCKED - grant PRECISE location in system settings or altitude stays missing" to 2
+        gpsStatus == com.example.data.GpsManager.STATUS_PROVIDER_OFF ->
+            "GPS OFF - enable phone Location or altitude stays missing" to 2
+        else -> "GPS - waiting for first fix, altitude starts logging then..." to 1
     }
 }
 
@@ -442,6 +564,10 @@ fun RecordingControlBar(
     transactionCount: Long,
     canResponseCount: Long,
     errorCount: Long,
+    autoStopNotice: String? = null,
+    autoRecoveryNotice: String? = null,
+    gpsNotice: String? = null,
+    gpsNoticeTone: Int = 1,
     onStartRecording: () -> Unit,
     onStopRecording: () -> Unit,
     onTogglePolling: () -> Unit
@@ -449,7 +575,7 @@ fun RecordingControlBar(
     val durationFormatted = remember(recordingDurationSeconds) {
         val min = recordingDurationSeconds / 60
         val sec = recordingDurationSeconds % 60
-        String.format("%02d:%02d", min, sec)
+        String.format(java.util.Locale.US, "%02d:%02d", min, sec)
     }
 
     Card(
@@ -537,8 +663,37 @@ fun RecordingControlBar(
                 MetricCounter(label = "Errors", value = "$errorCount", isError = errorCount > 0)
                 MetricCounter(
                     label = "Rec Status",
-                    value = if (isRecording) "ACTIVE ($durationFormatted)" else "IDLE",
-                    isSuccess = isRecording
+                    // OWNER BUG 2026-09-16: button said "Resume" (polling paused) while
+                    // Rec Status still claimed ACTIVE. Paused polling = paused claim.
+                    value = if (!isRecording) "IDLE" else if (isPolling) "ACTIVE ($durationFormatted)" else "PAUSED ($durationFormatted)",
+                    isSuccess = isRecording && isPolling
+                )
+            }
+            autoStopNotice?.let {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(it, color = WarningRed, fontSize = 12.sp, lineHeight = 17.sp)
+            }
+            autoRecoveryNotice?.let {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    it,
+                    modifier = Modifier.testTag("txt_auto_recovery_notice"),
+                    color = NeonEmerald,
+                    fontSize = 12.sp,
+                    lineHeight = 17.sp
+                )
+            }
+            gpsNotice?.let {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    it,
+                    color = when (gpsNoticeTone) {
+                        0 -> NeonEmerald
+                        2 -> WarningRed
+                        else -> ElectricAmber
+                    },
+                    fontSize = 12.sp,
+                    lineHeight = 17.sp
                 )
             }
         }
@@ -566,58 +721,17 @@ fun MetricCounter(label: String, value: String, isError: Boolean = false, isSucc
 @Composable
 fun PollingModeSelector(
     currentMode: PollingSpeedMode,
-    onModeSelected: (PollingSpeedMode) -> Unit
+    onModeSelected: (PollingSpeedMode) -> Unit,
+    observedGapMs: Long? = null,
+    livePids: Int = 0
 ) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .testTag("polling_mode_card"),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-    ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = "Polling Mode: ${currentMode.displayName}",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = currentMode.description,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 11.sp
-                )
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                PollingSpeedMode.values().forEach { mode ->
-                    val isSelected = mode == currentMode
-                    FilterChip(
-                        selected = isSelected,
-                        onClick = { onModeSelected(mode) },
-                        label = {
-                            Text(
-                                text = "${mode.displayName} (${(mode.multiplier * 250).toInt()}ms)",
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                fontSize = 11.sp
-                            )
-                        },
-                        modifier = Modifier.weight(1f).testTag("chip_mode_${mode.name}")
-                    )
-                }
-            }
-        }
-    }
+    com.example.ui.components.PollingAccuracyCard(
+        currentMode = currentMode,
+        onModeSelected = onModeSelected,
+        observedGapMs = observedGapMs,
+        livePids = livePids,
+        initiallyExpanded = false
+    )
 }
 
 data class TelemetryItem(
@@ -775,7 +889,7 @@ fun ResearchPidCard(
                     fontSize = 10.sp
                 )
                 Text(
-                    text = timestamp.takeLast(12),
+                    text = com.example.data.RecordTime.timeOfDay(timestamp),
                     style = MaterialTheme.typography.bodySmall,
                     fontFamily = FontFamily.Monospace,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -793,6 +907,7 @@ fun ProtocolVerificationControl(
     health: ProtocolHealth,
     result: ProtocolVerificationResult?,
     isConnected: Boolean,
+    hardwareInfo: MainViewModel.AdapterHardwareClassification? = null,
     onProtocolSelected: (CanProtocol) -> Unit,
     onVerify: () -> Unit,
     onShowBatchTest: () -> Unit,
@@ -837,6 +952,50 @@ fun ProtocolVerificationControl(
                 }
             }
 
+            // Hardware Classification Badge (Shows if Clone or Genuine STN/PIC)
+            if (isConnected && hardwareInfo != null) {
+                Spacer(modifier = Modifier.height(10.dp))
+                val badgeBg = when {
+                    hardwareInfo.isClone -> WarningRed.copy(alpha = 0.15f)
+                    hardwareInfo.isStn -> CyberCyan.copy(alpha = 0.15f)
+                    else -> NeonEmerald.copy(alpha = 0.15f)
+                }
+                val badgeBorder = when {
+                    hardwareInfo.isClone -> WarningRed.copy(alpha = 0.5f)
+                    hardwareInfo.isStn -> CyberCyan.copy(alpha = 0.5f)
+                    else -> NeonEmerald.copy(alpha = 0.5f)
+                }
+                val badgeTint = when {
+                    hardwareInfo.isClone -> ElectricAmber
+                    hardwareInfo.isStn -> CyberCyan
+                    else -> NeonEmerald
+                }
+                val icon = when {
+                    hardwareInfo.isClone -> Icons.Default.Warning
+                    hardwareInfo.isStn -> Icons.Default.Verified
+                    else -> Icons.Default.Memory
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = badgeBg,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, badgeBorder),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(icon, contentDescription = null, tint = badgeTint, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Column {
+                            Text(hardwareInfo.label, color = badgeTint, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            Text(hardwareInfo.description, color = TextSecondaryDark, fontSize = 9.sp)
+                        }
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(12.dp))
             
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -862,7 +1021,8 @@ fun ProtocolVerificationControl(
                     Text(statusText, color = statusColor, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                 }
                 
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // 2026-09-13 owner screenshot: FAB covered "Test Profile" - keep the row clear.
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(end = 64.dp)) {
                     OutlinedButton(
                         onClick = onShowBatchTest,
                         enabled = isConnected,
@@ -935,7 +1095,8 @@ fun QuickAccessHub(
     onHudClick: () -> Unit,
     onTripsClick: () -> Unit,
     onRawMonitorClick: () -> Unit,
-    onPidScannerClick: () -> Unit = {}
+    onPidScannerClick: () -> Unit = {},
+    onDtcClick: () -> Unit = {}
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(
@@ -991,6 +1152,14 @@ fun QuickAccessHub(
                 accentColor = ElectricAmber,
                 modifier = Modifier.weight(1f),
                 onClick = onTripsClick
+            )
+            QuickActionCard(
+                title = "EPC & Diagnostics",
+                subtitle = "VAG EPC 6-Point Check & DTCs",
+                icon = Icons.Default.Security,
+                accentColor = WarningRed,
+                modifier = Modifier.weight(1f),
+                onClick = onDtcClick
             )
         }
     }

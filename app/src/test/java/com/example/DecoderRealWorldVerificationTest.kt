@@ -23,7 +23,8 @@ class DecoderRealWorldVerificationTest {
     private fun pid(id: String, dec: DecoderType) = PidDefinition(
         id = id, service = "01", pid = id.removePrefix("01"),
         name = "Test $id", shortName = id, unit = "",
-        decoderType = dec, isResearch = false
+        decoderType = dec, isResearch = false,
+        defaultIntervalMs = 500L
     )
 
     // ─── 1. RPM (PID 0x0C) — ((A*256)+B)/4 ──────────────────────────
@@ -90,11 +91,38 @@ class DecoderRealWorldVerificationTest {
             listOf(0x41, 0x46, 0x41))
         assertEquals(25.0, r.numericValue!!, 0.01)
     }
-    // ─── 7. Fuel Rate (PID 0x9D) — ((A*256)+B)/20 ───────────────────
-    @Test fun fuelRate_419D00220022_decodes1_7() {
-        val r = PidDecoder.decode(pid("019D", DecoderType.FUEL_RATE_20),
+    // ─── 7. Fuel Rate MASS (PID 0x9D) — g/s = ((A*256)+B)/10 ────────
+    // QA/QC fuel audit 2026-09-13 (F-2): this test previously asserted /20 (the $5E volume
+    // formula) on $9D, locking the wrong decoder and masking the ProfileDefinitions bug.
+    // J1979 $9D = engine fuel rate MASS, g/s, 4 data bytes (A,B used; C,D reserved).
+    @Test fun fuelRateMass_419D00220022_decodes0_68gs() {
+        // F-6 (2026-09-13): resolution recalibrated to 0.02 g/s per count (/50) against owner
+        // live telemetry + stoichiometric air-model cross-check; /10 gave impossible idle L/h.
+        val r = PidDecoder.decode(pid("019D", DecoderType.FUEL_RATE_MASS_50),
             listOf(0x41, 0x9D, 0x00, 0x22, 0x00, 0x22))
+        assertEquals(0.68, r.numericValue!!, 0.01)
+        // 2026-09-15: the row now carries its litre equivalent inline (owner: "why g/s
+        // whereas all other units are Liters?"); the decoded unit suffix is empty because
+        // LiveTelemetryStore joins displayValue+unit.
+        assertEquals("0.68 g/s ≈ 3.29 L/h", r.displayValue)
+        assertEquals("", r.unit)
+    }
+
+    @Test fun fuelRateMass_ownerIdleFrame_419D0008_isPhysical() {
+        // Owner's real Kylaq idle frame equivalent (raw count 8): 0.16 g/s = 0.77 L/h warm idle.
+        val r = PidDecoder.decode(pid("019D", DecoderType.FUEL_RATE_MASS_50),
+            listOf(0x41, 0x9D, 0x00, 0x08))
+        assertEquals(0.16, r.numericValue!!, 0.001)
+        val lh = r.numericValue!! * 3600.0 / 745.0
+        assert(lh in 0.5..1.2) { "idle L/h implausible: $lh" }
+    }
+
+    // ─── 7b. Fuel Rate VOLUME (PID 0x5E) — L/h = ((A*256)+B)/20 ──────
+    @Test fun fuelRateVolume_415E0022_decodes1_7lh() {
+        val r = PidDecoder.decode(pid("015E", DecoderType.FUEL_RATE_20),
+            listOf(0x41, 0x5E, 0x00, 0x22))
         assertEquals(1.7, r.numericValue!!, 0.01)
+        assertEquals("L/h", r.unit)
     }
 
     // ─── 8. Voltage (PID 0x42) — ((A*256)+B)/1000 ───────────────────
@@ -173,12 +201,14 @@ class DecoderRealWorldVerificationTest {
 
     // ─── 18. PID 0x67 sentinel: Skoda Kylaq ECU returns 0x03 ──────
     // as a "no sensor" sentinel for the secondary coolant probe.
-    // Decoder formula is A-40, which correctly yields -37 for 0x03.
-    // The numeric value is correct; the UI should suppress this impossible reading.
-    @Test fun coolant2_4167035043_sentinelDecodesNegative37() {
+    // Formula A-40 yields -37 for 0x03, which the plausibility gate
+    // (-30..210 C, added 2026-09-13 after owner live screenshots, T-3)
+    // rejects: the sentinel must surface as NO DATA, never a fake number.
+    @Test fun coolant2_4167035043_sentinelRejectedAsNoData() {
         val r = PidDecoder.decode(pid("0167", DecoderType.TEMP_MINUS_40),
             listOf(0x41, 0x67, 0x03, 0x50, 0x43))
-        assertEquals(-37.0, r.numericValue!!, 0.01)
+        assertNull(r.numericValue)
+        assertEquals("implausible raw - no data", r.displayValue)
     }
 
     // ─── 19. NO DATA handling: must not contaminate UI ───────────────

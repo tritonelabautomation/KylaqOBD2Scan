@@ -46,12 +46,27 @@ class RuleBasedChatProvider(
             q.contains("throttle") || q.contains("load") || q.contains("accelerat") -> buildThrottleResponse(report)
             q.contains("boost") || q.contains("turbo") || q.contains("map") -> buildBoostResponse(report)
             q.contains("speed") || q.contains("velocity") -> buildSpeedResponse(report)
+            q.contains("mechanic") || q.contains("workshop") -> buildMechanicQuestions()
             q.contains("dtc") || q.contains("fault") || q.contains("error") || q.contains("check engine") -> buildDtcResponse(report, context)
             q.contains("fuel") || q.contains("air") || q.contains("maf") || q.contains("lambda") -> buildAirFuelResponse(report)
             q.contains("overall") || q.contains("health") || q.contains("summary") || q.contains("score") -> buildHealthSummary(report)
             q.contains("recommend") || q.contains("check") || q.contains("maintenance") -> buildRecommendations(report)
             else -> buildGeneralResponse(report, context)
         }
+    }
+
+    /** VehIQ "counter-questions for the mechanic": never accept a code-only diagnosis. */
+    private fun buildMechanicQuestions() = buildString {
+        appendLine("Ask the workshop these before approving any repair (free counter-questions):")
+        appendLine("1. Is the code CURRENT, PENDING or STORED? Can I see the freeze-frame data (rpm, load, speed) captured when it set?")
+        appendLine("2. Show me the live sensor data that proves the part failed - not just the trouble code.")
+        appendLine("3. What else shares this circuit? Wiring, connectors and grounds get blamed last but fail often.")
+        appendLine("4. Is this a known 1.0 TSI EA211 issue (carbon build-up, wastegate rattle, water-pump seepage, coil packs)? Any TSB/service campaign?")
+        appendLine("5. What exactly will you replace, what does the part cost, and can I have the old part back?")
+        appendLine("6. Labour hours quoted vs book time? What is the warranty on parts AND labour?")
+        appendLine("7. Will the fix need adaptation/reset (throttle body, DSG, fuel trims) and a verification drive afterwards?")
+        appendLine("8. Can we clear the code and re-test first, so we know it returns before spending?")
+        append("Tip: run AI Diagnostic here first and read the codes to the mechanic - matching vocabulary prevents upselling.")
     }
 
     private fun buildNoTripResponse() = buildString {
