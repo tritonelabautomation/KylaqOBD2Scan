@@ -14,12 +14,12 @@ class FuelBatchTripComparatorTest {
         val tripStartMs = 1760000000000L
         val trip = TripEntity(
             id = "trip_milex_01",
+            title = "Nayara mileX Drive",
+            startTimeUtc = "2026-10-02T11:00:00Z",
+            endTimeUtc = "2026-10-02T11:30:00Z",
             startTimestamp = tripStartMs,
             endTimestamp = tripStartMs + 1800_000L,
-            distanceKm = 24.0,
             durationSeconds = 1800L,
-            fuelLiters = 2.0,
-            averageSpeedKmh = 48.0,
             maxSpeedKmh = 75.0,
             healthScore = 95
         )
@@ -30,17 +30,64 @@ class FuelBatchTripComparatorTest {
             distanceKm = 24.0,
             kmPerLiter = 12.0, // 12.0 km/L on treated batch
             averageSpeedKmh = 48.0,
+            movingAverageSpeedKmh = 50.0,
             maxSpeedKmh = 75.0,
+            coastSeconds = 60.0,
             durationSeconds = 1800L,
-            idleSeconds = 60.0
+            idleSeconds = 60.0,
+            speedHistogram = emptyList()
         )
 
         // Telemetry samples with PID 010E (Timing Advance ~18.5°) and PID 0107 (LTFT ~0.8%)
         val samples = listOf(
-            TelemetrySampleEntity(tripId = "trip_milex_01", pid = "010E", timestamp = tripStartMs + 1000, numericValue = 18.5),
-            TelemetrySampleEntity(tripId = "trip_milex_01", pid = "010E", timestamp = tripStartMs + 2000, numericValue = 18.7),
-            TelemetrySampleEntity(tripId = "trip_milex_01", pid = "0107", timestamp = tripStartMs + 1000, numericValue = 0.8),
-            TelemetrySampleEntity(tripId = "trip_milex_01", pid = "0107", timestamp = tripStartMs + 2000, numericValue = 0.6)
+            TelemetrySampleEntity(
+                tripId = "trip_milex_01",
+                timestamp = tripStartMs + 1000,
+                timestampUtc = "2026-10-02T11:00:01Z",
+                pid = "010E",
+                parameterName = "Timing Advance",
+                rawHex = "410E5C",
+                numericValue = 18.5,
+                displayValue = "18.5",
+                unit = "°",
+                ecuCanId = "7E8"
+            ),
+            TelemetrySampleEntity(
+                tripId = "trip_milex_01",
+                timestamp = tripStartMs + 2000,
+                timestampUtc = "2026-10-02T11:00:02Z",
+                pid = "010E",
+                parameterName = "Timing Advance",
+                rawHex = "410E5E",
+                numericValue = 18.7,
+                displayValue = "18.7",
+                unit = "°",
+                ecuCanId = "7E8"
+            ),
+            TelemetrySampleEntity(
+                tripId = "trip_milex_01",
+                timestamp = tripStartMs + 1000,
+                timestampUtc = "2026-10-02T11:00:01Z",
+                pid = "0107",
+                parameterName = "Long Term Fuel Trim Bank 1",
+                rawHex = "410781",
+                numericValue = 0.8,
+                displayValue = "0.8",
+                unit = "%",
+                ecuCanId = "7E8"
+            ),
+            TelemetrySampleEntity(
+                tripId = "trip_milex_01",
+                timestamp = tripStartMs + 2000,
+                timestampUtc = "2026-10-02T11:00:02Z",
+                pid = "0107",
+                parameterName = "Long Term Fuel Trim Bank 1",
+                rawHex = "410780",
+                numericValue = 0.6,
+                displayValue = "0.6",
+                unit = "%",
+                ecuCanId = "7E8"
+            )
         )
 
         val currentFill = FuelLogCodec.FuelEntry(
