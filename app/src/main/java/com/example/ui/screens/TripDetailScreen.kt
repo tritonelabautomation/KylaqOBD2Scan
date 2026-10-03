@@ -355,6 +355,9 @@ fun TripDetailScreen(
                             userOverride = userOverride,
                             onToggleDriveMode = onToggleDriveMode,
                             onUpdateAcState = onUpdateAcState,
+                            onUpdateFuelTag = { st, gr, ad, ml ->
+                                viewModel.setTripFuelTag(tripId, st, gr, ad, ml)
+                            },
                             onUpdateAltitude = { maxAlt, minAlt ->
                                 viewModel.updateTripAltitudeIfMissing(tripId, maxAlt, minAlt)
                             },
@@ -645,6 +648,7 @@ private fun TripOverviewView(
     userOverride: com.example.data.TripUserOverride = com.example.data.TripUserOverride(trip?.id ?: ""),
     onToggleDriveMode: (String) -> Unit = {},
     onUpdateAcState: (String?, Boolean) -> Unit = { _, _ -> },
+    onUpdateFuelTag: (String, String, String?, Double?) -> Unit = { _, _, _, _ -> },
     onUpdateAltitude: (Double, Double) -> Unit = { _, _ -> },
     /** Car-pool card slot (owner 2026-09-19): rendered as an item of THIS list so it scrolls
      *  with everything else - the 2026-09-16 clipping fix forbids cards outside the list. */
@@ -701,6 +705,14 @@ private fun TripOverviewView(
         } ?: "--:--"
     }
 
+    var showFuelTagDialog by remember { mutableStateOf(false) }
+    val fuelTag = remember(trip.id, userOverride, validStartMs) {
+        com.example.analysis.FuelBrandTagger.resolveFuelTag(
+            tripStartMs = validStartMs ?: trip.startTimestamp,
+            userOverride = userOverride
+        )
+    }
+
     val gpsPoints = remember(trip.id) {
         val sessionDir = File(context.filesDir, "recordings/session_${trip.id}")
         val candidates = listOf(
@@ -746,12 +758,40 @@ private fun TripOverviewView(
             )
         }
 
-        // 2. Business vs Personal Trip Capsule Switcher
+        // 2. Business vs Personal Trip Capsule Switcher & Fuel Used Batch Tag
         item {
-            JioMotiveTripHeader(
-                isBusinessTrip = isBusinessTrip,
-                onToggleCategory = { isBusinessTrip = it }
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                JioMotiveTripHeader(
+                    isBusinessTrip = isBusinessTrip,
+                    onToggleCategory = { isBusinessTrip = it }
+                )
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, fuelTag.brand.primaryColor.copy(alpha = 0.35f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.weight(1f, fill = false)) {
+                            Icon(Icons.Default.LocalGasStation, contentDescription = null, tint = fuelTag.brand.secondaryColor, modifier = Modifier.size(20.dp))
+                            Column {
+                                Text("FUEL BATCH IN TANK", color = TextSecondaryDark, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                Text(fuelTag.fullStationAndGrade, color = TextPrimaryDark, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                        com.example.ui.components.FuelBrandBadge(
+                            fuelTag = fuelTag,
+                            onClick = { showFuelTagDialog = true }
+                        )
+                    }
+                }
+            }
         }
 
         // 3. Route Details & Stoppage / Halts Card (JioMotive Route Section)
@@ -942,6 +982,17 @@ private fun TripOverviewView(
                 }
             }
         }
+    }
+
+    if (showFuelTagDialog) {
+        com.example.ui.components.FuelTagSelectorDialog(
+            currentTag = fuelTag,
+            onDismiss = { showFuelTagDialog = false },
+            onTagSelected = { station, grade, additive, dosageMl ->
+                onUpdateFuelTag(station, grade, additive, dosageMl)
+                showFuelTagDialog = false
+            }
+        )
     }
 }
 

@@ -73,7 +73,8 @@ object DailyTripCostAggregator {
         /** Unlogged odometer gap in km if previous trip's end ODO < this trip's start ODO (e.g. >= 0.5 km missed drive). */
         val unloggedOdoGapKm: Double? = null,
         val prevTripEndOdoKm: Double? = null,
-        val prevTripEndMs: Long? = null
+        val prevTripEndMs: Long? = null,
+        val fuelTag: FuelBrandTagger.FuelTagInfo? = null
     )
 
     data class DayTripGroup(
@@ -150,7 +151,9 @@ object DailyTripCostAggregator {
         carpoolEntries: List<CarpoolCodec.CarpoolEntry>,
         fuelLogs: List<FuelLogCodec.FuelEntry>,
         fuelPricePerL: Double? = null,
-        nowMs: Long = System.currentTimeMillis()
+        nowMs: Long = System.currentTimeMillis(),
+        userOverrides: Map<String, com.example.data.TripUserOverride> = emptyMap(),
+        bunkRecords: List<com.example.data.RefuelBunkRecord> = emptyList()
     ): AggregationResult {
         val effectivePricePerL = fuelPricePerL?.takeIf { it > 0.0 }
             ?: fuelLogs.maxByOrNull { it.idMs }?.pricePerL?.takeIf { it > 0.0 }
@@ -225,6 +228,12 @@ object DailyTripCostAggregator {
             }
 
             val gapInfo = tripGaps[trip.tripId]
+            val fuelTag = FuelBrandTagger.resolveFuelTag(
+                tripStartMs = startMs,
+                userOverride = userOverrides[trip.tripId],
+                fuelLogs = fuelLogs,
+                bunkRecords = bunkRecords
+            )
 
             DayTripItem(
                 tripId = trip.tripId,
@@ -253,7 +262,8 @@ object DailyTripCostAggregator {
                 endOdometerKm = trip.endOdometerKm,
                 unloggedOdoGapKm = gapInfo?.first,
                 prevTripEndOdoKm = gapInfo?.second,
-                prevTripEndMs = gapInfo?.third
+                prevTripEndMs = gapInfo?.third,
+                fuelTag = fuelTag
             )
         }
 

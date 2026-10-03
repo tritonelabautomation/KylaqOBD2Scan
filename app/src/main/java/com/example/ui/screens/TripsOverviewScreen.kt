@@ -382,12 +382,16 @@ fun BandStrip(fractions: List<Double>) {
 @Composable
 private fun TripRow(trip: WeeklyTripOverview.TripCard, price: Double, onOpenTrip: (String) -> Unit) {
     val timeFmt = remember { com.example.data.RecordTime.formatter("HH:mm") }
+    val fuelTag = remember(trip.startMs) { com.example.analysis.FuelBrandTagger.resolveFuelTag(trip.startMs) }
     Column(Modifier.fillMaxWidth().background(TtInner, RoundedCornerShape(14.dp)).clickable { onOpenTrip(trip.tripId) }.padding(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             GradientRing(score = trip.score, size = 42.dp, stroke = 3.5.dp, numberSp = 13)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(trip.title, color = TtWhite, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(trip.title, color = TtWhite, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f, fill = false))
+                    com.example.ui.components.FuelBrandBadge(fuelTag = fuelTag)
+                }
                 Spacer(Modifier.height(3.dp))
                 Text("%.1f km • %d min".format(trip.distanceKm, (trip.durationSec / 60).toInt()), color = TtGray, fontSize = 11.sp)
                 Spacer(Modifier.height(3.dp))

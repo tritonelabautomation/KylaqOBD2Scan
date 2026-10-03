@@ -21,7 +21,11 @@ data class TripUserOverride(
     val acState: String? = null,
     /** True if driver drove with window rolled down for natural ventilation */
     val windowRolledDown: Boolean = false,
-    val note: String? = null
+    val note: String? = null,
+    val fuelBrand: String? = null,
+    val fuelStation: String? = null,
+    val fuelGrade: String? = null,
+    val fuelAdditive: String? = null
 )
 
 object TripUserOverrideStore {
@@ -51,6 +55,10 @@ object TripUserOverrideStore {
         override.acState?.let { json.put("acState", it) }
         json.put("windowRolledDown", override.windowRolledDown)
         override.note?.let { json.put("note", it) }
+        override.fuelBrand?.let { json.put("fuelBrand", it) }
+        override.fuelStation?.let { json.put("fuelStation", it) }
+        override.fuelGrade?.let { json.put("fuelGrade", it) }
+        override.fuelAdditive?.let { json.put("fuelAdditive", it) }
         return json.toString()
     }
 
@@ -62,7 +70,11 @@ object TripUserOverrideStore {
                 driveMode = json.optString("driveMode", null)?.takeIf { it.isNotBlank() && it != "null" },
                 acState = json.optString("acState", null)?.takeIf { it.isNotBlank() && it != "null" },
                 windowRolledDown = json.optBoolean("windowRolledDown", false),
-                note = json.optString("note", null)?.takeIf { it.isNotBlank() && it != "null" }
+                note = json.optString("note", null)?.takeIf { it.isNotBlank() && it != "null" },
+                fuelBrand = json.optString("fuelBrand", null)?.takeIf { it.isNotBlank() && it != "null" },
+                fuelStation = json.optString("fuelStation", null)?.takeIf { it.isNotBlank() && it != "null" },
+                fuelGrade = json.optString("fuelGrade", null)?.takeIf { it.isNotBlank() && it != "null" },
+                fuelAdditive = json.optString("fuelAdditive", null)?.takeIf { it.isNotBlank() && it != "null" }
             )
         } catch (e: Exception) {
             TripUserOverride(tripId)

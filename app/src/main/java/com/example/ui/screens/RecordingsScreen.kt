@@ -31,9 +31,12 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.core.content.FileProvider
 import com.example.analysis.DailyTripCostAggregator
+import com.example.analysis.FuelBrandTagger
 import com.example.data.SavedRecording
 import com.example.data.db.StorageStats
 import com.example.ui.components.DayCostGroupCard
+import com.example.ui.components.FuelBrandBadge
+import com.example.ui.components.FuelTagSelectorDialog
 import com.example.ui.components.MonthlyPriceCard
 import com.example.ui.screens.CarpoolDialog
 import com.example.ui.theme.*
@@ -109,6 +112,7 @@ fun RecordingsScreen(
     var selectedMonthIndex by remember { mutableStateOf(0) }
     var viewAllMonths by remember { mutableStateOf(false) }
     var carpoolTargetTrip by remember { mutableStateOf<DailyTripCostAggregator.DayTripItem?>(null) }
+    var fuelTagTargetTrip by remember { mutableStateOf<DailyTripCostAggregator.DayTripItem?>(null) }
     var showFillGapDialog by remember { mutableStateOf(false) }
     var gapToFill by remember { mutableStateOf<DailyTripCostAggregator.DayTripItem?>(null) }
 
@@ -737,7 +741,8 @@ fun RecordingsScreen(
                                         onShareFile = { file, mimeType -> shareFile(context, file, mimeType) },
                                         onRename = { renamingRecording = rec },
                                         onDelete = { deletingRecording = rec },
-                                        onAddOrEditCarpool = { carpoolTargetTrip = tripItem }
+                                        onAddOrEditCarpool = { carpoolTargetTrip = tripItem },
+                                        onEditFuelTag = { fuelTagTargetTrip = tripItem }
                                     )
                                 }
                             }
@@ -923,6 +928,20 @@ fun RecordingsScreen(
         )
     }
 
+    // Fuel Tag Selector Dialog
+    fuelTagTargetTrip?.let { tripItem ->
+        val currentTag = tripItem.fuelTag ?: FuelBrandTagger.resolveFuelTag(tripItem.startMs)
+        FuelTagSelectorDialog(
+            currentTag = currentTag,
+            onDismiss = { fuelTagTargetTrip = null },
+            onTagSelected = { station, grade, additive, dosageMl ->
+                viewModel.setTripFuelTag(tripItem.tripId, station, grade, additive, dosageMl)
+                fuelTagTargetTrip = null
+                Toast.makeText(context, "Fuel tag updated to $station ($grade)", Toast.LENGTH_SHORT).show()
+            }
+        )
+    }
+
     if (showFillGapDialog) {
         com.example.ui.components.FillMissingTripDialog(
             initialStartOdoKm = gapToFill?.prevTripEndOdoKm,
@@ -956,7 +975,8 @@ fun RecordingItemCard(
     onShareFile: (File, String) -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit,
-    onAddOrEditCarpool: (() -> Unit)? = null
+    onAddOrEditCarpool: (() -> Unit)? = null,
+    onEditFuelTag: (() -> Unit)? = null
 ) {
     val meta = recording.metadata
 
@@ -975,7 +995,7 @@ fun RecordingItemCard(
         border = if (isSelected) androidx.compose.foundation.BorderStroke(2.dp, CyberCyan) else null
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
-            // Row 1: Checkbox, Name, Commute Tag, Sync icon, Action icons
+            // Row 1: Checkbox, Name, Commute Tag, Fuel Brand Badge, Sync icon, Action icons
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -1023,17 +1043,18 @@ fun RecordingItemCard(
                         )
                     }
 
-                    // Commute Slot Tag & Time
-                    if (tripItem != null) {
-                        val slotColor = when (tripItem.commuteSlot) {
-                            com.example.analysis.CommuteComparator.CommuteSlot.MORNING -> CyberCyan
-                            com.example.analysis.CommuteComparator.CommuteSlot.EVENING -> ElectricAmber
-                            com.example.analysis.CommuteComparator.CommuteSlot.OFF_PEAK -> TextSecondaryDark
-                        }
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(top = 2.dp)
-                        ) {
+                    // Commute Slot Tag & Time + Fuel Used Tag Badge (e.g. Nayara X95, IOCL XP95, Jio-bp, Shell)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.padding(top = 2.dp)
+                    ) {
+                        if (tripItem != null) {
+                            val slotColor = when (tripItem.commuteSlot) {
+                                com.example.analysis.CommuteComparator.CommuteSlot.MORNING -> CyberCyan
+                                com.example.analysis.CommuteComparator.CommuteSlot.EVENING -> ElectricAmber
+                                com.example.analysis.CommuteComparator.CommuteSlot.OFF_PEAK -> TextSecondaryDark
+                            }
                             Surface(
                                 color = slotColor.copy(alpha = 0.14f),
                                 shape = RoundedCornerShape(4.dp)
@@ -1047,6 +1068,14 @@ fun RecordingItemCard(
                                 )
                             }
                         }
+
+                        // Fuel Used Tag (e.g. Nayara X95 + mileX, IOCL XP95, Jio-bp, Shell)
+                        val startMs = tripItem?.startMs ?: com.example.data.RecordTime.parseMillis(meta.startTimeUtc) ?: recording.jsonFile.lastModified()
+                        val fuelTag = tripItem?.fuelTag ?: FuelBrandTagger.resolveFuelTag(startMs)
+                        FuelBrandBadge(
+                            fuelTag = fuelTag,
+                            onClick = onEditFuelTag
+                        )
                     }
 
                     Text(
@@ -1107,14 +1136,25 @@ fun RecordingItemCard(
                             )
                         }
                         tripItem.kmPerLiter?.let { kmL ->
-                            Text(
-                                text = "${String.format(java.util.Locale.US, "%.1f", kmL)} km/L",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = NeonEmerald,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 11.sp,
-                                fontFamily = FontFamily.Monospace
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    text = "${String.format(java.util.Locale.US, "%.1f", kmL)} km/L",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = NeonEmerald,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 11.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                tripItem.fuelTag?.let { ft ->
+                                    Text(
+                                        text = "· ⛽ ${ft.displayBadge}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = ft.brand.secondaryColor,
+                                        fontSize = 10.5.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                            }
                         }
                     }
                 } else {

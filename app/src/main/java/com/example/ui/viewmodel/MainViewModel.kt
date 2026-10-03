@@ -482,13 +482,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
 
+        val userOverrides = tripIds.associateWith { com.example.data.TripUserOverrideStore.get(appContext, it) }
+        val bunkRecords = com.example.data.BunkNozzleStore.getAll(appContext)
+
         com.example.analysis.DailyTripCostAggregator.aggregate(
             trips = tripInputs,
             carpoolEntries = carpools,
             fuelLogs = fuelLogs,
             fuelPricePerL = latestPrice,
-            nowMs = System.currentTimeMillis()
+            nowMs = System.currentTimeMillis(),
+            userOverrides = userOverrides,
+            bunkRecords = bunkRecords
         )
+    }
+
+    fun setTripFuelTag(tripId: String, station: String, grade: String, additive: String?, dosageMl: Double?) {
+        val current = com.example.data.TripUserOverrideStore.get(appContext, tripId)
+        val brand = com.example.analysis.FuelBrandTagger.detectBrand(station)
+        val updated = current.copy(
+            fuelBrand = brand.displayName,
+            fuelStation = station,
+            fuelGrade = grade,
+            fuelAdditive = additive
+        )
+        com.example.data.TripUserOverrideStore.save(appContext, updated)
+        viewModelScope.launch {
+            loadSavedRecordings()
+            triggerImmediateBackup()
+        }
     }
 
     fun noteBackgroundLocationDeclined() {
