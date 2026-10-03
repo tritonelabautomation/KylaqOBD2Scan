@@ -109,7 +109,7 @@ fun TripDetailScreen(
                 summary = fuelSummary,
                 samples = samples,
                 fuelEntries = viewModel.fuelLogRepository.entries(),
-                bunkRecords = BunkNozzleStore.load(context)
+                bunkRecords = BunkNozzleStore.getAll(context)
             )
         }
     }

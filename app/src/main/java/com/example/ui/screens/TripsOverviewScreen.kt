@@ -307,6 +307,16 @@ fun TripsOverviewScreen(
             }
         }
     }
+
+    if (showFillGapDialog) {
+        com.example.ui.components.FillMissingTripDialog(
+            onDismiss = { showFillGapDialog = false },
+            onSave = { request ->
+                viewModel.createManualTrip(request)
+                showFillGapDialog = false
+            }
+        )
+    }
 }
 
 // ── replicated atoms ─────────────────────────────────────────────────────────
@@ -423,15 +433,5 @@ private fun TripRow(trip: WeeklyTripOverview.TripCard, price: Double, onOpenTrip
             Spacer(Modifier.width(8.dp))
             Icon(Icons.Default.ChevronRight, null, tint = TtLink, modifier = Modifier.size(18.dp))
         }
-    }
-
-    if (showFillGapDialog) {
-        com.example.ui.components.FillMissingTripDialog(
-            onDismiss = { showFillGapDialog = false },
-            onSave = { request ->
-                viewModel.createManualTrip(request)
-                showFillGapDialog = false
-            }
-        )
     }
 }

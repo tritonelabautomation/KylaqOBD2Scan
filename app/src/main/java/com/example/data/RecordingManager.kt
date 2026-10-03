@@ -1544,11 +1544,11 @@ class RecordingManager(
                 SynchronizedSample(
                     timestampUtc = tUtc,
                     timestampMonotonic = tMs,
-                    engineRpm = curRpm,
-                    vehicleSpeedKmh = curSpeed,
+                    rpm = curRpm,
+                    speedKmh = curSpeed,
                     voltageV = if (acState.equals("ON", ignoreCase = true)) 13.6 else 14.1,
-                    coolantTempC = 90.0,
-                    fuelRateGps = fuelRateMassGps
+                    coolantC = 90.0,
+                    fuelRateLh = (fuelRateMassGps / 810.0) * 3600.0
                 )
             )
         }
@@ -1561,22 +1561,26 @@ class RecordingManager(
                 tripId = sessionId,
                 driveMode = driveMode,
                 acState = acState,
-                userNotes = notes
+                note = notes
             )
         )
 
         if (carpoolRiders.isNotBlank() || carpoolFare > 0.0) {
             val ridersList = carpoolRiders.split(",").map { it.trim() }.filter { it.isNotBlank() }
-            val entry = com.example.model.CarpoolCodec.CarpoolEntry(
+            val perRider = if (ridersList.isNotEmpty()) carpoolFare / ridersList.size else carpoolFare
+            val carpoolRepo = CarpoolRepository(context)
+            val entry = CarpoolCodec.CarpoolEntry(
                 idMs = System.currentTimeMillis(),
                 tripId = sessionId,
-                riderCount = maxOf(1, ridersList.size),
-                riderNames = ridersList,
-                totalFareEarned = carpoolFare,
-                costPerRider = if (ridersList.isNotEmpty()) carpoolFare / ridersList.size else carpoolFare,
-                notes = "Manual Gap Drive Carpool"
+                dateUtc = endUtc,
+                distanceKm = distanceKm,
+                riders = if (ridersList.isNotEmpty()) {
+                    ridersList.map { name -> CarpoolCodec.Rider(name = name, amount = perRider, distanceKm = distanceKm) }
+                } else {
+                    listOf(CarpoolCodec.Rider(name = "Rider", amount = carpoolFare, distanceKm = distanceKm))
+                }
             )
-            com.example.di.AppContainer.carpoolRepository.save(entry)
+            carpoolRepo.save(entry)
         }
 
         loadSavedRecordings()

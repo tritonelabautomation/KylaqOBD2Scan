@@ -88,6 +88,8 @@ object BunkNozzleStore {
         }
     }
 
+    fun load(context: Context): List<RefuelBunkRecord> = getAll(context)
+
     fun delete(context: Context, idMs: Long) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val updated = getAll(context).filterNot { it.idMs == idMs }
