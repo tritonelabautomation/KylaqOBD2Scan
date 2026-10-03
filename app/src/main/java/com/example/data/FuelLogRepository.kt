@@ -28,9 +28,13 @@ object FuelLogCodec {
         val grade: String,
         val note: String,
         /** Fuelio parity: partial tank / missed previous fill-up - excluded from km/L anchoring. */
-        val partial: Boolean = false
+        val partial: Boolean = false,
+        val additive: String? = null,
+        val additiveDosageMl: Double? = null,
+        val additiveCost: Double? = null
     ) {
-        val totalCost: Double get() = liters * pricePerL
+        val totalCost: Double get() = liters * pricePerL + (additiveCost ?: 0.0)
+        val hasAdditive: Boolean get() = !additive.isNullOrBlank() && !additive.equals("None", ignoreCase = true)
 
         val display: String
             get() = buildString {
@@ -38,6 +42,7 @@ object FuelLogCodec {
                 append(" · ").append(String.format(java.util.Locale.US, "%.2f L", liters))
                 append(" · ₹").append(String.format(java.util.Locale.US, "%.0f", totalCost))
                 append(" · ").append(grade)
+                if (hasAdditive && !additive.isNullOrBlank()) append(" + ").append(additive)
                 if (station.isNotBlank()) append(" · ").append(station)
             }
     }
@@ -52,19 +57,25 @@ object FuelLogCodec {
         esc(e.station),
         e.grade,
         esc(e.note),
-        if (e.partial) "1" else "0"
+        if (e.partial) "1" else "0",
+        esc(e.additive ?: ""),
+        e.additiveDosageMl?.let { num(it) } ?: "-",
+        e.additiveCost?.let { num(it) } ?: "-"
     ).joinToString("|")
 
     fun decode(line: String): FuelEntry? {
         val p = line.split('|')
-        // v1 lines (9 fields) stay readable: partial defaults to false.
+        // v1 (9), v2 (10), v2 with additives (13) stay readable: partial defaults to false.
         val partial = when {
-            p[0] == "f2" && p.size == 10 -> p[9] == "1"
+            p[0] == "f2" && p.size >= 10 -> p[9] == "1"
             p[0] == "f1" && p.size == 9 -> false
             else -> return null
         }
         if (p[0] != "f1" && p[0] != "f2") return null
         return try {
+            val additive = p.getOrNull(10)?.let { unesc(it).takeIf { s -> s.isNotBlank() } }
+            val dosage = p.getOrNull(11)?.toDoubleOrNull()
+            val addCost = p.getOrNull(12)?.toDoubleOrNull()
             FuelEntry(
                 idMs = p[1].toLong(),
                 dateUtc = p[2],
@@ -74,7 +85,10 @@ object FuelLogCodec {
                 station = unesc(p[6]),
                 grade = p[7],
                 note = unesc(p[8]),
-                partial = partial
+                partial = partial,
+                additive = additive,
+                additiveDosageMl = dosage,
+                additiveCost = addCost
             )
         } catch (e: NumberFormatException) {
             null

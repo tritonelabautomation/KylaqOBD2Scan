@@ -85,6 +85,12 @@ fun RefuelLoggingDialog(
     var midRangeKm by remember { mutableStateOf("") }
     var note by remember { mutableStateOf(initialNote) }
 
+    // Fuel Additive State
+    var additiveSelected by remember { mutableStateOf("None") }
+    var customAdditiveName by remember { mutableStateOf("") }
+    var additiveDosageMl by remember { mutableStateOf("") }
+    var additiveCost by remember { mutableStateOf("") }
+
     var receiptPhotoUri by remember { mutableStateOf<String?>(null) }
     var midPhotoUri by remember { mutableStateOf<String?>(null) }
 
@@ -325,6 +331,77 @@ fun RefuelLoggingDialog(
                     }
                 }
 
+                // Fuel Additive Section
+                Text("Fuel Additive (mileX / Liqui Moly / None):", color = TextSecondaryDark, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    listOf("None", "mileX 5ml (₹15)", "mileX 50ml (₹150)", "Liqui Moly", "Custom").forEach { opt ->
+                        FilterChip(
+                            selected = additiveSelected == opt,
+                            onClick = {
+                                additiveSelected = opt
+                                when (opt) {
+                                    "None" -> {
+                                        customAdditiveName = ""
+                                        additiveDosageMl = ""
+                                        additiveCost = ""
+                                    }
+                                    "mileX 5ml (₹15)" -> {
+                                        customAdditiveName = "Dorf Ketal mileX"
+                                        additiveDosageMl = "5.0"
+                                        additiveCost = "15.0"
+                                    }
+                                    "mileX 50ml (₹150)" -> {
+                                        customAdditiveName = "Dorf Ketal mileX (Full 50L Dose)"
+                                        additiveDosageMl = "50.0"
+                                        additiveCost = "150.0"
+                                    }
+                                    "Liqui Moly" -> {
+                                        customAdditiveName = "Liqui Moly Speed Tec Petrol"
+                                        additiveDosageMl = "250.0"
+                                        additiveCost = "450.0"
+                                    }
+                                    "Custom" -> {
+                                        if (customAdditiveName.isBlank()) customAdditiveName = "Fuel Additive"
+                                    }
+                                }
+                            },
+                            label = { Text(opt, fontSize = 10.sp) }
+                        )
+                    }
+                }
+
+                if (additiveSelected != "None") {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = customAdditiveName,
+                            onValueChange = { customAdditiveName = it },
+                            label = { Text("Additive Brand") },
+                            modifier = Modifier.weight(1.5f),
+                            singleLine = true
+                        )
+                        OutlinedTextField(
+                            value = additiveDosageMl,
+                            onValueChange = { additiveDosageMl = it },
+                            label = { Text("Dose (ml)") },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true
+                        )
+                        OutlinedTextField(
+                            value = additiveCost,
+                            onValueChange = { additiveCost = it },
+                            label = { Text("Cost ₹") },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true
+                        )
+                    }
+                }
+
                 // Liters, Price, and Total
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -470,6 +547,9 @@ fun RefuelLoggingDialog(
                     val distVal = midDistanceKm.toDoubleOrNull()
                     val econVal = midEconomyKmL.toDoubleOrNull()
                     val rangeVal = midRangeKm.toDoubleOrNull()
+                    val addDosage = additiveDosageMl.toDoubleOrNull()
+                    val addCost = additiveCost.toDoubleOrNull()
+                    val addName = if (additiveSelected != "None" && customAdditiveName.isNotBlank()) customAdditiveName else null
 
                     if (lVal != null && lVal > 0.0) {
                         val record = RefuelBunkRecord(
@@ -488,7 +568,10 @@ fun RefuelLoggingDialog(
                             midRangeKm = rangeVal,
                             receiptPhotoUri = receiptPhotoUri,
                             midPhotoUri = midPhotoUri,
-                            note = note
+                            note = note,
+                            additiveName = addName,
+                            additiveDosageMl = addDosage,
+                            additiveCost = addCost
                         )
                         BunkNozzleStore.save(context, record)
                         onSaved(record)

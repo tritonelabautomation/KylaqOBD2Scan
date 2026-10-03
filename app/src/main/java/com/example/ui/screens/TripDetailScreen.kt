@@ -29,6 +29,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
+import com.example.analysis.FuelBatchTripComparator
+import com.example.data.BunkNozzleStore
 import com.example.data.GpxExporter
 import com.example.data.db.entities.AiAnalysisEntity
 import com.example.data.db.entities.RawLogEntity
@@ -99,6 +101,18 @@ fun TripDetailScreen(
     // DB-load window, then swapped to real data. Until the load finishes the screen
     // now says LOADING, so an empty state always means a genuinely empty trip.
     var samplesLoaded by remember(tripId) { mutableStateOf(false) }
+
+    val fuelBatchComparison = remember(trip, fuelSummary, samples) {
+        trip?.let { t ->
+            FuelBatchTripComparator.compare(
+                trip = t,
+                summary = fuelSummary,
+                samples = samples,
+                fuelEntries = viewModel.fuelLogRepository.entries(),
+                bunkRecords = BunkNozzleStore.load(context)
+            )
+        }
+    }
 
     // Car-pool ledger for this trip (owner 2026-09-19): riders, what they paid, and the trip's
     // effective cost = pump fuel cost minus earnings. One entry per trip, edited in place.
@@ -336,6 +350,7 @@ fun TripDetailScreen(
                             sampleAltitudes = samples.mapNotNull { it.altitudeM },
                             passengerLoadResult = passengerLoadResult,
                             commuteComparison = commuteComparison,
+                            fuelBatchComparison = fuelBatchComparison,
                             altitudeBlankReason = altitudeBlankReason,
                             userOverride = userOverride,
                             onToggleDriveMode = onToggleDriveMode,
@@ -624,6 +639,7 @@ private fun TripOverviewView(
     sampleAltitudes: List<Double> = emptyList(),
     passengerLoadResult: com.example.analysis.PassengerLoadAnalyzer.Result? = null,
     commuteComparison: com.example.analysis.CommuteComparator.CommuteComparison? = null,
+    fuelBatchComparison: com.example.analysis.FuelBatchTripComparator.ComparisonResult? = null,
     /** Why the altitude column is blank, when it is. Computed by the caller from the location grants. */
     altitudeBlankReason: String? = null,
     userOverride: com.example.data.TripUserOverride = com.example.data.TripUserOverride(trip?.id ?: ""),
@@ -809,6 +825,11 @@ private fun TripOverviewView(
                 tripId = trip.id,
                 fuelSummary = summary
             )
+        }
+        fuelBatchComparison?.let { fbc ->
+            item {
+                FuelBatchComparisonCard(comparison = fbc)
+            }
         }
         item {
             // Replicated OBDeleven trip-detail cards (owner reference screen 2, 2026-09-13)

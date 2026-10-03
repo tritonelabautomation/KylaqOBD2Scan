@@ -26,8 +26,12 @@ data class RefuelBunkRecord(
     val midEconomyKmL: Double? = null,
     val receiptPhotoUri: String? = null,
     val midPhotoUri: String? = null,
-    val note: String = ""
+    val note: String = "",
+    val additiveName: String? = null,
+    val additiveDosageMl: Double? = null,
+    val additiveCost: Double? = null
 ) {
+    val hasAdditive: Boolean get() = !additiveName.isNullOrBlank() && !additiveName.equals("None", ignoreCase = true)
     /** Float Sensor Error vs Ground Truth Pump Liters */
     val floatErrorPct: Double
         get() = if (pumpLitres > 0.05) ((pumpLitres - floatDeltaLitres) / pumpLitres) * 100.0 else 0.0
@@ -139,6 +143,9 @@ object BunkNozzleStore {
         r.midEconomyKmL?.let { json.put("midEconomyKmL", it) }
         r.receiptPhotoUri?.let { json.put("receiptPhotoUri", it) }
         r.midPhotoUri?.let { json.put("midPhotoUri", it) }
+        r.additiveName?.let { json.put("additiveName", it) }
+        r.additiveDosageMl?.let { json.put("additiveDosageMl", it) }
+        r.additiveCost?.let { json.put("additiveCost", it) }
         json.put("note", r.note)
         return json
     }
@@ -163,7 +170,10 @@ object BunkNozzleStore {
                 midEconomyKmL = json.optDouble("midEconomyKmL", Double.NaN).takeIf { !it.isNaN() },
                 receiptPhotoUri = json.optString("receiptPhotoUri", null)?.takeIf { it.isNotBlank() && it != "null" },
                 midPhotoUri = json.optString("midPhotoUri", null)?.takeIf { it.isNotBlank() && it != "null" },
-                note = json.optString("note", "")
+                note = json.optString("note", ""),
+                additiveName = json.optString("additiveName", null)?.takeIf { it.isNotBlank() && it != "null" },
+                additiveDosageMl = json.optDouble("additiveDosageMl", Double.NaN).takeIf { !it.isNaN() },
+                additiveCost = json.optDouble("additiveCost", Double.NaN).takeIf { !it.isNaN() }
             )
         } catch (e: Exception) {
             null

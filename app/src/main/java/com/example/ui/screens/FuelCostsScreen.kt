@@ -363,8 +363,16 @@ fun FuelCostsScreen(
                                         Text("PARTIAL", color = ElectricAmber, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                                     }
                                 }
-                                if (entry.station.isNotBlank() || entry.note.isNotBlank()) {
-                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                if (entry.station.isNotBlank() || entry.note.isNotBlank() || entry.hasAdditive) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        if (entry.hasAdditive) {
+                                            Text(
+                                                text = "🧪 ${entry.additive ?: "Additive"}${entry.additiveDosageMl?.let { " (${String.format(java.util.Locale.US, "%.0fml", it)})" } ?: ""}",
+                                                color = NeonEmerald,
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                        }
                                         if (entry.station.isNotBlank()) {
                                             Icon(Icons.Default.Place, contentDescription = null, tint = TextSecondaryDark, modifier = Modifier.size(12.dp))
                                             Text(entry.station, color = TextSecondaryDark, fontSize = 10.sp)
@@ -414,7 +422,10 @@ fun FuelCostsScreen(
                         station = record.stationName,
                         grade = record.fuelGrade,
                         note = record.note,
-                        partial = false
+                        partial = false,
+                        additive = record.additiveName,
+                        additiveDosageMl = record.additiveDosageMl,
+                        additiveCost = record.additiveCost
                     )
                 )
                 viewModel.calibrateAfterFuelEntry(record.pumpLitres, record.odometerKm, false)
