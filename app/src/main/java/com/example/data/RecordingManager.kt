@@ -1572,12 +1572,12 @@ class RecordingManager(
             val entry = CarpoolCodec.CarpoolEntry(
                 idMs = System.currentTimeMillis(),
                 tripId = sessionId,
-                dateUtc = endUtc,
-                distanceKm = distanceKm,
+                dateUtc = endStampUtc,
+                distanceKm = distKm,
                 riders = if (ridersList.isNotEmpty()) {
-                    ridersList.map { name -> CarpoolCodec.Rider(name = name, amount = perRider, distanceKm = distanceKm) }
+                    ridersList.map { name -> CarpoolCodec.Rider(name = name, amount = perRider, distanceKm = distKm) }
                 } else {
-                    listOf(CarpoolCodec.Rider(name = "Rider", amount = carpoolFare, distanceKm = distanceKm))
+                    listOf(CarpoolCodec.Rider(name = "Rider", amount = carpoolFare, distanceKm = distKm))
                 }
             )
             carpoolRepo.save(entry)
