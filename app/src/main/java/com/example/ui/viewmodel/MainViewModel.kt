@@ -2600,6 +2600,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun createManualTrip(request: com.example.ui.components.ManualTripRequest) {
+        viewModelScope.launch {
+            try {
+                val saved = recordingManager.createManualReconstructedTrip(
+                    title = request.title,
+                    startOdoKm = request.startOdometerKm,
+                    endOdoKm = request.endOdometerKm,
+                    startMs = request.startTimestampMs,
+                    durationSeconds = request.durationSeconds,
+                    driveMode = request.driveMode,
+                    acState = request.acState,
+                    fuelLiters = request.estimatedFuelLiters,
+                    carpoolRiders = request.carpoolRiders,
+                    carpoolFare = request.carpoolFare,
+                    notes = request.notes
+                )
+                if (saved != null) {
+                    maintenanceRepository.setCurrentOdometerKm(request.endOdometerKm)
+                    triggerImmediateBackup()
+                    _mergeNotice.value = "Created trip '${request.title}' (+${String.format(java.util.Locale.US, "%.1f", request.distanceKm)} km). Gap successfully filled."
+                } else {
+                    _mergeNotice.value = "Failed to create manual trip."
+                }
+            } catch (e: Exception) {
+                _mergeNotice.value = "Manual trip creation failed: ${e.message ?: e.javaClass.simpleName}"
+            }
+        }
+    }
+
     private val _importStatusMessage = MutableStateFlow<String?>(null)
     val importStatusMessage: StateFlow<String?> = _importStatusMessage.asStateFlow()
 

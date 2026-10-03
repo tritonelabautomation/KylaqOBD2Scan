@@ -109,6 +109,8 @@ fun RecordingsScreen(
     var selectedMonthIndex by remember { mutableStateOf(0) }
     var viewAllMonths by remember { mutableStateOf(false) }
     var carpoolTargetTrip by remember { mutableStateOf<DailyTripCostAggregator.DayTripItem?>(null) }
+    var showFillGapDialog by remember { mutableStateOf(false) }
+    var gapToFill by remember { mutableStateOf<DailyTripCostAggregator.DayTripItem?>(null) }
 
     LaunchedEffect(savedRecordings, carpoolTick) {
         aggregationResult = runCatching { viewModel.loadDayWiseAggregation() }.getOrNull()
@@ -158,6 +160,15 @@ fun RecordingsScreen(
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(
+                    onClick = {
+                        gapToFill = null
+                        showFillGapDialog = true
+                    },
+                    modifier = Modifier.testTag("btn_add_manual_trip")
+                ) {
+                    Icon(Icons.Default.AddRoad, contentDescription = "Fill Missing Trip", tint = NeonEmerald)
+                }
                 IconButton(
                     onClick = {
                         zipPickerLauncher.launch(arrayOf("application/zip", "application/x-zip-compressed", "*/*"))
@@ -655,30 +666,50 @@ fun RecordingsScreen(
                                             color = WarningRed.copy(alpha = 0.12f),
                                             border = androidx.compose.foundation.BorderStroke(1.dp, WarningRed.copy(alpha = 0.45f))
                                         ) {
-                                            Row(
-                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Default.Warning,
-                                                    contentDescription = null,
-                                                    tint = WarningRed,
-                                                    modifier = Modifier.size(16.dp)
-                                                )
-                                                Spacer(modifier = Modifier.width(8.dp))
-                                                Column {
-                                                    Text(
-                                                        text = "MISSED TRIP / UNLOGGED GAP: +${String.format(java.util.Locale.US, "%.1f", tripItem.unloggedOdoGapKm)} km",
-                                                        color = WarningRed,
-                                                        fontWeight = FontWeight.Bold,
-                                                        fontSize = 11.sp,
-                                                        fontFamily = FontFamily.Monospace
+                                            Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Warning,
+                                                        contentDescription = null,
+                                                        tint = WarningRed,
+                                                        modifier = Modifier.size(16.dp)
                                                     )
-                                                    Text(
-                                                        text = "Cluster ODO advanced from ${String.format(java.util.Locale.US, "%.1f", tripItem.prevTripEndOdoKm ?: 0.0)} km → ${String.format(java.util.Locale.US, "%.1f", tripItem.startOdometerKm ?: 0.0)} km between trips without OBD logging.",
-                                                        color = TextSecondaryDark,
-                                                        fontSize = 11.sp
-                                                    )
+                                                    Spacer(modifier = Modifier.width(8.dp))
+                                                    Column(modifier = Modifier.weight(1f)) {
+                                                        Text(
+                                                            text = "MISSED TRIP / UNLOGGED GAP: +${String.format(java.util.Locale.US, "%.1f", tripItem.unloggedOdoGapKm)} km",
+                                                            color = WarningRed,
+                                                            fontWeight = FontWeight.Bold,
+                                                            fontSize = 11.sp,
+                                                            fontFamily = FontFamily.Monospace
+                                                        )
+                                                        Text(
+                                                            text = "Cluster ODO advanced from ${String.format(java.util.Locale.US, "%.1f", tripItem.prevTripEndOdoKm ?: 0.0)} km → ${String.format(java.util.Locale.US, "%.1f", tripItem.startOdometerKm ?: 0.0)} km between trips without OBD logging.",
+                                                            color = TextSecondaryDark,
+                                                            fontSize = 11.sp
+                                                        )
+                                                    }
+                                                }
+                                                Spacer(modifier = Modifier.height(6.dp))
+                                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                                    OutlinedButton(
+                                                        onClick = {
+                                                            gapToFill = tripItem
+                                                            showFillGapDialog = true
+                                                        },
+                                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = CyberCyan),
+                                                        border = androidx.compose.foundation.BorderStroke(1.dp, CyberCyan),
+                                                        shape = RoundedCornerShape(6.dp),
+                                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                                        modifier = Modifier.height(30.dp)
+                                                    ) {
+                                                        Icon(Icons.Default.AddRoad, contentDescription = null, modifier = Modifier.size(14.dp), tint = CyberCyan)
+                                                        Spacer(Modifier.width(4.dp))
+                                                        Text("Fill Missing Trip (+${String.format(java.util.Locale.US, "%.1f", tripItem.unloggedOdoGapKm)} km)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                                    }
                                                 }
                                             }
                                         }
@@ -888,6 +919,24 @@ fun RecordingsScreen(
                     carpoolTargetTrip = null
                     Toast.makeText(context, "Carpool details saved for trip", Toast.LENGTH_SHORT).show()
                 }
+            }
+        )
+    }
+
+    if (showFillGapDialog) {
+        com.example.ui.components.FillMissingTripDialog(
+            initialStartOdoKm = gapToFill?.prevTripEndOdoKm,
+            initialEndOdoKm = gapToFill?.startOdometerKm,
+            initialStartMs = gapToFill?.prevTripEndMs,
+            initialEndMs = gapToFill?.startMs,
+            onDismiss = {
+                showFillGapDialog = false
+                gapToFill = null
+            },
+            onSave = { request ->
+                viewModel.createManualTrip(request)
+                showFillGapDialog = false
+                gapToFill = null
             }
         )
     }

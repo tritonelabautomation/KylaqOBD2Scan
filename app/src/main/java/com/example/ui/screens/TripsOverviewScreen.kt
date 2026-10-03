@@ -105,12 +105,19 @@ fun TripsOverviewScreen(
         loading = false
     }
 
+    var showFillGapDialog by remember { mutableStateOf(false) }
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Driving history", color = TtWhite, fontSize = 16.sp, fontWeight = FontWeight.SemiBold) },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back", tint = TtWhite) } },
-                actions = { IconButton(onClick = onOpenSettings) { Icon(Icons.Default.Settings, "Settings", tint = TtWhite) } },
+                actions = {
+                    IconButton(onClick = { showFillGapDialog = true }) {
+                        Icon(Icons.Default.AddRoad, "Fill Missing Trip", tint = TtLink)
+                    }
+                    IconButton(onClick = onOpenSettings) { Icon(Icons.Default.Settings, "Settings", tint = TtWhite) }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = TtBlack)
             )
         },
@@ -416,5 +423,15 @@ private fun TripRow(trip: WeeklyTripOverview.TripCard, price: Double, onOpenTrip
             Spacer(Modifier.width(8.dp))
             Icon(Icons.Default.ChevronRight, null, tint = TtLink, modifier = Modifier.size(18.dp))
         }
+    }
+
+    if (showFillGapDialog) {
+        com.example.ui.components.FillMissingTripDialog(
+            onDismiss = { showFillGapDialog = false },
+            onSave = { request ->
+                viewModel.createManualTrip(request)
+                showFillGapDialog = false
+            }
+        )
     }
 }

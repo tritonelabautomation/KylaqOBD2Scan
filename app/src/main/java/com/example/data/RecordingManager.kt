@@ -1398,6 +1398,192 @@ class RecordingManager(
     }
 
     /**
+     * Manually creates a reconstructed trip record to fill an unlogged driving gap between sessions.
+     */
+    suspend fun createManualReconstructedTrip(
+        title: String,
+        startOdoKm: Double,
+        endOdoKm: Double,
+        startMs: Long,
+        durationSeconds: Long,
+        driveMode: String = "D",
+        acState: String = "ON",
+        fuelLiters: Double? = null,
+        carpoolRiders: String = "",
+        carpoolFare: Double = 0.0,
+        notes: String = ""
+    ): SavedRecording? = withContext(Dispatchers.IO) {
+        val distKm = maxOf(0.1, endOdoKm - startOdoKm)
+        val durSec = maxOf(60L, durationSeconds)
+        val endMs = startMs + durSec * 1000L
+        val startStampUtc = RecordTime.stamp(startMs)
+        val endStampUtc = RecordTime.stamp(endMs)
+        val sessionId = "manual_${System.currentTimeMillis()}"
+
+        val calculatedFuelL = fuelLiters ?: (distKm / 10.5)
+        val fuelRateLh = calculatedFuelL / (durSec / 3600.0)
+        val fuelRateMassGps = fuelRateLh * 745.0 / 3600.0
+        val avgSpeed = (distKm / (durSec / 3600.0)).coerceIn(1.0, 160.0)
+
+        val metadata = RecordingMetadata(
+            sessionId = sessionId,
+            sessionName = title.ifBlank { "Manual Drive (Gap Filled)" },
+            vehicle = "Škoda Kylaq 1.0 TSI (EA211)",
+            adapter = "Manual Entry (Unlogged Gap Reconstructed)",
+            protocol = "ISO 15765-4 (CAN 11/500K)",
+            startTimeUtc = startStampUtc
+        ).apply {
+            endTimeUtc = endStampUtc
+        }
+
+        val stepCount = 8
+        val dtMs = (durSec * 1000L) / stepCount
+        val txList = mutableListOf<TransactionRecord>()
+        val sampleList = mutableListOf<SynchronizedSample>()
+
+        for (i in 0..stepCount) {
+            val tMs = startMs + i * dtMs
+            val tUtc = RecordTime.stamp(tMs)
+            val frac = i.toDouble() / stepCount
+            val curOdo = startOdoKm + frac * distKm
+            val curSpeed = if (i == 0 || i == stepCount) 0.0 else avgSpeed * (0.9 + 0.2 * (i % 2))
+            val curRpm = if (i == 0 || i == stepCount) 800.0 else 1800.0 + (i % 3) * 150.0
+
+            txList.add(
+                TransactionRecord(
+                    timestampUtc = tUtc,
+                    timestampMonotonic = tMs,
+                    direction = Direction.RX,
+                    canRxId = "7E8",
+                    service = "01",
+                    pid = "A6",
+                    requestHex = "01A6",
+                    decodedParameter = "Cluster Odometer",
+                    decodedValue = curOdo,
+                    unit = "km",
+                    responseStatus = ResponseStatus.OK
+                )
+            )
+            txList.add(
+                TransactionRecord(
+                    timestampUtc = tUtc,
+                    timestampMonotonic = tMs,
+                    direction = Direction.RX,
+                    canRxId = "7E8",
+                    service = "01",
+                    pid = "0D",
+                    requestHex = "010D",
+                    decodedParameter = "Vehicle Speed",
+                    decodedValue = curSpeed,
+                    unit = "km/h",
+                    responseStatus = ResponseStatus.OK
+                )
+            )
+            txList.add(
+                TransactionRecord(
+                    timestampUtc = tUtc,
+                    timestampMonotonic = tMs,
+                    direction = Direction.RX,
+                    canRxId = "7E8",
+                    service = "01",
+                    pid = "0C",
+                    requestHex = "010C",
+                    decodedParameter = "Engine RPM",
+                    decodedValue = curRpm,
+                    unit = "RPM",
+                    responseStatus = ResponseStatus.OK
+                )
+            )
+            txList.add(
+                TransactionRecord(
+                    timestampUtc = tUtc,
+                    timestampMonotonic = tMs,
+                    direction = Direction.RX,
+                    canRxId = "7E8",
+                    service = "01",
+                    pid = "9D",
+                    requestHex = "019D",
+                    decodedParameter = "Engine Fuel Rate",
+                    decodedValue = fuelRateMassGps,
+                    unit = "g/s",
+                    responseStatus = ResponseStatus.OK
+                )
+            )
+            txList.add(
+                TransactionRecord(
+                    timestampUtc = tUtc,
+                    timestampMonotonic = tMs,
+                    direction = Direction.RX,
+                    canRxId = "7E8",
+                    service = "01",
+                    pid = "42",
+                    requestHex = "0142",
+                    decodedParameter = "Control Module Voltage",
+                    decodedValue = if (acState.equals("ON", ignoreCase = true)) 13.6 else 14.1,
+                    unit = "V",
+                    responseStatus = ResponseStatus.OK
+                )
+            )
+            txList.add(
+                TransactionRecord(
+                    timestampUtc = tUtc,
+                    timestampMonotonic = tMs,
+                    direction = Direction.RX,
+                    canRxId = "7E8",
+                    service = "01",
+                    pid = "05",
+                    requestHex = "0105",
+                    decodedParameter = "Engine Coolant Temperature",
+                    decodedValue = 90.0,
+                    unit = "°C",
+                    responseStatus = ResponseStatus.OK
+                )
+            )
+
+            sampleList.add(
+                SynchronizedSample(
+                    timestampUtc = tUtc,
+                    timestampMonotonic = tMs,
+                    engineRpm = curRpm,
+                    vehicleSpeedKmh = curSpeed,
+                    voltageV = if (acState.equals("ON", ignoreCase = true)) 13.6 else 14.1,
+                    coolantTempC = 90.0,
+                    fuelRateGps = fuelRateMassGps
+                )
+            )
+        }
+
+        val saved = finalizeSession(metadata, txList, sampleList, null, recovered = false)
+
+        TripUserOverrideStore.save(
+            context,
+            TripUserOverride(
+                tripId = sessionId,
+                driveMode = driveMode,
+                acState = acState,
+                userNotes = notes
+            )
+        )
+
+        if (carpoolRiders.isNotBlank() || carpoolFare > 0.0) {
+            val ridersList = carpoolRiders.split(",").map { it.trim() }.filter { it.isNotBlank() }
+            val entry = com.example.model.CarpoolCodec.CarpoolEntry(
+                idMs = System.currentTimeMillis(),
+                tripId = sessionId,
+                riderCount = maxOf(1, ridersList.size),
+                riderNames = ridersList,
+                totalFareEarned = carpoolFare,
+                costPerRider = if (ridersList.isNotEmpty()) carpoolFare / ridersList.size else carpoolFare,
+                notes = "Manual Gap Drive Carpool"
+            )
+            com.example.di.AppContainer.carpoolRepository.save(entry)
+        }
+
+        loadSavedRecordings()
+        saved
+    }
+
+    /**
      * Every stamp this class writes goes through here.
      *
      * It used to be `isoUtc()`, formatting in UTC with a trailing `Z`. Owner mandate 2026-09-17:

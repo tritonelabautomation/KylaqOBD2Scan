@@ -385,5 +385,28 @@ class DailyTripCostAggregatorTest {
         assertEquals(4080.0, trip2Item.prevTripEndOdoKm!!, 0.001)
         assertEquals(15.0, dayGroup.totalDayUnloggedGapKm, 0.001)
         assertEquals(15.0, result.currentMonthSummary.totalUnloggedOdoGapKm, 0.001)
+
+        // Filling the missing trip (4080.0 -> 4095.0) closes the gap
+        val filledMidTrip = DailyTripCostAggregator.TripRecordInput(
+            tripId = "trip_manual_filled",
+            sessionName = "Missed Drive (Gap Filled)",
+            startTimeUtc = RecordTime.stamp(trip1Start + 3600_000L),
+            startTimestampMs = trip1Start + 3600_000L,
+            durationSeconds = 1200L,
+            distanceKm = 15.0,
+            startOdometerKm = 4080.0,
+            endOdometerKm = 4095.0
+        )
+        val resultAfterFill = DailyTripCostAggregator.aggregate(
+            trips = listOf(trips[0], filledMidTrip, trips[1]),
+            carpoolEntries = emptyList(),
+            fuelLogs = emptyList(),
+            nowMs = trip2Start
+        )
+        val groupAfter = resultAfterFill.dayGroups.first()
+        assertEquals(3, groupAfter.trips.size)
+        assertTrue(groupAfter.trips.all { it.unloggedOdoGapKm == null })
+        assertEquals(0.0, groupAfter.totalDayUnloggedGapKm, 0.001)
+        assertEquals(0.0, resultAfterFill.currentMonthSummary.totalUnloggedOdoGapKm, 0.001)
     }
 }
