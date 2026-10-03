@@ -109,10 +109,21 @@ class FuelBatchTripComparatorTest {
             dateUtc = "2026-09-27T10:00:00Z",
             liters = 40.0,
             pricePerL = 108.5,
-            odometerKm = 10050.0, // 400 km / 40L = 10.0 km/L
+            odometerKm = 10050.0, // (10050 - 9650) / 40L = 10.0 km/L
             station = "IOCL",
             grade = FuelLogCodec.GRADE_REGULAR,
             note = "Standard tank"
+        )
+
+        val prevPrevFill = FuelLogCodec.FuelEntry(
+            idMs = tripStartMs - 86400_000L * 10,
+            dateUtc = "2026-09-22T10:00:00Z",
+            liters = 40.0,
+            pricePerL = 108.5,
+            odometerKm = 9650.0,
+            station = "IOCL",
+            grade = FuelLogCodec.GRADE_REGULAR,
+            note = "Base anchor fill"
         )
 
         val bunkRecord = RefuelBunkRecord(
@@ -133,7 +144,7 @@ class FuelBatchTripComparatorTest {
             trip = trip,
             summary = summary,
             samples = samples,
-            fuelEntries = listOf(currentFill, prevFill),
+            fuelEntries = listOf(currentFill, prevFill, prevPrevFill),
             bunkRecords = listOf(bunkRecord)
         )
 
