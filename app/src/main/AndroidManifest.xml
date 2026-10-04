@@ -154,6 +154,17 @@
             </intent-filter>
         </receiver>
 
+        <!-- Always-On Bluetooth Trigger: wakes up OBD keep-alive when car/adapter Bluetooth connects -->
+        <receiver
+            android:name=".service.BluetoothStateReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.bluetooth.device.action.ACL_CONNECTED" />
+                <action android:name="android.bluetooth.device.action.ACL_DISCONNECTED" />
+                <action android:name="android.bluetooth.adapter.action.STATE_CHANGED" />
+            </intent-filter>
+        </receiver>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

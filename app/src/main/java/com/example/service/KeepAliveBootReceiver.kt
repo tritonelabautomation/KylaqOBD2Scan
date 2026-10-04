@@ -36,7 +36,8 @@ class KeepAliveBootReceiver : BroadcastReceiver() {
             )
             KeepAlivePolicy.shouldStartKeepAlive(
                 pendingJournal = pending,
-                autoConnectEnabled = com.example.di.AppContainer.settingsRepository.autoConnect.value
+                autoConnectEnabled = com.example.di.AppContainer.settingsRepository.autoConnect.value,
+                alwaysOnEnabled = com.example.di.AppContainer.settingsRepository.alwaysOnService.value
             )
         }.getOrDefault(false)
         if (!shouldStart) return

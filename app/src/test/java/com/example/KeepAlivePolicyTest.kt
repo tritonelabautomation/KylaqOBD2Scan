@@ -74,9 +74,10 @@ class KeepAlivePolicyTest {
         assertTrue(KeepAlivePolicy.shouldStartKeepAlive(pendingJournal = true, autoConnectEnabled = false))
         assertTrue(KeepAlivePolicy.shouldStartKeepAlive(pendingJournal = false, autoConnectEnabled = true))
         assertTrue(KeepAlivePolicy.shouldStartKeepAlive(pendingJournal = true, autoConnectEnabled = true))
+        assertTrue(KeepAlivePolicy.shouldStartKeepAlive(pendingJournal = false, autoConnectEnabled = false, alwaysOnEnabled = true))
         assertFalse(
             "nothing to rescue and auto-connect off: a permanent notification would be noise",
-            KeepAlivePolicy.shouldStartKeepAlive(pendingJournal = false, autoConnectEnabled = false)
+            KeepAlivePolicy.shouldStartKeepAlive(pendingJournal = false, autoConnectEnabled = false, alwaysOnEnabled = false)
         )
     }
 

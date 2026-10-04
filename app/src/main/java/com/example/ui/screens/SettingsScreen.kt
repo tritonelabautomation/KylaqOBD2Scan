@@ -518,6 +518,100 @@ fun SettingsScreen(
                     )
                 }
             }
+
+            SettingsSectionHeader("AUTOMATION & ALWAYS-ON SERVICE")
+
+            val alwaysOnService by viewModel.settingsRepository.alwaysOnService.collectAsState()
+            val autoConnectAdapter by viewModel.settingsRepository.autoConnect.collectAsState()
+            val autoRecordTrips by viewModel.settingsRepository.autoRecord.collectAsState()
+
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp).testTag("card_automation_always_on"),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "Always-On Background Service",
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                "Runs a lightweight standby service in the background so trips record automatically every drive without needing to open the app.",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Switch(
+                            checked = alwaysOnService,
+                            onCheckedChange = { viewModel.settingsRepository.setAlwaysOnService(it) },
+                            modifier = Modifier.testTag("switch_always_on_service")
+                        )
+                    }
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "Auto-Connect to OBD Adapter",
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                "Automatically opens Bluetooth RFCOMM socket and polls telemetry when vehicle or adapter is detected.",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Switch(
+                            checked = autoConnectAdapter,
+                            onCheckedChange = { viewModel.settingsRepository.setAutoConnect(it) },
+                            modifier = Modifier.testTag("switch_auto_connect")
+                        )
+                    }
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "Auto-Record Drives",
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                "Starts recording telemetry and GPS when engine starts (RPM > 200) and saves the trip when parked.",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Switch(
+                            checked = autoRecordTrips,
+                            onCheckedChange = { viewModel.settingsRepository.setAutoRecord(it) },
+                            modifier = Modifier.testTag("switch_auto_record")
+                        )
+                    }
+                }
+            }
+
             SettingsSectionHeader("DATA & BACKUP")
 
             // ── Never lose a drive (owner 2026-09-17) ─────────────────────────────────
@@ -567,14 +661,19 @@ fun SettingsScreen(
                                 "mid-drive. This is the one setting the app cannot change for you."
                         }
                     )
+                    val isServiceActive = alwaysOnService || autoConnectAdapter || connectionNow == com.example.bluetooth.ConnectionState.CONNECTED
                     ProtectionStatusRow(
-                        ok = connectionNow == com.example.bluetooth.ConnectionState.CONNECTED,
-                        label = "Keep-alive service",
-                        detail = if (connectionNow == com.example.bluetooth.ConnectionState.CONNECTED) {
-                            "Foreground service running${if (isRecordingNow) " and recording" else ""}, " +
-                                "wake lock held, restarts itself after a swipe-away."
-                        } else {
-                            "Not running - it starts the moment the adapter connects."
+                        ok = isServiceActive,
+                        label = "Always-On service",
+                        detail = when {
+                            isRecordingNow ->
+                                "Foreground service active & recording trip in real-time."
+                            connectionNow == com.example.bluetooth.ConnectionState.CONNECTED ->
+                                "Foreground service active & connected to OBD adapter. Polling live engine telemetry."
+                            alwaysOnService || autoConnectAdapter ->
+                                "Always-on standby service active. Auto-connects and starts recording when near vehicle."
+                            else ->
+                                "Stopped. Starts only when adapter connects manually."
                         }
                     )
                     ProtectionStatusRow(

@@ -22,5 +22,20 @@ class KylaqApplication : Application() {
         super.onCreate()
         CrashJournal.install(this)
         CrashReporter.onAppStarted(this)
+
+        runCatching {
+            com.example.di.AppContainer.init(this)
+            val settings = com.example.di.AppContainer.settingsRepository
+            if (settings.alwaysOnService.value || settings.autoConnect.value) {
+                val intent = android.content.Intent(this, com.example.service.ObdKeepAliveService::class.java)
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                    startForegroundService(intent)
+                } else {
+                    startService(intent)
+                }
+            }
+        }.onFailure {
+            // Android 12+ background start restriction if started from background broadcast
+        }
     }
 }

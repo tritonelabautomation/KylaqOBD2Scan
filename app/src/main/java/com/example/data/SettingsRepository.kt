@@ -147,6 +147,9 @@ class SettingsRepository(private val context: Context) {
     private val _autoRecord = MutableStateFlow(prefs.getBoolean("auto_record_on_start", true))
     val autoRecord: StateFlow<Boolean> = _autoRecord.asStateFlow()
 
+    private val _alwaysOnService = MutableStateFlow(prefs.getBoolean("always_on_background_service", true))
+    val alwaysOnService: StateFlow<Boolean> = _alwaysOnService.asStateFlow()
+
     /** The adapter auto-connect and both supervisors should use; null = pick by name. */
     fun setDefaultBtAddress(address: String?) {
         prefs.edit().putString("default_bt_address", address).apply()
@@ -161,6 +164,11 @@ class SettingsRepository(private val context: Context) {
     fun setAutoRecord(enabled: Boolean) {
         prefs.edit().putBoolean("auto_record_on_start", enabled).apply()
         _autoRecord.value = enabled
+    }
+
+    fun setAlwaysOnService(enabled: Boolean) {
+        prefs.edit().putBoolean("always_on_background_service", enabled).apply()
+        _alwaysOnService.value = enabled
     }
 
     // ── Car Welcome voice (owner 2026-09-16: the MacroDroid "Car Welcome" recipe, native) ──

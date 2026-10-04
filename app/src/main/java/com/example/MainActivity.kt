@@ -360,10 +360,12 @@ fun MainApp(viewModel: MainViewModel) {
         permissionLauncher.launch(requiredPermissions)
     }
 
-    // Background keep-alive (2026-09-09): while the adapter is CONNECTED the process
-    // runs as a foreground service so Android cannot silently kill the OBD session.
+    // Background keep-alive: keeps the process running as a foreground service
+    // so Android cannot silently kill the OBD session, and continuously monitors for auto-connect.
     val keepAliveConnection by viewModel.connectionState.collectAsState()
     val keepAliveRecording by viewModel.isRecording.collectAsState()
+    val alwaysOnService by viewModel.settingsRepository.alwaysOnService.collectAsState()
+    val autoConnectAdapter by viewModel.settingsRepository.autoConnect.collectAsState()
     val keepAliveContext = LocalContext.current
     var keepAliveRetryPending by remember { mutableStateOf(false) }
     val startKeepAlive: (Boolean) -> Boolean = { recording ->
@@ -375,8 +377,9 @@ fun MainApp(viewModel: MainViewModel) {
         }
         result.isSuccess
     }
-    LaunchedEffect(keepAliveConnection, keepAliveRecording) {
-        if (keepAliveConnection == ConnectionState.CONNECTED) {
+    LaunchedEffect(keepAliveConnection, keepAliveRecording, alwaysOnService, autoConnectAdapter) {
+        val shouldRunService = alwaysOnService || autoConnectAdapter || keepAliveConnection == ConnectionState.CONNECTED
+        if (shouldRunService) {
             startKeepAlive(keepAliveRecording)
         } else {
             keepAliveRetryPending = false
@@ -386,13 +389,13 @@ fun MainApp(viewModel: MainViewModel) {
     // QA H1: Android 12+ forbids starting a foreground service while the app is in the
     // background; auto-connect can reach CONNECTED with the activity stopped. Retry on resume.
     val keepAliveLifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(keepAliveLifecycleOwner, keepAliveConnection, keepAliveRetryPending) {
+    DisposableEffect(keepAliveLifecycleOwner, keepAliveConnection, alwaysOnService, autoConnectAdapter, keepAliveRetryPending) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME &&
-                keepAliveRetryPending &&
-                keepAliveConnection == ConnectionState.CONNECTED
-            ) {
-                if (startKeepAlive(keepAliveRecording)) keepAliveRetryPending = false
+            if (event == Lifecycle.Event.ON_RESUME) {
+                val shouldRunService = alwaysOnService || autoConnectAdapter || keepAliveConnection == ConnectionState.CONNECTED
+                if (shouldRunService) {
+                    if (startKeepAlive(keepAliveRecording)) keepAliveRetryPending = false
+                }
             }
         }
         keepAliveLifecycleOwner.lifecycle.addObserver(observer)

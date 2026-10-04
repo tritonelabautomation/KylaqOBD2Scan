@@ -50,11 +50,33 @@ object KeepAlivePolicy {
             }
 
     /**
-     * Start the service when there is a cut-off journal to rescue, OR when the owner's
-     * auto-connect is on - the second case is what makes the NEXT drive work after a reboot
-     * without anyone opening the app. With neither, starting a foreground service would only
+     * Start the service when there is a cut-off journal to rescue, OR when auto-connect / always-on
+     * background mode is on - the second case is what makes the NEXT drive work after a reboot
+     * without anyone opening the app. With none, starting a foreground service would only
      * hang a permanent notification on a phone that has nothing to log.
      */
-    fun shouldStartKeepAlive(pendingJournal: Boolean, autoConnectEnabled: Boolean): Boolean =
-        pendingJournal || autoConnectEnabled
+    fun shouldStartKeepAlive(
+        pendingJournal: Boolean,
+        autoConnectEnabled: Boolean,
+        alwaysOnEnabled: Boolean = false
+    ): Boolean =
+        pendingJournal || autoConnectEnabled || alwaysOnEnabled
+
+    enum class ServiceMode {
+        STANDBY,
+        CONNECTED,
+        RECORDING
+    }
+
+    fun notificationTitle(mode: ServiceMode, deviceName: String? = null): String = when (mode) {
+        ServiceMode.RECORDING -> "Recording trip - OBD live"
+        ServiceMode.CONNECTED -> if (!deviceName.isNullOrBlank()) "OBD connected - $deviceName" else "OBD connected - logging ready"
+        ServiceMode.STANDBY -> "OBD Standby - Ready to connect"
+    }
+
+    fun notificationText(mode: ServiceMode): String = when (mode) {
+        ServiceMode.RECORDING -> "Kylaq TSI Coach keeps polling and saving in the background."
+        ServiceMode.CONNECTED -> "Kylaq TSI Coach keeps the adapter socket and polling alive in the background."
+        ServiceMode.STANDBY -> "Waiting for vehicle. Auto-connect is active and ready to log your next drive."
+    }
 }

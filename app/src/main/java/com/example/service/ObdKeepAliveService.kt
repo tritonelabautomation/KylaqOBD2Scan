@@ -70,6 +70,10 @@ class ObdKeepAliveService : Service() {
         /** Live threshold alerts land here at HIGH importance: they mean stop-and-look. */
         const val ALERT_CHANNEL_ID = "vehicle_alerts"
 
+        /** Intent actions for controlling background service lifecycle and immediate triggers. */
+        const val ACTION_START_STANDBY = "com.example.service.action.START_STANDBY"
+        const val ACTION_STOP_SERVICE = "com.example.service.action.STOP_SERVICE"
+
         /** Tick periods, matching what `MainViewModel.startSessionAutomation` has always used. */
         const val AUTO_CONNECT_TICK_MS = 10_000L
         const val AUTO_RECORD_TICK_MS = 2_000L
@@ -85,6 +89,20 @@ class ObdKeepAliveService : Service() {
                 "Kylaq TSI Coach keeps polling and saving in the background."
             } else {
                 "Kylaq TSI Coach keeps the adapter socket and polling alive in the background."
+            }
+
+        fun notificationTitle(recording: Boolean, connected: Boolean, deviceName: String? = null): String =
+            when {
+                recording -> "Recording trip - OBD live"
+                connected -> if (!deviceName.isNullOrBlank()) "OBD connected - $deviceName" else "OBD connected - logging ready"
+                else -> "OBD Standby - Ready to connect"
+            }
+
+        fun notificationText(recording: Boolean, connected: Boolean): String =
+            when {
+                recording -> "Kylaq TSI Coach keeps polling and saving in the background."
+                connected -> "Kylaq TSI Coach keeps the adapter socket and polling alive in the background."
+                else -> "Waiting for vehicle. Auto-connect is active and ready to log your next drive."
             }
 
         /**
@@ -120,6 +138,21 @@ class ObdKeepAliveService : Service() {
         // then start supervising again, so the rest of the drive is still recorded.
         recoverKilledSessions()
         startSupervisors()
+
+        // Keep notification in sync with live connection & recording state changes
+        refreshScope.launch {
+            runCatching {
+                com.example.di.AppContainer.init(applicationContext)
+                kotlinx.coroutines.flow.combine(
+                    com.example.di.AppContainer.bluetoothManager.connectionState,
+                    com.example.di.AppContainer.recordingManager.isRecording
+                ) { conn, rec -> Pair(conn, rec) }.collect { (_, rec) ->
+                    lastRecordingState = rec
+                    startForegroundCompat(rec)
+                }
+            }
+        }
+
         // Live threshold alerts (owner 2026-09-19): the service outlives the UI, so an over-temp
         // or a dying alternator reaches him with the screen off and the phone pocketed.
         refreshScope.launch {
@@ -146,11 +179,41 @@ class ObdKeepAliveService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_STOP_SERVICE) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(true)
+            }
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
         val recording = intent?.getBooleanExtra(EXTRA_RECORDING, false) == true
         lastRecordingState = recording
         startForegroundCompat(recording)
         refreshWakeLock()
         recoverKilledSessions()
+
+        if (intent?.action == BluetoothStateReceiver.ACTION_TRIGGER_CONNECT ||
+            intent?.action == ACTION_START_STANDBY
+        ) {
+            recoveryScope.launch {
+                runCatching {
+                    com.example.di.AppContainer.init(applicationContext)
+                    val settings = com.example.di.AppContainer.settingsRepository
+                    val scheduler = com.example.di.AppContainer.obdScheduler
+                    if ((settings.autoConnect.value || settings.alwaysOnService.value) && !scheduler.isPolling.value) {
+                        com.example.scheduler.ObdQuickConnect.connectPairedAdapterAndPoll(
+                            this,
+                            respectAutoConnectSetting = false
+                        )
+                    }
+                }
+            }
+        }
+
         // QA M1: re-acquire before the 60 min timeout so multi-hour drives never lose CPU.
         if (refreshJob == null) {
             refreshJob = refreshScope.launch {
@@ -174,6 +237,11 @@ class ObdKeepAliveService : Service() {
             this, 0, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+        val stopPending = PendingIntent.getService(
+            this, 3, Intent(this, ObdKeepAliveService::class.java).apply { action = ACTION_STOP_SERVICE },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
         // Say plainly when the session is exposed to an OEM kill, and give the owner the one tap
         // that fixes it. A service that quietly claims invulnerability is how a day of logging went
         // missing.
@@ -181,16 +249,32 @@ class ObdKeepAliveService : Service() {
             getSystemService(PowerManager::class.java)?.isIgnoringBatteryOptimizations(packageName) ?: true
         }.getOrDefault(true)
         val warning = warningText(exempted)
+
+        val isConnected = runCatching {
+            com.example.di.AppContainer.init(applicationContext)
+            com.example.di.AppContainer.bluetoothManager.connectionState.value == com.example.bluetooth.ConnectionState.CONNECTED
+        }.getOrDefault(false)
+
+        val devName = runCatching {
+            com.example.di.AppContainer.bluetoothManager.connectedDeviceName.value
+        }.getOrNull()
+
+        val title = notificationTitle(recording = recording, connected = isConnected, deviceName = devName)
+        val text = notificationText(recording = recording, connected = isConnected)
+
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_kylaq)
-            .setContentTitle(notificationTitle(recording))
-            .setContentText(notificationText(recording))
+            .setContentTitle(title)
+            .setContentText(text)
             .setOngoing(true)
             .setSilent(true)
             .setContentIntent(pending)
+            .addAction(0, "Open App", pending)
+            .addAction(0, "Stop Service", stopPending)
+
         if (warning != null) {
             builder.setStyle(
-                NotificationCompat.BigTextStyle().bigText(notificationText(recording) + "\n" + warning)
+                NotificationCompat.BigTextStyle().bigText(text + "\n" + warning)
             ).addAction(0, "Make Unrestricted", exemptionPendingIntent())
         }
         val notification: Notification = builder.build()
@@ -275,11 +359,14 @@ class ObdKeepAliveService : Service() {
                         com.example.di.AppContainer.init(applicationContext)
                         val settings = com.example.di.AppContainer.settingsRepository
                         val scheduler = com.example.di.AppContainer.obdScheduler
-                        if (settings.autoConnect.value && !scheduler.isPolling.value) {
-                            com.example.scheduler.ObdQuickConnect.connectPairedAdapterAndPoll(
+                        if ((settings.autoConnect.value || settings.alwaysOnService.value) && !scheduler.isPolling.value) {
+                            val connected = com.example.scheduler.ObdQuickConnect.connectPairedAdapterAndPoll(
                                 this,
-                                respectAutoConnectSetting = true
+                                respectAutoConnectSetting = false
                             ) { /* progress messages belong to the UI supervisor */ }
+                            if (connected) {
+                                startForegroundCompat(lastRecordingState)
+                            }
                         }
                     }.onFailure {
                         android.util.Log.e("ObdKeepAliveService", "auto-connect tick failed", it)
@@ -418,12 +505,17 @@ class ObdKeepAliveService : Service() {
      */
     override fun onTaskRemoved(rootIntent: Intent?) {
         runCatching {
-            val restart = Intent(applicationContext, ObdKeepAliveService::class.java)
-                .putExtra(EXTRA_RECORDING, lastRecordingState)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(restart)
-            } else {
-                startService(restart)
+            com.example.di.AppContainer.init(applicationContext)
+            val settings = com.example.di.AppContainer.settingsRepository
+            val shouldKeepAlive = settings.alwaysOnService.value || settings.autoConnect.value || lastRecordingState
+            if (shouldKeepAlive) {
+                val restart = Intent(applicationContext, ObdKeepAliveService::class.java)
+                    .putExtra(EXTRA_RECORDING, lastRecordingState)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    startForegroundService(restart)
+                } else {
+                    startService(restart)
+                }
             }
         }.onFailure { android.util.Log.e("ObdKeepAliveService", "restart after task removal failed", it) }
         super.onTaskRemoved(rootIntent)
