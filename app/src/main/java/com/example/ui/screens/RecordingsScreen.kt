@@ -13,7 +13,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -117,7 +119,15 @@ fun RecordingsScreen(
     var gapToFill by remember { mutableStateOf<DailyTripCostAggregator.DayTripItem?>(null) }
 
     LaunchedEffect(savedRecordings, carpoolTick) {
-        aggregationResult = runCatching { viewModel.loadDayWiseAggregation() }.getOrNull()
+        val res = runCatching { viewModel.loadDayWiseAggregation() }.getOrNull()
+        aggregationResult = res
+        if (res != null) {
+            val months = res.allMonthSummaries
+            val idxWithTrips = months.indexOfFirst { it.totalTrips > 0 }
+            if (idxWithTrips >= 0 && (selectedMonthIndex >= months.size || months.getOrNull(selectedMonthIndex)?.totalTrips == 0)) {
+                selectedMonthIndex = idxWithTrips
+            }
+        }
     }
 
     // Sync status — OneDrive-style (owner 2026-09-21)
@@ -437,42 +447,49 @@ fun RecordingsScreen(
 
                 if (savedRecordings.isNotEmpty()) {
                     item(key = "month_filter_tabs") {
-                        Row(
+                        LazyRow(
                             modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            FilterChip(
-                                selected = !viewAllMonths,
-                                onClick = { viewAllMonths = false },
-                                label = {
-                                    Text(
-                                        text = "${activeMonth.displayMonth} (${activeMonth.totalTrips})",
-                                        fontSize = 12.sp,
-                                        fontWeight = if (!viewAllMonths) FontWeight.Bold else FontWeight.Normal
+                            item(key = "tab_all_days") {
+                                FilterChip(
+                                    selected = viewAllMonths,
+                                    onClick = { viewAllMonths = true },
+                                    label = {
+                                        Text(
+                                            text = "All Days (${savedRecordings.size})",
+                                            fontSize = 12.sp,
+                                            fontWeight = if (viewAllMonths) FontWeight.Bold else FontWeight.Normal
+                                        )
+                                    },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = CyberCyan.copy(alpha = 0.2f),
+                                        selectedLabelColor = CyberCyan
                                     )
-                                },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = CyberCyan.copy(alpha = 0.2f),
-                                    selectedLabelColor = CyberCyan
                                 )
-                            )
+                            }
 
-                            FilterChip(
-                                selected = viewAllMonths,
-                                onClick = { viewAllMonths = true },
-                                label = {
-                                    Text(
-                                        text = "All Days (${savedRecordings.size})",
-                                        fontSize = 12.sp,
-                                        fontWeight = if (viewAllMonths) FontWeight.Bold else FontWeight.Normal
+                            itemsIndexed(months, key = { _, m -> "tab_month_${m.monthKey}" }) { idx, m ->
+                                FilterChip(
+                                    selected = !viewAllMonths && selectedMonthIndex == idx,
+                                    onClick = {
+                                        selectedMonthIndex = idx
+                                        viewAllMonths = false
+                                    },
+                                    label = {
+                                        Text(
+                                            text = "${m.displayMonth} (${m.totalTrips})",
+                                            fontSize = 12.sp,
+                                            fontWeight = if (!viewAllMonths && selectedMonthIndex == idx) FontWeight.Bold else FontWeight.Normal
+                                        )
+                                    },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = CyberCyan.copy(alpha = 0.2f),
+                                        selectedLabelColor = CyberCyan
                                     )
-                                },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = CyberCyan.copy(alpha = 0.2f),
-                                    selectedLabelColor = CyberCyan
                                 )
-                            )
+                            }
                         }
                     }
                 }
@@ -516,134 +533,110 @@ fun RecordingsScreen(
                     agg?.dayGroups?.filter { it.dateKey.startsWith(activeMonth?.monthKey ?: "") } ?: emptyList()
                 }
 
-                if (dayGroupsToShow.isEmpty()) {
-                    val monthFuelLogs = activeMonth?.fuelLogs ?: emptyList()
-                    val monthCarpools = activeMonth?.carpoolLogs ?: emptyList()
+                val monthFuelLogs = activeMonth?.fuelLogs ?: emptyList()
+                val monthCarpools = activeMonth?.carpoolLogs ?: emptyList()
 
-                    if (monthFuelLogs.isNotEmpty() || monthCarpools.isNotEmpty()) {
-                        item(key = "month_fuel_ledger_card") {
-                            Card(
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                                shape = RoundedCornerShape(14.dp),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
-                            ) {
-                                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (monthFuelLogs.isNotEmpty() || monthCarpools.isNotEmpty()) {
+                    item(key = "month_fuel_ledger_card") {
+                        Card(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
+                        ) {
+                            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.LocalGasStation, contentDescription = null, tint = ElectricAmber, modifier = Modifier.size(18.dp))
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(
+                                            text = "${activeMonth?.displayMonth} Fuel Fill-Ups (${monthFuelLogs.size})",
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = TextPrimaryDark
+                                        )
+                                    }
+                                    Text(
+                                        text = "₹${String.format(Locale.US, "%.0f", activeMonth?.totalRefuelSpend ?: 0.0)}",
+                                        fontWeight = FontWeight.Bold,
+                                        color = ElectricAmber,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 13.sp
+                                    )
+                                }
+
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
+
+                                monthFuelLogs.forEach { log ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Column {
+                                            Text(
+                                                text = com.example.data.RecordTime.format("d MMM yyyy", log.idMs) +
+                                                    if (log.station.isNotBlank()) " · ${log.station}" else "",
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = TextPrimaryDark
+                                            )
+                                            Text(
+                                                text = "${String.format(Locale.US, "%.1f L", log.liters)} @ ₹${String.format(Locale.US, "%.1f", log.pricePerL)}/L (${log.grade})" +
+                                                    (log.odometerKm?.let { " · ODO: ${String.format(Locale.US, "%,.0f km", it)}" } ?: ""),
+                                                fontSize = 11.sp,
+                                                color = TextSecondaryDark,
+                                                fontFamily = FontFamily.Monospace
+                                            )
+                                        }
+
+                                        Text(
+                                            text = "₹${String.format(Locale.US, "%.0f", log.totalCost)}",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = TextPrimaryDark,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                    }
+                                }
+
+                                if (monthCarpools.isNotEmpty()) {
+                                    Spacer(Modifier.height(4.dp))
+                                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Icon(Icons.Default.LocalGasStation, contentDescription = null, tint = ElectricAmber, modifier = Modifier.size(18.dp))
-                                            Spacer(Modifier.width(8.dp))
+                                            Icon(Icons.Default.Groups, contentDescription = null, tint = NeonEmerald, modifier = Modifier.size(16.dp))
+                                            Spacer(Modifier.width(6.dp))
                                             Text(
-                                                text = "${activeMonth?.displayMonth} Fuel Fill-Ups (${monthFuelLogs.size})",
-                                                style = MaterialTheme.typography.titleSmall,
+                                                text = "Carpool Rides (${monthCarpools.size})",
+                                                fontSize = 12.sp,
                                                 fontWeight = FontWeight.Bold,
-                                                color = TextPrimaryDark
+                                                color = NeonEmerald
                                             )
                                         }
                                         Text(
-                                            text = "₹${String.format(Locale.US, "%.0f", activeMonth?.totalRefuelSpend ?: 0.0)}",
+                                            text = "+₹${String.format(Locale.US, "%.0f", activeMonth?.totalCarpoolEarned ?: 0.0)}",
+                                            fontSize = 12.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = ElectricAmber,
-                                            fontFamily = FontFamily.Monospace,
-                                            fontSize = 13.sp
+                                            color = NeonEmerald,
+                                            fontFamily = FontFamily.Monospace
                                         )
                                     }
-
-                                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
-
-                                    monthFuelLogs.forEach { log ->
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.SpaceBetween
-                                        ) {
-                                            Column {
-                                                Text(
-                                                    text = com.example.data.RecordTime.format("d MMM yyyy", log.idMs) +
-                                                        if (log.station.isNotBlank()) " · ${log.station}" else "",
-                                                    fontSize = 12.sp,
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    color = TextPrimaryDark
-                                                )
-                                                Text(
-                                                    text = "${String.format(Locale.US, "%.1f L", log.liters)} @ ₹${String.format(Locale.US, "%.1f", log.pricePerL)}/L (${log.grade})" +
-                                                        (log.odometerKm?.let { " · ODO: ${String.format(Locale.US, "%,.0f km", it)}" } ?: ""),
-                                                    fontSize = 11.sp,
-                                                    color = TextSecondaryDark,
-                                                    fontFamily = FontFamily.Monospace
-                                                )
-                                            }
-
-                                            Text(
-                                                text = "₹${String.format(Locale.US, "%.0f", log.totalCost)}",
-                                                fontSize = 12.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = TextPrimaryDark,
-                                                fontFamily = FontFamily.Monospace
-                                            )
-                                        }
-                                    }
-
-                                    if (monthCarpools.isNotEmpty()) {
-                                        Spacer(Modifier.height(4.dp))
-                                        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.SpaceBetween
-                                        ) {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Icon(Icons.Default.Groups, contentDescription = null, tint = NeonEmerald, modifier = Modifier.size(16.dp))
-                                                Spacer(Modifier.width(6.dp))
-                                                Text(
-                                                    text = "Carpool Rides (${monthCarpools.size})",
-                                                    fontSize = 12.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = NeonEmerald
-                                                )
-                                            }
-                                            Text(
-                                                text = "+₹${String.format(Locale.US, "%.0f", activeMonth?.totalCarpoolEarned ?: 0.0)}",
-                                                fontSize = 12.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = NeonEmerald,
-                                                fontFamily = FontFamily.Monospace
-                                            )
-                                        }
-                                    }
                                 }
                             }
                         }
                     }
+                }
 
-                    item(key = "no_trips_in_month") {
-                        Card(
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
-                        ) {
-                            Column(
-                                modifier = Modifier.fillMaxWidth().padding(14.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                Text(
-                                    text = "No OBD diagnostic trips recorded in ${activeMonth?.displayMonth ?: "this month"}",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = TextSecondaryDark,
-                                    fontSize = 12.sp
-                                )
-                                Spacer(Modifier.height(4.dp))
-                                TextButton(onClick = { viewAllMonths = true }) {
-                                    Text("View all recorded days (${savedRecordings.size} trips)")
-                                }
-                            }
-                        }
-                    }
-                } else {
+                if (dayGroupsToShow.isNotEmpty()) {
                     dayGroupsToShow.forEach { dayGroup ->
                         item(key = "day_header_${dayGroup.dateKey}") {
                             DayCostGroupCard(dayGroup = dayGroup)
@@ -754,6 +747,74 @@ fun RecordingsScreen(
                                 }
                             }
                         }
+                    }
+                } else if (savedRecordings.isNotEmpty()) {
+                    // Fallback when dayGroups are empty for selected month or while aggregator is computing:
+                    item(key = "no_trips_in_month_fallback_header") {
+                        Card(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = if (activeMonth != null && !viewAllMonths) "No trips in ${activeMonth.displayMonth} · Showing all ${savedRecordings.size} trips" else "All Recorded Trips (${savedRecordings.size})",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextSecondaryDark,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                TextButton(onClick = { viewAllMonths = true }) {
+                                    Text("View All", color = CyberCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+
+                    items(savedRecordings, key = { it.metadata.sessionId }) { rec ->
+                        val isSelected = rec.metadata.sessionId in selectedIds
+                        val dirMtime = rec.transactionCsvFile.parentFile?.lastModified()
+                        val syncState = com.example.data.BackupSyncStatus.forTrip(
+                            lastBackupMs = lastBackupMs,
+                            endMs = null,
+                            startMs = com.example.data.RecordTime.parseMillis(rec.metadata.startTimeUtc),
+                            dirLastModifiedMs = dirMtime
+                        )
+                        RecordingItemCard(
+                            recording = rec,
+                            tripItem = null,
+                            isSelected = isSelected,
+                            selectionMode = selectionMode,
+                            syncState = syncState,
+                            onClick = {
+                                if (selectionMode) {
+                                    selectedIds = if (isSelected) selectedIds - rec.metadata.sessionId else selectedIds + rec.metadata.sessionId
+                                } else {
+                                    onNavigateToTripDetail(rec.metadata.sessionId)
+                                }
+                            },
+                            onLongClick = {
+                                selectedIds = if (isSelected) selectedIds - rec.metadata.sessionId else selectedIds + rec.metadata.sessionId
+                            },
+                            onToggleSelect = {
+                                selectedIds = if (isSelected) selectedIds - rec.metadata.sessionId else selectedIds + rec.metadata.sessionId
+                            },
+                            onShareFile = { file, mimeType -> shareFile(context, file, mimeType) },
+                            onRecalculate = {
+                                coroutineScope.launch {
+                                    val ok = viewModel.recalculateTripMetrics(rec.metadata.sessionId)
+                                    aggregationResult = runCatching { viewModel.loadDayWiseAggregation() }.getOrNull()
+                                    Toast.makeText(context, if (ok) "Recalculated metrics from disk transactions" else "Recalculation complete", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            onRename = { renamingRecording = rec },
+                            onDelete = { deletingRecording = rec },
+                            onAddOrEditCarpool = null,
+                            onEditFuelTag = null
+                        )
                     }
                 }
 
