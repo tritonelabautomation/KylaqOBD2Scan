@@ -1346,6 +1346,17 @@ class RecordingManager(
             }.getOrDefault(emptyList())
             for (stuck in stuckTrips) {
                 if (stuck.id !in ids) {
+                    val sessionDir = File(recordingsDir, "session_${stuck.id}")
+                    val txFile = File(sessionDir, "${stuck.id}_transactions.csv")
+                    val journalTx = journal.txFile(stuck.id)
+                    val lastMod = when {
+                        journalTx.exists() -> journalTx.lastModified()
+                        txFile.exists() -> txFile.lastModified()
+                        else -> stuck.startTimestamp
+                    }
+                    if (skipFreshMs > 0L && SessionRecoveryPolicy.isResumable(System.currentTimeMillis() - lastMod, skipFreshMs)) {
+                        continue
+                    }
                     val rebuilt = rebuildRoomTripFromDisk(stuck.id)
                     if (rebuilt) {
                         recovered++
