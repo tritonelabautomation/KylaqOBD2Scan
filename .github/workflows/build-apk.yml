@@ -97,7 +97,7 @@ jobs:
             PR="${{ github.event.pull_request.number }}"
             if [ -z "$PR" ]; then PR=1; fi
             { echo "**push run @ ${GITHUB_SHA:0:7}**"; cat /tmp/test-report.md; } > /tmp/test-report-push.md
-            gh pr comment "$PR" --body-file /tmp/test-report-push.md
+            gh pr comment "$PR" --body-file /tmp/test-report-push.md || echo "PR comment skipped or not found (non-fatal)"
           fi
 
       - name: Fail the job when tests failed
