@@ -102,10 +102,11 @@ fun RecordingsScreen(
     }
 
     // Cross-trip trends (rpm / speed / load / torque / idle-vs-model) computed from the
-    // stored Room telemetry samples of the newest recorded trips.
+    // stored Room telemetry samples, falling back to disk files when Room is empty.
+    var trendWindowLimit by remember { mutableStateOf(0) } // 0 = All Trips
     var trends by remember { mutableStateOf<List<com.example.analysis.TripTrendPoint>>(emptyList()) }
-    LaunchedEffect(savedRecordings.size) {
-        trends = runCatching { viewModel.computeTripTrends() }.getOrDefault(emptyList())
+    LaunchedEffect(savedRecordings.size, trendWindowLimit) {
+        trends = runCatching { viewModel.computeTripTrends(trendWindowLimit) }.getOrDefault(emptyList())
     }
 
     // Monthly Price Card & Day-Wise Grouping Aggregator (owner request 2026-09-30)
@@ -825,11 +826,41 @@ fun RecordingsScreen(
                     shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                 ) {
-                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(
-                            "VEHICLE TRENDS - your last ${trends.size} recorded trip(s)",
-                            color = CyberCyan, fontWeight = FontWeight.Bold, fontSize = 14.sp
-                        )
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "VEHICLE TRENDS (${trends.size} trips)",
+                                color = CyberCyan, fontWeight = FontWeight.Bold, fontSize = 14.sp
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                listOf(
+                                    7 to "7",
+                                    14 to "14",
+                                    30 to "30",
+                                    0 to "All (${savedRecordings.size})"
+                                ).forEach { (limit, label) ->
+                                    val isSelected = trendWindowLimit == limit
+                                    Surface(
+                                        modifier = Modifier.clickable { trendWindowLimit = limit },
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = if (isSelected) CyberCyan.copy(alpha = 0.25f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                        border = if (isSelected) BorderStroke(1.dp, CyberCyan) else null
+                                    ) {
+                                        Text(
+                                            text = label,
+                                            fontSize = 11.sp,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (isSelected) CyberCyan else TextSecondaryDark,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
                         if (trends.size >= 2) {
                             TrendRow("avg engine rpm", trends.mapNotNull { it.avgRpm }, "%.0f", NeonEmerald)
                             TrendRow("avg speed (km/h)", trends.mapNotNull { it.avgSpeedKmh }, "%.1f", CyberCyan)

@@ -2277,24 +2277,69 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /**
      * Cross-trip trend points (avg rpm/speed/load/torque + idle model-vs-actual) for the
-     * Trips tab charts. Computed from stored Room telemetry samples of the newest trips.
+     * Trips tab charts. Computed from stored Room telemetry samples, falling back to disk
+     * sample files when Room has 0 rows for a trip.
+     *
+     * @param limit Maximum trips to include (0 = all saved trips).
      */
-    suspend fun computeTripTrends(limit: Int = 8): List<com.example.analysis.TripTrendPoint> {
+    suspend fun computeTripTrends(limit: Int = 0): List<com.example.analysis.TripTrendPoint> = withContext(Dispatchers.IO) {
+        val allSaved = savedRecordings.value
+        val targetRecordings = if (limit > 0) allSaved.take(limit) else allSaved
+        if (targetRecordings.isEmpty()) return@withContext emptyList()
+
+        val tripIds = targetRecordings.map { it.metadata.sessionId }
         val repo = recordingManager.tripRepository
-        val trips = repo.recentTrips(limit)
-        if (trips.isEmpty()) return emptyList()
-        val rows = repo.trendSamples(trips.map { it.id })
-        return com.example.analysis.TripTrendAnalyzer.analyze(
-            rows.map {
-                val pid = it.pid.uppercase()
-                com.example.analysis.TripTrendAnalyzer.Sample(
-                    tripId = it.tripId,
-                    pid = if (pid.length == 2) "01$pid" else pid,
-                    ts = it.instantMs,
-                    value = it.numericValue
-                )
+
+        val roomSamples = try {
+            repo.trendSamples(tripIds)
+        } catch (_: Exception) {
+            emptyList()
+        }
+
+        val samplesByTrip = roomSamples.groupBy { it.tripId }.toMutableMap()
+
+        val trendPids = setOf("010C", "0C", "010D", "0D", "0104", "04", "0162", "62", "015E", "5E", "019D", "9D")
+        for (rec in targetRecordings) {
+            val sId = rec.metadata.sessionId
+            if (samplesByTrip[sId].isNullOrEmpty()) {
+                val diskPoints = samplePointsFromDisk(sId)
+                if (diskPoints.isNotEmpty()) {
+                    val filtered = diskPoints.filter { pt ->
+                        val norm = com.example.analysis.TripFuelSummary.normalizePidKey(pt.pid)
+                        norm in trendPids || pt.pid in trendPids
+                    }
+                    if (filtered.isNotEmpty()) {
+                        val converted = filtered.map { pt ->
+                            com.example.data.db.entities.TelemetrySampleEntity(
+                                tripId = sId,
+                                timestamp = pt.timestampMs,
+                                timestampUtc = com.example.data.RecordTime.stamp(pt.timestampMs),
+                                ecuCanId = "7E8",
+                                pid = pt.pid,
+                                parameterName = "",
+                                rawHex = "",
+                                numericValue = pt.value,
+                                displayValue = "",
+                                unit = ""
+                            )
+                        }
+                        samplesByTrip[sId] = converted
+                    }
+                }
             }
-        ).sortedByDescending { it.startTs }
+        }
+
+        val allTrendSamples = samplesByTrip.values.flatten().map {
+            val pid = it.pid.uppercase()
+            com.example.analysis.TripTrendAnalyzer.Sample(
+                tripId = it.tripId,
+                pid = if (pid.length == 2) "01$pid" else pid,
+                ts = it.instantMs,
+                value = it.numericValue
+            )
+        }
+
+        com.example.analysis.TripTrendAnalyzer.analyze(allTrendSamples).sortedBy { it.startTs }
     }
 
     /** Saved ride X-rays, newest first (behaviour + gears + elevation per ride). */
