@@ -444,4 +444,57 @@ class KilledSessionRecoveryTest {
         assertFalse(SessionRecoveryPolicy.finishedMarkerAllowed(saved != null))
         assertTrue(SessionRecoveryPolicy.finishedMarkerAllowed(true))
     }
+
+    @Test
+    fun stuckRecordingTripInRoomIsAutoRecoveredAndRebuiltFromDisk() = runBlocking {
+        val startMs = System.currentTimeMillis() - 20 * 60_000L
+        val frames = realFrames(startMs)
+        val manager = newManager()
+        val meta = manager.startRecording()!!
+        frames.forEach { manager.recordTransaction(it) }
+
+        // Simulate a trip stuck in RECORDING state in Room
+        val repo = TripRepository(context)
+        val tripBefore = repo.getTripById(meta.sessionId)
+        assertNotNull(tripBefore)
+        assertEquals("RECORDING", tripBefore!!.status)
+
+        // Run recovery pass
+        val restarted = newManager()
+        val summary = restarted.recoverUnfinishedSessions()
+        assertNotNull(summary)
+
+        val tripAfter = repo.getTripById(meta.sessionId)
+        assertNotNull(tripAfter)
+        assertEquals("COMPLETED", tripAfter!!.status)
+        assertEquals(frames.size, tripAfter.sampleCount)
+        assertTrue(tripAfter.maxSpeedKmh > 0.0)
+        assertTrue(tripAfter.maxRpm > 0.0)
+        assertTrue(repo.getSamplesForTrip(meta.sessionId).isNotEmpty())
+    }
+
+    @Test
+    fun rebuildRoomTripFromDiskRestoresMissingSamples() = runBlocking {
+        val startMs = System.currentTimeMillis() - 15 * 60_000L
+        val frames = realFrames(startMs)
+        val manager = newManager()
+        val meta = manager.startRecording()!!
+        frames.forEach { manager.recordTransaction(it) }
+        val saved = manager.stopRecording()
+        assertNotNull(saved)
+
+        val repo = TripRepository(context)
+        // Simulate missing Room samples (e.g. cleared database / partial write)
+        repo.deleteTrip(meta.sessionId)
+        assertEquals(0, repo.getSamplesForTrip(meta.sessionId).size)
+
+        // Rebuild from disk CSVs
+        val rebuilt = manager.rebuildRoomTripFromDisk(meta.sessionId)
+        assertTrue("rebuildRoomTripFromDisk must succeed", rebuilt)
+
+        val restoredTrip = repo.getTripById(meta.sessionId)
+        assertNotNull(restoredTrip)
+        assertEquals("COMPLETED", restoredTrip!!.status)
+        assertEquals(frames.size, repo.getSamplesForTrip(meta.sessionId).size)
+    }
 }

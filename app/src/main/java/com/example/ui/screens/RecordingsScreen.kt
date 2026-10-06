@@ -739,6 +739,13 @@ fun RecordingsScreen(
                                             selectedIds = if (isSelected) selectedIds - rec.metadata.sessionId else selectedIds + rec.metadata.sessionId
                                         },
                                         onShareFile = { file, mimeType -> shareFile(context, file, mimeType) },
+                                        onRecalculate = {
+                                            coroutineScope.launch {
+                                                val ok = viewModel.recalculateTripMetrics(rec.metadata.sessionId)
+                                                aggregationResult = runCatching { viewModel.loadDayWiseAggregation() }.getOrNull()
+                                                Toast.makeText(context, if (ok) "Recalculated metrics from disk transactions" else "Recalculation complete", Toast.LENGTH_SHORT).show()
+                                            }
+                                        },
                                         onRename = { renamingRecording = rec },
                                         onDelete = { deletingRecording = rec },
                                         onAddOrEditCarpool = { carpoolTargetTrip = tripItem },
@@ -973,6 +980,7 @@ fun RecordingItemCard(
     onLongClick: (() -> Unit)? = null,
     onToggleSelect: (() -> Unit)? = null,
     onShareFile: (File, String) -> Unit,
+    onRecalculate: (() -> Unit)? = null,
     onRename: () -> Unit,
     onDelete: () -> Unit,
     onAddOrEditCarpool: (() -> Unit)? = null,
@@ -1089,6 +1097,11 @@ fun RecordingItemCard(
                 }
 
                 Row {
+                    if (onRecalculate != null) {
+                        IconButton(onClick = onRecalculate, modifier = Modifier.size(32.dp)) {
+                            Icon(Icons.Default.Refresh, contentDescription = "Recalculate", tint = CyberCyan, modifier = Modifier.size(16.dp))
+                        }
+                    }
                     IconButton(onClick = onRename, modifier = Modifier.size(32.dp)) {
                         Icon(Icons.Default.Edit, contentDescription = "Rename", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
                     }

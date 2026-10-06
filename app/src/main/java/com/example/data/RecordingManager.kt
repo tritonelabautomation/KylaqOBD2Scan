@@ -788,11 +788,237 @@ class RecordingManager(
         // now - join the trip whose window covers them, the moment the trip exists.
         runCatching { relinkCarpoolEntries() }
             .onFailure { android.util.Log.e("RecordingManager", "carpool relink failed", it) }
-            .onFailure { android.util.Log.e("RecordingManager", "refuel detection failed", it) }
 
         // Auto-run local AI Doctor analysis
         runCatching { tripRepository.runAiCarDoctorAnalysis(sessionId) }
             .onFailure { android.util.Log.e("RecordingManager", "AI doctor failed for $sessionId", it) }
+    }
+
+    /**
+     * Reads a session's transactions/samples CSV from disk, recalculates all summary
+     * metrics (distance, duration, average speed, max speed, max rpm, coolant, voltage,
+     * fuel, start/end ODO, altitude), rebuilds the Room database rows for TripEntity and
+     * TelemetrySampleEntity, and marks the trip status as COMPLETED.
+     */
+    suspend fun rebuildRoomTripFromDisk(sessionId: String): Boolean = withContext(Dispatchers.IO) {
+        val sessionDir = File(recordingsDir, "session_$sessionId")
+        val txCsv = File(sessionDir, "${sessionId}_transactions.csv")
+        val sampleCsv = File(sessionDir, "${sessionId}_samples.csv")
+        val jsonFile = File(sessionDir, "$sessionId.json")
+        val journalTx = journal.txFile(sessionId)
+        val journalSample = journal.sampleFile(sessionId)
+
+        val txList: List<TransactionRecord> = when {
+            txCsv.exists() && txCsv.length() > 0 -> runCatching { CsvExporter.readTransactionsFromCsv(txCsv) }.getOrDefault(emptyList())
+            journalTx.exists() && journalTx.length() > 0 -> runCatching { CsvExporter.readTransactionsFromCsv(journalTx) }.getOrDefault(emptyList())
+            else -> emptyList()
+        }
+
+        val sampleList: List<SynchronizedSample> = when {
+            sampleCsv.exists() && sampleCsv.length() > 0 -> runCatching { CsvExporter.readSamplesFromCsv(sampleCsv) }.getOrDefault(emptyList())
+            journalSample.exists() && journalSample.length() > 0 -> runCatching { CsvExporter.readSamplesFromCsv(journalSample) }.getOrDefault(emptyList())
+            else -> emptyList()
+        }
+
+        if (txList.isEmpty() && sampleList.isEmpty()) {
+            val rawFile = File(rawLogsDir, "raw_log_$sessionId.txt").takeIf { it.exists() }
+                ?: File(sessionDir, "${sessionId}_raw.txt").takeIf { it.exists() }
+            if (rawFile != null) {
+                val outcome = recoverFromRawLog(rawFile)
+                return@withContext outcome is RecoveryOutcome.Recovered
+            }
+            return@withContext false
+        }
+
+        val existingTrip = tripRepository.getTripById(sessionId)
+        val metaFromJson = if (jsonFile.exists()) {
+            runCatching { SessionJsonReader.readMetadata(jsonFile.reader()) }.getOrNull()
+        } else null
+        val metaFromJournal = if (journal.metaFile(sessionId).exists()) {
+            journal.readMeta(sessionId)
+        } else emptyMap()
+
+        val sessionName = metaFromJson?.sessionName
+            ?: existingTrip?.title
+            ?: metaFromJournal["sessionName"]
+            ?: "Kylaq Run $sessionId"
+        val vehicleName = metaFromJson?.vehicle
+            ?: existingTrip?.vehicleName
+            ?: metaFromJournal["vehicle"]
+            ?: "Škoda Kylaq 1.0 TSI (EA211)"
+        val adapterName = metaFromJson?.adapter
+            ?: existingTrip?.adapterName
+            ?: metaFromJournal["adapter"]
+            ?: "ELM327 Bluetooth"
+        val protocolName = metaFromJson?.protocol
+            ?: existingTrip?.protocolName
+            ?: metaFromJournal["protocol"]
+            ?: "ISO 15765-4 (CAN 11/500K)"
+        val startStamp = metaFromJson?.startTimeUtc
+            ?: existingTrip?.startTimeUtc
+            ?: txList.firstOrNull()?.timestampUtc
+            ?: sampleList.firstOrNull()?.timestampUtc
+            ?: RecordTime.stamp(System.currentTimeMillis())
+
+        val validTimestamps = txList.mapNotNull {
+            val ms = SessionRecoveryPolicy.wallEpochMs(it.timestampUtc, it.timestampMonotonic)
+            if (ms in RecordTime.MIN_PLAUSIBLE_EPOCH_MS..RecordTime.MAX_PLAUSIBLE_EPOCH_MS) ms else null
+        }.ifEmpty {
+            sampleList.mapNotNull {
+                val ms = RecordTime.parseMillis(it.timestampUtc) ?: it.timestampMonotonic
+                if (ms in RecordTime.MIN_PLAUSIBLE_EPOCH_MS..RecordTime.MAX_PLAUSIBLE_EPOCH_MS) ms else null
+            }
+        }
+
+        val startTimestamp = validTimestamps.minOrNull()
+            ?: existingTrip?.startTimestamp
+            ?: RecordTime.parseMillis(startStamp)
+            ?: System.currentTimeMillis()
+        val endTimestamp = validTimestamps.maxOrNull()
+            ?: (startTimestamp + 1000L)
+        val endStamp = RecordTime.stamp(endTimestamp)
+        val durationSec = maxOf(1L, (endTimestamp - startTimestamp) / 1000)
+
+        // Altitudes & Voltages
+        val altList = if (sampleList.any { it.altitudeM != null }) {
+            sampleList.mapNotNull { it.altitudeM }
+        } else {
+            txList.mapNotNull { it.altitudeM }
+        }
+        val altStats = if (altList.isNotEmpty()) com.example.analysis.AltitudeStats.reduce(altList) else null
+
+        val voltList = if (sampleList.any { it.voltageV != null }) {
+            sampleList.mapNotNull { smp -> smp.voltageV?.let { smp.timestampMonotonic to it } }
+        } else {
+            txList.filter { it.pid.equals("42", ignoreCase = true) || it.pid.equals("0142", ignoreCase = true) }
+                .mapNotNull { tx -> tx.decodedValue?.let { tx.timestampMonotonic to it } }
+        }
+        val voltStats = if (voltList.isNotEmpty()) com.example.analysis.VoltageStats.extremes(voltList) else null
+
+        val maxRpm = txList.filter { it.pid.equals("0C", ignoreCase = true) || it.pid.equals("010C", ignoreCase = true) }
+            .mapNotNull { it.decodedValue }.maxOrNull()
+            ?: sampleList.mapNotNull { it.rpm }.maxOrNull()
+            ?: 0.0
+        val maxSpeed = txList.filter { it.pid.equals("0D", ignoreCase = true) || it.pid.equals("010D", ignoreCase = true) }
+            .mapNotNull { it.decodedValue }.maxOrNull()
+            ?: sampleList.mapNotNull { it.speedKmh }.maxOrNull()
+            ?: 0.0
+        val maxCoolant = txList.filter { it.pid.equals("05", ignoreCase = true) || it.pid.equals("0105", ignoreCase = true) }
+            .mapNotNull { it.decodedValue }.maxOrNull()
+            ?: sampleList.mapNotNull { it.coolantC }.maxOrNull()
+            ?: 0.0
+        val avgVolt = if (voltList.isNotEmpty()) voltList.map { it.second }.average() else 0.0
+        val detectedEcus = txList.mapNotNull { it.canRxId.takeIf { id -> id.isNotBlank() } }.distinct()
+            .joinToString(", ").ifBlank { "7E8" }
+
+        val levelSamples = txList.filter {
+            it.pid.equals("2F", ignoreCase = true) || it.pid.equals("012F", ignoreCase = true)
+        }.mapNotNull { it.decodedValue }
+        val startFuelPercent = levelSamples.firstOrNull() ?: existingTrip?.startFuelPercent
+        val endFuelPercent = levelSamples.lastOrNull() ?: existingTrip?.endFuelPercent
+        val fuelDeltaPercent = if (startFuelPercent != null && endFuelPercent != null) {
+            endFuelPercent - startFuelPercent
+        } else existingTrip?.fuelDeltaPercent
+
+        val totalCount = maxOf(txList.size, sampleList.size)
+
+        // Update Trip Entity
+        tripRepository.insertTrip(
+            TripEntity(
+                id = sessionId,
+                title = sessionName,
+                vehicleName = vehicleName,
+                adapterName = adapterName,
+                protocolName = protocolName,
+                startTimeUtc = startStamp,
+                endTimeUtc = endStamp,
+                startTimestamp = startTimestamp,
+                endTimestamp = endTimestamp,
+                durationSeconds = durationSec,
+                status = "COMPLETED",
+                sampleCount = totalCount,
+                rawLogCount = totalCount,
+                maxRpm = maxRpm,
+                maxSpeedKmh = maxSpeed,
+                maxCoolantC = maxCoolant,
+                avgVoltageV = avgVolt,
+                detectedEcus = detectedEcus,
+                healthScore = 100,
+                maxAltitudeM = altStats?.maxAltitudeM ?: existingTrip?.maxAltitudeM,
+                minAltitudeM = altStats?.minAltitudeM ?: existingTrip?.minAltitudeM,
+                minVoltageV = voltStats?.minV ?: existingTrip?.minVoltageV,
+                maxVoltageV = voltStats?.maxV ?: existingTrip?.maxVoltageV,
+                startFuelPercent = startFuelPercent,
+                endFuelPercent = endFuelPercent,
+                fuelDeltaPercent = fuelDeltaPercent
+            )
+        )
+
+        // Insert Room samples
+        if (txList.isNotEmpty()) {
+            val entities = txList.mapIndexed { idx, tx ->
+                TelemetrySampleEntity(
+                    tripId = sessionId,
+                    timestamp = com.example.data.RecordTime.instantOf(tx.timestampMonotonic, tx.timestampUtc) ?: tx.timestampMonotonic,
+                    timestampUtc = tx.timestampUtc,
+                    ecuCanId = tx.canRxId.ifBlank { "7E8" },
+                    pid = tx.pid,
+                    parameterName = tx.decodedParameter.ifBlank { "PID ${tx.pid}" },
+                    rawHex = tx.responseHex,
+                    numericValue = tx.decodedValue,
+                    displayValue = tx.decodedValueDisplay,
+                    unit = tx.unit,
+                    quality = "VALID",
+                    altitudeM = tx.altitudeM,
+                    sequence = idx.toLong()
+                )
+            }
+            tripRepository.insertSamples(entities)
+        } else if (sampleList.isNotEmpty()) {
+            val entities = mutableListOf<TelemetrySampleEntity>()
+            var seq = 0L
+            sampleList.forEach { smp ->
+                val instant = com.example.data.RecordTime.parseMillis(smp.timestampUtc) ?: smp.timestampMonotonic
+                fun addEntity(pid: String, param: String, value: Double?, unit: String) {
+                    if (value != null) {
+                        entities.add(
+                            TelemetrySampleEntity(
+                                tripId = sessionId,
+                                timestamp = instant,
+                                timestampUtc = smp.timestampUtc,
+                                ecuCanId = "7E8",
+                                pid = pid,
+                                parameterName = param,
+                                rawHex = "",
+                                numericValue = value,
+                                displayValue = String.format(java.util.Locale.US, "%.1f %s", value, unit),
+                                unit = unit,
+                                quality = "VALID",
+                                altitudeM = smp.altitudeM,
+                                sequence = seq++
+                            )
+                        )
+                    }
+                }
+                addEntity("010C", "Engine Speed", smp.rpm, "rpm")
+                addEntity("010D", "Vehicle Speed", smp.speedKmh, "km/h")
+                addEntity("0104", "Engine Load", smp.engineLoadPct, "%")
+                addEntity("0105", "Engine Coolant Temperature", smp.coolantC, "°C")
+                addEntity("0142", "Control Module Voltage", smp.voltageV, "V")
+                addEntity("015E", "Engine Fuel Rate", smp.fuelRateLh, "L/h")
+                addEntity("0162", "Actual Engine - Percent Torque", smp.engineTorquePct, "%")
+            }
+            if (entities.isNotEmpty()) {
+                tripRepository.insertSamples(entities)
+            }
+        }
+
+        if (txList.isNotEmpty()) {
+            runCatching { detectRefuelEvents(txList) }
+        }
+        runCatching { relinkCarpoolEntries() }
+        runCatching { tripRepository.runAiCarDoctorAnalysis(sessionId) }
+        true
     }
 
     /**
@@ -1044,7 +1270,15 @@ class RecordingManager(
                         skipFreshMs
                     )
                 ) continue
-                if (id in savedIds) { journal.discard(id); continue }
+                if (id in savedIds) {
+                    val existingTrip = runCatching { tripRepository.getTripById(id) }.getOrNull()
+                    val existingSamples = runCatching { tripRepository.getSamplesForTrip(id) }.getOrDefault(emptyList())
+                    if (existingTrip == null || existingTrip.status == "RECORDING" || existingSamples.isEmpty()) {
+                        rebuildRoomTripFromDisk(id)
+                    }
+                    journal.discard(id)
+                    continue
+                }
                 val rawLog = File(rawLogsDir, "raw_log_$id.txt").takeIf { it.exists() }
                 val source = SessionRecoveryPolicy.chooseSource(
                     journalRowCount = CsvExporter.readTransactionsFromCsv(journal.txFile(id)).size,
@@ -1103,6 +1337,29 @@ class RecordingManager(
                         runCatching { archiveUnrecoverableRawLog(file) }
                     }
                     else -> Unit // NothingToRecover: leave it, it may still be mid-drive.
+                }
+            }
+
+            // Stored Room trips that got stuck in RECORDING state (e.g. process died or app was closed)
+            val stuckTrips = runCatching {
+                tripRepository.getAllTrips().filter { it.status == "RECORDING" && it.id != liveId }
+            }.getOrDefault(emptyList())
+            for (stuck in stuckTrips) {
+                if (stuck.id !in ids) {
+                    val rebuilt = rebuildRoomTripFromDisk(stuck.id)
+                    if (rebuilt) {
+                        recovered++
+                        ids += stuck.id
+                    } else {
+                        val endMs = stuck.endTimestamp ?: (stuck.startTimestamp + 1000L)
+                        tripRepository.insertTrip(
+                            stuck.copy(
+                                status = "COMPLETED",
+                                endTimestamp = endMs,
+                                endTimeUtc = RecordTime.stamp(endMs)
+                            )
+                        )
+                    }
                 }
             }
 

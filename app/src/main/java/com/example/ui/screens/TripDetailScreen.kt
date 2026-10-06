@@ -120,6 +120,7 @@ fun TripDetailScreen(
     val carpoolEntry = remember(tripId, carpoolTick) {
         viewModel.carpoolRepository.forTrip(tripId).firstOrNull()
     }
+    var isRecalculating by remember { mutableStateOf(false) }
     var showCarpool by remember { mutableStateOf(false) }
     if (showCarpool) {
         CarpoolDialog(
@@ -146,7 +147,10 @@ fun TripDetailScreen(
     LaunchedEffect(tripId) {
         samplesLoaded = false
         trip = tripRepo.getTripById(tripId)
-        samples = tripRepo.getSamplesForTrip(tripId)
+        samples = viewModel.loadSamplesForTripWithFallback(tripId)
+        if (trip == null || trip?.status == "RECORDING" || (trip?.sampleCount ?: 0) == 0) {
+            trip = tripRepo.getTripById(tripId)
+        }
         rawLogs = tripRepo.getRawLogsForTrip(tripId)
         aiAnalysis = tripRepo.getAnalysisForTrip(tripId)
         samplesLoaded = true
@@ -254,6 +258,26 @@ fun TripDetailScreen(
                     IconButton(
                         onClick = {
                             coroutineScope.launch {
+                                isRecalculating = true
+                                val ok = viewModel.recalculateTripMetrics(tripId)
+                                trip = tripRepo.getTripById(tripId)
+                                samples = tripRepo.getSamplesForTrip(tripId)
+                                rawLogs = tripRepo.getRawLogsForTrip(tripId)
+                                aiAnalysis = tripRepo.getAnalysisForTrip(tripId)
+                                isRecalculating = false
+                                Toast.makeText(context, if (ok) "Trip metrics & ${samples.size} samples recalculated from disk" else "Recalculation complete", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    ) {
+                        if (isRecalculating) {
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = NeonEmerald)
+                        } else {
+                            Icon(Icons.Default.Refresh, contentDescription = "Recalculate Diagnostics", tint = NeonEmerald)
+                        }
+                    }
+                    IconButton(
+                        onClick = {
+                            coroutineScope.launch {
                                 isAnalyzing = true
                                 try {
                                     tripRepo.runAiCarDoctorAnalysis(tripId)
@@ -344,6 +368,7 @@ fun TripDetailScreen(
                         TripOverviewView(
                             trip = trip, sampleCount = samples.size, rawCount = rawLogs.size, analysis = aiAnalysis,
                             summary = fuelSummary,
+                            samples = samples,
                             pricePerL = viewModel.fuelLogRepository.entries().maxByOrNull { it.idMs }?.pricePerL ?: 0.0,
                             speedPoints = samples.filter { it.pid.takeLast(2) == "0D" }
                                 .map { it.instantMs to (it.numericValue ?: 0.0) },
@@ -639,6 +664,7 @@ private fun TripOverviewView(
     summary: com.example.analysis.TripFuelSummary.Summary,
     pricePerL: Double,
     speedPoints: List<Pair<Long, Double>>,
+    samples: List<TelemetrySampleEntity> = emptyList(),
     sampleAltitudes: List<Double> = emptyList(),
     passengerLoadResult: com.example.analysis.PassengerLoadAnalyzer.Result? = null,
     commuteComparison: com.example.analysis.CommuteComparator.CommuteComparison? = null,
@@ -928,22 +954,27 @@ private fun TripOverviewView(
 
         item {
             // Metrics Quad
+            val effectiveMaxRpm = if (trip.maxRpm > 0.0) trip.maxRpm else samples.filter { it.pid.endsWith("0C") || it.pid == "0C" }.mapNotNull { it.numericValue }.maxOrNull() ?: 0.0
+            val effectiveTopSpeed = if (trip.maxSpeedKmh > 0.0) trip.maxSpeedKmh else summary.maxSpeedKmh
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                MetricCard("PEAK RPM", "${trip.maxRpm.toInt()}", "RPM", NeonEmerald, Modifier.weight(1f))
-                MetricCard("TOP SPEED", "${trip.maxSpeedKmh.toInt()}", "km/h", CyberCyan, Modifier.weight(1f))
+                MetricCard("PEAK RPM", "${effectiveMaxRpm.toInt()}", "RPM", NeonEmerald, Modifier.weight(1f))
+                MetricCard("TOP SPEED", "${effectiveTopSpeed.toInt()}", "km/h", CyberCyan, Modifier.weight(1f))
             }
         }
 
         item {
+            val effectiveMaxCoolant = if (trip.maxCoolantC > 0.0) trip.maxCoolantC else samples.filter { it.pid.endsWith("05") || it.pid == "05" }.mapNotNull { it.numericValue }.maxOrNull() ?: 0.0
+            val sampleVoltages = samples.filter { it.pid.endsWith("42") || it.pid == "42" }.mapNotNull { it.numericValue }
+            val effectiveAvgVolt = if (trip.avgVoltageV > 0.0) trip.avgVoltageV else if (sampleVoltages.isNotEmpty()) sampleVoltages.average() else 0.0
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                MetricCard("MAX COOLANT", "${trip.maxCoolantC.toInt()}", "°C", ElectricAmber, Modifier.weight(1f))
-                MetricCard("AVG VOLTAGE", String.format(java.util.Locale.US, "%.2f", trip.avgVoltageV), "V", NeonEmerald, Modifier.weight(1f))
+                MetricCard("MAX COOLANT", "${effectiveMaxCoolant.toInt()}", "°C", ElectricAmber, Modifier.weight(1f))
+                MetricCard("AVG VOLTAGE", String.format(java.util.Locale.US, "%.2f", effectiveAvgVolt), "V", NeonEmerald, Modifier.weight(1f))
             }
         }
 

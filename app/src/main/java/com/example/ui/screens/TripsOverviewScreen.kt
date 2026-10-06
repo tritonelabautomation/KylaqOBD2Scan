@@ -86,13 +86,16 @@ fun TripsOverviewScreen(
         val now = System.currentTimeMillis()
         val trips = withContext(Dispatchers.IO) { repo.recentTrips(300) }
         val inputs = withContext(Dispatchers.Default) {
-            trips.filter { it.status != "RECORDING" }.map { t ->
+            trips.filter { it.status != "RECORDING" || (it.sampleCount > 0 || it.rawLogCount > 0) }.map { t ->
                 val samples = repo.getSamplesForTrip(t.id)
+                val sPoints = if (samples.isNotEmpty()) {
+                    samples.map { TripFuelSummary.SamplePoint(it.pid, it.instantMs, it.numericValue) }
+                } else {
+                    viewModel.samplePointsFromDisk(t.id)
+                }
                 WeeklyTripOverview.TripInput(
                     tripId = t.id, title = t.title, startMs = t.startTimestamp,
-                    summary = TripFuelSummary.summarize(
-                        samples.map { TripFuelSummary.SamplePoint(it.pid, it.instantMs, it.numericValue) }
-                    )
+                    summary = TripFuelSummary.summarize(sPoints)
                 )
             }
         }

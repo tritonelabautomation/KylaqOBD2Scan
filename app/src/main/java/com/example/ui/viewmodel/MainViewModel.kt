@@ -455,7 +455,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         val tripInputs = saved.map { rec ->
             val sList = samplesByTrip[rec.metadata.sessionId] ?: emptyList()
-            val sPoints = sList.map { com.example.analysis.TripFuelSummary.SamplePoint(it.pid, it.instantMs, it.numericValue) }
+            val sPoints = if (sList.isNotEmpty()) {
+                sList.map { com.example.analysis.TripFuelSummary.SamplePoint(it.pid, it.instantMs, it.numericValue) }
+            } else {
+                val diskPoints = samplePointsFromRecordingDisk(rec)
+                if (diskPoints.isNotEmpty()) {
+                    viewModelScope.launch(Dispatchers.IO) {
+                        recordingManager.rebuildRoomTripFromDisk(rec.metadata.sessionId)
+                    }
+                }
+                diskPoints
+            }
             val summary = if (sPoints.isNotEmpty()) {
                 com.example.analysis.TripFuelSummary.summarize(sPoints)
             } else null
@@ -495,6 +505,76 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             userOverrides = userOverrides,
             bunkRecords = bunkRecords
         )
+    }
+
+    /**
+     * Extracts telemetry sample points directly from disk CSV/journal for a session.
+     * Used when Room database contains 0 rows for a trip so distance/fuel/duration are never 0.0.
+     */
+    fun samplePointsFromDisk(sessionId: String): List<com.example.analysis.TripFuelSummary.SamplePoint> {
+        val sessionDir = File(recordingManager.recordingsDir, "session_$sessionId")
+        val sampleCsv = File(sessionDir, "${sessionId}_samples.csv")
+        val txCsv = File(sessionDir, "${sessionId}_transactions.csv")
+        val journalTx = recordingManager.journal.txFile(sessionId)
+        val journalSample = recordingManager.journal.sampleFile(sessionId)
+
+        val points = mutableListOf<com.example.analysis.TripFuelSummary.SamplePoint>()
+
+        val sFile = if (sampleCsv.exists() && sampleCsv.length() > 0) sampleCsv else if (journalSample.exists() && journalSample.length() > 0) journalSample else null
+        if (sFile != null) {
+            val samples = runCatching { com.example.data.CsvExporter.readSamplesFromCsv(sFile) }.getOrDefault(emptyList())
+            for (s in samples) {
+                val t = com.example.data.RecordTime.parseMillis(s.timestampUtc) ?: s.timestampMonotonic
+                s.speedKmh?.let { points.add(com.example.analysis.TripFuelSummary.SamplePoint("010D", t, it)) }
+                s.fuelRateLh?.let { points.add(com.example.analysis.TripFuelSummary.SamplePoint("015E", t, it)) }
+                s.rpm?.let { points.add(com.example.analysis.TripFuelSummary.SamplePoint("010C", t, it)) }
+                s.voltageV?.let { points.add(com.example.analysis.TripFuelSummary.SamplePoint("0142", t, it)) }
+                s.coolantC?.let { points.add(com.example.analysis.TripFuelSummary.SamplePoint("0105", t, it)) }
+                s.engineTorquePct?.let { points.add(com.example.analysis.TripFuelSummary.SamplePoint("0162", t, it)) }
+            }
+        }
+
+        if (points.isNotEmpty()) return points
+
+        val tFile = if (txCsv.exists() && txCsv.length() > 0) txCsv else if (journalTx.exists() && journalTx.length() > 0) journalTx else null
+        if (tFile != null) {
+            val txs = runCatching { com.example.data.CsvExporter.readTransactionsFromCsv(tFile) }.getOrDefault(emptyList())
+            for (tx in txs) {
+                if (tx.decodedValue != null) {
+                    val t = com.example.data.SessionRecoveryPolicy.wallEpochMs(tx.timestampUtc, tx.timestampMonotonic)
+                    points.add(com.example.analysis.TripFuelSummary.SamplePoint(tx.pid, t, tx.decodedValue))
+                }
+            }
+        }
+        return points
+    }
+
+    fun samplePointsFromRecordingDisk(rec: SavedRecording): List<com.example.analysis.TripFuelSummary.SamplePoint> {
+        return samplePointsFromDisk(rec.metadata.sessionId)
+    }
+
+    /**
+     * Loads samples for a trip from Room database, falling back to disk CSV/journal and
+     * backfilling Room asynchronously if Room is empty.
+     */
+    suspend fun loadSamplesForTripWithFallback(tripId: String): List<com.example.data.db.entities.TelemetrySampleEntity> = withContext(Dispatchers.IO) {
+        val roomSamples = recordingManager.tripRepository.getSamplesForTrip(tripId)
+        if (roomSamples.isNotEmpty()) {
+            return@withContext roomSamples
+        }
+        recordingManager.rebuildRoomTripFromDisk(tripId)
+        recordingManager.tripRepository.getSamplesForTrip(tripId)
+    }
+
+    /**
+     * One-tap recalculate & re-parse action: re-reads disk CSV transactions, recalculates all
+     * metrics (distance, duration, fuel, speed, RPM, coolant, voltage, altitude), rebuilds
+     * Room database rows, and refreshes the saved recordings state.
+     */
+    suspend fun recalculateTripMetrics(tripId: String): Boolean = withContext(Dispatchers.IO) {
+        val success = recordingManager.rebuildRoomTripFromDisk(tripId)
+        recordingManager.loadSavedRecordings()
+        success
     }
 
     fun setTripFuelTag(tripId: String, station: String, grade: String, additive: String?, dosageMl: Double?) {
