@@ -1341,7 +1341,7 @@ class RecordingManager(
             }
 
             // Stored Room trips that got stuck in RECORDING state (e.g. process died or app was closed)
-            val stuckTrips = runCatching {
+            val stuckTrips: List<TripEntity> = runCatching {
                 tripRepository.getAllTrips().filter { it.status == "RECORDING" && it.id != liveId }
             }.getOrDefault(emptyList())
             for (stuck in stuckTrips) {

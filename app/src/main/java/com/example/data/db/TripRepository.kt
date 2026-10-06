@@ -75,6 +75,10 @@ class TripRepository(context: Context) {
         tripDao.getTripById(tripId)
     }
 
+    suspend fun getAllTrips(): List<TripEntity> = withContext(Dispatchers.IO) {
+        tripDao.getAllTrips()
+    }
+
     suspend fun recentTrips(limit: Int): List<TripEntity> = withContext(Dispatchers.IO) {
         tripDao.getAllTrips().take(limit)
     }
