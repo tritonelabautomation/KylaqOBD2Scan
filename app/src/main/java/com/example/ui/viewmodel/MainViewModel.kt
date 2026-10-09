@@ -443,28 +443,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val repo = recordingManager.tripRepository
 
         val tripIds = saved.map { it.metadata.sessionId }
-        val samples = if (tripIds.isNotEmpty()) {
-            try {
-                repo.samplesForTrips(tripIds, listOf("019D", "9D", "015E", "5E", "010D", "0D", "01A6", "A6", "012F", "2F"))
+        val keyPids = listOf("019D", "9D", "015E", "5E", "010D", "0D", "01A6", "A6", "012F", "2F")
+
+        val tripInputs = saved.map { rec ->
+            val sId = rec.metadata.sessionId
+            val sRows = try {
+                repo.samplesForTripPids(sId, keyPids)
             } catch (_: Exception) {
                 emptyList()
             }
-        } else emptyList()
-
-        val samplesByTrip = samples.groupBy { it.tripId }
-
-        val tripInputs = saved.map { rec ->
-            val sList = samplesByTrip[rec.metadata.sessionId] ?: emptyList()
-            val sPoints = if (sList.isNotEmpty()) {
-                sList.map { com.example.analysis.TripFuelSummary.SamplePoint(it.pid, it.instantMs, it.numericValue) }
+            val sPoints = if (sRows.isNotEmpty()) {
+                sRows.map { com.example.analysis.TripFuelSummary.SamplePoint(it.pid, it.timestamp, it.numericValue) }
             } else {
-                val diskPoints = samplePointsFromRecordingDisk(rec)
-                if (diskPoints.isNotEmpty()) {
-                    viewModelScope.launch(Dispatchers.IO) {
-                        recordingManager.rebuildRoomTripFromDisk(rec.metadata.sessionId)
-                    }
-                }
-                diskPoints
+                samplePointsFromRecordingDisk(rec)
             }
             val summary = if (sPoints.isNotEmpty()) {
                 com.example.analysis.TripFuelSummary.summarize(sPoints)
@@ -520,9 +511,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         val points = mutableListOf<com.example.analysis.TripFuelSummary.SamplePoint>()
 
+        val tFile = if (txCsv.exists() && txCsv.length() > 0) txCsv else if (journalTx.exists() && journalTx.length() > 0) journalTx else null
+        val txs = if (tFile != null) {
+            runCatching { com.example.data.CsvExporter.readTransactionsFromCsv(tFile) }.getOrDefault(emptyList())
+        } else emptyList()
+
         val sFile = if (sampleCsv.exists() && sampleCsv.length() > 0) sampleCsv else if (journalSample.exists() && journalSample.length() > 0) journalSample else null
-        if (sFile != null) {
-            val samples = runCatching { com.example.data.CsvExporter.readSamplesFromCsv(sFile) }.getOrDefault(emptyList())
+        val samples = if (sFile != null) {
+            runCatching { com.example.data.CsvExporter.readSamplesFromCsv(sFile) }.getOrDefault(emptyList())
+        } else emptyList()
+
+        // If transactions file has significantly more data (e.g. 34,700 txs vs truncated sample file), use transactions
+        if (txs.isNotEmpty() && (samples.isEmpty() || txs.size > samples.size * 2)) {
+            for (tx in txs) {
+                if (tx.decodedValue != null) {
+                    val t = com.example.data.SessionRecoveryPolicy.wallEpochMs(tx.timestampUtc, tx.timestampMonotonic)
+                    points.add(com.example.analysis.TripFuelSummary.SamplePoint(tx.pid, t, tx.decodedValue))
+                }
+            }
+            return points
+        }
+
+        if (samples.isNotEmpty()) {
             for (s in samples) {
                 val t = com.example.data.RecordTime.parseMillis(s.timestampUtc) ?: s.timestampMonotonic
                 s.speedKmh?.let { points.add(com.example.analysis.TripFuelSummary.SamplePoint("010D", t, it)) }
@@ -532,13 +542,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 s.coolantC?.let { points.add(com.example.analysis.TripFuelSummary.SamplePoint("0105", t, it)) }
                 s.engineTorquePct?.let { points.add(com.example.analysis.TripFuelSummary.SamplePoint("0162", t, it)) }
             }
+            if (points.isNotEmpty()) return points
         }
 
-        if (points.isNotEmpty()) return points
-
-        val tFile = if (txCsv.exists() && txCsv.length() > 0) txCsv else if (journalTx.exists() && journalTx.length() > 0) journalTx else null
-        if (tFile != null) {
-            val txs = runCatching { com.example.data.CsvExporter.readTransactionsFromCsv(tFile) }.getOrDefault(emptyList())
+        if (txs.isNotEmpty()) {
             for (tx in txs) {
                 if (tx.decodedValue != null) {
                     val t = com.example.data.SessionRecoveryPolicy.wallEpochMs(tx.timestampUtc, tx.timestampMonotonic)
@@ -558,12 +565,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * backfilling Room asynchronously if Room is empty.
      */
     suspend fun loadSamplesForTripWithFallback(tripId: String): List<com.example.data.db.entities.TelemetrySampleEntity> = withContext(Dispatchers.IO) {
+        val trip = recordingManager.tripRepository.getTripById(tripId)
         val roomSamples = recordingManager.tripRepository.getSamplesForTrip(tripId)
+        val expectedCount = maxOf(trip?.sampleCount ?: 0, trip?.rawLogCount ?: 0)
+
+        // If Room samples are empty or truncated (< 25% of expected transactions when > 1000 txs)
+        if (roomSamples.isEmpty() || (expectedCount > 1000 && roomSamples.size < expectedCount / 4)) {
+            recordingManager.rebuildRoomTripFromDisk(tripId)
+            val refreshed = recordingManager.tripRepository.getSamplesForTrip(tripId)
+            if (refreshed.isNotEmpty()) return@withContext refreshed
+        }
+
         if (roomSamples.isNotEmpty()) {
             return@withContext roomSamples
         }
-        recordingManager.rebuildRoomTripFromDisk(tripId)
-        recordingManager.tripRepository.getSamplesForTrip(tripId)
+
+        val diskPoints = samplePointsFromDisk(tripId)
+        diskPoints.mapIndexed { idx, pt ->
+            com.example.data.db.entities.TelemetrySampleEntity(
+                tripId = tripId,
+                timestamp = pt.timestampMs,
+                timestampUtc = com.example.data.RecordTime.stamp(pt.timestampMs),
+                ecuCanId = "7E8",
+                pid = pt.pid,
+                parameterName = "PID ${pt.pid}",
+                rawHex = "",
+                numericValue = pt.value,
+                displayValue = "",
+                unit = "",
+                sequence = idx.toLong()
+            )
+        }
     }
 
     /**

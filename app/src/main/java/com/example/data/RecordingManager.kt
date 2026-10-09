@@ -747,6 +747,7 @@ class RecordingManager(
             )
         }.onFailure { android.util.Log.e("RecordingManager", "trip insert failed for $sessionId", it) }
 
+        tripRepository.deleteSamplesForTrip(sessionId)
         runCatching {
             tripRepository.insertSamples(
                 txList.mapIndexed { idx, tx ->
@@ -814,10 +815,22 @@ class RecordingManager(
             else -> emptyList()
         }
 
-        val sampleList: List<SynchronizedSample> = when {
+        val rawSampleList: List<SynchronizedSample> = when {
             sampleCsv.exists() && sampleCsv.length() > 0 -> runCatching { CsvExporter.readSamplesFromCsv(sampleCsv) }.getOrDefault(emptyList())
             journalSample.exists() && journalSample.length() > 0 -> runCatching { CsvExporter.readSamplesFromCsv(journalSample) }.getOrDefault(emptyList())
             else -> emptyList()
+        }
+
+        val sampleList: List<SynchronizedSample> = if (txList.isNotEmpty() && (rawSampleList.isEmpty() || txList.size > rawSampleList.size * 2)) {
+            val replayed = SessionRecoveryPolicy.replaySamples(
+                transactions = txList,
+                seed = SynchronizedSample(timestampUtc = "", timestampMonotonic = 0L),
+                merge = { acc, tx -> mergeSample(acc, tx).copy(altitudeM = tx.altitudeM) }
+            )
+            runCatching { CsvExporter.exportSynchronizedSamplesToCsv(sampleCsv, replayed) }
+            replayed
+        } else {
+            rawSampleList
         }
 
         if (txList.isEmpty() && sampleList.isEmpty()) {
@@ -955,6 +968,7 @@ class RecordingManager(
         )
 
         // Insert Room samples
+        tripRepository.deleteSamplesForTrip(sessionId)
         if (txList.isNotEmpty()) {
             val entities = txList.mapIndexed { idx, tx ->
                 TelemetrySampleEntity(
