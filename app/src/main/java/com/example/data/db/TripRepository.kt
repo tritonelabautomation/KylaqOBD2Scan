@@ -257,13 +257,6 @@ class TripRepository(context: Context) {
         report
     }
 
-    suspend fun samplesForTripPids(tripId: String, pids: List<String>): List<SampleRow> = withContext(Dispatchers.IO) {
-        val expanded = pids.flatMap { p ->
-            listOf(p, if (p.startsWith("01")) p.substring(2) else "01$p")
-        }.distinct()
-        sampleDao.samplesForTripPids(tripId, expanded)
-    }
-
     suspend fun deleteSamplesForTrip(tripId: String) = withContext(Dispatchers.IO) {
         sampleDao.deleteSamplesForTrip(tripId)
     }
