@@ -177,7 +177,7 @@ object RefuelSessionScan {
     fun scan(rows: List<SinceRefuelStats.Row>): Result {
         val detector = RefuelEventDetector()
         val events = mutableListOf<RefuelEventDetector.Detected>()
-        val levelRows = mutableListOf<Pair<Long, Double>>()
+        val levelRows = mutableListOf<Triple<Long, Double, Double?>>()
         var lastOdo: Double? = null
         var firstOdo: Double? = null
         var lastTs: Long? = null
@@ -187,7 +187,7 @@ object RefuelSessionScan {
             val normPid = TripFuelSummary.normalizePidKey(r.pid)
             when (normPid) {
                 RefuelEventDetector.PID_LEVEL -> if (v != null) {
-                    levelRows.add(r.tsMs to v)
+                    levelRows.add(Triple(r.tsMs, v, lastOdo))
                 }
                 RefuelEventDetector.PID_ODO -> if (v != null) {
                     if (firstOdo == null) firstOdo = v
@@ -217,11 +217,11 @@ object RefuelSessionScan {
 
         val lastLevel = when {
             levelRows.isEmpty() -> null
-            levelRows.size < 6 -> Triple(levelRows.last().first, levelRows.last().second, lastOdo)
+            levelRows.size < 6 -> Triple(levelRows.last().first, levelRows.last().second, levelRows.last().third)
             else -> {
                 val windowSize = (levelRows.size / 5).coerceIn(3, 10)
                 val medianVal = windowMedian(levelRows.takeLast(windowSize).map { it.second })
-                Triple(levelRows.last().first, medianVal, lastOdo)
+                Triple(levelRows.last().first, medianVal, levelRows.last().third)
             }
         }
 
