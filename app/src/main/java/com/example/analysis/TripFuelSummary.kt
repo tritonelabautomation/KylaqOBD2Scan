@@ -302,7 +302,7 @@ object TripFuelSummary {
         val fuelDeltaLiters = if (fuelDeltaPercent != null) {
             kotlin.math.abs(fuelDeltaPercent) / 100.0 * com.example.engine.PowertrainModel.TANK_CAPACITY_L
         } else null
-        val isRefuelBrimEvent = (fuelDeltaPercent ?: 0.0) >= 3.0
+        val isRefuelBrimEvent = (fuelDeltaPercent ?: 0.0) >= 10.0
 
         if (startOdo != null && endOdo != null && kotlin.math.abs(endOdo - startOdo) < 0.01 && distanceKm > 0.05) {
             endOdo = startOdo + distanceKm

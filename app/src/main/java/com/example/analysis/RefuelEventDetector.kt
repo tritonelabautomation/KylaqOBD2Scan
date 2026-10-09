@@ -113,11 +113,19 @@ class RefuelEventDetector(private val minRisePct: Double = DEFAULT_MIN_RISE_PCT)
         const val PID_ODO = "01A6"
         const val PID_RPM = "010C"
 
-        /** ~2 L in the Kylaq's 50 L tank; measured driving slosh on this car stays under 2 pts. */
-        const val DEFAULT_MIN_RISE_PCT = 4.0
+        /** ~5 L in the Kylaq's 50 L tank; stops false events from stationary slosh/incline. */
+        const val DEFAULT_MIN_RISE_PCT = 10.0
         const val STOP_KMH = 1.0
         /** RPM below this = engine off / cranking = stationary for refuel window (owner 2026-09-23 38.54L: gap 08:49-08:53 with RPM 0 and no 010D samples). */
         const val STOP_RPM = 500.0
+
+        /**
+         * Cross-session minimum rise percentage: 12.0% (~6 L in 50L tank).
+         * Parking tilt, basement ramp slopes, cold-soak settling, and float sensor quantization
+         * routinely cause +/-5-8% level variation between parking and starting (e.g. 47.8% -> 55.7%).
+         * A genuine car refuel is >= 12% (~6 L minimum up to full tank 30-45 L fills).
+         */
+        const val DEFAULT_CROSS_SESSION_MIN_RISE_PCT = 12.0
 
         /**
          * The owner's 2026-09-17 refuel happened BETWEEN sessions: engine off at the pump ends
@@ -132,7 +140,7 @@ class RefuelEventDetector(private val minRisePct: Double = DEFAULT_MIN_RISE_PCT)
             firstTsMs: Long,
             firstLevelPct: Double,
             firstOdoKm: Double?,
-            minRisePct: Double = DEFAULT_MIN_RISE_PCT
+            minRisePct: Double = DEFAULT_CROSS_SESSION_MIN_RISE_PCT
         ): Detected? {
             val rise = firstLevelPct - prevLevelPct
             if (rise < minRisePct) return null
@@ -169,8 +177,7 @@ object RefuelSessionScan {
     fun scan(rows: List<SinceRefuelStats.Row>): Result {
         val detector = RefuelEventDetector()
         val events = mutableListOf<RefuelEventDetector.Detected>()
-        var firstLevel: Pair<Long, Double>? = null
-        var lastLevel: Triple<Long, Double, Double?>? = null
+        val levelRows = mutableListOf<Pair<Long, Double>>()
         var lastOdo: Double? = null
         var firstOdo: Double? = null
         var lastTs: Long? = null
@@ -180,8 +187,7 @@ object RefuelSessionScan {
             val normPid = TripFuelSummary.normalizePidKey(r.pid)
             when (normPid) {
                 RefuelEventDetector.PID_LEVEL -> if (v != null) {
-                    if (firstLevel == null) firstLevel = r.tsMs to v
-                    lastLevel = Triple(r.tsMs, v, lastOdo)
+                    levelRows.add(r.tsMs to v)
                 }
                 RefuelEventDetector.PID_ODO -> if (v != null) {
                     if (firstOdo == null) firstOdo = v
@@ -191,6 +197,34 @@ object RefuelSessionScan {
             detector.onSample(RefuelEventDetector.Sample(r.tsMs, normPid, v))?.let { events += it }
         }
         lastTs?.let { end -> detector.onSessionEnd(end)?.let { events += it } }
+
+        fun windowMedian(list: List<Double>): Double {
+            if (list.isEmpty()) return 0.0
+            val sorted = list.sorted()
+            val mid = sorted.size / 2
+            return if (sorted.size % 2 == 1) sorted[mid] else (sorted[mid - 1] + sorted[mid]) / 2.0
+        }
+
+        val firstLevel = when {
+            levelRows.isEmpty() -> null
+            levelRows.size < 6 -> levelRows.first().first to levelRows.first().second
+            else -> {
+                val windowSize = (levelRows.size / 5).coerceIn(3, 10)
+                val medianVal = windowMedian(levelRows.take(windowSize).map { it.second })
+                levelRows.first().first to medianVal
+            }
+        }
+
+        val lastLevel = when {
+            levelRows.isEmpty() -> null
+            levelRows.size < 6 -> Triple(levelRows.last().first, levelRows.last().second, lastOdo)
+            else -> {
+                val windowSize = (levelRows.size / 5).coerceIn(3, 10)
+                val medianVal = windowMedian(levelRows.takeLast(windowSize).map { it.second })
+                Triple(levelRows.last().first, medianVal, lastOdo)
+            }
+        }
+
         return Result(events, firstLevel, lastLevel, firstOdo)
     }
 }

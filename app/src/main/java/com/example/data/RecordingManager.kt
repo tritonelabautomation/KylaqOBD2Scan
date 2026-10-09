@@ -105,9 +105,10 @@ class RecordingManager(
     private val _restartRefuel = MutableStateFlow<RestartRefuel?>(null)
     val restartRefuel: StateFlow<RestartRefuel?> = _restartRefuel
 
-    /** Armed per session; the first level row disarms it, so the check runs exactly once. */
+    /** Armed per session; collects initial level samples to compute a robust median before evaluating. */
     @Volatile
     private var restartLevelCheckArmed = false
+    private val startupLevelSamples = mutableListOf<Pair<Long, Double>>()
 
     fun clearRestartRefuel() { _restartRefuel.value = null }
 
@@ -264,6 +265,9 @@ class RecordingManager(
         _currentTransactions.value = emptyList()
         _isRecording.value = true
         restartLevelCheckArmed = true
+        synchronized(startupLevelSamples) {
+            startupLevelSamples.clear()
+        }
         _autoStopNotice.value = null
         lastRxAtMs = System.currentTimeMillis()
         watchdogJob?.cancel()
@@ -398,14 +402,32 @@ class RecordingManager(
     fun recordTransaction(tx: TransactionRecord) {
         if (!_isRecording.value) return
 
-        // Restart-refuel check: the first valid level row of this session, once (RestartRefuel).
+        // Restart-refuel check: buffer startup level rows to compute median and filter cranking spikes/slosh.
         val normPid = com.example.analysis.TripFuelSummary.normalizePidKey(tx.pid)
         if (restartLevelCheckArmed &&
             normPid == com.example.analysis.RefuelEventDetector.PID_LEVEL &&
             tx.decodedValue != null
         ) {
-            restartLevelCheckArmed = false
-            maybeFlagRestartRefuel(tx)
+            val ts = RecordTime.instantOf(tx.timestampMonotonic, tx.timestampUtc)
+                ?: tx.timestampMonotonic
+            val levelVal = tx.decodedValue
+            var samplesToEvaluate: List<Pair<Long, Double>>? = null
+            synchronized(startupLevelSamples) {
+                if (restartLevelCheckArmed) {
+                    startupLevelSamples.add(ts to levelVal)
+                    if (startupLevelSamples.size >= 4) {
+                        restartLevelCheckArmed = false
+                        samplesToEvaluate = startupLevelSamples.toList()
+                    }
+                }
+            }
+            samplesToEvaluate?.let { samples ->
+                val sortedVals = samples.map { it.second }.sorted()
+                val mid = sortedVals.size / 2
+                val medianLevel = if (sortedVals.size % 2 == 1) sortedVals[mid] else (sortedVals[mid - 1] + sortedVals[mid]) / 2.0
+                val firstTs = samples.first().first
+                maybeFlagRestartRefuel(firstTs, medianLevel)
+            }
         }
 
         val journaled: TransactionRecord
@@ -1179,16 +1201,13 @@ class RecordingManager(
     }
 
     /**
-     * The "after" half of a between-sessions refuel, captured live: first valid 012F row of the
+     * The "after" half of a between-sessions refuel, captured live: robust median 012F level of the
      * new session against the previous session's persisted stamp. Writes the event immediately -
      * the popup offers a receipt against an event that already exists in the ledger, and a
      * session that dies again still keeps the detection - then raises the prompt unless the owner
      * already answered it or a receipt already matched it.
      */
-    private fun maybeFlagRestartRefuel(tx: TransactionRecord) {
-        val ts = RecordTime.instantOf(tx.timestampMonotonic, tx.timestampUtc)
-            ?: tx.timestampMonotonic
-        val level = tx.decodedValue ?: return
+    private fun maybeFlagRestartRefuel(ts: Long, level: Double) {
         managerScope.launch {
             runCatching {
                 val settings = com.example.di.AppContainer.settingsRepository

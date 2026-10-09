@@ -90,6 +90,22 @@ class RefuelEventDetectorTest {
     }
 
     @Test
+    fun parkingSlopeOrInclineFluctuationBetweenSessionsIsNotAnEvent() {
+        // Evening restart vs morning park: tank float read 47.8% at parking and 55.7% at restart (+7.9%)
+        // Due to driveway incline / parking ramp tilt / quantization, rises < 12.0% are rejected.
+        assertNull(
+            RefuelEventDetector.crossSession(
+                prevTsMs = 1_000_000,
+                prevLevelPct = 47.8,
+                prevOdoKm = 4300.0,
+                firstTsMs = 28_800_000,
+                firstLevelPct = 55.7,
+                firstOdoKm = 4300.0
+            )
+        )
+    }
+
+    @Test
     fun aStopBeforeAnyLevelRowCannotInventARise() {
         val d = RefuelEventDetector()
         d.onSample(spd(10, 0.0))                       // window opens with no base level
@@ -267,6 +283,25 @@ class RefuelSessionScanTest {
         assertEquals(93.7, ev.levelAfterPct, 1e-9)
         assertEquals(67.8, ev.risePct, 1e-6)
         assertEquals(4210.4, ev.odoKm!!, 1e-9)
+    }
+
+    @Test
+    fun scansWindowedMedianRejectsNoiseSpikes() {
+        // Outlier first sample (55.7%) followed by stable 48.0% readings
+        val res = RefuelSessionScan.scan(
+            listOf(
+                row(0, "012F", 55.7),
+                row(10, "012F", 48.0),
+                row(20, "012F", 47.9),
+                row(30, "012F", 48.1),
+                row(40, "012F", 48.0),
+                row(50, "012F", 47.8),
+                row(60, "012F", 48.0)
+            )
+        )
+        assertTrue(res.events.isEmpty())
+        assertEquals(48.0, res.firstLevel!!.second, 0.1)
+        assertEquals(48.0, res.lastLevel!!.second, 0.1)
     }
 }
 
