@@ -211,7 +211,7 @@ class TripFuelSummaryTest {
         assertEquals(85.0, summary.startFuelPercent!!, 1e-9)
         assertEquals(81.5, summary.endFuelPercent!!, 1e-9)
         assertEquals(-3.5, summary.fuelDeltaPercent!!, 1e-9)
-        assertEquals(1.575, summary.fuelDeltaLiters!!, 1e-9) // 3.5% of 45L = 1.575L
+        assertEquals(1.75, summary.fuelDeltaLiters!!, 1e-9) // 3.5% of 50L = 1.75L
         assertEquals(false, summary.isRefuelBrimEvent)
     }
 
@@ -226,7 +226,7 @@ class TripFuelSummaryTest {
         assertEquals(25.0, summary.startFuelPercent!!, 1e-9)
         assertEquals(95.0, summary.endFuelPercent!!, 1e-9)
         assertEquals(70.0, summary.fuelDeltaPercent!!, 1e-9)
-        assertEquals(31.5, summary.fuelDeltaLiters!!, 1e-9) // 70% of 45L = 31.5L
+        assertEquals(35.0, summary.fuelDeltaLiters!!, 1e-9) // 70% of 50L = 35.0L
         assertEquals(true, summary.isRefuelBrimEvent)
     }
 }

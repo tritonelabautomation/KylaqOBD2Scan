@@ -42,7 +42,7 @@ class ThreeWayFuelComparatorTest {
             fuelDeltaLiters = 4.05
         )
 
-        val result = ThreeWayFuelComparator.compare("test_trip_1", summary, midData)
+        val result = ThreeWayFuelComparator.compare("test_trip_1", summary, midData, tankCapacityL = 45.0)
 
         // Assert MID factor
         assertEquals(31.0, result.distanceKm, 0.01)
@@ -176,7 +176,7 @@ class ThreeWayFuelComparatorTest {
             fuelDeltaLiters = 3.14
         )
 
-        val comparison = ThreeWayFuelComparator.compare("trip_da5654ff", summary, parsed)
+        val comparison = ThreeWayFuelComparator.compare("trip_da5654ff", summary, parsed, tankCapacityL = 45.0)
 
         // Factor 3: Ground Truth Baseline
         assertEquals(9.8, comparison.factor3ClusterMid.economyKmL!!, 0.01)

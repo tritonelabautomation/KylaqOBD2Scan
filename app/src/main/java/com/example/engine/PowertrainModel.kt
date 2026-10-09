@@ -52,7 +52,7 @@ object PowertrainModel {
     /** Petrol energy per litre: 43.4 MJ/kg × 0.745 kg/L. */
     const val FUEL_ENERGY_MJ_PER_L = 32.3
 
-    const val TANK_CAPACITY_L = 45.0
+    const val TANK_CAPACITY_L = 50.0
 
     /** Typical warm-idle consumption of a 1.0 TSI, used as a coasting baseline. */
     // QA/QC 2026-09-13 re-calibration (owner telemetry is the oracle): post-F-6 live
