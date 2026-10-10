@@ -1,0 +1,26 @@
+## Vehicle																				
+Name	Description	DistUnit	FuelUnit	ConsumptionUnit	ImportCSVDateFormat	VIN	Insurance	Plate	Make	Model	Year	TankCount	Tank1Type	Tank2Type	Active	Tank1Capacity	Tank2Capacity	FuelUnitTank2	FuelConsumptionTank2	guid	lastupdated
+N160		0	0	3	yyyy-MM-dd							1	100	0	1	14	0	0	0	df0a6810-87e7-41f1-99a2-77e5beab578a	1772006460000
+## Log																				
+Data	Odo (km)	Fuel (litres)	Full	Price (optional)	km/l (optional)	latitude (optional)	longitude (optional)	City (optional)	Notes (optional)	Missed	TankNumber	FuelType	VolumePrice	StationID (optional)	ExcludeDistance	UniqueId	TankCalc	Weather	guid	lastupdated
+2026-08-29 14:41	13317	11.24	1	1296.08	40	17.4244555	78.6050925	Hyderabad		0	1	105	115.31	0	0	23	0		72c1eaee-caa9-4fbf-8354-af89d4f3cf6c	1787994746954
+2026-06-09 21:13	12868	10.06	1	1163.84	51.28	17.40211	78.57373	Hyderabad - IBP Petrol Bunk	BP COCO	0	1	105	115.69	262834	0	14	0		52231233-bb7c-49a8-89b0-9727e9adb05c	1787994746956
+2026-05-26 17:04	12352	10.18	1	1274.23	51.28	17.44496	78.46726	Hyderabad - COCO IOCL BEGUMPET 		0	1	110	125.17	913924	0	12	0		042d4dc0-71dc-40e9-9b78-3254acf6fc9e	1787994746958
+2026-05-14 19:25	11830	10	1	1122.4	51.28	17.4449904	78.6051787	Chengicherala Main Road - Hyderabad	Nayara not E20	0	1	105	112.24	0	0	11	0		cd776806-9399-4936-a93e-351a57fcf378	1787994746959
+2026-05-04 18:29	11317	11.17	1	1200.78	47.17	17.42821	78.58026	No name - 	JIO BP	0	1	105	107.5	762089	0	4	0		9e774a98-8220-4d2e-b0ff-8cd7d1839f68	1787994746961
+2026-04-21 16:36	10789	10.87	1	1168.53	41.15	17.44401	78.37661	Indian Oil - Hyderabad		0	1	105	107.5	186502	0	3	0		100902c9-87d5-49a8-89c3-81596c659	1787994746962
+2026-04-10 21:21	10341	10.65	1	1144.88	46.95	17.43741	78.3883	Bharat Petroleum - 		0	1	105	107.5	434785	0	5	0		13348c86-023c-4580-a89c-81596	1787994746964
+2026-02-25 13:31	9840	11.66	1	1228.85	41.67	17.36715	78.54142	Reliance Petrol Station - 		0	1	105	105.39	766241	0	2	0		af235d77-0bba-47a4-a6ee-965	1787994746965
+2026-01-19 15:53	9354	11.21	1	1202.16	714.29	0	0			0	1	105	107.24	0	0	1	0		10ffec33-745e-4c53-9a2b-87c659	1787994746967
+2023-02-18 18:04	1161	12.26	1	1259.59	31.65	17.42821	78.58026	Hyderabad - No name		0	1	105	102.74	762089	0	10	0		047f1c93-c889-4aba-961b-4f3cf6c	1787994746969
+2023-01-01 13:16	772.7	2.74	1	281.51	50.25	17.42821	78.58026	Hyderabad - No name		0	1	105	102.74	762089	0	9	0		3f1d4b79-c3ac-4394-a3a9-89b05c	1787994746970
+2023-01-01 9:17	635	11.64	1	1195.89	53.19	17.42821	78.58026	Hyderabad - No name		0	1	105	102.74	762089	0	8	0		bcefea92-7ce8-4ad0-bc95-4f3cf6c	1787994746972
+2022-11-22 21:47	15	11.8	1	1211		17.42821	78.58026	Hyderabad - No name		0	1	105	102.65	762089	0	7	0		776b19d3-aa4c-4b0e-9b7d-959	1787994746973
+2022-11-13 21:42	2	2	0	213.42	0	17.42821	78.58026	Hyderabad - No name		0	1	105	106.71	762089	0	6	0		0777e0e0-6bcd-4b0f-88b2-5e7d	1787994746952
+## FavStations																				
+NameBrand	Latitude	Longitude	StationID	Description	CountryCode	guid	lastupdated
+No name	17.42821	78.58026	762089	Hyderabad	IND	30c03e92-bc1b-4b41-98d6-1ae54	1777909634750
+COCO HITECH CITY	17.44416	78.37679	1000439	Hyderabad, Hitech City Main Rd	IND	7ce07ba7-18da-46f9-8d1f-b5e535	1780066014508
+## Category																				
+IdCategory	Name	guid	lastupdated
+1	Private	de9fa689-8988-4886-a886-88a8c	1776769426158

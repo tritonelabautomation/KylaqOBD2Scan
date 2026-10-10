@@ -52,7 +52,15 @@ data class PidValidationResult(
     val rawResponse: String,
     val latencyMs: Long,
     val decodedValue: String? = null,
-    val respondingCanId: String? = null
+    val respondingCanId: String? = null,
+    /**
+     * Data quality of [decodedValue], reported separately from [directStatus] since
+     * 2026-09-17. directStatus answers whether the ECU replied positively, NOT whether
+     * the value is usable: the owner export of the 2026-09-16 run carried six rows that
+     * read DIRECT_VALIDATED while their decoded value was an implausible-raw sentinel or
+     * Not available. Two facts, two fields - never one dressed as the other.
+     */
+    val dataQuality: String = "NOT_DECODED"
 )
 
 /**
@@ -111,7 +119,14 @@ class PidDiscoveryService(
     private val _discoveredEcus = MutableStateFlow<List<String>>(emptyList())
     val discoveredEcus: StateFlow<List<String>> = _discoveredEcus.asStateFlow()
 
-    private val timeFormat = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
+    /**
+     * Discovery log lines carry their full IST date, not just a time of day.
+     *
+     * The owner audits these lines against the raw ELM log and against the export's run stamp; a
+     * time-only line cannot be tied to a day, and the run stamp used to disagree with them by five
+     * and a half hours (it claimed UTC while holding local time). One clock, one zone, stated.
+     */
+    private fun logStamp(): String = com.example.data.RecordTime.logStamp()
 
     /**
      * Standard OBD-II Mode 01 Base Ranges:
@@ -163,6 +178,54 @@ class PidDiscoveryService(
 
             var blockIndex = 0
             val totalBlocks = standardBaseRanges.size
+
+            // Records one decoded range block: ranges list, responding ECUs, per-ECU
+            // continuation state, capability marking and the published PID list. Local so
+            // a buffer-lag SALVAGE and the retried own-base result can BOTH be recorded in
+            // the same iteration (owner's Kylaq run 2026-09-16 lost the whole 0x00 block
+            // to ELM327 response lag).
+            fun recordRange(result: DiscoveryRangeResult) {
+                val baseCmd = "01${"%02X".format(result.basePid)}"
+                rangeResults.add(result)
+                _discoveredRanges.value = rangeResults.toList()
+
+                // Collect responding ECU CAN IDs
+                if (result.ecuResponses.isNotEmpty()) {
+                    for (ecuResp in result.ecuResponses) {
+                        respondingEcusSet.add(ecuResp.rxCanId)
+                        capabilityManager.parseCapabilityBitmap(result.basePid, ecuResp.bitmap.map { it.toInt() and 0xFF }, ecuResp.rxCanId)
+                        ecuContinuationState[ecuResp.rxCanId] = ecuResp.hasNextRange
+                        appendLog("ECU ${ecuResp.rxCanId} Bitmap for $baseCmd: [${ecuResp.bitmapHex}] (${ecuResp.supportedPids.size} supported)")
+                    }
+                } else if (result.rxCanId != null) {
+                    respondingEcusSet.add(result.rxCanId)
+                    capabilityManager.parseCapabilityBitmap(result.basePid, result.bitmap.map { it.toInt() and 0xFF }, result.rxCanId)
+                    ecuContinuationState[result.rxCanId] = result.hasNextRange
+                }
+                _discoveredEcus.value = respondingEcusSet.toList().sorted()
+
+                appendLog("Decoded $baseCmd Combined: [${result.bitmapHex}] (${result.supportedPids.size} supported PIDs)")
+
+                // Map all tested PIDs in this block (never includes PID 100)
+                val supportedSet = result.supportedPids.toSet()
+                for (pidInt in result.allTestedPids) {
+                    val hexPid = "%02X".format(pidInt)
+                    val isSupported = supportedSet.contains(pidInt)
+
+                    // Update capability manager with bitmap discovery result
+                    val status = if (isSupported) CapabilityStatus.BITMAP_SUPPORTED else CapabilityStatus.NOT_SUPPORTED
+                    capabilityManager.markPidStatus("01$hexPid", status)
+                    capabilityManager.markPidStatus(hexPid, status)
+
+                    val def = StandardPidCatalog.lookup(hexPid, isSupported = isSupported)
+                    cumulativePids[hexPid] = def
+                }
+
+                // Publish updated state
+                val sortedList = cumulativePids.values.sortedBy { it.hexPid }
+                _discoveredPids.value = sortedList
+                _supportedPidsCount.value = sortedList.count { it.supported }
+            }
 
             try {
                 for (basePid in standardBaseRanges) {
@@ -237,57 +300,45 @@ class PidDiscoveryService(
                         break
                     }
 
-                    // Decode bitmap from response lines
-                    val rangeResult = PidDiscoveryDecoder.decodeFromRawResponse(basePid, response.lines)
+                    // Decode bitmap from response lines. ELM327 buffer-lag self-heal
+                    // (owner's Kylaq discovery run 2026-09-16 08:57 IST: TX 0100 returned a
+                    // garbled stale frame and TX 0120 received the 41 00 bitmap that BELONGED
+                    // to 0100 - rejecting the PID mismatch was correct, but the whole base
+                    // block (RPM, speed, coolant, MAP, throttle, fuel rate...) vanished from
+                    // the report). A late frame is still true car data: attribute it to its
+                    // real base, then retry the requested command once.
+                    var rangeResult = PidDiscoveryDecoder.decodeFromRawResponse(basePid, response.lines)
                     if (rangeResult == null) {
-                        appendLog("No valid 4-byte capability bitmap found in response to $cmd.")
+                        PidDiscoveryDecoder.salvageLaggedBitmap(
+                            basePid,
+                            response.lines,
+                            rangeResults.map { it.basePid }.toSet()
+                        )?.let { lagged ->
+                            appendLog("RX to $cmd carried a valid 01${"%02X".format(lagged.basePid)} bitmap (ELM buffer lag) - salvaged under its true base.")
+                            recordRange(lagged)
+                        }
+                        appendLog("No 01${"%02X".format(basePid)} bitmap in RX - retrying $cmd once.")
+                        val retry = transport.sendCommand(cmd, timeoutMs = 3000L)
+                        val retryRx = retry.lines.joinToString(" / ").ifEmpty { retry.rawText.trim() }
+                        appendLog("RX ($cmd retry): [${retry.status}] $retryRx")
+                        rangeResult = PidDiscoveryDecoder.decodeFromRawResponse(basePid, retry.lines)
+                        if (rangeResult == null) {
+                            PidDiscoveryDecoder.salvageLaggedBitmap(
+                                basePid,
+                                retry.lines,
+                                rangeResults.map { it.basePid }.toSet()
+                            )?.let { laggedRetry ->
+                                appendLog("Retry RX carried a valid 01${"%02X".format(laggedRetry.basePid)} bitmap - salvaged under its true base.")
+                                recordRange(laggedRetry)
+                            }
+                        }
+                    }
+                    if (rangeResult == null) {
+                        appendLog("No valid 4-byte capability bitmap found in response to $cmd (even after one retry).")
                         blockIndex++
                         continue
                     }
-
-                    rangeResults.add(rangeResult)
-                    _discoveredRanges.value = rangeResults.toList()
-
-                    // Collect responding ECU CAN IDs
-                    if (rangeResult.ecuResponses.isNotEmpty()) {
-                        for (ecuResp in rangeResult.ecuResponses) {
-                            respondingEcusSet.add(ecuResp.rxCanId)
-                            capabilityManager.parseCapabilityBitmap(basePid, ecuResp.bitmap.map { it.toInt() and 0xFF }, ecuResp.rxCanId)
-                            ecuContinuationState[ecuResp.rxCanId] = ecuResp.hasNextRange
-                            appendLog("ECU ${ecuResp.rxCanId} Bitmap for $cmd: [${ecuResp.bitmapHex}] (${ecuResp.supportedPids.size} supported)")
-                        }
-                    } else if (rangeResult.rxCanId != null) {
-                        respondingEcusSet.add(rangeResult.rxCanId)
-                        capabilityManager.parseCapabilityBitmap(basePid, rangeResult.bitmap.map { it.toInt() and 0xFF }, rangeResult.rxCanId)
-                        ecuContinuationState[rangeResult.rxCanId] = rangeResult.hasNextRange
-                    }
-                    _discoveredEcus.value = respondingEcusSet.toList().sorted()
-
-                    appendLog("Decoded $cmd Combined: [${rangeResult.bitmapHex}] (${rangeResult.supportedPids.size} supported PIDs)")
-
-                    // Map all tested PIDs in this block (never includes PID 100)
-                    val supportedSet = rangeResult.supportedPids.toSet()
-                    for (pidInt in rangeResult.allTestedPids) {
-                        val hexPid = "%02X".format(pidInt)
-                        val isSupported = supportedSet.contains(pidInt)
-
-                        // Update capability manager with bitmap discovery result
-                        val status = if (isSupported) CapabilityStatus.BITMAP_SUPPORTED else CapabilityStatus.NOT_SUPPORTED
-                        capabilityManager.markPidStatus("01$hexPid", status)
-                        capabilityManager.markPidStatus(hexPid, status)
-
-                        val def = StandardPidCatalog.lookup(hexPid, isSupported = isSupported)
-                        cumulativePids[hexPid] = def
-                    }
-
-                    // Also record per-ECU bitmaps
-                    // (REMOVED redundant parseCapabilityBitmap per Rule 4)
-
-                    // Publish updated state
-                    val sortedList = cumulativePids.values.sortedBy { it.hexPid }
-                    _discoveredPids.value = sortedList
-                    val currentSupportedCount = sortedList.count { it.supported }
-                    _supportedPidsCount.value = currentSupportedCount
+                    recordRange(rangeResult)
 
                     // Standard continuation rule: if bit 32 (basePid + 0x20) is NOT supported, stop!
                     // For base 0xE0, standard Mode 01 PID space ends at 0xFF
@@ -426,7 +477,20 @@ class PidDiscoveryService(
                         } catch (_: Exception) { null }
                     } else null
 
-                    appendLog("PID $cleanPid Validation: status=$status (${latencyMs}ms) | Decoded: $decodedVal | Responding ECU: $respondingCanId")
+                    // A POSITIVE REPLY IS NOT A USABLE VALUE. Classify what came back so the
+                    // report can never again claim a PID is validated while its payload is a
+                    // sentinel the ECU returns for "not implemented / not available now".
+                    val dataQuality = when {
+                        !isPositive -> "NO_REPLY"
+                        decodedVal == null -> "NOT_DECODED"
+                        decodedVal.startsWith("implausible") -> "RESPONDED_IMPLAUSIBLE"
+                        decodedVal == "NO DATA" -> "RESPONDED_NO_DATA"
+                        decodedVal == "INVALID_RESPONSE" -> "RESPONDED_MISMATCHED_FRAME"
+                        decodedVal == "Not available" -> "RESPONDED_NOT_AVAILABLE"
+                        else -> "PLAUSIBLE"
+                    }
+
+                    appendLog("PID $cleanPid Validation: status=$status (${latencyMs}ms) | Decoded: $decodedVal | Data: $dataQuality | Responding ECU: $respondingCanId")
 
                     val valResult = PidValidationResult(
                         hexPid = cleanPid,
@@ -436,7 +500,8 @@ class PidDiscoveryService(
                         rawResponse = rxSummary,
                         latencyMs = latencyMs,
                         decodedValue = decodedVal,
-                        respondingCanId = respondingCanId
+                        respondingCanId = respondingCanId,
+                        dataQuality = dataQuality
                     )
                     results.add(valResult)
                     _validatedPids.value = results.toList()
@@ -557,7 +622,11 @@ class PidDiscoveryService(
         json.put("canBitrate", KylaqProtocolProfile.BITRATE_DISPLAY)
         json.put("elmProtocolCommand", KylaqProtocolProfile.ELM_PROTOCOL_COMMAND)
         json.put("functionalRequestId", KylaqProtocolProfile.FUNCTIONAL_REQUEST_ID)
-        json.put("timestamp", SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).format(Date()))
+        // IST with its offset (owner mandate 2026-09-17: "For all records use IST time only no
+        // UTC"). This is the stamp on the PID discovery export the owner pastes back for auditing,
+        // and it used to claim UTC while holding device-local time - which is why it disagreed with
+        // the raw log lines in the same investigation.
+        json.put("timestamp", com.example.data.RecordTime.stamp())
 
         // Responding ECUs
         val ecusArr = JSONArray()
@@ -575,6 +644,17 @@ class PidDiscoveryService(
             rangesArr.put(rObj)
         }
         json.put("ranges", rangesArr)
+
+        // Range markers (0x20/0x40/0x60/0x80/0xA0/0xC0) are availability bitmaps, NOT
+        // parameters. They are listed explicitly since 2026-09-17 so a reader can never
+        // mistake one for a data channel again: the owner export of 2026-09-16 listed PID
+        // 60 and PID 80 under supportedPids and then "validated" PID 80 as a diesel
+        // particulate filter temperature on a petrol car.
+        val markersArr = JSONArray()
+        for (range in _discoveredRanges.value) {
+            if (range.basePid < 0xE0) markersArr.put("01%02X".format(range.basePid + 0x20))
+        }
+        json.put("rangeMarkersNotDataPids", markersArr)
 
         // Supported PIDs
         val supportedArr = JSONArray()
@@ -596,10 +676,13 @@ class PidDiscoveryService(
             vObj.put("directStatus", v.directStatus.name)
             vObj.put("latencyMs", v.latencyMs)
             vObj.put("decodedValue", v.decodedValue ?: "")
+            vObj.put("dataQuality", v.dataQuality)
             vObj.put("respondingCanId", v.respondingCanId ?: "")
             valArr.put(vObj)
         }
         json.put("validationResults", valArr)
+        json.put("positiveReplies", valArr.length())
+        json.put("usableValues", _validatedPids.value.count { it.dataQuality == "PLAUSIBLE" })
 
         // Raw Logs
         val logsArr = JSONArray()
@@ -614,22 +697,23 @@ class PidDiscoveryService(
      */
     fun exportDiscoveryReportCsv(): String {
         val sb = StringBuilder()
-        sb.append("PID,Name,ShortName,Unit,BitmapSupported,ValidationStatus,DecodedValue,LatencyMs\n")
+        sb.append("PID,Name,ShortName,Unit,BitmapSupported,ValidationStatus,DataQuality,DecodedValue,LatencyMs\n")
         val valMap = _validatedPids.value.associateBy { it.hexPid.uppercase() }
 
         for (pid in _discoveredPids.value) {
             val clean = pid.hexPid.uppercase()
             val v = valMap[clean]
             val valStatus = v?.directStatus?.name ?: "NOT_VALIDATED"
+            val dataQuality = v?.dataQuality ?: "NOT_VALIDATED"
             val decoded = (v?.decodedValue ?: "").replace(",", ";")
             val lat = v?.latencyMs ?: 0L
-            sb.append("${pid.pid},\"${pid.name}\",\"${pid.shortName}\",\"${pid.unit}\",${pid.supported},$valStatus,\"$decoded\",$lat\n")
+            sb.append("${pid.pid},\"${pid.name}\",\"${pid.shortName}\",\"${pid.unit}\",${pid.supported},$valStatus,$dataQuality,\"$decoded\",$lat\n")
         }
         return sb.toString()
     }
 
     private fun appendLog(message: String) {
-        val timestamp = timeFormat.format(Date())
+        val timestamp = logStamp()
         val entry = "[$timestamp] $message"
         val current = _rawLogEntries.value.toMutableList()
         current.add(entry)
