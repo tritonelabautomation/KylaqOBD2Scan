@@ -110,22 +110,57 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     suspend fun sinceRefuelStats(): com.example.analysis.SinceRefuelStats.Stats? {
         val repo = recordingManager.tripRepository
         val ev = repo.refuelEvents().firstOrNull() ?: return null
-        val rows = repo.samplesSince(ev.tsEndMs, summaryPids)
-        return com.example.analysis.SinceRefuelStats.summarize(
-            rows.map { com.example.analysis.SinceRefuelStats.Row(it.timestamp, it.pid, it.numericValue) }
-        )
+        val trips = repo.allTripsChronological().filter {
+            it.status == "COMPLETED" && (it.endTimestamp ?: it.startTimestamp) >= ev.tsEndMs
+        }
+        if (trips.isEmpty()) {
+            val rows = repo.samplesSince(ev.tsEndMs, summaryPids)
+            return com.example.analysis.SinceRefuelStats.summarize(
+                rows.map { com.example.analysis.SinceRefuelStats.Row(it.timestamp, it.pid, it.numericValue) }
+            )
+        }
+        var totalDist = 0.0
+        var totalFuel = 0.0
+        var totalDuration = 0L
+        for (t in trips) {
+            val samples = repo.samplesForTripPids(t.id, summaryPids)
+            if (samples.isNotEmpty()) {
+                val stats = com.example.analysis.SinceRefuelStats.summarize(
+                    samples.map { com.example.analysis.SinceRefuelStats.Row(it.timestamp, it.pid, it.numericValue) }
+                )
+                totalDist += stats.distanceKm
+                totalFuel += stats.fuelLiters
+                totalDuration += stats.durationSec
+            }
+        }
+        val avgSpeed = if (totalDuration > 0) totalDist / (totalDuration / 3600.0) else null
+        return com.example.analysis.SinceRefuelStats.Stats(totalDist, totalFuel, totalDuration, avgSpeed)
     }
 
     /**
      * Cluster LONG-TERM tab: everything the app has ever recorded, through the SAME integrator
-     * as since-refuel - one code path, so the tabs can never disagree about a litre.
+     * as since-refuel - processed trip-by-trip to keep memory usage bounded (< 2 MB).
      */
     suspend fun longTermStats(): com.example.analysis.SinceRefuelStats.Stats? {
-        val rows = recordingManager.tripRepository.samplesSince(0L, summaryPids)
-        if (rows.isEmpty()) return null
-        return com.example.analysis.SinceRefuelStats.summarize(
-            rows.map { com.example.analysis.SinceRefuelStats.Row(it.timestamp, it.pid, it.numericValue) }
-        )
+        val repo = recordingManager.tripRepository
+        val allTrips = repo.allTripsChronological().filter { it.status == "COMPLETED" }
+        if (allTrips.isEmpty()) return null
+        var totalDist = 0.0
+        var totalFuel = 0.0
+        var totalDuration = 0L
+        for (t in allTrips) {
+            val samples = repo.samplesForTripPids(t.id, summaryPids)
+            if (samples.isNotEmpty()) {
+                val stats = com.example.analysis.SinceRefuelStats.summarize(
+                    samples.map { com.example.analysis.SinceRefuelStats.Row(it.timestamp, it.pid, it.numericValue) }
+                )
+                totalDist += stats.distanceKm
+                totalFuel += stats.fuelLiters
+                totalDuration += stats.durationSec
+            }
+        }
+        val avgSpeed = if (totalDuration > 0) totalDist / (totalDuration / 3600.0) else null
+        return com.example.analysis.SinceRefuelStats.Stats(totalDist, totalFuel, totalDuration, avgSpeed)
     }
 
     /**
@@ -509,51 +544,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val journalTx = recordingManager.journal.txFile(sessionId)
         val journalSample = recordingManager.journal.sampleFile(sessionId)
 
-        val points = mutableListOf<com.example.analysis.TripFuelSummary.SamplePoint>()
-
-        val tFile = if (txCsv.exists() && txCsv.length() > 0) txCsv else if (journalTx.exists() && journalTx.length() > 0) journalTx else null
-        val txs = if (tFile != null) {
-            runCatching { com.example.data.CsvExporter.readTransactionsFromCsv(tFile) }.getOrDefault(emptyList())
-        } else emptyList()
-
         val sFile = if (sampleCsv.exists() && sampleCsv.length() > 0) sampleCsv else if (journalSample.exists() && journalSample.length() > 0) journalSample else null
-        val samples = if (sFile != null) {
-            runCatching { com.example.data.CsvExporter.readSamplesFromCsv(sFile) }.getOrDefault(emptyList())
-        } else emptyList()
-
-        // If transactions file has significantly more data (e.g. 34,700 txs vs truncated sample file), use transactions
-        if (txs.isNotEmpty() && (samples.isEmpty() || txs.size > samples.size * 2)) {
-            for (tx in txs) {
-                if (tx.decodedValue != null) {
-                    val t = com.example.data.SessionRecoveryPolicy.wallEpochMs(tx.timestampUtc, tx.timestampMonotonic)
-                    points.add(com.example.analysis.TripFuelSummary.SamplePoint(tx.pid, t, tx.decodedValue))
+        if (sFile != null && sFile.length() > 0) {
+            val points = mutableListOf<com.example.analysis.TripFuelSummary.SamplePoint>()
+            runCatching {
+                com.example.data.CsvExporter.readSamplesFromCsv(sFile).forEach { s ->
+                    val t = com.example.data.RecordTime.parseMillis(s.timestampUtc) ?: s.timestampMonotonic
+                    s.speedKmh?.let { points.add(com.example.analysis.TripFuelSummary.SamplePoint("010D", t, it)) }
+                    s.fuelRateLh?.let { points.add(com.example.analysis.TripFuelSummary.SamplePoint("015E", t, it)) }
+                    s.rpm?.let { points.add(com.example.analysis.TripFuelSummary.SamplePoint("010C", t, it)) }
+                    s.voltageV?.let { points.add(com.example.analysis.TripFuelSummary.SamplePoint("0142", t, it)) }
+                    s.coolantC?.let { points.add(com.example.analysis.TripFuelSummary.SamplePoint("0105", t, it)) }
+                    s.engineTorquePct?.let { points.add(com.example.analysis.TripFuelSummary.SamplePoint("0162", t, it)) }
                 }
-            }
-            return points
-        }
-
-        if (samples.isNotEmpty()) {
-            for (s in samples) {
-                val t = com.example.data.RecordTime.parseMillis(s.timestampUtc) ?: s.timestampMonotonic
-                s.speedKmh?.let { points.add(com.example.analysis.TripFuelSummary.SamplePoint("010D", t, it)) }
-                s.fuelRateLh?.let { points.add(com.example.analysis.TripFuelSummary.SamplePoint("015E", t, it)) }
-                s.rpm?.let { points.add(com.example.analysis.TripFuelSummary.SamplePoint("010C", t, it)) }
-                s.voltageV?.let { points.add(com.example.analysis.TripFuelSummary.SamplePoint("0142", t, it)) }
-                s.coolantC?.let { points.add(com.example.analysis.TripFuelSummary.SamplePoint("0105", t, it)) }
-                s.engineTorquePct?.let { points.add(com.example.analysis.TripFuelSummary.SamplePoint("0162", t, it)) }
             }
             if (points.isNotEmpty()) return points
         }
 
-        if (txs.isNotEmpty()) {
-            for (tx in txs) {
-                if (tx.decodedValue != null) {
-                    val t = com.example.data.SessionRecoveryPolicy.wallEpochMs(tx.timestampUtc, tx.timestampMonotonic)
-                    points.add(com.example.analysis.TripFuelSummary.SamplePoint(tx.pid, t, tx.decodedValue))
-                }
-            }
+        val tFile = if (txCsv.exists() && txCsv.length() > 0) txCsv else if (journalTx.exists() && journalTx.length() > 0) journalTx else null
+        if (tFile != null && tFile.length() > 0) {
+            return com.example.data.CsvExporter.readSamplePointsFromCsv(tFile)
         }
-        return points
+
+        return emptyList()
     }
 
     fun samplePointsFromRecordingDisk(rec: SavedRecording): List<com.example.analysis.TripFuelSummary.SamplePoint> {

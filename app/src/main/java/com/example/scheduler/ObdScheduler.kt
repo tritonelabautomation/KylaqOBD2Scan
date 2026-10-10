@@ -103,8 +103,10 @@ class ObdScheduler(
     val liveNumericMap: StateFlow<Map<String, Double>> = telemetryStore.numericMap
 
     // Research PID observations: raw history
+    private val rawHistoryMap = java.util.concurrent.ConcurrentHashMap<String, java.util.ArrayDeque<TransactionRecord>>()
     private val _pidRawHistory = MutableStateFlow<Map<String, List<TransactionRecord>>>(emptyMap())
     val pidRawHistory: StateFlow<Map<String, List<TransactionRecord>>> = _pidRawHistory.asStateFlow()
+    @Volatile private var lastHistoryPublishMs = 0L
 
     // Powertrain Intelligence StateFlows
     private val _realtimeEconomy = MutableStateFlow(
@@ -912,23 +914,28 @@ class ObdScheduler(
         telemetryStore.numericValue(pidId, capabilityManager.getPreferredEcuForPid(pidId))
 
     private fun appendRawHistory(pidId: String, record: TransactionRecord) {
-        val currHistory = _pidRawHistory.value.toMutableMap()
-        // QA M7: avoid per-sample ArrayList element shifts at the 500-entry cap.
-        val existing = currHistory[pidId] ?: emptyList()
-        val list = if (existing.size >= 500) {
-            existing.subList(existing.size - 499, existing.size).toMutableList()
-        } else {
-            existing.toMutableList()
+        val deque = rawHistoryMap.getOrPut(pidId) { java.util.ArrayDeque(50) }
+        synchronized(deque) {
+            if (deque.size >= 50) {
+                deque.removeFirst()
+            }
+            deque.addLast(record)
         }
-        list.add(record)
-        currHistory[pidId] = list
-        _pidRawHistory.value = currHistory
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastHistoryPublishMs > 500L) {
+            lastHistoryPublishMs = now
+            val snapshot = rawHistoryMap.mapValues { entry ->
+                synchronized(entry.value) { entry.value.toList() }
+            }
+            _pidRawHistory.value = snapshot
+        }
     }
 
     fun resetCounters() {
         _transactionCount.value = 0L
         _canResponseCount.value = 0L
         _errorCount.value = 0L
+        rawHistoryMap.clear()
         _pidRawHistory.value = emptyMap()
         telemetryStore.clear()
         currentCanHeader = ""

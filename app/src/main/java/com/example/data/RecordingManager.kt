@@ -363,13 +363,15 @@ class RecordingManager(
         synchronized(activeTransactionList) {
             activeTransactionList.clear()
             activeSampleList.clear()
-            activeTransactionList.addAll(reloaded)
+            val tailTransactions = if (reloaded.size > 200) reloaded.takeLast(200) else reloaded
+            activeTransactionList.addAll(tailTransactions)
             val replayed = SessionRecoveryPolicy.replaySamples(
                 transactions = reloaded,
                 seed = SynchronizedSample(timestampUtc = "", timestampMonotonic = 0L),
                 merge = { acc, tx -> mergeSample(acc, tx).copy(altitudeM = tx.altitudeM) }
             )
-            activeSampleList.addAll(replayed)
+            val tailSamples = if (replayed.size > 200) replayed.takeLast(200) else replayed
+            activeSampleList.addAll(tailSamples)
             currentSample = replayed.lastOrNull()
                 ?: SynchronizedSample(timestampUtc = "", timestampMonotonic = 0L)
         }
@@ -1314,7 +1316,7 @@ class RecordingManager(
                 }
                 val rawLog = File(rawLogsDir, "raw_log_$id.txt").takeIf { it.exists() }
                 val source = SessionRecoveryPolicy.chooseSource(
-                    journalRowCount = CsvExporter.readTransactionsFromCsv(journal.txFile(id)).size,
+                    journalRowCount = SessionJsonReader.countTransactionRows(journal.txFile(id)),
                     rawLogBytes = rawLog?.length() ?: 0L
                 )
                 when (val r = if (source == SessionRecoveryPolicy.RecoverySource.JOURNAL) {
