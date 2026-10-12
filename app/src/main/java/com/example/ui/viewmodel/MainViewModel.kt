@@ -707,7 +707,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // Rebuild anything a killed process left behind, before the owner has to ask.
         runAutoRecovery()
     }
-    val cloudBackupManager = AppContainer.cloudBackupManager
     val catalogRepository = AppContainer.catalogRepository
 
     var activeTransport: ElmTransport? = null
