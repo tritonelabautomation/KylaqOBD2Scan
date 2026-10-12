@@ -90,6 +90,20 @@ fun DriveBackupScreen(
         }
     }
 
+    fun refreshList() {
+        treeUri?.let { uri ->
+            runCatching {
+                backups = DriveBackupClient.listBackups(context, uri)
+                if (backups.isEmpty() && !DriveBackupClient.hasPersistedPermission(context, uri)) {
+                    status = "Please re-select your Google Drive backup folder on this device to link permissions."
+                }
+            }.onFailure { e ->
+                status = "Drive folder inaccessible on this device: ${e.message}. Please select folder again."
+                backups = emptyList()
+            }
+        }
+    }
+
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) {
             runCatching {
@@ -103,20 +117,6 @@ fun DriveBackupScreen(
             treeUri = uri
             status = "Drive folder linked. Backups will be written here."
             refreshList()
-        }
-    }
-
-    fun refreshList() {
-        treeUri?.let { uri ->
-            runCatching {
-                backups = DriveBackupClient.listBackups(context, uri)
-                if (backups.isEmpty() && !DriveBackupClient.hasPersistedPermission(context, uri)) {
-                    status = "Please re-select your Google Drive backup folder on this device to link permissions."
-                }
-            }.onFailure { e ->
-                status = "Drive folder inaccessible on this device: ${e.message}. Please select folder again."
-                backups = emptyList()
-            }
         }
     }
 
