@@ -6,7 +6,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -14,6 +13,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
@@ -27,7 +27,9 @@ import com.example.ui.theme.NeonEmerald
 import com.example.ui.theme.TextSecondaryDark
 import com.example.ui.theme.WarningRed
 import com.example.ui.viewmodel.MainViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Fuelio-style Google Drive backup that needs NO OAuth client: the system folder picker opens the
@@ -43,7 +45,13 @@ fun DriveBackupScreen(
     val context = LocalContext.current
     val settings = viewModel.settingsRepository
     val scope = rememberCoroutineScope()
-    var treeUri by remember { mutableStateOf(settings.driveTreeUri()?.let { Uri.parse(it) }) }
+    var treeUri by remember {
+        mutableStateOf(
+            runCatching {
+                settings.driveTreeUri()?.takeIf { it.isNotBlank() }?.let { Uri.parse(it) }
+            }.getOrNull()
+        )
+    }
     var status by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     var restoringName by remember { mutableStateOf<String?>(null) }
@@ -55,6 +63,7 @@ fun DriveBackupScreen(
     val daily by settings.backupDaily.collectAsState()
     var pendingRestore by remember { mutableStateOf<DriveBackupClient.BackupFile?>(null) }
     val fuelRepo = viewModel.fuelLogRepository
+
     val csvExport = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("text/csv")
     ) { uri ->
@@ -62,7 +71,7 @@ fun DriveBackupScreen(
         scope.launch {
             status = try {
                 val csv = com.example.data.FuelLogCodec.toCsv(fuelRepo.entries())
-                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                withContext(Dispatchers.IO) {
                     context.contentResolver.openOutputStream(uri)?.use { it.write(csv.toByteArray()) }
                 }
                 "Fuel log CSV exported (${fuelRepo.entries().size} entries)."
@@ -71,13 +80,14 @@ fun DriveBackupScreen(
             }
         }
     }
+
     val csvImport = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
             status = try {
-                val text = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                val text = withContext(Dispatchers.IO) {
                     context.contentResolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) } ?: ""
                 }
                 val incoming = com.example.data.FuelLogCodec.fromCsv(text)
@@ -91,15 +101,22 @@ fun DriveBackupScreen(
     }
 
     fun refreshList() {
-        treeUri?.let { uri ->
-            runCatching {
-                backups = DriveBackupClient.listBackups(context, uri)
-                if (backups.isEmpty() && !DriveBackupClient.hasPersistedPermission(context, uri)) {
+        val uri = treeUri ?: return
+        scope.launch(Dispatchers.IO) {
+            val hasPerm = DriveBackupClient.hasPersistedPermission(context, uri)
+            if (!hasPerm) {
+                withContext(Dispatchers.Main) {
+                    backups = emptyList()
                     status = "Please re-select your Google Drive backup folder on this device to link permissions."
                 }
-            }.onFailure { e ->
-                status = "Drive folder inaccessible on this device: ${e.message}. Please select folder again."
-                backups = emptyList()
+                return@launch
+            }
+            val result = DriveBackupClient.listBackups(context, uri)
+            withContext(Dispatchers.Main) {
+                backups = result
+                if (result.isEmpty()) {
+                    status = null
+                }
             }
         }
     }
@@ -183,7 +200,7 @@ fun DriveBackupScreen(
                                                 )
                                                 settings.setLastBackupTimestamp(System.currentTimeMillis())
                                                 refreshList()
-                                                "Sent $name to Drive."
+                                                "Backup uploaded: $name"
                                             } catch (e: Exception) {
                                                 "Backup failed: ${e.message}"
                                             }
@@ -196,16 +213,13 @@ fun DriveBackupScreen(
                             }
                             Row(
                                 modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("Auto-backup after every recording", color = TextSecondaryDark, fontSize = 12.sp)
+                                Text("Auto-backup after every recording", color = TextSecondaryDark, fontSize = 12.sp, modifier = Modifier.weight(1f))
                                 Switch(checked = autoBackup, onCheckedChange = { settings.setAutoCloudBackup(it) })
                             }
                             Text(
-                                // Was java.util.Date(lastBackup).toString(), which renders in the
-                                // device zone and in Java's own format ("Wed Sep 17 14:27:05
-                                // GMT+05:30 2026") - the one date in the app that was neither IST
-                                // by construction nor readable. Owner mandate 2026-09-17.
                                 "Last backup: " + (if (lastBackup > 0) {
                                     com.example.data.RecordTime.format("yyyy-MM-dd HH:mm:ss", lastBackup)
                                 } else {
@@ -215,23 +229,26 @@ fun DriveBackupScreen(
                             )
                             Row(
                                 modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("Show notification", color = TextSecondaryDark, fontSize = 12.sp)
+                                Text("Show notification", color = TextSecondaryDark, fontSize = 12.sp, modifier = Modifier.weight(1f))
                                 Switch(checked = showNotif, onCheckedChange = { settings.setBackupShowNotification(it) })
                             }
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("Daily backup service", color = TextSecondaryDark, fontSize = 12.sp)
+                                Text("Daily backup service", color = TextSecondaryDark, fontSize = 12.sp, modifier = Modifier.weight(1f))
                                 Switch(checked = daily, onCheckedChange = { settings.setBackupDaily(it) })
                             }
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("Auto sync only on Wi-Fi", color = TextSecondaryDark, fontSize = 12.sp)
+                                Text("Auto sync only on Wi-Fi", color = TextSecondaryDark, fontSize = 12.sp, modifier = Modifier.weight(1f))
                                 Switch(checked = wifiOnly, onCheckedChange = { settings.setBackupWifiOnly(it) })
                             }
                         }
@@ -259,7 +276,7 @@ fun DriveBackupScreen(
                 status?.let {
                     Text(
                         it,
-                        color = if (it.startsWith("Backup failed") || it.startsWith("Restore failed")) WarningRed else ElectricAmber,
+                        color = if (it.startsWith("Backup failed") || it.startsWith("Restore failed") || it.startsWith("Drive folder inaccessible")) WarningRed else ElectricAmber,
                         fontSize = 11.sp
                     )
                 }
@@ -271,7 +288,7 @@ fun DriveBackupScreen(
                 )
             }
             if (backups.isEmpty() && treeUri != null) {
-                item { Text("No backup ZIPs yet.", color = TextSecondaryDark, fontSize = 11.sp) }
+                item { Text("No backup ZIPs found in this folder.", color = TextSecondaryDark, fontSize = 11.sp) }
             }
             itemsIndexed(backups, key = { index, file -> "${file.uri}_${file.name}_$index" }) { _, file ->
                 Card(
@@ -280,7 +297,8 @@ fun DriveBackupScreen(
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(file.name, color = CyberCyan, fontSize = 12.sp)
@@ -293,9 +311,6 @@ fun DriveBackupScreen(
                             onClick = { pendingRestore = file },
                             enabled = restoringName == null && !busy
                         ) {
-                            // Owner 2026-09-20: "Even if i click single restore all are showing
-                            // restoring" - one global flag greyed every row into looking like it
-                            // was mid-restore. Only the row actually being restored says so now.
                             Text(if (restoringName == file.name) "Restoring…" else "Restore")
                         }
                     }
@@ -333,10 +348,6 @@ fun DriveBackupScreen(
                             } catch (e: Exception) {
                                 "Restore failed: " + (e.message ?: "error")
                             }
-                            // A restore replaces Room rows and files underneath the screens:
-                            // refresh the trip list and TOAST the counts so the owner never has
-                            // to guess whether anything happened (owner 2026-09-20: "nothing is
-                            // restored from drive to app").
                             viewModel.recordingManager.loadSavedRecordings()
                             status = outcome
                             restoringName = null
@@ -348,5 +359,4 @@ fun DriveBackupScreen(
             dismissButton = { TextButton(onClick = { pendingRestore = null }) { Text("CANCEL") } }
         )
     }
-
 }

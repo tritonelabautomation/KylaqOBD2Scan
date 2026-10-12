@@ -29,18 +29,24 @@ object DriveBackupClient {
     /** Lists existing backup ZIPs in the chosen Drive folder, newest first. */
     fun listBackups(context: Context, treeUri: Uri): List<BackupFile> =
         runCatching {
+            if (!hasPersistedPermission(context, treeUri)) {
+                return emptyList()
+            }
             DocumentFile.fromTreeUri(context, treeUri)
                 ?.listFiles()
                 ?.filter { it.isFile && (it.name ?: "").endsWith(".zip") }
                 ?.map { BackupFile(it.name ?: "backup.zip", it.uri, it.length(), it.lastModified()) }
                 ?.sortedByDescending { it.modifiedMs }
-        }.getOrNull() ?: emptyList()
+                ?: emptyList()
+        }.getOrDefault(emptyList())
 
     /** Checks whether persistable read/write URI permission is currently held on this device. */
     fun hasPersistedPermission(context: Context, uri: Uri): Boolean =
         runCatching {
+            val targetStr = uri.toString().trimEnd('/')
             context.contentResolver.persistedUriPermissions.any {
-                it.uri == uri && (it.isReadPermission || it.isWritePermission)
+                val pStr = it.uri.toString().trimEnd('/')
+                (it.isReadPermission || it.isWritePermission) && (it.uri == uri || pStr == targetStr)
             }
         }.getOrDefault(false)
 
