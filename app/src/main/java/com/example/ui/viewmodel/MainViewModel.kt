@@ -61,6 +61,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val recordingManager = AppContainer.recordingManager
     val bluetoothManager = AppContainer.bluetoothManager
     val obdScheduler = AppContainer.obdScheduler
+    val fuelLogRepository = AppContainer.fuelLogRepository
+    val carpoolRepository = AppContainer.carpoolRepository
+    val maintenanceRepository = AppContainer.maintenanceRepository
+    val expenseRepository = AppContainer.expenseRepository
+    val documentRepository = AppContainer.documentRepository
+    val reminderRepository = AppContainer.reminderRepository
+    val tripPlanRepository = AppContainer.tripPlanRepository
+    val cloudBackupManager = AppContainer.cloudBackupManager
 
     // Timer + guards must be BEFORE any init that touches them (NPE crash 2026-09-23 09:26 IST at line 350)
     private val _recordingDurationSeconds = MutableStateFlow(0L)
@@ -2260,14 +2268,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             // Insight persistence is best-effort; stopping the recording always wins.
         }
     }
-
-    val fuelLogRepository = AppContainer.fuelLogRepository
-    val carpoolRepository = AppContainer.carpoolRepository
-    val maintenanceRepository = AppContainer.maintenanceRepository
-    val expenseRepository = AppContainer.expenseRepository
-    val documentRepository = AppContainer.documentRepository
-    val reminderRepository = AppContainer.reminderRepository
-    val tripPlanRepository = AppContainer.tripPlanRepository
 
     private val _quickAdd = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
 
