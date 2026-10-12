@@ -475,7 +475,8 @@ fun MainApp(viewModel: MainViewModel) {
         drawerState = drawerState,
         drawerContent = {
             ModalDrawerSheet(
-                drawerContainerColor = MaterialTheme.colorScheme.surface
+                drawerContainerColor = MaterialTheme.colorScheme.surface,
+                windowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Vertical + WindowInsetsSides.Start)
             ) {
                 Spacer(modifier = Modifier.height(20.dp))
                 Text(
@@ -483,13 +484,13 @@ fun MainApp(viewModel: MainViewModel) {
                     color = CyberCyan,
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 6.dp)
                 )
                 Text(
                     "Skoda Kylaq 1.0 TSI - drive intelligence",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 11.sp,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp)
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 2.dp)
                 )
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
                 // 2026-09-14 owner screenshot: the sheet is a plain Column, so on a
@@ -520,7 +521,7 @@ fun MainApp(viewModel: MainViewModel) {
                                 }
                             }
                         },
-                        modifier = Modifier.padding(horizontal = 10.dp)
+                        modifier = Modifier.padding(horizontal = 12.dp)
                     )
                 }
                 }

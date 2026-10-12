@@ -92,19 +92,32 @@ fun DriveBackupScreen(
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) {
-            context.contentResolver.takePersistableUriPermission(
-                uri,
-                android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
-                    android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-            )
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+            }
             settings.setDriveTreeUri(uri.toString())
             treeUri = uri
             status = "Drive folder linked. Backups will be written here."
+            refreshList()
         }
     }
 
     fun refreshList() {
-        treeUri?.let { uri -> backups = DriveBackupClient.listBackups(context, uri) }
+        treeUri?.let { uri ->
+            runCatching {
+                backups = DriveBackupClient.listBackups(context, uri)
+                if (backups.isEmpty() && !DriveBackupClient.hasPersistedPermission(context, uri)) {
+                    status = "Please re-select your Google Drive backup folder on this device to link permissions."
+                }
+            }.onFailure { e ->
+                status = "Drive folder inaccessible on this device: ${e.message}. Please select folder again."
+                backups = emptyList()
+            }
+        }
     }
 
     LaunchedEffect(treeUri) { refreshList() }

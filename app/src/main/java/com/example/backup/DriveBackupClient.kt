@@ -28,12 +28,21 @@ object DriveBackupClient {
 
     /** Lists existing backup ZIPs in the chosen Drive folder, newest first. */
     fun listBackups(context: Context, treeUri: Uri): List<BackupFile> =
-        DocumentFile.fromTreeUri(context, treeUri)
-            ?.listFiles()
-            ?.filter { it.isFile && (it.name ?: "").endsWith(".zip") }
-            ?.map { BackupFile(it.name ?: "backup.zip", it.uri, it.length(), it.lastModified()) }
-            ?.sortedByDescending { it.modifiedMs }
-            ?: emptyList()
+        runCatching {
+            DocumentFile.fromTreeUri(context, treeUri)
+                ?.listFiles()
+                ?.filter { it.isFile && (it.name ?: "").endsWith(".zip") }
+                ?.map { BackupFile(it.name ?: "backup.zip", it.uri, it.length(), it.lastModified()) }
+                ?.sortedByDescending { it.modifiedMs }
+        }.getOrNull() ?: emptyList()
+
+    /** Checks whether persistable read/write URI permission is currently held on this device. */
+    fun hasPersistedPermission(context: Context, uri: Uri): Boolean =
+        runCatching {
+            context.contentResolver.persistedUriPermissions.any {
+                it.uri == uri && (it.isReadPermission || it.isWritePermission)
+            }
+        }.getOrDefault(false)
 
     /**
      * Zips every recording plus the two things that used to be lost on a reinstall and
