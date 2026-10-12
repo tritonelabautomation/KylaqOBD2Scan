@@ -1265,20 +1265,33 @@ private fun TripTrendsView(
         // numbers live in the crosshair bubble).
         if (primary != null) {
             val numericValues = primary.points.map { it.second }
+            val statFmt = if (primary.discrete) "%.0f" else "%.1f"
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
                 color = DarkSurface
             ) {
                 Row(
-                    modifier = Modifier.padding(14.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    val statFmt = if (primary.discrete) "%.0f" else "%.1f"
-                    Text("MIN: ${String.format(java.util.Locale.US, statFmt, numericValues.minOrNull() ?: 0.0)} ${primary.unit}", color = TextSecondaryDark, fontSize = 14.sp)
-                    Text("AVG: ${String.format(java.util.Locale.US, "%.1f", numericValues.average())} ${primary.unit}", color = primary.color, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    Text("MAX: ${String.format(java.util.Locale.US, statFmt, numericValues.maxOrNull() ?: 0.0)} ${primary.unit}", color = NeonEmerald, fontSize = 14.sp)
-                    Text("COUNT: ${numericValues.size}", color = TextSecondaryDark, fontSize = 14.sp)
+                    Column(horizontalAlignment = Alignment.Start) {
+                        Text("MIN", color = TextSecondaryDark, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("${String.format(java.util.Locale.US, statFmt, numericValues.minOrNull() ?: 0.0)} ${primary.unit}", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("AVG", color = TextSecondaryDark, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("${String.format(java.util.Locale.US, "%.1f", numericValues.average())} ${primary.unit}", color = primary.color, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("MAX", color = TextSecondaryDark, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("${String.format(java.util.Locale.US, statFmt, numericValues.maxOrNull() ?: 0.0)} ${primary.unit}", color = NeonEmerald, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text("SAMPLES", color = TextSecondaryDark, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("${numericValues.size}", color = TextSecondaryDark, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
+                    }
                 }
             }
         }

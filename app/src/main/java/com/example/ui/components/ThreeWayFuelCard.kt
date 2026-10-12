@@ -216,57 +216,66 @@ fun ThreeWayFuelCard(
                                     contentDescription = "Cluster Photo",
                                     contentScale = ContentScale.Crop,
                                     modifier = Modifier
-                                        .size(48.dp)
+                                        .size(44.dp)
                                         .clip(RoundedCornerShape(6.dp))
                                         .border(1.dp, DarkBorder, RoundedCornerShape(6.dp))
                                         .clickable { showImageModal = true }
                                 )
-                                Spacer(modifier = Modifier.width(10.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
                             }
 
                             Row(
                                 modifier = Modifier.weight(1f),
-                                horizontalArrangement = Arrangement.SpaceBetween
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Column(modifier = Modifier.weight(1f)) {
+                                Column(horizontalAlignment = Alignment.Start) {
                                     Text(
                                         text = "${String.format(Locale.US, "%.1f", midData!!.avgFuelEconomyKmL)} km/L",
                                         color = NeonEmerald,
-                                        fontSize = 15.sp,
+                                        fontSize = 12.sp,
                                         fontWeight = FontWeight.Bold,
-                                        fontFamily = FontFamily.Monospace
+                                        fontFamily = FontFamily.Monospace,
+                                        maxLines = 1,
+                                        softWrap = false
                                     )
-                                    Text("MID ECONOMY", color = TextSecondaryDark, fontSize = 9.sp)
+                                    Text("MID ECONOMY", color = TextSecondaryDark, fontSize = 8.sp, maxLines = 1)
                                 }
-                                Column(modifier = Modifier.weight(1f)) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                     Text(
                                         text = "${String.format(Locale.US, "%.1f", midData!!.distanceKm)} km",
                                         color = TextPrimaryDark,
-                                        fontSize = 15.sp,
+                                        fontSize = 12.sp,
                                         fontWeight = FontWeight.Bold,
-                                        fontFamily = FontFamily.Monospace
+                                        fontFamily = FontFamily.Monospace,
+                                        maxLines = 1,
+                                        softWrap = false
                                     )
-                                    Text("MID DISTANCE", color = TextSecondaryDark, fontSize = 9.sp)
+                                    Text("DISTANCE", color = TextSecondaryDark, fontSize = 8.sp, maxLines = 1)
                                 }
-                                Column(modifier = Modifier.weight(1f)) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                     Text(
                                         text = midData!!.durationText,
                                         color = TextPrimaryDark,
-                                        fontSize = 15.sp,
+                                        fontSize = 12.sp,
                                         fontWeight = FontWeight.Bold,
-                                        fontFamily = FontFamily.Monospace
+                                        fontFamily = FontFamily.Monospace,
+                                        maxLines = 1,
+                                        softWrap = false
                                     )
-                                    Text("MID DURATION", color = TextSecondaryDark, fontSize = 9.sp)
+                                    Text("DURATION", color = TextSecondaryDark, fontSize = 8.sp, maxLines = 1)
                                 }
-                                Column(modifier = Modifier.weight(1f)) {
+                                Column(horizontalAlignment = Alignment.End) {
                                     Text(
                                         text = "${String.format(Locale.US, "%.0f", midData!!.avgSpeedKmh)} km/h",
                                         color = TextPrimaryDark,
-                                        fontSize = 15.sp,
+                                        fontSize = 12.sp,
                                         fontWeight = FontWeight.Bold,
-                                        fontFamily = FontFamily.Monospace
+                                        fontFamily = FontFamily.Monospace,
+                                        maxLines = 1,
+                                        softWrap = false
                                     )
-                                    Text("AVG SPEED", color = TextSecondaryDark, fontSize = 9.sp)
+                                    Text("AVG SPEED", color = TextSecondaryDark, fontSize = 8.sp, maxLines = 1)
                                 }
                             }
                         }
@@ -653,27 +662,32 @@ private fun FactorRowCard(
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = liters?.let { "${String.format(Locale.US, "%.2f", it)} L" } ?: "--",
                         color = TextPrimaryDark,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp,
-                        fontFamily = FontFamily.Monospace
+                        fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 1,
+                        softWrap = false
                     )
-                    Text("TOTAL BURN", color = TextSecondaryDark, fontSize = 8.sp)
+                    Text("TOTAL BURN", color = TextSecondaryDark, fontSize = 8.sp, maxLines = 1)
                 }
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = kmL?.let { "${String.format(Locale.US, "%.2f", it)} km/L" } ?: "--",
                         color = TextPrimaryDark,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp,
-                        fontFamily = FontFamily.Monospace
+                        fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 1,
+                        softWrap = false
                     )
-                    Text("ECONOMY", color = TextSecondaryDark, fontSize = 8.sp)
+                    Text("ECONOMY", color = TextSecondaryDark, fontSize = 8.sp, maxLines = 1)
                 }
                 Column(modifier = Modifier.weight(1f)) {
                     val deltaStr = errorPct?.let {
@@ -684,10 +698,12 @@ private fun FactorRowCard(
                         text = deltaStr,
                         color = if (errorPct == null) TextSecondaryDark else if (kotlin.math.abs(errorPct) <= 6.0) NeonEmerald else if (kotlin.math.abs(errorPct) <= 12.0) ElectricAmber else WarningRed,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp,
-                        fontFamily = FontFamily.Monospace
+                        fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 1,
+                        softWrap = false
                     )
-                    Text("DELTA VS MID", color = TextSecondaryDark, fontSize = 8.sp)
+                    Text("DELTA VS MID", color = TextSecondaryDark, fontSize = 8.sp, maxLines = 1)
                 }
             }
 
