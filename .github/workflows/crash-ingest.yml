@@ -1,0 +1,81 @@
+name: Crash Ingest
+
+# Receives crash logs from app via repository_dispatch event_type=crash-report
+# App POSTs to https://api.github.com/repos/{repo}/dispatches with PAT CRASH_REPORT_TOKEN
+# This workflow commits crash file to crashes/inbox/ and ensures issue exists
+
+on:
+  repository_dispatch:
+    types: [crash-report]
+  workflow_dispatch:
+    inputs:
+      file_name:
+        description: 'Crash file name'
+        required: false
+        default: 'manual-crash.txt'
+      crash_log:
+        description: 'Crash log text (up to 10k)'
+        required: true
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create crash file
+        run: |
+          mkdir -p crashes/inbox
+          TS=$(date +%Y%m%d-%H%M%S)
+          FILE_NAME="${{ github.event.client_payload.file_name || inputs.file_name }}"
+          SAFE_NAME=$(echo "$FILE_NAME" | tr -cd 'a-zA-Z0-9._-')
+          OUT="crashes/inbox/${TS}-${SAFE_NAME}"
+          echo "${{ github.event.client_payload.crash_log || inputs.crash_log }}" > "$OUT"
+          echo "Created $OUT"
+          ls -lh crashes/inbox/ | tail -n 20
+          echo "out_path=$OUT" >> $GITHUB_ENV
+
+      - name: Commit crash file
+        run: |
+          git config user.name "crash-bot"
+          git config user.email "crash-bot@users.noreply.github.com"
+          git add crashes/inbox/
+          git diff --cached --quiet && echo "No changes" && exit 0
+          git commit -m "crash: auto ingest ${{ env.out_path }} [skip ci]"
+          git push origin HEAD:${{ github.ref_name || 'main' }} || git push origin HEAD:main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Ensure issue exists
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const repo = context.repo;
+            const payload = context.payload.client_payload || {};
+            const log = (payload.crash_log || `${{ inputs.crash_log }}`).substring(0, 20000);
+            const fileName = payload.file_name || '${{ inputs.file_name }}';
+            const title = `Auto Crash: ${fileName} ${new Date().toISOString()}`;
+            // Check if recent crash-auto issue with same file already exists (avoid dup in 5 min)
+            const issues = await github.rest.issues.listForRepo({
+              ...repo,
+              labels: 'crash-auto',
+              state: 'open',
+              per_page: 10
+            });
+            const recent = issues.data.find(i => i.title.includes(fileName) && (Date.now() - new Date(i.created_at).getTime() < 5*60*1000));
+            if (recent) {
+              console.log(`Recent issue #${recent.number} already exists for ${fileName}, skipping`);
+              return;
+            }
+            await github.rest.issues.create({
+              ...repo,
+              title: title.substring(0, 200),
+              body: `**Auto-ingested crash via repository_dispatch**\n\n**File:** ${{ env.out_path }}\n**When:** ${new Date().toISOString()}\n**App version:** ${payload.app_version || 'unknown'}\n\n\`\`\`\n${log}\n\`\`\`\n\nLabel: crash-auto`,
+              labels: ['crash-auto','auto-reported','bug']
+            });

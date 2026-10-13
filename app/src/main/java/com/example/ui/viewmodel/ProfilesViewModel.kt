@@ -153,7 +153,7 @@ class ProfilesViewModel(application: Application) : AndroidViewModel(application
     }
 
     private fun parsePayload(lines: List<String>, service: String, identifier: String): String? {
-        val expectedRespSvc = String.format("%02X", service.toInt(16) + 0x40)
+        val expectedRespSvc = String.format(java.util.Locale.US, "%02X", service.toInt(16) + 0x40)
         for (line in lines) {
             val clean = line.replace(" ", "")
             if (clean.length >= 4 && clean.startsWith(expectedRespSvc)) {
@@ -179,15 +179,15 @@ class ProfilesViewModel(application: Application) : AndroidViewModel(application
             val b = if (payloadHex.length >= 4) payloadHex.substring(2, 4).toInt(16).toDouble() else 0.0
             
             return when (request.decoderType.name) {
-                "PERCENT_255" -> String.format("%.1f %%", a * 100 / 255)
-                "TEMP_MINUS_40" -> String.format("%.0f °C", a - 40)
-                "RPM_FORMULA" -> String.format("%.0f rpm", ((a * 256) + b) / 4)
-                "RAW_A_KMH" -> String.format("%.0f km/h", a)
-                "RAW_A_KPA" -> String.format("%.0f kPa", a)
-                "FUEL_TRIM" -> String.format("%.1f %%", (a - 128) * 100 / 128)
-                "TIMING_ADVANCE" -> String.format("%.1f °", a / 2 - 64)
-                "VOLTAGE_1000" -> String.format("%.2f V", ((a * 256) + b) / 1000)
-                "EQUIVALENCE_RATIO" -> String.format("%.3f λ", ((a * 256) + b) / 32768)
+                "PERCENT_255" -> String.format(java.util.Locale.US, "%.1f %%", a * 100 / 255)
+                "TEMP_MINUS_40" -> String.format(java.util.Locale.US, "%.0f °C", a - 40)
+                "RPM_FORMULA" -> String.format(java.util.Locale.US, "%.0f rpm", ((a * 256) + b) / 4)
+                "RAW_A_KMH" -> String.format(java.util.Locale.US, "%.0f km/h", a)
+                "RAW_A_KPA" -> String.format(java.util.Locale.US, "%.0f kPa", a)
+                "FUEL_TRIM" -> String.format(java.util.Locale.US, "%.1f %%", (a - 128) * 100 / 128)
+                "TIMING_ADVANCE" -> String.format(java.util.Locale.US, "%.1f °", a / 2 - 64)
+                "VOLTAGE_1000" -> String.format(java.util.Locale.US, "%.2f V", ((a * 256) + b) / 1000)
+                "EQUIVALENCE_RATIO" -> String.format(java.util.Locale.US, "%.3f λ", ((a * 256) + b) / 32768)
                 else -> null
             }
         } catch (e: Exception) {

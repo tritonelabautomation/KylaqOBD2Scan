@@ -17,21 +17,14 @@ class TransmissionEngine {
 
     // Calibrated gear ratio bands for Škoda Kylaq 1.0 TSI (EA211 + 6-Speed Torque Converter AT)
     // Values represent RPM per km/h in locked-up / coupled converter state:
-    // Final Drive: ~3.87
-    // 1st (4.04): ~105 RPM / km/h
-    // 2nd (2.37): ~62 RPM / km/h
-    // 3rd (1.56): ~41 RPM / km/h
-    // 4th (1.16): ~30 RPM / km/h
-    // 5th (0.85): ~22 RPM / km/h
-    // 6th (0.67): ~17.5 RPM / km/h
-    private val gearRpmPerKmhBands = listOf(
-        Pair(1, 92.0..120.0),
-        Pair(2, 54.0..72.0),
-        Pair(3, 36.0..48.0),
-        Pair(4, 26.5..34.5),
-        Pair(5, 19.5..25.5),
-        Pair(6, 14.5..19.0)
-    )
+    /**
+     * AQ250-6F / 09G (Aisin TF-60SN) per SSP 291 - ratios 4.148/2.370/1.556/1.155/0.859/0.686,
+     * spread 6.05, slip-controlled lock-up. Relative ratios are factory truth; the absolute
+     * rpm-per-km/h scale self-calibrates from steady cruise samples (final drive x idler x
+     * tyre circumference varies by application), so D/S/M paddle gears all read correctly.
+     */
+    val gearModel = Aq250GearModel()
+    private var lastRpmPerKmh: Double? = null
 
     /**
      * Evaluates transmission state.
@@ -66,15 +59,44 @@ class TransmissionEngine {
         // 3. Estimated Gear (derived with high confidence threshold)
         var estimatedGear: Int? = null
         var isConfident = false
+        // Expected-vs-actual drivetrain deviation: the gear model predicts the engine rpm the
+        // gearbox SHOULD show for the nearest gear at this speed; the difference is torque-
+        // converter slip (open/slip-controlled converter, launch, shift transient) or model
+        // error (tyre change, degraded calibration). Quantified for the dashboard.
+        var slipRpm: Double? = null
+        var lockupDisplay = "Not available"
 
         if (speedKmh != null && engineRpm != null && speedKmh >= 10.0 && engineRpm >= 1000.0) {
             val currentRpmPerKmh = engineRpm / speedKmh
+            // Only steady-ratio samples (converter locked, no shift transient) adapt the model.
+            val stable = lastRpmPerKmh?.let {
+                kotlin.math.abs(it - currentRpmPerKmh) / currentRpmPerKmh < 0.02
+            } ?: false
+            gearModel.observe(currentRpmPerKmh, stable)
+            lastRpmPerKmh = currentRpmPerKmh
 
-            for ((gear, band) in gearRpmPerKmhBands) {
-                if (currentRpmPerKmh in band) {
-                    estimatedGear = gear
-                    isConfident = true
-                    break
+            val est = gearModel.estimate(currentRpmPerKmh)
+            if (est != null) {
+                estimatedGear = est.first
+                isConfident = est.second
+            }
+
+            gearModel.nearestGear(currentRpmPerKmh)?.let { (nearGear, deviation) ->
+                gearModel.expectedRpm(nearGear, speedKmh)?.let { expected ->
+                    val slip = engineRpm - expected
+                    slipRpm = slip
+                    lockupDisplay = when {
+                        deviation <= com.example.engine.Aq250GearModel.TOLERANCE ->
+                            "Locked / coupled (expected %.0f rpm, slip %+.0f)".format(expected, slip)
+                        slip > 0.0 ->
+                            "Converter slip +%.0f rpm (G%d expects %.0f, actual %.0f)".format(
+                                slip, nearGear, expected, engineRpm
+                            )
+                        else ->
+                            "Below model -%.0f rpm (G%d expects %.0f) - engine braking/decel?".format(
+                                -slip, nearGear, expected
+                            )
+                    }
                 }
             }
         }
@@ -94,8 +116,8 @@ class TransmissionEngine {
             targetGearDisplay = "Not available",
             inputRpm = engineRpm,
             outputRpm = speedKmh?.let { it * 15.0 }, // approximate output shaft scale if unvalidated
-            torqueConverterSlipRpm = null,
-            torqueConverterLockup = if (isConfident) "Coupled / Locked" else "Not available",
+            torqueConverterSlipRpm = slipRpm,
+            torqueConverterLockup = lockupDisplay,
             atfTemperatureC = null,
             isEstimatedGearConfident = isConfident,
             source = if (validatedActualGear != null) ValueSource.STANDARD_OBD else ValueSource.ESTIMATED

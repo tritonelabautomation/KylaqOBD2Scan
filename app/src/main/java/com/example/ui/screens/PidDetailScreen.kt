@@ -242,7 +242,7 @@ fun PidDetailScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = record.timestampUtc.takeLast(12).removeSuffix("Z"),
+                                    text = com.example.data.RecordTime.timeOfDay(record.timestampUtc),
                                     fontFamily = FontFamily.Monospace,
                                     fontSize = 11.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -279,8 +279,8 @@ fun PidMetadataCard(
     lastDecoded: String,
     history: List<TransactionRecord>
 ) {
-    val firstObs = history.firstOrNull()?.timestampUtc?.takeLast(12)?.removeSuffix("Z") ?: "--"
-    val lastObs = history.lastOrNull()?.timestampUtc?.takeLast(12)?.removeSuffix("Z") ?: "--"
+    val firstObs = com.example.data.RecordTime.timeOfDay(history.firstOrNull()?.timestampUtc)
+    val lastObs = com.example.data.RecordTime.timeOfDay(history.lastOrNull()?.timestampUtc)
 
     Card(
         modifier = Modifier.fillMaxWidth(),

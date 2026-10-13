@@ -36,6 +36,25 @@ interface TripDao {
 
 @Dao
 interface TelemetrySampleDao {
+    @Query(
+        "SELECT timestamp, pid, numericValue FROM telemetry_samples " +
+            "WHERE timestamp >= :ts AND pid IN (:pids) ORDER BY timestamp ASC"
+    )
+    suspend fun samplesSince(ts: Long, pids: List<String>): List<SampleRow>
+
+    @Query(
+        "SELECT timestamp, pid, numericValue FROM telemetry_samples " +
+            "WHERE tripId = :tripId AND pid IN (:pids) ORDER BY timestamp ASC"
+    )
+    suspend fun samplesForTripPids(tripId: String, pids: List<String>): List<SampleRow>
+
+    /** Newest stored value of one PID: the odometer/level readout when no session is live. */
+    @Query(
+        "SELECT numericValue FROM telemetry_samples WHERE pid = :pid AND numericValue IS NOT NULL " +
+            "ORDER BY timestamp DESC LIMIT 1"
+    )
+    suspend fun latestNumericFor(pid: String): Double?
+
     @Query("SELECT * FROM telemetry_samples WHERE tripId = :tripId ORDER BY sequence ASC")
     fun getSamplesForTripFlow(tripId: String): Flow<List<TelemetrySampleEntity>>
 
@@ -44,6 +63,13 @@ interface TelemetrySampleDao {
 
     @Query("SELECT * FROM telemetry_samples WHERE tripId = :tripId AND pid = :pid ORDER BY sequence ASC")
     suspend fun getSamplesForPid(tripId: String, pid: String): List<TelemetrySampleEntity>
+
+    /** Trend projection: only the PIDs the cross-trip trend charts need, for several trips. */
+    @Query(
+        "SELECT * FROM telemetry_samples WHERE tripId IN (:tripIds) AND pid IN (:pids) " +
+            "ORDER BY tripId ASC, sequence ASC"
+    )
+    suspend fun getSamplesForTrips(tripIds: List<String>, pids: List<String>): List<TelemetrySampleEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertSamples(samples: List<TelemetrySampleEntity>)
@@ -125,4 +151,26 @@ interface AiAnalysisDao {
 
     @Query("DELETE FROM ai_analyses")
     suspend fun deleteAllAnalyses()
+}
+
+/** Projection for since-refuel aggregation: only the columns the integrator reads. */
+data class SampleRow(val timestamp: Long, val pid: String, val numericValue: Double?)
+
+@Dao
+interface RefuelEventDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertRefuelEvent(e: RefuelEventEntity)
+
+    @Query("SELECT * FROM refuel_events ORDER BY tsEndMs DESC")
+    fun refuelEventsFlow(): Flow<List<RefuelEventEntity>>
+
+    @Query("SELECT * FROM refuel_events ORDER BY tsEndMs DESC")
+    suspend fun refuelEvents(): List<RefuelEventEntity>
+
+    @Query("UPDATE refuel_events SET calibratedPumpL = :pumpL WHERE idMs = :idMs")
+    suspend fun calibrate(idMs: Long, pumpL: Double)
+
+    /** Pump litres a receipt already matched to this event: a rewrite must never drop them. */
+    @Query("SELECT calibratedPumpL FROM refuel_events WHERE idMs = :idMs")
+    suspend fun calibratedPumpFor(idMs: Long): Double?
 }

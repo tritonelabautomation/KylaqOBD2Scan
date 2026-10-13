@@ -31,38 +31,40 @@ class KylaqDiscoveryComprehensiveTest {
         // BE (10111110) -> 01, 03, 04, 05, 06, 07
         // 3E (00111110) -> 0B, 0C, 0D, 0E, 0F
         // B8 (10111000) -> 11, 13, 14, 15
-        // 13 (00010011) -> 1C, 1F, 20
+        // 13 (00010011) -> 1C, 1F, and bit 32 = the 0120 range MARKER
         val bitmap = byteArrayOf(0xBE.toByte(), 0x3E.toByte(), 0xB8.toByte(), 0x13.toByte())
         val supported = PidDiscoveryDecoder.decodeSupportedPids(0x00, bitmap)
 
-        assertEquals(18, supported.size)
+        // 2026-09-17: the range marker (basePid + 0x20) is NOT a data PID and must never be
+        // emitted as one - it is what made the owner export "validate" PID 60 and PID 80.
+        assertEquals(17, supported.size)
         assertTrue(supported.contains(0x0C)) // Engine RPM
         assertTrue(supported.contains(0x0D)) // Vehicle Speed
-        assertTrue(supported.contains(0x20)) // Next range indicator
+        assertFalse(supported.contains(0x20)) // range marker, reported by hasNextRange only
         assertTrue(PidDiscoveryDecoder.hasNextRange(bitmap))
     }
 
     @Test
     fun testBitmapDecodingRange0120() {
         // Range 0120: basePid = 0x20 -> PIDs 0x21..0x40
-        // 80 00 00 01 -> PID 0x21 and PID 0x40 supported
+        // 80 00 00 01 -> PID 0x21 supported, plus bit 32 = the 0140 range marker
         val bitmap = byteArrayOf(0x80.toByte(), 0x00, 0x00, 0x01)
         val supported = PidDiscoveryDecoder.decodeSupportedPids(0x20, bitmap)
 
-        assertEquals(listOf(0x21, 0x40), supported)
+        assertEquals(listOf(0x21), supported)
         assertTrue("Bit 0 set -> hasNextRange true", PidDiscoveryDecoder.hasNextRange(bitmap))
     }
 
     @Test
     fun testBitmapDecodingRange0140() {
         // Range 0140: basePid = 0x40 -> PIDs 0x41..0x60
-        // FED00001 -> 41..45, 49, 4B, 60
+        // FED00001 -> 41..45, 49, 4B (0x60 is the range marker, never a data PID)
         val bitmap = byteArrayOf(0xFE.toByte(), 0xD0.toByte(), 0x00, 0x01)
         val supported = PidDiscoveryDecoder.decodeSupportedPids(0x40, bitmap)
 
         assertTrue(supported.contains(0x41))
         assertTrue(supported.contains(0x42)) // Control module voltage
-        assertTrue(supported.contains(0x60))
+        assertFalse(supported.contains(0x60))
         assertTrue(PidDiscoveryDecoder.hasNextRange(bitmap))
     }
 
@@ -72,7 +74,7 @@ class KylaqDiscoveryComprehensiveTest {
         val bitmap = byteArrayOf(0x00, 0x01, 0x00, 0x01)
         val supported = PidDiscoveryDecoder.decodeSupportedPids(0x60, bitmap)
 
-        assertEquals(listOf(0x70, 0x80), supported)
+        assertEquals(listOf(0x70), supported)
         assertTrue(PidDiscoveryDecoder.hasNextRange(bitmap))
     }
 
@@ -82,7 +84,7 @@ class KylaqDiscoveryComprehensiveTest {
         val bitmap = byteArrayOf(0x80.toByte(), 0x00, 0x00, 0x01)
         val supported = PidDiscoveryDecoder.decodeSupportedPids(0x80, bitmap)
 
-        assertEquals(listOf(0x81, 0xA0), supported)
+        assertEquals(listOf(0x81), supported)
         assertTrue(PidDiscoveryDecoder.hasNextRange(bitmap))
     }
 
@@ -92,7 +94,7 @@ class KylaqDiscoveryComprehensiveTest {
         val bitmap = byteArrayOf(0x00, 0x80.toByte(), 0x00, 0x01)
         val supported = PidDiscoveryDecoder.decodeSupportedPids(0xA0, bitmap)
 
-        assertEquals(listOf(0xA9, 0xC0), supported)
+        assertEquals(listOf(0xA9), supported)
         assertTrue(PidDiscoveryDecoder.hasNextRange(bitmap))
     }
 
@@ -102,7 +104,7 @@ class KylaqDiscoveryComprehensiveTest {
         val bitmap = byteArrayOf(0x40, 0x00, 0x00, 0x01)
         val supported = PidDiscoveryDecoder.decodeSupportedPids(0xC0, bitmap)
 
-        assertEquals(listOf(0xC2, 0xE0), supported)
+        assertEquals(listOf(0xC2), supported)
         assertTrue(PidDiscoveryDecoder.hasNextRange(bitmap))
     }
 
@@ -212,7 +214,7 @@ class KylaqDiscoveryComprehensiveTest {
 
     @Test
     fun testKylaqAuthoritativeProfile() {
-        assertEquals("Škoda Kylaq", KylaqProtocolProfile.VEHICLE_NAME)
+        assertEquals("Skoda Kylaq", KylaqProtocolProfile.VEHICLE_NAME) // ASCII constant: avoids mojibake on non-UTF8 consoles
         assertEquals("1.0 TSI (EA211)", KylaqProtocolProfile.ENGINE_NAME)
         assertEquals("ATSP6", KylaqProtocolProfile.ELM_PROTOCOL_COMMAND)
         assertEquals("7DF", KylaqProtocolProfile.FUNCTIONAL_REQUEST_ID)
@@ -236,6 +238,59 @@ class KylaqDiscoveryComprehensiveTest {
             val isForbidden = svc == "04" || svc == "08"
             assertTrue("Service $svc must be strictly forbidden during discovery", isForbidden)
         }
+    }
+
+    @Test
+    fun testAuthenticKylaq2026ScanTraceDiscoveryFullParity() {
+        // Exact live vehicle bitmaps from Škoda Kylaq 1.0 TSI (VIN MEXKPEPC2TG028855)
+        // Timestamp: 2026-09-26T21:32:15.493+05:30
+        val b0100 = byteArrayOf(0xBE.toByte(), 0x3E.toByte(), 0xA8.toByte(), 0x13.toByte())
+        val b0120 = byteArrayOf(0x80.toByte(), 0x07.toByte(), 0xB0.toByte(), 0x11.toByte())
+        val b0140 = byteArrayOf(0xFE.toByte(), 0xD0.toByte(), 0x84.toByte(), 0x01.toByte())
+        val b0160 = byteArrayOf(0x6B.toByte(), 0x09.toByte(), 0x00.toByte(), 0x41.toByte())
+        val b0180 = byteArrayOf(0x00.toByte(), 0x24.toByte(), 0x00.toByte(), 0x0D.toByte())
+        val b01A0 = byteArrayOf(0x14.toByte(), 0x00.toByte(), 0x00.toByte(), 0x00.toByte())
+
+        val pids0100 = PidDiscoveryDecoder.decodeSupportedPids(0x00, b0100)
+        val pids0120 = PidDiscoveryDecoder.decodeSupportedPids(0x20, b0120)
+        val pids0140 = PidDiscoveryDecoder.decodeSupportedPids(0x40, b0140)
+        val pids0160 = PidDiscoveryDecoder.decodeSupportedPids(0x60, b0160)
+        val pids0180 = PidDiscoveryDecoder.decodeSupportedPids(0x80, b0180)
+        val pids01A0 = PidDiscoveryDecoder.decodeSupportedPids(0xA0, b01A0)
+
+        // Verify counts
+        assertEquals(16, pids0100.size)
+        assertEquals(8, pids0120.size)
+        assertEquals(12, pids0140.size)
+        assertEquals(8, pids0160.size)
+        assertEquals(4, pids0180.size)
+        assertEquals(2, pids01A0.size)
+
+        val totalSupported = pids0100 + pids0120 + pids0140 + pids0160 + pids0180 + pids01A0
+        assertEquals(50, totalSupported.size)
+
+        // Range continuations
+        assertTrue(PidDiscoveryDecoder.hasNextRange(b0100))
+        assertTrue(PidDiscoveryDecoder.hasNextRange(b0120))
+        assertTrue(PidDiscoveryDecoder.hasNextRange(b0140))
+        assertTrue(PidDiscoveryDecoder.hasNextRange(b0160))
+        assertTrue(PidDiscoveryDecoder.hasNextRange(b0180))
+        assertFalse(PidDiscoveryDecoder.hasNextRange(b01A0)) // Bit 32 is 0 -> Stop at 01A0
+
+        // Key expected PIDs from live Kylaq 1.0 TSI scan
+        assertTrue(totalSupported.contains(0x0C)) // RPM
+        assertTrue(totalSupported.contains(0x0D)) // Speed
+        assertTrue(totalSupported.contains(0x05)) // Coolant
+        assertTrue(totalSupported.contains(0x0B)) // MAP (Boost)
+        assertTrue(totalSupported.contains(0x2F)) // Fuel Tank Level
+        assertTrue(totalSupported.contains(0x42)) // Voltage
+        assertTrue(totalSupported.contains(0x62)) // Actual Torque %
+        assertTrue(totalSupported.contains(0x63)) // Reference Torque (178 Nm)
+        assertTrue(totalSupported.contains(0x6D)) // Fuel Pressure Control (Research)
+        assertTrue(totalSupported.contains(0x70)) // Boost Pressure Control (Research)
+        assertTrue(totalSupported.contains(0x9D)) // Fuel Rate Mass (g/s)
+        assertTrue(totalSupported.contains(0xA4)) // Transmission Actual Gear / Ratio
+        assertTrue(totalSupported.contains(0xA6)) // Odometer (km)
     }
 
     @Test

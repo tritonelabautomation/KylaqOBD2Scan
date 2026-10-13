@@ -63,12 +63,36 @@ class ObdCarSession : Session() {
 
     override fun onCreateScreen(intent: Intent): Screen {
         Log.i("OBDLogger/AndroidAuto", "ObdCarSession onCreateScreen with intent: $intent")
-        // FIX TD-1: Propagate error instead of silently retrying the same broken path.
+        // 2026-09-14 (owner: AA never lists the app): rethrowing here made the AA
+        // host fail the whole bind, so the app vanished from the launcher with no
+        // visible error. A degraded diagnostic pane beats an invisible app.
         return try {
             ObdDashboardScreen(carContext)
         } catch (t: Throwable) {
-            Log.e("OBDLogger/AndroidAuto", "Error instantiating ObdDashboardScreen — rethrowing", t)
-            throw t
+            Log.e("OBDLogger/AndroidAuto", "ObdDashboardScreen failed - serving fallback pane", t)
+            ObdFallbackScreen(carContext, t.message ?: t.javaClass.simpleName)
         }
+    }
+}
+
+/**
+ * Degraded AA screen: proves the car-app bind works and tells the driver where the
+ * live data is, instead of the host dropping the app silently.
+ */
+class ObdFallbackScreen(private val ctx: androidx.car.app.CarContext, private val reason: String) :
+    Screen(ctx) {
+    override fun onGetTemplate(): androidx.car.app.model.Template {
+        val pane = androidx.car.app.model.Pane.Builder()
+            .addRow(
+                androidx.car.app.model.Row.Builder()
+                    .setTitle("Kylaq TSI Coach")
+                    .addText("Car telemetry UI could not start: $reason")
+                    .addText("Live logging continues on the phone app; the car mirror retries on next launch.")
+                    .build()
+            )
+            .build()
+        return androidx.car.app.model.PaneTemplate.Builder(pane)
+            .setHeaderAction(androidx.car.app.model.Action.BACK)
+            .build()
     }
 }

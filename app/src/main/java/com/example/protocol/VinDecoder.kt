@@ -55,8 +55,12 @@ object VinDecoder {
         try {
             val variants = catalogRepository.getAllVariants()
             if (mfgMatch != null && variants.isNotEmpty()) {
-                val mfgId = catalogRepository.getAllManufacturers().find { 
-                    it.name.contains(mfgMatch, ignoreCase = true) 
+                // FIX: the catalog stores the brand as "Škoda", so a plain
+                // contains("Skoda") never matched and every Škoda VIN decoded to
+                // manufacturerCandidate = null / confidence = UNVERIFIED. Compare with
+                // diacritics folded away on both sides.
+                val mfgId = catalogRepository.getAllManufacturers().find {
+                    brandMatches(it.name, mfgMatch)
                 }?.id
                 
                 if (mfgId != null) {
@@ -112,22 +116,43 @@ object VinDecoder {
         return yearMap[c]
     }
 
+    /**
+     * Accent- and case-insensitive brand match, so the ASCII label returned by
+     * [decodeWmi] ("Skoda") matches catalog entries stored as "Škoda".
+     */
+    private fun brandMatches(catalogName: String, brand: String): Boolean {
+        val a = foldDiacritics(catalogName)
+        val b = foldDiacritics(brand)
+        if (a.isBlank() || b.isBlank()) return false
+        return a.contains(b, ignoreCase = true) || b.contains(a, ignoreCase = true)
+    }
+
+    private fun foldDiacritics(value: String): String =
+        java.text.Normalizer.normalize(value, java.text.Normalizer.Form.NFD)
+            .replace(Regex("\\p{Mn}+"), "")
+
     private fun decodeWmi(wmi: String): String? {
         // India WMIs
         if (wmi.startsWith("MA1") || wmi.startsWith("MA3")) return "Maruti Suzuki"
         if (wmi.startsWith("MAL")) return "Hyundai"
-        if (wmi.startsWith("MAT")) return "Tata"
+        if (wmi.startsWith("MAT")) return "Tata Motors"
         if (wmi.startsWith("MA7")) return "Skoda"
+        // FIX: "MEX" is the Skoda Auto Volkswagen India (Chakan/Pune) WMI used by the
+        // Kylaq / Kushaq / Slavia. The reference trace for this very car reads
+        // VIN MEXKPEPC2TG028855, which previously decoded to manufacturerCandidate = null.
+        if (wmi.startsWith("MEX")) return "Skoda"
         if (wmi.startsWith("MDH")) return "Nissan"
         if (wmi.startsWith("MBH")) return "Nissan" // Often shared or specific models
         if (wmi.startsWith("MHF")) return "Toyota"
         if (wmi.startsWith("MAK")) return "Honda"
         if (wmi.startsWith("MZB")) return "Kia"
         if (wmi.startsWith("MA6")) return "Mahindra"
-        
+        if (wmi.startsWith("MGR") || wmi.startsWith("MGF")) return "MG Motor"
+        if (wmi.startsWith("MCB") || wmi.startsWith("MC2")) return "Renault"
+
         // VW India
         if (wmi.startsWith("WVW") || wmi.startsWith("MDV")) return "Volkswagen"
-        
+
         return null
     }
 }
