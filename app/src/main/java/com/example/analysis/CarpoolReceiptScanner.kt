@@ -398,7 +398,7 @@ object CarpoolReceiptScanner {
     fun extractAmounts(text: String): List<Double> {
         val amounts = mutableListOf<Double>()
         // Strip distance tokens (e.g. "14.8 km"), time tokens (e.g. "20 mins"), and percentage tokens (e.g. "86%")
-        val clean = text.replace(Regex("(?i)\\b\\d+(?:\\.\\d+)?\\s*(?:km|kms|min|mins|hr|hrs|%)\\b"), "")
+        val clean = text.replace(Regex("(?i)(?:\\b\\d+(?:\\.\\d+)?\\s*(?:km|kms|min|mins|hr|hrs|%)|\\d+(?:\\.\\d+)?%)"), "")
             .replace('↗', ' ')
             .replace("->", " ")
             .replace("→", " ")
