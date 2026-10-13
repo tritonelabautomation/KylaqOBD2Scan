@@ -258,13 +258,16 @@ object CarpoolReceiptScanner {
                     var dist: Double? = null
                     for (j in (i + 1)..minOf(i + 4, allLines.size - 1)) {
                         val nextLine = allLines[j]
+                        if (isLikelyRiderName(nextLine)) break
                         val extracted = extractAmounts(nextLine)
-                        if (extracted.isNotEmpty()) {
+                        if (extracted.isNotEmpty() && amt == null) {
                             amt = extracted.maxOrNull()
                         }
                         val md = distancePattern.matcher(nextLine)
-                        if (md.find()) dist = md.group(1)?.toDoubleOrNull()
-                        if (amt != null) break
+                        if (md.find() && dist == null) {
+                            dist = md.group(1)?.toDoubleOrNull()
+                        }
+                        if (amt != null && dist != null) break
                     }
                     if (amt != null && amt > 0.0 && detectedRiders.none { it.name.equals(name, ignoreCase = true) }) {
                         detectedRiders.add(CarpoolCodec.Rider(name = name, amount = amt, distanceKm = dist))

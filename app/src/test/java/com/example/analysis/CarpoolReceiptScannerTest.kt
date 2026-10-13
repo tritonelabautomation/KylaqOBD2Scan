@@ -164,12 +164,12 @@ class CarpoolReceiptScannerTest {
                     while (m.find()) {
                         m.group(1)?.toDoubleOrNull()?.let { if (it > 5.0 && it < 10000.0) amts.add(it) }
                     }
-                    if (amts.isNotEmpty()) {
+                    if (amts.isNotEmpty() && amt == null) {
                         amt = amts.maxOrNull()
                     }
                     val md = distancePattern.matcher(nextLine)
-                    if (md.find()) dist = md.group(1)?.toDoubleOrNull()
-                    if (amt != null) break
+                    if (md.find() && dist == null) dist = md.group(1)?.toDoubleOrNull()
+                    if (amt != null && dist != null) break
                 }
                 if (amt != null && amt > 0.0) {
                     detectedRiders.add(com.example.data.CarpoolCodec.Rider(name = name, amount = amt, distanceKm = dist))
