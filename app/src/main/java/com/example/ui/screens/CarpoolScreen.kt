@@ -1,5 +1,10 @@
 package com.example.ui.screens
 
+import android.net.Uri
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,11 +21,13 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.MaterialTheme
@@ -37,9 +44,11 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.analysis.CarpoolReceiptScanner
 import com.example.data.CarpoolCodec
 import com.example.ui.theme.ElectricAmber
 import com.example.ui.theme.NeonEmerald
@@ -62,6 +71,7 @@ fun CarpoolScreen(
     viewModel: com.example.ui.viewmodel.MainViewModel,
     onBack: () -> Unit
 ) {
+    val context = LocalContext.current
     val tick by viewModel.carpoolRepository.changeTick.collectAsState()
     var refresh by remember { mutableStateOf(0) }
     val entries = remember(tick, refresh) {
@@ -77,6 +87,36 @@ fun CarpoolScreen(
     var showAdd by remember { mutableStateOf(false) }
     var editTarget by remember { mutableStateOf<CarpoolCodec.CarpoolEntry?>(null) }
     val scope = rememberCoroutineScope()
+    var isOcrScanning by remember { mutableStateOf(false) }
+
+    val screenOcrPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            isOcrScanning = true
+            val result = CarpoolReceiptScanner.scanCarpoolImage(context, uri)
+            isOcrScanning = false
+            if (result != null && (result.riders.isNotEmpty() || (result.totalEarned ?: 0.0) > 0.0)) {
+                val dist = result.totalDistanceKm ?: 0.0
+                val now = System.currentTimeMillis()
+                val entry = CarpoolCodec.CarpoolEntry(
+                    idMs = now,
+                    tripId = null,
+                    dateUtc = com.example.data.RecordTime.stamp(now),
+                    distanceKm = dist,
+                    riders = result.riders.ifEmpty {
+                        listOf(CarpoolCodec.Rider(name = "Rider 1", amount = result.totalEarned ?: 0.0))
+                    }
+                )
+                editTarget = entry
+                showAdd = true
+                Toast.makeText(context, "Scanned ${entry.riders.size} rider(s) from screenshot", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(context, "Could not auto-read carpool screenshot", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -91,24 +131,34 @@ fun CarpoolScreen(
         Column(
             Modifier.padding(pad).fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)
         ) {
-            Button(onClick = { showAdd = true }, modifier = Modifier.fillMaxWidth()) {
-                Text("+ Log car pool")
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { editTarget = null; showAdd = true },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("+ Log car pool")
+                }
+                OutlinedButton(
+                    onClick = { screenOcrPicker.launch("image/*") },
+                    modifier = Modifier.weight(1.1f),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = NeonEmerald),
+                    border = BorderStroke(1.dp, NeonEmerald.copy(alpha = 0.6f)),
+                    enabled = !isOcrScanning
+                ) {
+                    Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(16.dp), tint = NeonEmerald)
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (isOcrScanning) "Scanning..." else "Scan Screenshot", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
             }
             Spacer(Modifier.height(12.dp))
             if (entries.isEmpty()) {
                 Text(
-                    "No car-pool rides logged yet. Log one with its date and time: if a saved " +
-                        "trip covers that instant the ride links to it automatically - including " +
-                        "trips recovered later after an abrupt stop.",
+                    "No car-pool rides logged yet. Log one with its date and time or scan a ride " +
+                        "confirmation screenshot: if a saved trip covers that instant the ride " +
+                        "links to it automatically - including trips recovered later after an abrupt stop.",
                     color = TextSecondaryDark, fontSize = 12.sp
                 )
             }
-            // Owner 2026-09-20: "month wise earning ... not in the top in between trip segregate
-            // to that month the log and show that month earning and fuel refill cost saving or
-            // net fuel cost for that month". The single top summary is gone: every IST month that
-            // holds rides gets its own header card directly above its rides, carrying that
-            // month's earned, the fuel cost of its linked trips, and the net fuel cost (or the
-            // saving when earnings beat fuel) - the same tested numbers the Reports card shows.
             val monthTotals = monthly.associateBy { it.month }
             entries.groupBy {
                 com.example.data.RecordTime.format("yyyy-MM", CarpoolCodec.whenMs(it) ?: it.idMs)
@@ -265,8 +315,8 @@ fun CarpoolScreen(
     if (showAdd || editTarget != null) {
         CarpoolDialog(
             existing = editTarget,
-            defaultDistanceKm = 0.0,
-            defaultWhenMs = System.currentTimeMillis(),
+            defaultDistanceKm = editTarget?.distanceKm ?: 0.0,
+            defaultWhenMs = editTarget?.let { CarpoolCodec.whenMs(it) } ?: System.currentTimeMillis(),
             onDismiss = { showAdd = false; editTarget = null },
             onSave = { d, riders, whenMs ->
                 scope.launch {

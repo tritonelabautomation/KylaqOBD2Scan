@@ -1,5 +1,10 @@
 package com.example.ui.screens
 
+import android.net.Uri
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,16 +16,19 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -29,6 +37,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
@@ -37,11 +46,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.analysis.CarpoolReceiptScanner
 import com.example.ui.theme.ElectricAmber
 import com.example.ui.theme.NeonEmerald
 import com.example.ui.theme.TextPrimaryDark
 import com.example.ui.theme.TextSecondaryDark
 import com.example.ui.theme.WarningRed
+import kotlinx.coroutines.launch
 
 /**
  * Car-pool views shared by the trip card and the standalone Car Pool screen (owner 2026-09-19:
@@ -199,7 +210,7 @@ fun CarpoolEntryRows(
 
 /**
  * Car-pool entry dialog: ride date and time (IST), shared distance, up to four rider rows with
- * "+" adding a seat. The whenMs handed to onSave is the ride's own instant - the linking key.
+ * "+" adding a seat. Includes instant OCR scanning for ride-share confirmation screenshots.
  */
 @Composable
 fun CarpoolDialog(
@@ -222,13 +233,11 @@ fun CarpoolDialog(
     var timeStr by remember {
         mutableStateOf(com.example.data.RecordTime.format("HH:mm", baseMs))
     }
-    // Owner 2026-09-20, with five reference screenshots (system clock dial, Fuelio calendar):
-    // "you are asking me to type date year month date instead of showing calender to select ...
-    // same goes for the time". The two fields are now tappable and open the SYSTEM date and time
-    // pickers - the same calendar grid and clock dial every other app on the phone shows. The
-    // typed-format strings stay the source of truth so the save path and the IST math are
-    // untouched; the pickers write back through RecordTime.pickedDate/pickedTime (zero-padded).
     val pickerContext = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var isScanning by remember { mutableStateOf(false) }
+    var scanNotice by remember { mutableStateOf<String?>(null) }
+
     fun openDatePicker() {
         val parts = dateStr.split('-')
         val now = java.util.Calendar.getInstance()
@@ -252,12 +261,7 @@ fun CarpoolDialog(
             h, mi, true
         ).show()
     }
-    // BUGFIX 2026-09-19 (owner: "unable to type rider 1 & ₹ place it's not taking any input
-    // from keyboard"): these were mutableStateOf(MutableList) updated by MUTATING the list and
-    // re-assigning the SAME instance - Compose compares old and new value, sees the identical
-    // reference, treats the write as a no-op and never recomposes: every keystroke vanished and
-    // "+ Add rider" silently added nothing. A SnapshotStateList tracks element writes itself, so
-    // typing works the way the owner expects.
+
     val riderNames = remember {
         mutableStateListOf<String>().apply { addAll(existing?.riders?.map { it.name } ?: listOf("")) }
     }
@@ -273,11 +277,81 @@ fun CarpoolDialog(
                 ?: listOf(""))
         }
     }
+
+    val ocrPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            isScanning = true
+            scanNotice = "Scanning carpool screenshot..."
+            val result = CarpoolReceiptScanner.scanCarpoolImage(pickerContext, uri)
+            isScanning = false
+            if (result != null && (result.riders.isNotEmpty() || (result.totalEarned ?: 0.0) > 0.0)) {
+                riderNames.clear()
+                riderAmounts.clear()
+                riderDistances.clear()
+
+                if (result.riders.isNotEmpty()) {
+                    result.riders.forEach { r ->
+                        riderNames.add(r.name)
+                        riderAmounts.add(String.format(java.util.Locale.US, "%.0f", r.amount))
+                        riderDistances.add(r.distanceKm?.let { String.format(java.util.Locale.US, "%.1f", it) } ?: "")
+                    }
+                } else if (result.totalEarned != null && result.totalEarned > 0.0) {
+                    riderNames.add("Rider 1")
+                    riderAmounts.add(String.format(java.util.Locale.US, "%.0f", result.totalEarned))
+                    riderDistances.add("")
+                }
+
+                if (result.totalDistanceKm != null && result.totalDistanceKm > 0.0) {
+                    distance = String.format(java.util.Locale.US, "%.1f", result.totalDistanceKm)
+                }
+
+                val routeInfo = if (result.routeFrom != null && result.routeTo != null) {
+                    " (${result.routeFrom} → ${result.routeTo})"
+                } else ""
+                val totStr = String.format(java.util.Locale.US, "₹%.0f", result.totalEarned ?: result.riders.sumOf { it.amount })
+                scanNotice = "OCR: ${result.riders.size} rider(s) detected · $totStr$routeInfo"
+                Toast.makeText(pickerContext, "Carpool OCR Success: ${result.riders.size} rider(s), $totStr", Toast.LENGTH_SHORT).show()
+            } else {
+                scanNotice = "Could not auto-read carpool data from image. Please enter manually."
+                Toast.makeText(pickerContext, "Could not auto-read carpool screenshot", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Car pool ride") },
         text = {
             Column {
+                OutlinedButton(
+                    onClick = { ocrPicker.launch("image/*") },
+                    modifier = Modifier.fillMaxWidth().height(42.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = NeonEmerald),
+                    border = BorderStroke(1.dp, NeonEmerald.copy(alpha = 0.6f)),
+                    enabled = !isScanning
+                ) {
+                    Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(16.dp), tint = NeonEmerald)
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        if (isScanning) "Scanning Screenshot..." else "Scan Carpool Screenshot (OCR)",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                if (scanNotice != null) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        scanNotice!!,
+                        fontSize = 10.sp,
+                        color = if (scanNotice!!.startsWith("OCR:")) NeonEmerald else ElectricAmber
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     PickerField(
                         label = "Date (IST)",
@@ -371,8 +445,6 @@ fun CarpoolDialog(
                     val rd = distStr.toDoubleOrNull()?.takeIf { it > 0.0 }
                     com.example.data.CarpoolCodec.Rider(n.trim(), a, rd)
                 }
-                // Same IST calendar math as the fuel log: the typed date and time ARE the ride's
-                // instant, in the device's IST zone - never UTC-shifted to another day.
                 val cal = java.util.Calendar.getInstance()
                 val dp = dateStr.split('-')
                 val tp = timeStr.split(':')
