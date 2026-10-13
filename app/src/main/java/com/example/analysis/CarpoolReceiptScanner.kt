@@ -353,7 +353,7 @@ object CarpoolReceiptScanner {
                 Return ONLY valid JSON.
             """.trimIndent()
 
-            val response = GeminiTextClient.generateWithImage(prompt, imageBytes, "image/jpeg")
+            val response = GeminiTextClient.scanCustomJson(imageBytes, prompt, "image/jpeg")
                 ?: return@withContext null
 
             val jsonStr = response.trim()
