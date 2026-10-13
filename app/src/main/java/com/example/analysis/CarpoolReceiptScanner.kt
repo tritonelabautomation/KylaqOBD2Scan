@@ -301,7 +301,7 @@ object CarpoolReceiptScanner {
         var routeTo: String? = null
         val detectedRiders = mutableListOf<CarpoolCodec.Rider>()
 
-        val routePattern = Pattern.compile("(?i)(?:Route:\\s*)?(.*?)\s*(?:->|→|—>|-->|to)\s*(.*)")
+        val routePattern = Pattern.compile("(?i)(?:Route:\\s*)?(.*?)\\s*(?:->|→|—>|-->|to)\\s*(.*)")
         for (line in text.lines()) {
             val m = routePattern.matcher(line.trim())
             if (m.find()) {
