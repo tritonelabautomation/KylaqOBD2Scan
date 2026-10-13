@@ -14,14 +14,19 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Schedule
-import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -40,10 +45,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.analysis.CarpoolReceiptScanner
@@ -209,8 +215,8 @@ fun CarpoolEntryRows(
 }
 
 /**
- * Car-pool entry dialog: ride date and time (IST), shared distance, up to four rider rows with
- * "+" adding a seat. Includes instant OCR scanning for ride-share confirmation screenshots.
+ * Dynamic Car-pool entry dialog: ride date and time (IST), shared distance, adaptive vertically
+ * scrollable container supporting up to four rider rows with real-time per-km and total calculations.
  */
 @Composable
 fun CarpoolDialog(
@@ -263,18 +269,21 @@ fun CarpoolDialog(
     }
 
     val riderNames = remember {
-        mutableStateListOf<String>().apply { addAll(existing?.riders?.map { it.name } ?: listOf("")) }
+        mutableStateListOf<String>().apply {
+            val list = existing?.riders?.map { it.name } ?: listOf("")
+            addAll(list.ifEmpty { listOf("") })
+        }
     }
     val riderAmounts = remember {
         mutableStateListOf<String>().apply {
-            addAll(existing?.riders?.map { String.format(java.util.Locale.US, "%.0f", it.amount) }
-                ?: listOf(""))
+            val list = existing?.riders?.map { String.format(java.util.Locale.US, "%.0f", it.amount) } ?: listOf("")
+            addAll(list.ifEmpty { listOf("") })
         }
     }
     val riderDistances = remember {
         mutableStateListOf<String>().apply {
-            addAll(existing?.riders?.map { it.distanceKm?.let { d -> String.format(java.util.Locale.US, "%.1f", d) } ?: "" }
-                ?: listOf(""))
+            val list = existing?.riders?.map { it.distanceKm?.let { d -> String.format(java.util.Locale.US, "%.1f", d) } ?: "" } ?: listOf("")
+            addAll(list.ifEmpty { listOf("") })
         }
     }
 
@@ -323,9 +332,20 @@ fun CarpoolDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Car pool ride") },
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Groups, contentDescription = null, tint = NeonEmerald, modifier = Modifier.size(22.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Car pool ride", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = TextPrimaryDark)
+            }
+        },
         text = {
-            Column {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
                 OutlinedButton(
                     onClick = { ocrPicker.launch("image/*") },
                     modifier = Modifier.fillMaxWidth().height(42.dp),
@@ -343,16 +363,14 @@ fun CarpoolDialog(
                     )
                 }
                 if (scanNotice != null) {
-                    Spacer(Modifier.height(4.dp))
                     Text(
                         scanNotice!!,
-                        fontSize = 10.sp,
+                        fontSize = 11.sp,
                         color = if (scanNotice!!.startsWith("OCR:")) NeonEmerald else ElectricAmber
                     )
                 }
-                Spacer(Modifier.height(8.dp))
 
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     PickerField(
                         label = "Date (IST)",
                         value = dateStr,
@@ -368,69 +386,146 @@ fun CarpoolDialog(
                         onClick = ::openTimePicker
                     )
                 }
-                Spacer(Modifier.height(6.dp))
+
                 OutlinedTextField(
                     value = distance,
                     onValueChange = { distance = it },
                     label = { Text("Total trip distance km") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
                     supportingText = { Text("Trip's full distance; per-rider below may differ", fontSize = 10.sp) }
                 )
-                Spacer(Modifier.height(8.dp))
+
+                Text(
+                    "Riders & Earnings (${riderNames.size}/${com.example.data.CarpoolCodec.MAX_RIDERS})",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = TextPrimaryDark,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+
                 riderNames.forEachIndexed { i, name ->
-                    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                            OutlinedTextField(
-                                value = name,
-                                onValueChange = { v -> riderNames[i] = v },
-                                label = { Text("Rider ${i + 1}") },
-                                singleLine = true,
-                                modifier = Modifier.weight(1f)
-                            )
-                            OutlinedTextField(
-                                value = riderAmounts[i],
-                                onValueChange = { v -> riderAmounts[i] = v },
-                                label = { Text("₹") },
-                                singleLine = true,
-                                modifier = Modifier.weight(0.6f)
-                            )
-                            if (riderNames.size > 1) {
-                                IconButton(onClick = {
-                                    riderNames.removeAt(i)
-                                    riderAmounts.removeAt(i)
-                                    riderDistances.removeAt(i)
-                                }) { Icon(Icons.Default.Close, "Remove rider") }
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                    ) {
+                        Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Person, contentDescription = null, tint = NeonEmerald, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("Rider ${i + 1}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextPrimaryDark)
+                                }
+                                if (riderNames.size > 1) {
+                                    IconButton(
+                                        onClick = {
+                                            riderNames.removeAt(i)
+                                            riderAmounts.removeAt(i)
+                                            riderDistances.removeAt(i)
+                                        },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(Icons.Default.Close, "Remove rider", tint = WarningRed, modifier = Modifier.size(16.dp))
+                                    }
+                                }
                             }
-                        }
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            OutlinedTextField(
-                                value = riderDistances[i],
-                                onValueChange = { v -> riderDistances[i] = v },
-                                label = { Text("Rider km (optional)") },
-                                singleLine = true,
-                                modifier = Modifier.weight(1f),
-                                supportingText = { Text("Leave blank = same as trip", fontSize = 9.sp) }
-                            )
-                            val d = riderDistances[i].toDoubleOrNull() ?: distance.toDoubleOrNull() ?: 0.0
-                            val a = riderAmounts[i].toDoubleOrNull() ?: 0.0
-                            val perKm = if (d > 0.1 && a > 0) String.format(java.util.Locale.US, "₹%.1f/km", a / d) else ""
-                            if (perKm.isNotEmpty()) {
-                                Text(perKm, color = TextSecondaryDark, fontSize = 11.sp, modifier = Modifier.padding(top = 16.dp))
+
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                OutlinedTextField(
+                                    value = name,
+                                    onValueChange = { v -> riderNames[i] = v },
+                                    label = { Text("Name") },
+                                    singleLine = true,
+                                    modifier = Modifier.weight(1.2f)
+                                )
+                                OutlinedTextField(
+                                    value = riderAmounts[i],
+                                    onValueChange = { v -> riderAmounts[i] = v },
+                                    label = { Text("₹ Amount") },
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    singleLine = true,
+                                    modifier = Modifier.weight(0.8f)
+                                )
+                            }
+
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                OutlinedTextField(
+                                    value = riderDistances[i],
+                                    onValueChange = { v -> riderDistances[i] = v },
+                                    label = { Text("Shared km (opt)") },
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                    singleLine = true,
+                                    modifier = Modifier.weight(1f),
+                                    supportingText = { Text("Default = full trip", fontSize = 9.sp) }
+                                )
+                                val d = riderDistances[i].toDoubleOrNull() ?: distance.toDoubleOrNull() ?: 0.0
+                                val a = riderAmounts[i].toDoubleOrNull() ?: 0.0
+                                val perKm = if (d > 0.1 && a > 0) String.format(java.util.Locale.US, "₹%.1f/km", a / d) else ""
+                                if (perKm.isNotEmpty()) {
+                                    Text(
+                                        perKm,
+                                        color = NeonEmerald,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        modifier = Modifier.padding(top = 4.dp, end = 4.dp)
+                                    )
+                                }
                             }
                         }
                     }
                 }
+
                 if (riderNames.size < com.example.data.CarpoolCodec.MAX_RIDERS) {
-                    TextButton(onClick = {
-                        riderNames.add("")
-                        riderAmounts.add("")
-                        riderDistances.add("")
-                    }) { Text("+ Add rider") }
+                    OutlinedButton(
+                        onClick = {
+                            riderNames.add("")
+                            riderAmounts.add("")
+                            riderDistances.add("")
+                        },
+                        modifier = Modifier.fillMaxWidth().height(40.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = NeonEmerald),
+                        border = BorderStroke(1.dp, NeonEmerald.copy(alpha = 0.5f))
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("+ Add Rider (${riderNames.size + 1}/${com.example.data.CarpoolCodec.MAX_RIDERS})", fontSize = 12.sp)
+                    }
                 } else {
                     Text(
-                        "Four riders max - the car seats five including you.",
-                        fontSize = 11.sp, color = TextSecondaryDark
+                        "Four riders max — the vehicle seats 5 including driver.",
+                        fontSize = 11.sp,
+                        color = TextSecondaryDark
                     )
+                }
+
+                val currentTotalEarned = riderAmounts.mapNotNull { it.toDoubleOrNull() }.sum()
+                if (currentTotalEarned > 0) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = CardDefaults.cardColors(containerColor = NeonEmerald.copy(alpha = 0.12f))
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Total Carpool Earned", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = TextPrimaryDark)
+                            Text(
+                                String.format(java.util.Locale.US, "₹%.0f", currentTotalEarned),
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = NeonEmerald
+                            )
+                        }
+                    }
                 }
             }
         },
@@ -459,7 +554,7 @@ fun CarpoolDialog(
                     )
                 }
                 if (d > 0.0 && riders.isNotEmpty()) onSave(d, riders, cal.timeInMillis)
-            }) { Text("Save") }
+            }) { Text("Save", fontWeight = FontWeight.Bold) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
