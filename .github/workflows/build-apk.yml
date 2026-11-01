@@ -45,6 +45,9 @@ jobs:
         with:
           gradle-version: '9.3.1'
 
+      - name: Check Kotlin structure
+        run: python3 tools/check_kotlin_structure.py
+
       # continue-on-error so the reporting steps below always run; the job is still
       # failed at the end by "Fail the job when tests failed".
       - name: Run unit tests
