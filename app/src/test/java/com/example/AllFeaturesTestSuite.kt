@@ -275,7 +275,7 @@ class AllFeaturesTestSuite {
     fun `throttle or brake cancels dfco`() {
         val coach = DfcoCoach()
         var ts = 0L
-        coach.onSample(ts, 80.0, 2000.0, 0.0, 0.0, false)
+        coach.onSample(ts, 80.0, 2000.0, 0.0, pedalPct = 0.0, brakeActive = false)
         ts += 1000
         val powered = coach.onSample(ts, 80.0, 2000.0, 4.5, pedalPct = 20.0)
         assertFalse(powered.isDfcoActive)
