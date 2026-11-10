@@ -138,8 +138,8 @@ class ValetSurveillanceManager(
         detail: String,
         onNew: () -> Unit
     ) {
-        val last = lastKindMs[kind] ?: 0L
-        if (ts - last < debounceMs) return
+        val last = lastKindMs[kind]
+        if (last != null && ts - last < debounceMs) return
         lastKindMs[kind] = ts
         onNew()
         events.addLast(
@@ -158,7 +158,7 @@ class ValetSurveillanceManager(
     private fun snapshot(): Snapshot {
         val clean = coldRevCount == 0 && overspeedCount == 0 && highRpmCount == 0
         val message = when {
-            !armed && events.isEmpty() -> "Valet surveillance disarmed."
+            !armed && armedAtMs == null -> "Valet surveillance disarmed."
             !armed && clean -> String.format(
                 Locale.US,
                 "Valet returned clean — max %.0f km/h / %.0f rpm.",
