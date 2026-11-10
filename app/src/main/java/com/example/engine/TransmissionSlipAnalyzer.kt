@@ -56,7 +56,6 @@ class TransmissionSlipAnalyzer(
         cumulativeSlipEnergyKj = 0.0
         atfStressScore = 0.0
         lastAtfTempC = null
-        lastGear = null
     }
 
     fun onSample(
