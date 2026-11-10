@@ -1,9 +1,15 @@
 package com.example.analysis
 
+import com.example.engine.BatteryCrankProfiler
 import com.example.engine.CoastNeutralDetector
+import com.example.engine.DfcoCoach
 import com.example.engine.FuelQualityAnalyzer
+import com.example.engine.OctaneRoiAnalyzer
 import com.example.engine.PowertrainModel
+import com.example.engine.TransmissionSlipAnalyzer
 import com.example.engine.TurboAnalyzer
+import com.example.engine.TurboCooldownGuardian
+import com.example.engine.ValetSurveillanceManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -18,6 +24,12 @@ import kotlinx.coroutines.flow.asStateFlow
  *    modelled curve and the resulting **sweet spot** for the current top-gear ratio;
  *  * **coasting / driving-in-neutral** events with distance and fuel saved (20-130 km/h window);
  *  * **turbo behaviour**: live/peak boost, boost-vs-rpm curve, tip-in lag, over-boost counts;
+ *  * **turbo cooldown / heat-soak** idle timer after a high-boost stint;
+ *  * **AQ250 converter slip & ATF thermal stress**;
+ *  * **DFCO rupee coach** (zero-fuel glide vs idle burn);
+ *  * **E20 vs XP95 octane ROI** (economy + trim vs the rupee premium);
+ *  * **cranking-voltage battery health**;
+ *  * **valet surveillance** (cold revving & speed audit);
  *  * **per-tank fuel behaviour** (refuel-segmented) for the X95-vs-regular comparison;
  *  * a 1 Hz **trend buffer** for the time-series charts.
  *
@@ -62,12 +74,24 @@ class DriveAnalytics(
         val harshAccelCount: Int = 0,
         val harshBrakeCount: Int = 0,
         val idleSeconds: Double = 0.0,
-        val trend: List<TrendPoint> = emptyList()
+        val trend: List<TrendPoint> = emptyList(),
+        val turboCooldown: TurboCooldownGuardian.Snapshot? = null,
+        val transmissionSlip: TransmissionSlipAnalyzer.Snapshot? = null,
+        val dfco: DfcoCoach.Snapshot? = null,
+        val octaneRoi: OctaneRoiAnalyzer.RoiVerdict? = null,
+        val batteryCrank: BatteryCrankProfiler.Snapshot? = null,
+        val valet: ValetSurveillanceManager.Snapshot? = null
     )
 
     val coastDetector = CoastNeutralDetector()
     val turboAnalyzer = TurboAnalyzer()
     val fuelQuality = FuelQualityAnalyzer()
+    val turboCooldown = TurboCooldownGuardian()
+    val transmissionSlip = TransmissionSlipAnalyzer()
+    val dfcoCoach = DfcoCoach()
+    val octaneRoi = OctaneRoiAnalyzer()
+    val batteryCrank = BatteryCrankProfiler()
+    val valetSurveillance = ValetSurveillanceManager()
 
     private val _snapshot = MutableStateFlow(DriveSnapshot())
     val snapshot: StateFlow<DriveSnapshot> = _snapshot.asStateFlow()
@@ -84,6 +108,12 @@ class DriveAnalytics(
     private var lastHarshAccelMs = 0L
     private var lastHarshBrakeMs = 0L
     private var lastSignalMs = 0L
+    private var lastTurboCooldown: TurboCooldownGuardian.Snapshot? = null
+    private var lastTransmissionSlip: TransmissionSlipAnalyzer.Snapshot? = null
+    private var lastDfco: DfcoCoach.Snapshot? = null
+    private var lastOctaneRoi: OctaneRoiAnalyzer.RoiVerdict? = null
+    private var lastBatteryCrank: BatteryCrankProfiler.Snapshot? = null
+    private var lastValet: ValetSurveillanceManager.Snapshot? = null
 
     private val torqueBins = LinkedHashMap<Int, BinStats>()
     private val powerBins = LinkedHashMap<Int, BinStats>()
@@ -112,7 +142,10 @@ class DriveAnalytics(
         brakeActive: Boolean?,
         actualTorquePct: Double?,
         demandTorquePct: Double?,
-        referenceTorqueNm: Double?
+        referenceTorqueNm: Double?,
+        voltageV: Double? = null,
+        coolantC: Double? = null,
+        estimatedGear: Int? = null
     ) {
         val speed = speedKmh ?: 0.0
         val accel = acceleration(timestampMonotonicMs, speed)
@@ -187,6 +220,53 @@ class DriveAnalytics(
             fuelRateLh = fuelRateLh
         )
 
+        val turboSnap = turboAnalyzer.snapshot()
+        lastTurboCooldown = turboCooldown.onSample(
+            timestampMonotonicMs = timestampMonotonicMs,
+            speedKmh = speedKmh,
+            rpm = rpm,
+            boostKpa = turboSnap.boostKpa,
+            loadPct = loadPct,
+            chargeTempC = chargeTempC,
+            coolantC = coolantC
+        )
+        lastTransmissionSlip = transmissionSlip.onSample(
+            timestampMonotonicMs = timestampMonotonicMs,
+            speedKmh = speedKmh,
+            engineRpm = rpm,
+            loadPct = loadPct,
+            atfTempC = null,
+            estimatedGear = estimatedGear
+        )
+        lastDfco = dfcoCoach.onSample(
+            timestampMonotonicMs = timestampMonotonicMs,
+            speedKmh = speedKmh,
+            rpm = rpm,
+            fuelRateLh = fuelRateLh,
+            pedalPct = pedalPct,
+            throttlePct = throttlePct,
+            brakeActive = brakeActive
+        )
+        lastOctaneRoi = octaneRoi.onSample(
+            timestampMonotonicMs = timestampMonotonicMs,
+            speedKmh = speedKmh,
+            fuelRateLh = fuelRateLh,
+            stftPct = stftPct,
+            ltftPct = ltftPct,
+            gradeTag = fuelQuality.activeTank()?.gradeTag
+        )
+        lastBatteryCrank = batteryCrank.onSample(
+            timestampMonotonicMs = timestampMonotonicMs,
+            rpm = rpm,
+            voltageV = voltageV
+        )
+        lastValet = valetSurveillance.onSample(
+            timestampMonotonicMs = timestampMonotonicMs,
+            speedKmh = speedKmh,
+            rpm = rpm,
+            coolantC = coolantC
+        )
+
         // --- 1 Hz trend buffer --------------------------------------------------------------
         if (timestampMonotonicMs - lastTrendMs >= 1000L) {
             lastTrendMs = timestampMonotonicMs
@@ -218,13 +298,33 @@ class DriveAnalytics(
         coastDetector.reset()
         turboAnalyzer.reset()
         fuelQuality.reset()
+        turboCooldown.reset()
+        transmissionSlip.reset()
+        dfcoCoach.reset()
+        octaneRoi.reset()
+        batteryCrank.reset()
+        valetSurveillance.reset(keepArmed = true)
         trend.clear()
         torqueBins.clear()
         powerBins.clear()
         lp100Bins.clear()
         measuredRpmPerKmh = null
         lastSpeedKmh = null
-        _snapshot.value = DriveSnapshot()
+        lastTurboCooldown = null
+        lastTransmissionSlip = null
+        lastDfco = null
+        lastOctaneRoi = null
+        lastBatteryCrank = null
+        lastValet = if (valetSurveillance.isArmed()) valetSurveillance.onSample(0L, 0.0, 0.0, null) else null
+        _snapshot.value = DriveSnapshot(valet = lastValet)
+    }
+
+    fun armValet(nowMs: Long) {
+        lastValet = valetSurveillance.arm(nowMs)
+    }
+
+    fun disarmValet() {
+        lastValet = valetSurveillance.disarm()
     }
 
     // region internals
@@ -331,7 +431,13 @@ class DriveAnalytics(
             harshAccelCount = harshAccelCount,
             harshBrakeCount = harshBrakeCount,
             idleSeconds = idleSeconds,
-            trend = trend.takeLast(SNAPSHOT_TREND_POINTS)
+            trend = trend.takeLast(SNAPSHOT_TREND_POINTS),
+            turboCooldown = lastTurboCooldown,
+            transmissionSlip = lastTransmissionSlip,
+            dfco = lastDfco,
+            octaneRoi = lastOctaneRoi,
+            batteryCrank = lastBatteryCrank,
+            valet = lastValet
         )
     }
 

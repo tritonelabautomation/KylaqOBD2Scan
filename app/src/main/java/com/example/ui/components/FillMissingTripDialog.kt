@@ -1,29 +1,74 @@
 package com.example.ui.components
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.AddRoad
+import androidx.compose.material.icons.filled.Air
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.LocalGasStation
+import androidx.compose.material.icons.filled.PictureAsPdf
+import androidx.compose.material.icons.filled.Route
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.data.RecordTime
-import com.example.ui.theme.*
+import com.example.model.GapTripType
+import com.example.ui.theme.CyberCyan
+import com.example.ui.theme.ElectricAmber
+import com.example.ui.theme.NeonEmerald
+import com.example.ui.theme.TextPrimaryDark
+import com.example.ui.theme.TextSecondaryDark
+import com.example.ui.theme.WarningRed
 import java.util.Locale
 
 /**
@@ -40,13 +85,21 @@ data class ManualTripRequest(
     val estimatedFuelLiters: Double? = null,
     val carpoolRiders: String = "",
     val carpoolFare: Double = 0.0,
-    val notes: String = ""
+    val notes: String = "",
+    val gapTripType: GapTripType = GapTripType.MISSED_DRIVE,
+    val pollenFilterServiced: Boolean = false,
+    val invoiceCost: Double? = null,
+    val invoicePdfUri: String? = null
 ) {
     val distanceKm: Double get() = maxOf(0.1, endOdometerKm - startOdometerKm)
 }
 
 /**
  * Dialog for filling an unlogged gap between OBD recording sessions or manually logging a missed drive.
+ *
+ * [GapTripType.SERVICE_INSPECTION] reveals pollen-filter task tagging, an invoice rupee field,
+ * and a PDF invoice picker. Drive/Sport chips use balanced [Modifier.weight] + maxLines=1 so
+ * "Sport (S)" never wraps. The body is height-capped, vertically scrollable, and ime-padded.
  */
 @Composable
 fun FillMissingTripDialog(
@@ -64,38 +117,80 @@ fun FillMissingTripDialog(
         maxOf(60L, (initialEndMs - defaultStartMs) / 1000L)
     } else {
         val dist = maxOf(0.5, defaultEndOdo - defaultStartOdo)
-        // Assume ~30 km/h city average
         (dist / 30.0 * 3600.0).toLong().coerceIn(120L, 14400L)
     }
 
-    var title by remember { mutableStateOf("Missed Drive (Gap Filled)") }
+    var gapTripType by remember { mutableStateOf(GapTripType.MISSED_DRIVE) }
+    var title by remember { mutableStateOf(GapTripType.MISSED_DRIVE.defaultTitle) }
     var startOdoText by remember { mutableStateOf(String.format(Locale.US, "%.1f", defaultStartOdo)) }
     var endOdoText by remember { mutableStateOf(String.format(Locale.US, "%.1f", defaultEndOdo)) }
     var durationMinutesText by remember { mutableStateOf("${maxOf(1L, defaultDurationSec / 60L)}") }
-    
-    var driveMode by remember { mutableStateOf("D") } // "D" or "S"
-    var acState by remember { mutableStateOf("ON") } // "ON", "OFF", "Auto"
-    
+
+    var driveMode by remember { mutableStateOf("D") }
+    var acState by remember { mutableStateOf("ON") }
+
     var customFuelText by remember { mutableStateOf("") }
     var showCarpoolSection by remember { mutableStateOf(false) }
     var carpoolRidersText by remember { mutableStateOf("") }
     var carpoolFareText by remember { mutableStateOf("") }
     var notesText by remember { mutableStateOf("") }
 
+    var pollenFilterServiced by remember { mutableStateOf(false) }
+    var invoiceCostText by remember { mutableStateOf("") }
+    var invoicePdfUri by remember { mutableStateOf<String?>(null) }
+    var invoicePdfLabel by remember { mutableStateOf<String?>(null) }
+
+    val pdfPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri ->
+        invoicePdfUri = uri?.toString()
+        invoicePdfLabel = uri?.lastPathSegment?.substringAfterLast('/') ?: uri?.toString()
+    }
+
+    LaunchedEffect(gapTripType) {
+        if (title == GapTripType.MISSED_DRIVE.defaultTitle ||
+            title == GapTripType.SERVICE_INSPECTION.defaultTitle
+        ) {
+            title = gapTripType.defaultTitle
+        }
+        if (gapTripType != GapTripType.SERVICE_INSPECTION) {
+            pollenFilterServiced = false
+        }
+    }
+
     val startOdoVal = startOdoText.toDoubleOrNull() ?: defaultStartOdo
     val endOdoVal = endOdoText.toDoubleOrNull() ?: defaultEndOdo
     val distanceKm = maxOf(0.0, endOdoVal - startOdoVal)
     val durationMinVal = durationMinutesText.toLongOrNull() ?: (defaultDurationSec / 60L)
     val durationSecVal = maxOf(60L, durationMinVal * 60L)
-    
+
     val avgSpeedKmh = if (durationSecVal > 0) (distanceKm / (durationSecVal / 3600.0)).coerceIn(1.0, 160.0) else 30.0
-    val autoEstimatedFuelL = (distanceKm / 10.5) // ~10.5 km/L default EA211 city economy
+    val autoEstimatedFuelL = (distanceKm / 10.5)
     val finalFuelL = customFuelText.toDoubleOrNull() ?: autoEstimatedFuelL
 
     val isValid = distanceKm > 0.05 && durationSecVal >= 60L && startOdoVal >= 0.0 && endOdoVal > startOdoVal
 
+    val maxBodyHeight = (LocalConfiguration.current.screenHeightDp * 0.62f).dp
+    val chipColorsCyan = FilterChipDefaults.filterChipColors(
+        selectedContainerColor = CyberCyan.copy(alpha = 0.2f),
+        selectedLabelColor = CyberCyan
+    )
+    val chipColorsRed = FilterChipDefaults.filterChipColors(
+        selectedContainerColor = WarningRed.copy(alpha = 0.2f),
+        selectedLabelColor = WarningRed
+    )
+    val chipColorsAmber = FilterChipDefaults.filterChipColors(
+        selectedContainerColor = ElectricAmber.copy(alpha = 0.2f),
+        selectedLabelColor = ElectricAmber
+    )
+    val chipColorsEmerald = FilterChipDefaults.filterChipColors(
+        selectedContainerColor = NeonEmerald.copy(alpha = 0.2f),
+        selectedLabelColor = NeonEmerald
+    )
+
     AlertDialog(
         onDismissRequest = onDismiss,
+        modifier = Modifier.imePadding(),
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.AddRoad, contentDescription = null, tint = CyberCyan, modifier = Modifier.size(24.dp))
@@ -107,6 +202,8 @@ fun FillMissingTripDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .heightIn(max = maxBodyHeight)
+                    .imePadding()
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
@@ -117,7 +214,43 @@ fun FillMissingTripDialog(
                     lineHeight = 16.sp
                 )
 
-                // Trip Title
+                Text("Gap type", color = TextSecondaryDark, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilterChip(
+                        selected = gapTripType == GapTripType.MISSED_DRIVE,
+                        onClick = { gapTripType = GapTripType.MISSED_DRIVE },
+                        modifier = Modifier.weight(1f).testTag("chip_gap_type_missed"),
+                        label = {
+                            Text(
+                                GapTripType.MISSED_DRIVE.label,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        },
+                        colors = chipColorsCyan
+                    )
+                    FilterChip(
+                        selected = gapTripType == GapTripType.SERVICE_INSPECTION,
+                        onClick = { gapTripType = GapTripType.SERVICE_INSPECTION },
+                        modifier = Modifier.weight(1f).testTag("chip_gap_type_service"),
+                        label = {
+                            Text(
+                                GapTripType.SERVICE_INSPECTION.label,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        },
+                        colors = chipColorsEmerald
+                    )
+                }
+
                 OutlinedTextField(
                     value = title,
                     onValueChange = { title = it },
@@ -127,7 +260,6 @@ fun FillMissingTripDialog(
                     colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = CyberCyan)
                 )
 
-                // Odometer Gap Endpoints
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f),
                     shape = RoundedCornerShape(10.dp),
@@ -154,7 +286,6 @@ fun FillMissingTripDialog(
                             )
                         }
 
-                        // Calculated Delta & Avg Speed summary
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -184,7 +315,6 @@ fun FillMissingTripDialog(
                     }
                 }
 
-                // Estimated Duration in Minutes
                 OutlinedTextField(
                     value = durationMinutesText,
                     onValueChange = { durationMinutesText = it.filter { ch -> ch.isDigit() } },
@@ -195,62 +325,114 @@ fun FillMissingTripDialog(
                     modifier = Modifier.fillMaxWidth().testTag("input_manual_duration_mins")
                 )
 
-                // Drive Mode & AC State Selectors
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    // Drive Mode Switch
-                    Surface(
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Column(modifier = Modifier.padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("Transmission Mode", color = TextSecondaryDark, fontSize = 10.sp)
-                            Spacer(Modifier.height(4.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                FilterChip(
-                                    selected = driveMode == "D",
-                                    onClick = { driveMode = "D" },
-                                    label = { Text("Drive (D)", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
-                                    colors = FilterChipDefaults.filterChipColors(selectedContainerColor = CyberCyan.copy(alpha = 0.2f), selectedLabelColor = CyberCyan)
-                                )
-                                FilterChip(
-                                    selected = driveMode == "S",
-                                    onClick = { driveMode = "S" },
-                                    label = { Text("Sport (S)", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
-                                    colors = FilterChipDefaults.filterChipColors(selectedContainerColor = WarningRed.copy(alpha = 0.2f), selectedLabelColor = WarningRed)
-                                )
-                            }
-                        }
-                    }
+                Text("Transmission mode", color = TextSecondaryDark, fontSize = 10.sp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilterChip(
+                        selected = driveMode == "D",
+                        onClick = { driveMode = "D" },
+                        modifier = Modifier.weight(1f).testTag("chip_drive_d"),
+                        label = {
+                            Text(
+                                "Drive (D)",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        },
+                        colors = chipColorsCyan
+                    )
+                    FilterChip(
+                        selected = driveMode == "S",
+                        onClick = { driveMode = "S" },
+                        modifier = Modifier.weight(1f).testTag("chip_sport_s"),
+                        label = {
+                            Text(
+                                "Sport (S)",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        },
+                        colors = chipColorsRed
+                    )
+                }
 
-                    // AC State Switch
-                    Surface(
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Column(modifier = Modifier.padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("Air Conditioning", color = TextSecondaryDark, fontSize = 10.sp)
-                            Spacer(Modifier.height(4.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                FilterChip(
-                                    selected = acState == "ON",
-                                    onClick = { acState = "ON" },
-                                    label = { Text("ON", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
-                                    colors = FilterChipDefaults.filterChipColors(selectedContainerColor = CyberCyan.copy(alpha = 0.2f), selectedLabelColor = CyberCyan)
+                Text("Air conditioning", color = TextSecondaryDark, fontSize = 10.sp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilterChip(
+                        selected = acState == "ON",
+                        onClick = { acState = "ON" },
+                        modifier = Modifier.weight(1f),
+                        label = {
+                            Text("ON", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                        },
+                        colors = chipColorsCyan
+                    )
+                    FilterChip(
+                        selected = acState == "OFF",
+                        onClick = { acState = "OFF" },
+                        modifier = Modifier.weight(1f),
+                        label = {
+                            Text("OFF", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                        },
+                        colors = chipColorsAmber
+                    )
+                }
+
+                AnimatedVisibility(visible = gapTripType == GapTripType.SERVICE_INSPECTION) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Service tasks", color = TextSecondaryDark, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                        FilterChip(
+                            selected = pollenFilterServiced,
+                            onClick = { pollenFilterServiced = !pollenFilterServiced },
+                            modifier = Modifier.fillMaxWidth().testTag("chip_pollen_filter"),
+                            leadingIcon = {
+                                Icon(Icons.Default.Air, contentDescription = null, modifier = Modifier.size(16.dp))
+                            },
+                            label = {
+                                Text(
+                                    "Cabin / pollen filter replaced",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
-                                FilterChip(
-                                    selected = acState == "OFF",
-                                    onClick = { acState = "OFF" },
-                                    label = { Text("OFF", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
-                                    colors = FilterChipDefaults.filterChipColors(selectedContainerColor = ElectricAmber.copy(alpha = 0.2f), selectedLabelColor = ElectricAmber)
-                                )
-                            }
+                            },
+                            colors = chipColorsEmerald
+                        )
+                        OutlinedTextField(
+                            value = invoiceCostText,
+                            onValueChange = { invoiceCostText = it },
+                            label = { Text("Invoice cost (₹)") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth().testTag("input_invoice_cost")
+                        )
+                        OutlinedButton(
+                            onClick = { pdfPicker.launch("application/pdf") },
+                            modifier = Modifier.fillMaxWidth().testTag("btn_attach_invoice_pdf")
+                        ) {
+                            Icon(Icons.Default.PictureAsPdf, contentDescription = null, tint = CyberCyan, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = invoicePdfLabel?.let { "PDF: $it" } ?: "Attach invoice PDF",
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                color = TextPrimaryDark,
+                                fontSize = 12.sp
+                            )
                         }
                     }
                 }
 
-                // Estimated Fuel Burn
                 OutlinedTextField(
                     value = customFuelText,
                     onValueChange = { customFuelText = it },
@@ -262,7 +444,6 @@ fun FillMissingTripDialog(
                     modifier = Modifier.fillMaxWidth().testTag("input_manual_fuel_liters")
                 )
 
-                // Optional Carpool Section Toggle
                 Surface(
                     color = if (showCarpoolSection) NeonEmerald.copy(alpha = 0.08f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
                     shape = RoundedCornerShape(8.dp),
@@ -308,7 +489,6 @@ fun FillMissingTripDialog(
                     }
                 }
 
-                // Optional Notes
                 OutlinedTextField(
                     value = notesText,
                     onValueChange = { notesText = it },
@@ -317,6 +497,7 @@ fun FillMissingTripDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
+                Spacer(Modifier.height(4.dp))
             }
         },
         confirmButton = {
@@ -325,7 +506,7 @@ fun FillMissingTripDialog(
                     if (isValid) {
                         onSave(
                             ManualTripRequest(
-                                title = title.ifBlank { "Missed Drive (Gap Filled)" },
+                                title = title.ifBlank { gapTripType.defaultTitle },
                                 startOdometerKm = startOdoVal,
                                 endOdometerKm = endOdoVal,
                                 startTimestampMs = defaultStartMs,
@@ -335,7 +516,11 @@ fun FillMissingTripDialog(
                                 estimatedFuelLiters = finalFuelL,
                                 carpoolRiders = carpoolRidersText.trim(),
                                 carpoolFare = carpoolFareText.toDoubleOrNull() ?: 0.0,
-                                notes = notesText.trim()
+                                notes = notesText.trim(),
+                                gapTripType = gapTripType,
+                                pollenFilterServiced = pollenFilterServiced,
+                                invoiceCost = invoiceCostText.toDoubleOrNull(),
+                                invoicePdfUri = invoicePdfUri
                             )
                         )
                     }

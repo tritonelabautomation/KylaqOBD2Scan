@@ -2795,6 +2795,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun createManualTrip(request: com.example.ui.components.ManualTripRequest) {
         viewModelScope.launch {
             try {
+                val composedNotes = com.example.model.composeGapTripNotes(
+                    notes = request.notes,
+                    type = request.gapTripType,
+                    pollenFilterServiced = request.pollenFilterServiced,
+                    invoiceCost = request.invoiceCost,
+                    invoicePdfUri = request.invoicePdfUri
+                )
                 val saved = recordingManager.createManualReconstructedTrip(
                     title = request.title,
                     startOdoKm = request.startOdometerKm,
@@ -2806,10 +2813,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     fuelLiters = request.estimatedFuelLiters,
                     carpoolRiders = request.carpoolRiders,
                     carpoolFare = request.carpoolFare,
-                    notes = request.notes
+                    notes = composedNotes
                 )
                 if (saved != null) {
                     maintenanceRepository.setCurrentOdometerKm(request.endOdometerKm)
+                    if (request.gapTripType == com.example.model.GapTripType.SERVICE_INSPECTION &&
+                        request.pollenFilterServiced
+                    ) {
+                        logMaintenance(
+                            com.example.data.MaintenanceCatalog.ServiceLog(
+                                itemId = com.example.model.GapTripType.POLLEN_FILTER_ITEM_ID,
+                                dateUtc = com.example.data.RecordTime.stamp(request.startTimestampMs),
+                                dateMs = request.startTimestampMs,
+                                odometerKm = request.endOdometerKm,
+                                cost = request.invoiceCost,
+                                notes = buildString {
+                                    append("Pollen filter tagged from service-inspection gap fill")
+                                    request.invoicePdfUri?.takeIf { it.isNotBlank() }?.let {
+                                        append(" | invoicePdf=")
+                                        append(it)
+                                    }
+                                }
+                            )
+                        )
+                    }
                     triggerImmediateBackup()
                     _mergeNotice.value = "Created trip '${request.title}' (+${String.format(java.util.Locale.US, "%.1f", request.distanceKm)} km). Gap successfully filled."
                 } else {

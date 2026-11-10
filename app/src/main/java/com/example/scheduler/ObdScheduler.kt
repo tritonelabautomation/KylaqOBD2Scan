@@ -902,7 +902,10 @@ class ObdScheduler(
             brakeActive = drivingResult.isBrakeActive,
             actualTorquePct = primaryNumeric("0162"),
             demandTorquePct = primaryNumeric("0161"),
-            referenceTorqueNm = primaryNumeric("0163") ?: primaryNumeric("0164")
+            referenceTorqueNm = primaryNumeric("0163") ?: primaryNumeric("0164"),
+            voltageV = primaryNumeric("0142"),
+            coolantC = primaryNumeric("0105"),
+            estimatedGear = transState.estimatedGear
         )
     }
 
