@@ -198,11 +198,11 @@ jobs:
           CRASH_REPORT_TOKEN: ${{ secrets.CRASH_REPORT_TOKEN }}
         run: |
           set -o pipefail
-          gradle assembleDebug --stacktrace 2>&1 | tee /tmp/build.log
+          gradle assembleDebug --no-configuration-cache --stacktrace 2>&1 | tee /tmp/build.log
           STATUS=$?
           if [ $STATUS -ne 0 ] && grep -q "ApplicationManager.getApplication() is null" /tmp/build.log; then
             echo "KSP2 worker-init NPE flake detected - retrying once with ksp.incremental=false..."
-            gradle assembleDebug --stacktrace -Pksp.incremental=false 2>&1 | tee /tmp/build.log
+            gradle assembleDebug --no-configuration-cache --stacktrace -Pksp.incremental=false 2>&1 | tee /tmp/build.log
             STATUS=$?
           fi
           exit $STATUS

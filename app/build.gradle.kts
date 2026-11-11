@@ -192,9 +192,10 @@ android {
 // Actions, rewrite the merged text manifests right before packageDebug so the
 // shipped APK is not debuggable while KSP still sees the normal debug variant.
 tasks.matching { it.name == "packageDebug" }.configureEach {
+  val outDir = layout.buildDirectory
   doFirst {
     if (System.getenv("GITHUB_ACTIONS").isNullOrBlank()) return@doFirst
-    val root = layout.buildDirectory.get().asFile
+    val root = outDir.get().asFile
     root.walkTopDown()
       .filter { it.isFile && it.name == "AndroidManifest.xml" }
       .forEach { file ->
@@ -205,7 +206,7 @@ tasks.matching { it.name == "packageDebug" }.configureEach {
           .replace(Regex("""android:testOnly\s*=\s*["']true["']"""), """android:testOnly="false"""")
         if (updated != original) {
           file.writeText(updated)
-          logger.lifecycle("CI: stripped debuggable/testOnly in ${file.relativeTo(root)}")
+          println("CI: stripped debuggable/testOnly in ${file.relativeTo(root)}")
         }
       }
   }
