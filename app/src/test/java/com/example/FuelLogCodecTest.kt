@@ -55,4 +55,28 @@ class FuelLogCodecTest {
         assertEquals(500.0 / 30.0, kmL, 0.001)
         assertTrue(b.totalCost > a.totalCost)
     }
+
+    @Test
+    fun `before and after tank percent round trip codec and csv`() {
+        val entry = FuelLogCodec.FuelEntry(
+            idMs = 3L,
+            dateUtc = "2026-11-11T11:39:00Z",
+            liters = 40.27,
+            pricePerL = 115.72,
+            odometerKm = 4987.0,
+            station = "IndianOil COCO BEGUMPET",
+            grade = FuelLogCodec.GRADE_X95,
+            note = "",
+            startLevelPct = 17.6,
+            endLevelPct = 93.7
+        )
+        val decoded = FuelLogCodec.decode(FuelLogCodec.encode(entry))!!
+        assertEquals(17.6, decoded.startLevelPct!!, 1e-4)
+        assertEquals(93.7, decoded.endLevelPct!!, 1e-4)
+        assertTrue(decoded.display.contains("17.6%"))
+        assertTrue(decoded.display.contains("93.7%"))
+        val csvBack = FuelLogCodec.fromCsv(FuelLogCodec.toCsv(listOf(entry))).single()
+        assertEquals(17.6, csvBack.startLevelPct!!, 1e-4)
+        assertEquals(93.7, csvBack.endLevelPct!!, 1e-4)
+    }
 }

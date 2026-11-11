@@ -16,6 +16,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -51,9 +52,11 @@ fun FuelCostsScreen(
     onBack: () -> Unit
 ) {
     val repo = viewModel.fuelLogRepository
+    val context = LocalContext.current
     var refresh by remember { mutableStateOf(0) }
     val entries = remember(refresh) { repo.entries() }
     val stats = remember(refresh) { repo.stats() }
+    val bunks = remember(refresh) { BunkNozzleStore.getAll(context) }
     var showAdd by remember { mutableStateOf(false) }
     val lastBackupMs by viewModel.settingsRepository.lastBackupTimestamp.collectAsState()
 
@@ -359,6 +362,44 @@ fun FuelCostsScreen(
                                     String.format(java.util.Locale.US, "%.2f L  ·  ₹%.2f/L  ·  ₹%.0f", entry.liters, entry.pricePerL, entry.totalCost),
                                     color = TextSecondaryDark, fontSize = 10.sp
                                 )
+                                val bunk = bunks.firstOrNull { it.idMs == entry.idMs }
+                                    ?: entry.odometerKm?.let { odo ->
+                                        bunks.filter { it.odometerKm != null && kotlin.math.abs(it.odometerKm!! - odo) <= 2.0 }
+                                            .minByOrNull { kotlin.math.abs(it.odometerKm!! - odo) }
+                                    }
+                                val beforePct = entry.startLevelPct ?: bunk?.startLevelPercent
+                                val afterPct = entry.endLevelPct ?: bunk?.autoCutPercent
+                                val fillSplit = com.example.analysis.MidTripFuel.split(
+                                    tripStartPct = null,
+                                    tripEndPct = null,
+                                    tankL = capacityL,
+                                    fillBeforePct = beforePct,
+                                    fillAfterPct = afterPct,
+                                    pumpLitres = entry.liters,
+                                    fillOnThisTrip = false
+                                )
+                                if (beforePct != null && afterPct != null) {
+                                    Text(
+                                        String.format(
+                                            java.util.Locale.US,
+                                            "Before %.1f%% → after %.1f%%",
+                                            beforePct,
+                                            afterPct
+                                        ),
+                                        color = NeonEmerald,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    com.example.analysis.MidTripFuel.pumpVsPidLine(fillSplit)?.let { line ->
+                                        Text(line, color = CyberCyan, fontSize = 10.sp)
+                                    }
+                                } else {
+                                    Text(
+                                        "Before/after tank % not logged — re-save to compare PID vs pump.",
+                                        color = TextSecondaryDark,
+                                        fontSize = 10.sp
+                                    )
+                                }
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     val kmL = intervalById[entry.idMs]
                                     Text(
@@ -415,8 +456,8 @@ fun FuelCostsScreen(
             initialLiters = editTarget?.liters ?: receiptPrefill?.liters,
             initialPrice = editTarget?.pricePerL,
             initialOdoKm = editTarget?.odometerKm ?: receiptPrefill?.odoKm ?: odoNow,
-            initialPreLevelPct = receiptPrefill?.levelBeforePct ?: fallbackPreLevel,
-            initialPostLevelPct = receiptPrefill?.levelAfterPct ?: levelNow,
+            initialPreLevelPct = editTarget?.startLevelPct ?: receiptPrefill?.levelBeforePct ?: fallbackPreLevel,
+            initialPostLevelPct = editTarget?.endLevelPct ?: receiptPrefill?.levelAfterPct ?: levelNow,
             initialStation = editTarget?.station ?: "",
             initialGrade = editTarget?.grade ?: FuelLogCodec.GRADE_X95,
             initialNote = editTarget?.note ?: "",
@@ -432,6 +473,8 @@ fun FuelCostsScreen(
                         odometerKm = record.odometerKm,
                         station = record.stationName,
                         grade = record.fuelGrade,
+                        startLevelPct = record.startLevelPercent,
+                        endLevelPct = record.autoCutPercent,
                         note = record.note,
                         partial = false,
                         additive = record.additiveName,

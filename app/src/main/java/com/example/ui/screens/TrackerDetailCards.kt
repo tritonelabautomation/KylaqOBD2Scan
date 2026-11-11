@@ -17,6 +17,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.analysis.MidTripFuel
 import com.example.analysis.TripDriveAnalysis
 import com.example.analysis.TripFuelSummary
 import com.example.analysis.WeeklyTripOverview
@@ -63,7 +64,12 @@ fun TrackerSummaryCards(
      * the real cause sends the owner looking in the wrong place, so the caller passes the reason the
      * permission policy computed instead of the card guessing.
      */
-    altitudeBlankReason: String? = null
+    altitudeBlankReason: String? = null,
+    tankCapacityL: Double = 50.0,
+    fillBeforePct: Double? = null,
+    fillAfterPct: Double? = null,
+    pumpLitres: Double? = null,
+    fillOnThisTrip: Boolean = false
 ) {
     val analysis = remember(summary, speedPoints) {
         TripDriveAnalysis.analyse(speedPoints, summary.idleSeconds + summary.engineOffSeconds, summary.speedHistogram)
@@ -179,19 +185,47 @@ fun TrackerSummaryCards(
                 )
             }
             if (summary.startFuelPercent != null && summary.endFuelPercent != null) {
+                val fuelSplit = MidTripFuel.split(
+                    tripStartPct = summary.startFuelPercent,
+                    tripEndPct = summary.endFuelPercent,
+                    tankL = tankCapacityL,
+                    fillBeforePct = fillBeforePct,
+                    fillAfterPct = fillAfterPct,
+                    pumpLitres = pumpLitres,
+                    fillOnThisTrip = fillOnThisTrip
+                )
                 Spacer(Modifier.height(8.dp))
                 Box(Modifier.fillMaxWidth().height(1.dp).background(TkInner))
                 Spacer(Modifier.height(8.dp))
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Tank Level (Start → End)", color = TkGray, fontSize = 13.sp)
+                    Text(
+                        if (fuelSplit.tripIsBrim) "Tank (fill on trip, not burn)" else "Tank Level (Start → End)",
+                        color = TkGray,
+                        fontSize = 13.sp
+                    )
                     val delta = summary.fuelDeltaPercent ?: 0.0
                     val deltaStr = if (delta > 0) "+%.1f%%".format(delta) else "%.1f%%".format(delta)
-                    val deltaCol = if (summary.isRefuelBrimEvent) TkGreen else if (delta < 0) TkOrange else TkGray
+                    val deltaCol = if (fuelSplit.tripIsBrim) TkGreen else if (delta < 0) TkOrange else TkGray
                     Text(
                         "%.1f%% → %.1f%% (%s)".format(summary.startFuelPercent, summary.endFuelPercent, deltaStr),
                         color = deltaCol,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold
+                    )
+                }
+                MidTripFuel.fillWindowLine(fuelSplit)?.let { fillLine ->
+                    Text(
+                        fillLine + (MidTripFuel.pumpVsPidLine(fuelSplit)?.let { " · $it" } ?: ""),
+                        color = TkGreen,
+                        fontSize = 11.sp
+                    )
+                }
+                if (fuelSplit.tripIsBrim) {
+                    Text(
+                        fuelSplit.netBurnLitres?.let { "Net float burn ${MidTripFuel.litres(it)} around the fill" }
+                            ?: "This rise is fuel in. Fuel used above is OBD, not the tank %.",
+                        color = TkGray,
+                        fontSize = 11.sp
                     )
                 }
             }

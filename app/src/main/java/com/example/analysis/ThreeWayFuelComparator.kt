@@ -14,7 +14,7 @@ import kotlin.math.abs
  *     divided by petrol density (0.745 kg/L). Captures continuous throttle transients, decel fuel
  *     cut-offs (DFCO), and idle fuel flow.
  *
- *  2. **Factor 2 (Tank Float Level Delta PID 012F %)**:
+ *  2. **Factor 2 (Tank Float net burn PID 012F %)**:
  *     Fuel tank float level percentage drop ($\Delta \text{Level} = \text{Start \%} - \text{End \%}$)
  *     multiplied by official 45.0 L tank capacity. Subject to float potentiometer step quantization (~0.39%
  *     resolution = ±0.18 L), fuel slosh, vehicle tilt, and thermal expansion.
@@ -61,7 +61,11 @@ object ThreeWayFuelComparator {
         tripId: String,
         fuelSummary: TripFuelSummary.Summary,
         midData: MidClusterData,
-        tankCapacityL: Double = PowertrainModel.TANK_CAPACITY_L
+        tankCapacityL: Double = PowertrainModel.TANK_CAPACITY_L,
+        fillBeforePct: Double? = null,
+        fillAfterPct: Double? = null,
+        pumpLitres: Double? = null,
+        fillOnThisTrip: Boolean = false
     ): ThreeWayComparison {
         val distance = if (fuelSummary.distanceKm > 0.05) fuelSummary.distanceKm else midData.distanceKm
         val durationMin = if (fuelSummary.durationSeconds > 0) fuelSummary.durationSeconds / 60 else midData.durationMinutes.toLong()
@@ -117,14 +121,17 @@ object ThreeWayFuelComparator {
             explanation = f1Explanation
         )
 
-        // ── Factor 2: Tank Float Level Delta (PID 012F %) ─────────────────────────────
-        val startPct = fuelSummary.startFuelPercent
-        val endPct = fuelSummary.endFuelPercent
-        val deltaPct = if (startPct != null && endPct != null) startPct - endPct else null // positive = consumed
-
-        val f2Liters = if (deltaPct != null && deltaPct > 0.1) {
-            (deltaPct / 100.0) * tankCapacityL
-        } else fuelSummary.fuelDeltaLiters
+        // ── Factor 2: Tank Float — NET BURN, never the fill rise ─────────────────────
+        val split = MidTripFuel.split(
+            tripStartPct = fuelSummary.startFuelPercent,
+            tripEndPct = fuelSummary.endFuelPercent,
+            tankL = tankCapacityL,
+            fillBeforePct = fillBeforePct,
+            fillAfterPct = fillAfterPct,
+            pumpLitres = pumpLitres,
+            fillOnThisTrip = fillOnThisTrip
+        )
+        val f2Liters = split.netBurnLitres
 
         val f2KmL = if (f2Liters != null && f2Liters > 0.05 && distance > 0.05) distance / f2Liters else null
         val f2L100 = if (f2KmL != null && f2KmL > 0.1) 100.0 / f2KmL else null
@@ -132,16 +139,47 @@ object ThreeWayFuelComparator {
         val f2ErrorPct = if (f2KmL != null && f3KmL > 0.1) ((f2KmL - f3KmL) / f3KmL) * 100.0 else null
 
         val f2Verdict = when {
-            f2ErrorPct == null -> "Float Sensor Delta Unavailable"
+            split.fillOnThisTrip && split.tripIsBrim -> "Fill on this trip — rise is not burn"
+            f2Liters == null -> "Float Sensor Delta Unavailable"
+            f2ErrorPct == null -> "Float burn vs MID not comparable"
             abs(f2ErrorPct) <= 8.0 -> "Good Float Tracking"
             abs(f2ErrorPct) <= 20.0 -> "Coarse Float Quantization (±0.5% steps)"
             else -> "Float Slosh / Gradient Inaccuracy"
         }
 
         val f2Explanation = when {
+            split.fillOnThisTrip && split.pidFillLitres != null && split.pumpLitres != null ->
+                buildString {
+                    append(
+                        String.format(
+                            Locale.US,
+                            "Fill %s%% → %s%%: pump %.2f L vs PID %.2f L (Δ %+.2f L).",
+                            split.fillBeforePct?.let { String.format(Locale.US, "%.1f", it) } ?: "--",
+                            split.fillAfterPct?.let { String.format(Locale.US, "%.1f", it) } ?: "--",
+                            split.pumpLitres,
+                            split.pidFillLitres,
+                            split.pumpMinusPidFillL ?: 0.0
+                        )
+                    )
+                    val net = split.netBurnLitres
+                    if (net != null) {
+                        append(
+                            String.format(
+                                Locale.US,
+                                " Net float burn around the fill is %.2f L — not the trip window %.2f L.",
+                                net,
+                                split.pidTripWindowLitres ?: 0.0
+                            )
+                        )
+                    } else {
+                        append(" The tank rise is fuel in, not burn.")
+                    }
+                }
+            split.tripIsBrim ->
+                "Tank rose on this trip (fill). That percentage is fuel in, not consumption. Use Factor 1 / MID for burn."
             f2ErrorPct == null -> "PID 012F fuel tank level was unmeasured or fuel level change was smaller than sensor resolution."
             abs(f2ErrorPct) <= 8.0 -> "Tank float level sensor tracked fuel drawdown consistently across this distance."
-            else -> "The mechanical fuel float has ~0.39% step resolution (±0.18 L on official 45L tank) and is susceptible to road incline tilt and cornering slosh over short trips."
+            else -> "The mechanical fuel float has ~0.39% step resolution and is susceptible to slosh and tilt over short trips."
         }
 
         val factor2 = FactorResult(
@@ -174,7 +212,9 @@ object ThreeWayFuelComparator {
                 append(String.format(Locale.US, "MID recorded %.1f km/L over %.1f km. ", f3KmL, midData.distanceKm))
             }
 
-            if (f2ErrorPct != null && abs(f2ErrorPct) > 12.0) {
+            if (split.fillOnThisTrip && split.tripIsBrim) {
+                append("Tank rose because of a fill — Factor 2 is net float burn around the pump, not the receipt.")
+            } else if (f2ErrorPct != null && abs(f2ErrorPct) > 12.0) {
                 append("Tank Float Delta (Factor 2) exhibits coarse potentiometer quantization and should be used only for multi-hundred km brim-to-brim tracking.")
             } else {
                 append("Dynamic injector mass flow provides the highest continuous fidelity.")

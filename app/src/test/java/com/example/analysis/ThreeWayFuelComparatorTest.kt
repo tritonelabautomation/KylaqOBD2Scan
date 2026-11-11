@@ -216,4 +216,55 @@ class ThreeWayFuelComparatorTest {
         assertEquals(4052.0, parsed.totalOdometerKm!!, 0.01)
         assertEquals(210.0, parsed.rangeKm!!, 0.01)
     }
+
+    @Test
+    fun brimFillIsNotFactor2Burn() {
+        // Recovered 17c54147: OBD 3.74 L / MID 3.81 L, tank 22.0% → 93.7% is the Begumpet fill.
+        val midData = MidClusterData(
+            tripId = "17c54147",
+            durationMinutes = 123,
+            durationText = "2:03 h",
+            distanceKm = 32.3,
+            avgFuelEconomyKmL = 8.40,
+            avgSpeedKmh = 16.0,
+            mode = "Since start"
+        )
+        val summary = TripFuelSummary.Summary(
+            fuelLiters = 3.74,
+            distanceKm = 32.3,
+            kmPerLiter = 8.63,
+            durationSeconds = 7380L,
+            averageSpeedKmh = 16.0,
+            movingAverageSpeedKmh = 22.0,
+            maxSpeedKmh = 65.0,
+            coastSeconds = 100.0,
+            idleSeconds = 400.0,
+            speedHistogram = emptyList(),
+            sampleCount = 500,
+            hasSpeedSeries = true,
+            hasFuelSeries = true,
+            startFuelPercent = 22.0,
+            endFuelPercent = 93.7,
+            fuelDeltaPercent = 71.7,
+            fuelDeltaLiters = 37.98,
+            isRefuelBrimEvent = true
+        )
+        val withFill = ThreeWayFuelComparator.compare(
+            "17c54147", summary, midData,
+            tankCapacityL = 52.9,
+            fillBeforePct = 17.6,
+            fillAfterPct = 93.7,
+            pumpLitres = 40.27,
+            fillOnThisTrip = true
+        )
+        assertEquals(3.74, withFill.factor1ObdIntegration.fuelLiters!!, 0.01)
+        assertTrue(withFill.factor2TankFloatDelta.fuelLiters!! < 5.0)
+        assertTrue(withFill.factor2TankFloatDelta.explanation.contains("pump 40.27"))
+        assertTrue(withFill.factor2TankFloatDelta.explanation.contains("17.6"))
+        assertTrue(withFill.primaryInsightVerdict.contains("fill"))
+
+        val brimOnly = ThreeWayFuelComparator.compare("17c54147", summary, midData, tankCapacityL = 52.9)
+        assertNull(brimOnly.factor2TankFloatDelta.fuelLiters)
+        assertTrue(brimOnly.factor2TankFloatDelta.explanation.contains("not consumption"))
+    }
 }

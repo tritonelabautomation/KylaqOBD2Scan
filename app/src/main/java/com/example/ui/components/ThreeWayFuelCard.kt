@@ -47,7 +47,11 @@ fun ThreeWayFuelCard(
     tripId: String,
     fuelSummary: TripFuelSummary.Summary,
     modifier: Modifier = Modifier,
-    tankCapacityL: Double = com.example.engine.PowertrainModel.TANK_CAPACITY_L
+    tankCapacityL: Double = com.example.engine.PowertrainModel.TANK_CAPACITY_L,
+    fillBeforePct: Double? = null,
+    fillAfterPct: Double? = null,
+    pumpLitres: Double? = null,
+    fillOnThisTrip: Boolean = false
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -91,9 +95,16 @@ fun ThreeWayFuelCard(
         }
     }
 
-    val comparison = remember(fuelSummary, midData, tankCapacityL) {
+    val comparison = remember(fuelSummary, midData, tankCapacityL, fillBeforePct, fillAfterPct, pumpLitres, fillOnThisTrip) {
         midData?.takeIf { it.avgFuelEconomyKmL > 0.1 }?.let {
-            ThreeWayFuelComparator.compare(tripId, fuelSummary, it, tankCapacityL = tankCapacityL)
+            ThreeWayFuelComparator.compare(
+                tripId, fuelSummary, it,
+                tankCapacityL = tankCapacityL,
+                fillBeforePct = fillBeforePct,
+                fillAfterPct = fillAfterPct,
+                pumpLitres = pumpLitres,
+                fillOnThisTrip = fillOnThisTrip
+            )
         }
     }
 
@@ -332,14 +343,15 @@ fun ThreeWayFuelCard(
 
                 // Factor 2 Card
                 FactorRowCard(
-                    factorLabel = "FACTOR 2 · TANK FLOAT LEVEL DELTA",
-                    methodSubtitle = "Potentiometer Float % Drop (PID 012F)",
+                    factorLabel = "FACTOR 2 · TANK FLOAT NET BURN",
+                    methodSubtitle = if (fillOnThisTrip) "Around the fill (PID 012F) — rise is not burn" else "Potentiometer Float % Drop (PID 012F)",
                     liters = comparison.factor2TankFloatDelta.fuelLiters,
                     kmL = comparison.factor2TankFloatDelta.economyKmL,
                     errorPct = comparison.factor2TankFloatDelta.errorPctVsMid,
                     verdictBadge = comparison.factor2TankFloatDelta.accuracyVerdict,
                     badgeColor = if (comparison.factor2TankFloatDelta.errorPctVsMid == null) TextSecondaryDark else if (kotlin.math.abs(comparison.factor2TankFloatDelta.errorPctVsMid) <= 10.0) ElectricAmber else WarningRed,
-                    explanation = comparison.factor2TankFloatDelta.explanation
+                    explanation = comparison.factor2TankFloatDelta.explanation,
+                    litersCaption = if (fillOnThisTrip) "NET FLOAT BURN" else "TOTAL BURN"
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))
@@ -630,7 +642,8 @@ private fun FactorRowCard(
     verdictBadge: String,
     badgeColor: Color,
     explanation: String,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    litersCaption: String = "TOTAL BURN"
 ) {
     Surface(
         color = DarkSurfaceElevated,
@@ -678,7 +691,7 @@ private fun FactorRowCard(
                         maxLines = 1,
                         softWrap = false
                     )
-                    Text("TOTAL BURN", color = TextSecondaryDark, fontSize = 8.sp, maxLines = 1)
+                    Text(litersCaption, color = TextSecondaryDark, fontSize = 8.sp, maxLines = 1)
                 }
                 Column(modifier = Modifier.weight(1f)) {
                     Text(

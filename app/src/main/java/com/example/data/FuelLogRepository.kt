@@ -31,7 +31,11 @@ object FuelLogCodec {
         val partial: Boolean = false,
         val additive: String? = null,
         val additiveDosageMl: Double? = null,
-        val additiveCost: Double? = null
+        val additiveCost: Double? = null,
+        /** PID 012F % immediately before the pump. */
+        val startLevelPct: Double? = null,
+        /** PID 012F % at auto-cut / after the pump. */
+        val endLevelPct: Double? = null
     ) {
         val totalCost: Double get() = liters * pricePerL + (additiveCost ?: 0.0)
         val hasAdditive: Boolean get() = !additive.isNullOrBlank() && !additive.equals("None", ignoreCase = true)
@@ -44,6 +48,9 @@ object FuelLogCodec {
                 append(" · ").append(grade)
                 if (hasAdditive && !additive.isNullOrBlank()) append(" + ").append(additive)
                 if (station.isNotBlank()) append(" · ").append(station)
+                if (startLevelPct != null && endLevelPct != null) {
+                    append(" · ").append(String.format(java.util.Locale.US, "%.1f%%→%.1f%%", startLevelPct, endLevelPct))
+                }
             }
     }
 
@@ -60,7 +67,9 @@ object FuelLogCodec {
         if (e.partial) "1" else "0",
         esc(e.additive ?: ""),
         e.additiveDosageMl?.let { num(it) } ?: "-",
-        e.additiveCost?.let { num(it) } ?: "-"
+        e.additiveCost?.let { num(it) } ?: "-",
+        e.startLevelPct?.let { num(it) } ?: "-",
+        e.endLevelPct?.let { num(it) } ?: "-"
     ).joinToString("|")
 
     fun decode(line: String): FuelEntry? {
@@ -88,7 +97,9 @@ object FuelLogCodec {
                 partial = partial,
                 additive = additive,
                 additiveDosageMl = dosage,
-                additiveCost = addCost
+                additiveCost = addCost,
+                startLevelPct = p.getOrNull(13)?.toDoubleOrNull(),
+                endLevelPct = p.getOrNull(14)?.toDoubleOrNull()
             )
         } catch (e: NumberFormatException) {
             null
@@ -153,7 +164,7 @@ object FuelLogCodec {
     }
 
     // ---- Fuelio-parity selective CSV export/import (merge-safe) ----
-    private const val CSV_HEADER = "idMs,dateUtc,liters,pricePerL,odometerKm,station,grade,note,partial"
+    private const val CSV_HEADER = "idMs,dateUtc,liters,pricePerL,odometerKm,station,grade,note,partial,startLevelPct,endLevelPct"
 
     fun toCsv(entries: List<FuelEntry>): String = buildString {
         appendLine(CSV_HEADER)
@@ -163,7 +174,9 @@ object FuelLogCodec {
                     e.idMs.toString(), csv(e.dateUtc), csv(num(e.liters)), csv(num(e.pricePerL)),
                     e.odometerKm?.let { num(it) } ?: "", csv(e.station.replace("\n", " ")),
                     csv(e.grade), csv(e.note.replace("\n", "\\n")),
-                    if (e.partial) "1" else "0"
+                    if (e.partial) "1" else "0",
+                    e.startLevelPct?.let { num(it) } ?: "",
+                    e.endLevelPct?.let { num(it) } ?: ""
                 ).joinToString(",")
             )
         }
@@ -185,7 +198,9 @@ object FuelLogCodec {
                     station = c[5],
                     grade = c[6],
                     note = c[7].replace("\\n", "\n"),
-                    partial = c[8] == "1"
+                    partial = c[8] == "1",
+                    startLevelPct = c.getOrNull(9)?.toDoubleOrNull(),
+                    endLevelPct = c.getOrNull(10)?.toDoubleOrNull()
                 )
             } catch (e: NumberFormatException) { null }
         }

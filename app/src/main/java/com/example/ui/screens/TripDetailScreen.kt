@@ -903,6 +903,7 @@ private fun TripOverviewView(
             TripFuelLogCard(
                 summary = summary,
                 linkedFill = linkedFill,
+                tankCapacityL = tankCapacityL,
                 acOverrideState = userOverride.acState,
                 windowRolledDown = userOverride.windowRolledDown,
                 onUpdateAcState = onUpdateAcState
@@ -929,7 +930,11 @@ private fun TripOverviewView(
             ThreeWayFuelCard(
                 tripId = trip.id,
                 fuelSummary = summary,
-                tankCapacityL = tankCapacityL
+                tankCapacityL = tankCapacityL,
+                fillBeforePct = linkedFill?.bunk?.startLevelPercent ?: linkedFill?.fill?.startLevelPct,
+                fillAfterPct = linkedFill?.bunk?.autoCutPercent ?: linkedFill?.fill?.endLevelPct,
+                pumpLitres = linkedFill?.pumpLitres,
+                fillOnThisTrip = linkedFill?.happenedOnThisTrip == true
             )
         }
         fuelBatchComparison?.let { fbc ->
@@ -948,7 +953,12 @@ private fun TripOverviewView(
                 speedPoints = speedPoints,
                 maxAltitudeM = effectiveMaxAlt,
                 minAltitudeM = effectiveMinAlt,
-                altitudeBlankReason = if (effectiveMaxAlt == null) altitudeBlankReason else null
+                altitudeBlankReason = if (effectiveMaxAlt == null) altitudeBlankReason else null,
+                tankCapacityL = tankCapacityL,
+                fillBeforePct = linkedFill?.bunk?.startLevelPercent ?: linkedFill?.fill?.startLevelPct,
+                fillAfterPct = linkedFill?.bunk?.autoCutPercent ?: linkedFill?.fill?.endLevelPct,
+                pumpLitres = linkedFill?.pumpLitres,
+                fillOnThisTrip = linkedFill?.happenedOnThisTrip == true
             )
         }
         item {
@@ -1816,6 +1826,7 @@ private fun InsightBlock(accent: Color, title: String, body: String) {
 private fun TripFuelLogCard(
     summary: com.example.analysis.TripFuelSummary.Summary,
     linkedFill: com.example.analysis.FillTripLinker.Link? = null,
+    tankCapacityL: Double = 50.0,
     acOverrideState: String? = null,
     windowRolledDown: Boolean = false,
     onUpdateAcState: ((acState: String?, windowDown: Boolean) -> Unit)? = null
@@ -1867,10 +1878,19 @@ private fun TripFuelLogCard(
                 fontSize = 13.sp
             )
 
-            // Mandatory Fuel Tank Level % & Brim Detection (Start vs End)
+            // Tank % is a window, not burn. A mid-trip fill is fuel in; OBD/MID are consumption.
             val startFuel = summary.startFuelPercent
             val endFuel = summary.endFuelPercent
             val deltaPct = summary.fuelDeltaPercent
+            val fuelSplit = com.example.analysis.MidTripFuel.split(
+                tripStartPct = startFuel,
+                tripEndPct = endFuel,
+                tankL = tankCapacityL,
+                fillBeforePct = linkedFill?.bunk?.startLevelPercent ?: linkedFill?.fill?.startLevelPct,
+                fillAfterPct = linkedFill?.bunk?.autoCutPercent ?: linkedFill?.fill?.endLevelPct,
+                pumpLitres = linkedFill?.pumpLitres,
+                fillOnThisTrip = linkedFill?.happenedOnThisTrip == true
+            )
             if (startFuel != null && endFuel != null) {
                 Spacer(modifier = Modifier.height(8.dp))
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
@@ -1881,7 +1901,12 @@ private fun TripFuelLogCard(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column {
-                        Text("TANK LEVEL (PID 012F)", color = CyberCyan, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Text(
+                            if (fuelSplit.tripIsBrim) "TANK LEVEL (FILL ON TRIP — NOT BURN)" else "TANK LEVEL (PID 012F)",
+                            color = CyberCyan,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
                         Spacer(modifier = Modifier.height(2.dp))
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(
@@ -1891,20 +1916,15 @@ private fun TripFuelLogCard(
                                 fontSize = 14.sp,
                                 fontFamily = FontFamily.Monospace
                             )
-                            val deltaColor = if (summary.isRefuelBrimEvent) NeonEmerald else if ((deltaPct ?: 0.0) < 0) ElectricAmber else TextSecondaryDark
+                            val deltaColor = if (fuelSplit.tripIsBrim) NeonEmerald else if ((deltaPct ?: 0.0) < 0) ElectricAmber else TextSecondaryDark
                             val deltaSign = if ((deltaPct ?: 0.0) > 0) "+" else ""
-                            val pumpL = linkedFill?.takeIf { it.happenedOnThisTrip && it.pumpLitres > 0.5 }?.pumpLitres
-                            val litresLabel = when {
-                                pumpL != null -> " (pump ${String.format(java.util.Locale.US, "%.2f", pumpL)} L)"
-                                summary.fuelDeltaLiters != null -> " (${String.format(java.util.Locale.US, "%.2f", summary.fuelDeltaLiters)} L)"
-                                else -> ""
-                            }
                             Surface(
                                 color = deltaColor.copy(alpha = 0.15f),
                                 shape = RoundedCornerShape(6.dp)
                             ) {
                                 Text(
-                                    text = "$deltaSign${String.format(java.util.Locale.US, "%.1f", deltaPct ?: 0.0)}%$litresLabel",
+                                    text = "$deltaSign${String.format(java.util.Locale.US, "%.1f", deltaPct ?: 0.0)}%" +
+                                        if (fuelSplit.tripIsBrim) " fill" else "",
                                     color = deltaColor,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 11.sp,
@@ -1913,7 +1933,7 @@ private fun TripFuelLogCard(
                             }
                         }
                     }
-                    if (summary.isRefuelBrimEvent) {
+                    if (fuelSplit.tripIsBrim) {
                         Surface(
                             color = NeonEmerald.copy(alpha = 0.2f),
                             shape = RoundedCornerShape(8.dp),
@@ -1930,21 +1950,33 @@ private fun TripFuelLogCard(
                         }
                     }
                 }
-                val brimFill = linkedFill?.takeIf { it.happenedOnThisTrip && it.pumpLitres > 0.5 }
-                if (brimFill != null) {
-                    val station = brimFill.stationName.takeIf { it.isNotBlank() }
-                    val floatL = summary.fuelDeltaLiters
+                val fillLine = com.example.analysis.MidTripFuel.fillWindowLine(fuelSplit)
+                val pumpLine = com.example.analysis.MidTripFuel.pumpVsPidLine(fuelSplit)
+                if (fillLine != null || pumpLine != null || linkedFill?.happenedOnThisTrip == true) {
+                    val station = linkedFill?.stationName?.takeIf { it.isNotBlank() }
                     Text(
                         buildString {
                             if (station != null) append(station).append(" · ")
-                            append(String.format(java.util.Locale.US, "receipt %.2f L", brimFill.pumpLitres))
-                            if (floatL != null) {
-                                append(String.format(java.util.Locale.US, " · float %.2f L", floatL))
+                            fillLine?.let { append(it) }
+                            if (fillLine != null && pumpLine != null) append(" · ")
+                            pumpLine?.let { append(it) }
+                            if (fillLine == null && pumpLine == null && linkedFill != null) {
+                                append(String.format(java.util.Locale.US, "pump %.2f L", linkedFill.pumpLitres))
                             }
                         },
                         color = NeonEmerald,
                         fontSize = 11.sp,
                         modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
+                if (fuelSplit.tripIsBrim) {
+                    Text(
+                        fuelSplit.netBurnLitres?.let {
+                            String.format(java.util.Locale.US, "Net float burn %.2f L around the fill — not the tank rise.", it)
+                        } ?: "This rise is fuel in. Trip burn is OBD / MID, not the tank %.",
+                        color = TextSecondaryDark,
+                        fontSize = 11.sp,
+                        modifier = Modifier.padding(top = 2.dp)
                     )
                 }
             }
