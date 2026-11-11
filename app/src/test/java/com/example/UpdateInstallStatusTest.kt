@@ -41,7 +41,7 @@ class UpdateInstallStatusTest {
     }
 
     @Test
-    fun `incompatible names the signing-key / versionCode case`() {
+    fun `incompatible names the signing-key and versionCode case`() {
         val msg = UpdateInstallStatus.userMessage(
             UpdateInstallStatus.FAILURE_INCOMPATIBLE,
             "INSTALL_FAILED_UPDATE_INCOMPATIBLE"
