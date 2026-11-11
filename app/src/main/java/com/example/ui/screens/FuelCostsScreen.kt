@@ -581,6 +581,7 @@ private fun RefuelTrackerCard(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TankCapacityEditorCard(
     capacityL: Double,

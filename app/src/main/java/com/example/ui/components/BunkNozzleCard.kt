@@ -132,7 +132,7 @@ fun BunkNozzleCard(
                             val maxCut = stats.maxOf { it.maxAutoCutPercent }
                             "Different petrol bunks and dispenser nozzles exhibit distinct auto-cut trigger thresholds (observed range: ${String.format(Locale.US, "%.1f%% - %.1f%%", minCut, maxCut)}). Tracking nozzle profiles calibrates tank fill accuracy."
                         } else {
-                            "Dispenser nozzles vary in backpressure sensitivity, causing auto-cutoffs between ~96.5% and 100.0%. Logging refuels per bunk & nozzle builds accurate cutoff profiles for your 50.0L Kylaq tank."
+                            "Dispenser nozzles vary in backpressure sensitivity, causing auto-cutoffs between ~96.5% and 100.0%. Logging brim fills per bunk & nozzle measures your real usable tank, not the 50 L factory stamp."
                         },
                         color = TextPrimaryDark,
                         fontSize = 11.sp,

@@ -815,13 +815,13 @@ class RecordingManager(
         val journalSample = journal.sampleFile(sessionId)
 
         val txSrc = when {
-            txCsv.exists() && txCsv.length() > 0L -> txCsv
-            journalTx.exists() && journalTx.length() > 0L -> journalTx
+            txCsv.exists() && SessionJsonReader.countTransactionRows(txCsv) > 0 -> txCsv
+            journalTx.exists() && SessionJsonReader.countTransactionRows(journalTx) > 0 -> journalTx
             else -> null
         }
         val sampleSrc = when {
-            sampleCsv.exists() && sampleCsv.length() > 0L -> sampleCsv
-            journalSample.exists() && journalSample.length() > 0L -> journalSample
+            sampleCsv.exists() && SessionJsonReader.countTransactionRows(sampleCsv) > 0 -> sampleCsv
+            journalSample.exists() && SessionJsonReader.countTransactionRows(journalSample) > 0 -> journalSample
             else -> null
         }
 
@@ -1029,7 +1029,8 @@ class RecordingManager(
         val stats = if (txCsv != null && txCsv.exists()) {
             CsvExporter.reduceTransactionsFromCsv(txCsv)
         } else CsvTripStats()
-        if (stats.count == 0 && (sampleCsv == null || !sampleCsv.exists())) return false
+        val sampleRows = sampleCsv?.let { SessionJsonReader.countTransactionRows(it) } ?: 0
+        if (stats.count == 0 && sampleRows == 0) return false
 
         val startTimestamp = startTimestampOverride
             ?: stats.minEpochMs
@@ -1044,7 +1045,7 @@ class RecordingManager(
         val (sampleMinAlt, sampleMaxAlt) = if (sampleCsv != null) {
             CsvExporter.reduceAltitudeFromSamplesCsv(sampleCsv)
         } else null to null
-        val totalCount = maxOf(stats.count, sampleCsv?.let { SessionJsonReader.countTransactionRows(it) } ?: 0)
+        val totalCount = maxOf(stats.count, sampleRows)
 
         tripRepository.insertTrip(
             TripEntity(
@@ -1541,14 +1542,21 @@ class RecordingManager(
                         recovered++
                         ids += stuck.id
                     } else {
-                        val endMs = stuck.endTimestamp ?: (stuck.startTimestamp + 1000L)
-                        tripRepository.insertTrip(
-                            stuck.copy(
-                                status = "COMPLETED",
-                                endTimestamp = endMs,
-                                endTimeUtc = RecordTime.stamp(endMs)
+                        val sampleCount = runCatching { tripRepository.getSampleCountForTrip(stuck.id) }.getOrDefault(0)
+                        if (sampleCount <= 0) {
+                            // Header-only journal / ignition-off: do not invent a zero-line trip.
+                            runCatching { tripRepository.deleteTrip(stuck.id) }
+                            journal.discard(stuck.id)
+                        } else {
+                            val endMs = stuck.endTimestamp ?: (stuck.startTimestamp + 1000L)
+                            tripRepository.insertTrip(
+                                stuck.copy(
+                                    status = "COMPLETED",
+                                    endTimestamp = endMs,
+                                    endTimeUtc = RecordTime.stamp(endMs)
+                                )
                             )
-                        )
+                        }
                     }
                 }
             }
