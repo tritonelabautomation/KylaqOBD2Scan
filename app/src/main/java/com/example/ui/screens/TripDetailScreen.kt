@@ -378,10 +378,18 @@ fun TripDetailScreen(
                             fuelBatchComparison = fuelBatchComparison,
                             altitudeBlankReason = altitudeBlankReason,
                             userOverride = userOverride,
+                            fuelLogs = viewModel.fuelLogRepository.entries(),
+                            bunkRecords = com.example.data.BunkNozzleStore.getAll(context),
                             onToggleDriveMode = onToggleDriveMode,
                             onUpdateAcState = onUpdateAcState,
                             onUpdateFuelTag = { st, gr, ad, ml ->
                                 viewModel.setTripFuelTag(tripId, st, gr, ad, ml)
+                                userOverride = userOverride.copy(
+                                    fuelStation = st,
+                                    fuelGrade = gr,
+                                    fuelAdditive = ad,
+                                    fuelBrand = com.example.analysis.FuelBrandTagger.detectBrand(st, gr, ad).displayName
+                                )
                             },
                             onUpdateAltitude = { maxAlt, minAlt ->
                                 viewModel.updateTripAltitudeIfMissing(tripId, maxAlt, minAlt)
@@ -672,6 +680,8 @@ private fun TripOverviewView(
     /** Why the altitude column is blank, when it is. Computed by the caller from the location grants. */
     altitudeBlankReason: String? = null,
     userOverride: com.example.data.TripUserOverride = com.example.data.TripUserOverride(trip?.id ?: ""),
+    fuelLogs: List<com.example.data.FuelLogCodec.FuelEntry> = emptyList(),
+    bunkRecords: List<com.example.data.RefuelBunkRecord> = emptyList(),
     onToggleDriveMode: (String) -> Unit = {},
     onUpdateAcState: (String?, Boolean) -> Unit = { _, _ -> },
     onUpdateFuelTag: (String, String, String?, Double?) -> Unit = { _, _, _, _ -> },
@@ -732,10 +742,12 @@ private fun TripOverviewView(
     }
 
     var showFuelTagDialog by remember { mutableStateOf(false) }
-    val fuelTag = remember(trip.id, userOverride, validStartMs) {
+    val fuelTag = remember(trip.id, userOverride, validStartMs, fuelLogs.size, fuelLogs.maxOfOrNull { it.idMs }, bunkRecords.size) {
         com.example.analysis.FuelBrandTagger.resolveFuelTag(
             tripStartMs = validStartMs ?: trip.startTimestamp,
-            userOverride = userOverride
+            userOverride = userOverride,
+            fuelLogs = fuelLogs,
+            bunkRecords = bunkRecords
         )
     }
 
@@ -808,7 +820,13 @@ private fun TripOverviewView(
                             Icon(Icons.Default.LocalGasStation, contentDescription = null, tint = fuelTag.brand.secondaryColor, modifier = Modifier.size(20.dp))
                             Column {
                                 Text("FUEL BATCH IN TANK", color = TextSecondaryDark, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                Text(fuelTag.fullStationAndGrade, color = TextPrimaryDark, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    fuelTag.fullStationAndGrade,
+                                    color = TextPrimaryDark,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 2
+                                )
                             }
                         }
                         com.example.ui.components.FuelBrandBadge(

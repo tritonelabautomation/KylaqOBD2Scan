@@ -289,7 +289,14 @@ fun TripsOverviewScreen(
                 } else {
                     ov.trips.groupBy { it.startMs / 86_400_000L }.forEach { (_, dayTrips) ->
                         item { Text(dayHeader(dayTrips.first().startMs), color = TtGray, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp)) }
-                        items(dayTrips) { trip -> TripRow(trip, weekFuel.third, onOpenTrip) }
+                        items(dayTrips) { trip ->
+                            TripRow(
+                                trip = trip,
+                                price = weekFuel.third,
+                                onOpenTrip = onOpenTrip,
+                                fuelLogs = viewModel.fuelLogRepository.entries()
+                            )
+                        }
                     }
                 }
 
@@ -383,9 +390,16 @@ fun BandStrip(fractions: List<Double>) {
 }
 
 @Composable
-private fun TripRow(trip: WeeklyTripOverview.TripCard, price: Double, onOpenTrip: (String) -> Unit) {
+private fun TripRow(
+    trip: WeeklyTripOverview.TripCard,
+    price: Double,
+    onOpenTrip: (String) -> Unit,
+    fuelLogs: List<com.example.data.FuelLogCodec.FuelEntry> = emptyList()
+) {
     val timeFmt = remember { com.example.data.RecordTime.formatter("HH:mm") }
-    val fuelTag = remember(trip.startMs) { com.example.analysis.FuelBrandTagger.resolveFuelTag(trip.startMs) }
+    val fuelTag = remember(trip.startMs, fuelLogs.size, fuelLogs.maxOfOrNull { it.idMs }) {
+        com.example.analysis.FuelBrandTagger.resolveFuelTag(trip.startMs, fuelLogs = fuelLogs)
+    }
     Column(Modifier.fillMaxWidth().background(TtInner, RoundedCornerShape(14.dp)).clickable { onOpenTrip(trip.tripId) }.padding(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             GradientRing(score = trip.score, size = 42.dp, stroke = 3.5.dp, numberSp = 13)

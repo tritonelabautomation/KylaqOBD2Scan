@@ -82,18 +82,31 @@ object FuelBrandTagger {
     }
 
     /**
-     * Identifies the brand enum from any raw station name string.
+     * Identifies the brand enum from any raw station / grade / additive string.
+     * Extra parts are concatenated so a blank station with grade `XP95` still
+     * resolves to IOCL instead of falling through to a fake Nayara default.
      */
-    fun detectBrand(stationOrBrand: String?): FuelBrand {
-        if (stationOrBrand.isNullOrBlank()) return FuelBrand.GENERIC
-        val s = stationOrBrand.uppercase(Locale.ROOT)
+    fun detectBrand(stationOrBrand: String?, vararg extra: String?): FuelBrand {
+        val s = buildString {
+            if (!stationOrBrand.isNullOrBlank()) append(stationOrBrand)
+            extra.forEach { part ->
+                if (!part.isNullOrBlank()) {
+                    if (isNotEmpty()) append(' ')
+                    append(part)
+                }
+            }
+        }.uppercase(Locale.ROOT)
+        if (s.isBlank()) return FuelBrand.GENERIC
         return when {
             s.contains("NAYARA") || s.contains("ESSAR") -> FuelBrand.NAYARA
-            s.contains("IOCL") || s.contains("INDIANOIL") || s.contains("INDIAN OIL") || s.contains("XP95") || s.contains("XP100") -> FuelBrand.IOCL
-            s.contains("JIO") || s.contains("BP") && s.contains("JIO") || s.contains("RELIANCE") -> FuelBrand.JIO_BP
+            s.contains("IOCL") || s.contains("INDIANOIL") || s.contains("INDIAN OIL") ||
+                s.contains("XP95") || s.contains("XP100") -> FuelBrand.IOCL
+            s.contains("JIO") || s.contains("RELIANCE") -> FuelBrand.JIO_BP
             s.contains("SHELL") || s.contains("V-POWER") -> FuelBrand.SHELL
             s.contains("BPCL") || s.contains("BHARAT") || s.contains("SPEED 97") -> FuelBrand.BPCL
             s.contains("HPCL") || s.contains("HINDUSTAN") || s.contains("POWER 95") || s.contains("HP ") -> FuelBrand.HPCL
+            // Nayara's premium grade is X95; IOCL's XP95 already matched above.
+            s.contains("X95") -> FuelBrand.NAYARA
             else -> FuelBrand.GENERIC
         }
     }
@@ -111,7 +124,7 @@ object FuelBrandTagger {
         // 1. Check if driver manually tagged/overrode the fuel on this trip
         if (userOverride != null && (!userOverride.fuelStation.isNullOrBlank() || !userOverride.fuelBrand.isNullOrBlank())) {
             val station = userOverride.fuelStation ?: userOverride.fuelBrand ?: "Petrol Pump"
-            val brand = detectBrand(station)
+            val brand = detectBrand(station, userOverride.fuelGrade, userOverride.fuelAdditive)
             val grade = userOverride.fuelGrade ?: brand.defaultGrade
             val additive = userOverride.fuelAdditive
             return FuelTagInfo(
@@ -129,20 +142,25 @@ object FuelBrandTagger {
         val activeBunk = bunkRecords.firstOrNull { it.idMs == activeFill?.idMs }
 
         if (activeFill != null) {
-            val station = activeFill.station.ifBlank { activeBunk?.stationName ?: "Nayara Energy" }
-            val brand = detectBrand(station)
+            val station = activeFill.station.ifBlank {
+                activeBunk?.stationName?.takeIf { it.isNotBlank() } ?: ""
+            }
             val grade = if (activeFill.grade.isNotBlank() && activeFill.grade != FuelLogCodec.GRADE_UNKNOWN) {
                 activeFill.grade
             } else {
-                activeBunk?.fuelGrade ?: brand.defaultGrade
+                activeBunk?.fuelGrade?.takeIf { it.isNotBlank() && it != FuelLogCodec.GRADE_UNKNOWN }.orEmpty()
             }
             val additive = activeFill.additive ?: activeBunk?.additiveName
             val dosage = activeFill.additiveDosageMl ?: activeBunk?.additiveDosageMl
+            val brand = detectBrand(station, grade, additive)
+            val displayStation = station.ifBlank {
+                if (brand != FuelBrand.GENERIC) brand.displayName else "Unknown pump"
+            }
 
             return FuelTagInfo(
-                stationName = station,
+                stationName = displayStation,
                 brand = brand,
-                grade = grade,
+                grade = grade.ifBlank { brand.defaultGrade },
                 additiveName = additive,
                 additiveDosageMl = dosage,
                 pricePerL = activeFill.pricePerL,
@@ -150,14 +168,16 @@ object FuelBrandTagger {
             )
         }
 
-        // 3. Fallback default to Nayara Energy X95
+        // 3. No fill-up on record — do not invent a bunk. Hard-coding Nayara Energy
+        // X95 + mileX here is what made trip detail show Nayara while the trip list
+        // (which does pass the fuel log) correctly showed IOCL Regular.
         return FuelTagInfo(
-            stationName = "Nayara Energy",
-            brand = FuelBrand.NAYARA,
-            grade = "X95",
-            additiveName = "Dorf Ketal mileX",
-            additiveDosageMl = 5.0,
-            pricePerL = 108.5,
+            stationName = "Unknown pump",
+            brand = FuelBrand.GENERIC,
+            grade = "",
+            additiveName = null,
+            additiveDosageMl = null,
+            pricePerL = 0.0,
             isManualOverride = false
         )
     }

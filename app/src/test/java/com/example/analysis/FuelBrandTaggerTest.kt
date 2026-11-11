@@ -20,6 +20,11 @@ class FuelBrandTaggerTest {
         assertEquals(FuelBrandTagger.FuelBrand.BPCL, FuelBrandTagger.detectBrand("BPCL Madhapur"))
         assertEquals(FuelBrandTagger.FuelBrand.HPCL, FuelBrandTagger.detectBrand("HPCL Jubilee Hills"))
         assertEquals(FuelBrandTagger.FuelBrand.GENERIC, FuelBrandTagger.detectBrand("Local Highway Bunk"))
+        assertEquals(FuelBrandTagger.FuelBrand.IOCL, FuelBrandTagger.detectBrand(null, "XP95"))
+        assertEquals(FuelBrandTagger.FuelBrand.GENERIC, FuelBrandTagger.detectBrand(null, "REGULAR"))
+        assertEquals(FuelBrandTagger.FuelBrand.IOCL, FuelBrandTagger.detectBrand("IOCL", "REGULAR"))
+        assertEquals(FuelBrandTagger.FuelBrand.NAYARA, FuelBrandTagger.detectBrand(null, "X95"))
+        assertEquals(FuelBrandTagger.FuelBrand.IOCL, FuelBrandTagger.detectBrand("IOCL Gachibowli", "X95"))
     }
 
     @Test
@@ -115,5 +120,68 @@ class FuelBrandTaggerTest {
         assertEquals("Active Petrol", tag.grade)
         assertTrue(tag.isManualOverride)
         assertEquals("Jio-bp Active Petrol", tag.displayBadge)
+    }
+
+    @Test
+    fun `trip detail without a fuel log must not invent a Nayara tank`() {
+        val tag = FuelBrandTagger.resolveFuelTag(
+            tripStartMs = 1_762_000_000_000L,
+            userOverride = null,
+            fuelLogs = emptyList(),
+            bunkRecords = emptyList()
+        )
+        assertEquals(FuelBrandTagger.FuelBrand.GENERIC, tag.brand)
+        assertFalse(tag.stationName.contains("Nayara", ignoreCase = true))
+        assertFalse(tag.displayBadge.contains("Nayara", ignoreCase = true))
+        assertFalse(tag.fullStationAndGrade.contains("mileX", ignoreCase = true))
+        assertFalse(tag.hasAdditive)
+    }
+
+    @Test
+    fun `IOCL Regular fill is the same tag on the list and on trip detail`() {
+        val fillMs = 1_762_000_000_000L
+        val tripStartMs = fillMs + 3_600_000L
+        val fill = FuelLogCodec.FuelEntry(
+            idMs = fillMs,
+            dateUtc = "2026-11-10T08:00:00Z",
+            liters = 32.0,
+            pricePerL = 107.8,
+            odometerKm = 4907.8,
+            station = "IOCL",
+            grade = FuelLogCodec.GRADE_REGULAR,
+            note = ""
+        )
+        val tag = FuelBrandTagger.resolveFuelTag(
+            tripStartMs = tripStartMs,
+            userOverride = null,
+            fuelLogs = listOf(fill)
+        )
+        assertEquals(FuelBrandTagger.FuelBrand.IOCL, tag.brand)
+        assertEquals("IOCL", tag.stationName)
+        assertEquals("REGULAR", tag.grade)
+        assertEquals("IOCL REGULAR", tag.displayBadge)
+        assertFalse(tag.fullStationAndGrade.contains("Nayara", ignoreCase = true))
+        assertFalse(tag.hasAdditive)
+    }
+
+    @Test
+    fun `blank station with XP95 grade is IOCL not Nayara`() {
+        val fill = FuelLogCodec.FuelEntry(
+            idMs = 1_762_000_000_000L,
+            dateUtc = "2026-11-10T08:00:00Z",
+            liters = 30.0,
+            pricePerL = 121.0,
+            odometerKm = 4800.0,
+            station = "",
+            grade = "XP95",
+            note = ""
+        )
+        val tag = FuelBrandTagger.resolveFuelTag(
+            tripStartMs = fill.idMs + 1_000L,
+            fuelLogs = listOf(fill)
+        )
+        assertEquals(FuelBrandTagger.FuelBrand.IOCL, tag.brand)
+        assertEquals("IOCL", tag.stationName)
+        assertEquals("XP95", tag.grade)
     }
 }
