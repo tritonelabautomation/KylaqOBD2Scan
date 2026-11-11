@@ -17,7 +17,7 @@ data class RefuelBunkRecord(
     val autoCutPercent: Double, // PID 012F % at auto-cut off
     val startLevelPercent: Double, // PID 012F % before refuel started
     val pumpLitres: Double, // Ground truth from dispenser / receipt OCR
-    val floatDeltaLitres: Double, // Calculated from PID 012F float delta * 50.0L
+    val floatDeltaLitres: Double, // PID 012F % rise × calibrated usable tank (not a frozen 50 L)
     val pricePerL: Double = 0.0,
     val totalCost: Double = 0.0,
     val odometerKm: Double? = null,

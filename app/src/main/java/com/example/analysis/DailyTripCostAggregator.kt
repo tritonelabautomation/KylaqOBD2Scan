@@ -153,7 +153,8 @@ object DailyTripCostAggregator {
         fuelPricePerL: Double? = null,
         nowMs: Long = System.currentTimeMillis(),
         userOverrides: Map<String, com.example.data.TripUserOverride> = emptyMap(),
-        bunkRecords: List<com.example.data.RefuelBunkRecord> = emptyList()
+        bunkRecords: List<com.example.data.RefuelBunkRecord> = emptyList(),
+        tankCapacityL: Double = TANK_CAPACITY_LITERS
     ): AggregationResult {
         val effectivePricePerL = fuelPricePerL?.takeIf { it > 0.0 }
             ?: fuelLogs.maxByOrNull { it.idMs }?.pricePerL?.takeIf { it > 0.0 }
@@ -211,7 +212,7 @@ object DailyTripCostAggregator {
             val derivedLiters = if (trip.fuelLiters > 0.001) {
                 trip.fuelLiters
             } else if (trip.fuelDeltaPercent != null && trip.fuelDeltaPercent < 0) {
-                kotlin.math.abs(trip.fuelDeltaPercent) * TANK_CAPACITY_LITERS / 100.0
+                kotlin.math.abs(trip.fuelDeltaPercent) * tankCapacityL / 100.0
             } else {
                 0.0
             }

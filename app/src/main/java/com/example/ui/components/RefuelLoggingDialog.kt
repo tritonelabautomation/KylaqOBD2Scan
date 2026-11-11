@@ -58,6 +58,7 @@ fun RefuelLoggingDialog(
     initialStation: String = "",
     initialGrade: String = FuelLogCodec.GRADE_X95,
     initialNote: String = "",
+    currentTankCapacityL: Double = com.example.analysis.TankCapacity.NOMINAL_L,
     onDismiss: () -> Unit,
     onSaved: (RefuelBunkRecord) -> Unit
 ) {
@@ -164,9 +165,12 @@ fun RefuelLoggingDialog(
     val preLvlVal = preLevelPct.toDoubleOrNull() ?: initialPreLevelPct ?: 0.0
     val postLvlVal = postLevelPct.toDoubleOrNull() ?: initialPostLevelPct ?: 100.0
     val deltaLvlVal = maxOf(0.0, postLvlVal - preLvlVal)
-    val floatLVal = (deltaLvlVal / 100.0) * 50.0
+    val savedCap = currentTankCapacityL.takeIf { it in com.example.analysis.TankCapacity.MIN_L..com.example.analysis.TankCapacity.MAX_L }
+        ?: com.example.analysis.TankCapacity.NOMINAL_L
+    val floatLVal = com.example.analysis.TankCapacity.litresFromPercent(deltaLvlVal, savedCap)
     val floatErrorPct = if (pumpLVal > 0.1) ((pumpLVal - floatLVal) / pumpLVal) * 100.0 else 0.0
-    val calibratedCapL = if (deltaLvlVal > 5.0 && pumpLVal > 0.5) (pumpLVal / (deltaLvlVal / 100.0)) else 50.0
+    val calibratedCapL = com.example.analysis.TankCapacity.impliedFromFill(pumpLVal, preLvlVal, postLvlVal)
+        ?: savedCap
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -311,7 +315,8 @@ fun RefuelLoggingDialog(
                         FilterChip(
                             selected = nozzle == noz,
                             onClick = { nozzle = noz },
-                            label = { Text(noz, fontSize = 10.sp) }
+                            modifier = Modifier.weight(1f),
+                            label = { Text(noz.removePrefix("Nozzle "), fontSize = 10.sp, maxLines = 1) }
                         )
                     }
                 }
@@ -528,8 +533,23 @@ fun RefuelLoggingDialog(
                             }
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                 Text("Derived Calibrated Tank Size:", color = TextSecondaryDark, fontSize = 11.sp)
-                                Text(String.format(Locale.US, "%.1f L (vs 50.0L nominal)", calibratedCapL), color = CyberCyan, fontSize = 11.sp)
+                                Text(
+                                    String.format(
+                                        Locale.US,
+                                        "%.1f L (saved %.1f · factory %.1f)",
+                                        calibratedCapL,
+                                        savedCap,
+                                        com.example.analysis.TankCapacity.NOMINAL_L
+                                    ),
+                                    color = CyberCyan,
+                                    fontSize = 11.sp
+                                )
                             }
+                            Text(
+                                "Save & Calibrate stores this as usable tank for every trip. Edit it any time on Fuel → Usable tank capacity.",
+                                color = TextSecondaryDark,
+                                fontSize = 10.sp
+                            )
                         }
                     }
                 }
@@ -559,7 +579,10 @@ fun RefuelLoggingDialog(
                             autoCutPercent = cutVal,
                             startLevelPercent = startVal,
                             pumpLitres = lVal,
-                            floatDeltaLitres = maxOf(0.0, (cutVal - startVal) / 100.0 * 50.0),
+                            floatDeltaLitres = com.example.analysis.TankCapacity.litresFromPercent(
+                                maxOf(0.0, cutVal - startVal),
+                                savedCap
+                            ),
                             pricePerL = pVal,
                             totalCost = totVal,
                             odometerKm = odoVal,

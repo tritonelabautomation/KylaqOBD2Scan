@@ -225,10 +225,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** Calibrated tank capacity for the range estimate (Settings holds it, prefs-backed). */
     fun tankCapacityL(): Double = com.example.di.AppContainer.settingsRepository.tankCapacityL()
 
+    /** Owner-typed usable tank (L). Clamped so a typo cannot poison every trip. */
+    fun setTankCapacityL(litres: Double) {
+        com.example.analysis.TankCapacity.sanitize(litres)?.let {
+            com.example.di.AppContainer.settingsRepository.setTankCapacityL(it)
+        }
+    }
+
+    /**
+     * Auto-cut brim fill: persist usable capacity from the numbers on the receipt dialog
+     * (pump litres vs start% → cut%), not from a trip-window 012F that started earlier
+     * in the drive. Owner 2026-11-11: 40.27 L / 76.1 pt = 52.9 L; the recovered trip's
+     * 22% start would have implied 56 L and left every later trip wrong.
+     */
+    fun applyAutoCutCalibration(record: com.example.data.RefuelBunkRecord) {
+        com.example.analysis.TankCapacity.impliedFromFill(
+            record.pumpLitres, record.startLevelPercent, record.autoCutPercent
+        )?.let { setTankCapacityL(it) }
+        calibrateAfterFuelEntry(record.pumpLitres, record.odometerKm, partial = false)
+    }
+
     /**
      * Closes the brim-to-brim loop: a fuel-log entry whose odometer matches an uncalibrated refuel
-     * event supplies the pump's litres. The implied tank capacity (pump L over level rise) then
-     * re-derives the estimate constant, clamped to a sane tank so one bad receipt cannot poison it.
+     * event supplies the pump's litres. Tank capacity is NOT derived here - the event's before/after
+     * % is the trip window, not the pump window. Capacity comes from [applyAutoCutCalibration].
      */
     fun calibrateAfterFuelEntry(litres: Double, odoKm: Double?, partial: Boolean) {
         if (partial || litres <= 0.0) return
@@ -241,13 +261,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
             } ?: return@launch
             repo.calibrateRefuelEvent(match.idMs, litres)
-            val rise = match.levelAfterPct - match.levelBeforePct
-            if (rise >= 4.0) {
-                val implied = litres / (rise / 100.0)
-                if (implied in 30.0..80.0) {
-                    com.example.di.AppContainer.settingsRepository.setTankCapacityL(implied)
-                }
-            }
         }
     }
 
@@ -264,13 +277,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     (kotlin.math.abs(ev.tsEndMs - log.idMs) <= 48 * 3600 * 1000L)
                 } ?: continue
                 repo.calibrateRefuelEvent(ev.idMs, match.liters)
-                val rise = ev.levelAfterPct - ev.levelBeforePct
-                if (rise >= 4.0) {
-                    val implied = match.liters / (rise / 100.0)
-                    if (implied in 30.0..80.0) {
-                        com.example.di.AppContainer.settingsRepository.setTankCapacityL(implied)
-                    }
-                }
             }
         }
     }
@@ -501,7 +507,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 samplePointsFromRecordingDisk(rec)
             }
             val summary = if (sPoints.isNotEmpty()) {
-                com.example.analysis.TripFuelSummary.summarize(sPoints)
+                com.example.analysis.TripFuelSummary.summarize(sPoints, tankCapacityL = tankCapacityL())
             } else null
 
             val startMs = com.example.data.RecordTime.parseMillis(rec.metadata.startTimeUtc)
@@ -537,7 +543,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             fuelPricePerL = latestPrice,
             nowMs = System.currentTimeMillis(),
             userOverrides = userOverrides,
-            bunkRecords = bunkRecords
+            bunkRecords = bunkRecords,
+            tankCapacityL = tankCapacityL()
         )
     }
 

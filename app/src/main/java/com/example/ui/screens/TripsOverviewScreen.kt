@@ -95,7 +95,7 @@ fun TripsOverviewScreen(
                 }
                 WeeklyTripOverview.TripInput(
                     tripId = t.id, title = t.title, startMs = t.startTimestamp,
-                    summary = TripFuelSummary.summarize(sPoints)
+                    summary = TripFuelSummary.summarize(sPoints, tankCapacityL = viewModel.tankCapacityL())
                 )
             }
         }

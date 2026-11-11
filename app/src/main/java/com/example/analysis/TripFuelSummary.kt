@@ -88,7 +88,7 @@ object TripFuelSummary {
         val endFuelPercent: Double? = null,
         /** Fuel level difference % (end - start). Negative = consumed, positive = refuel. */
         val fuelDeltaPercent: Double? = null,
-        /** Approximate liters from % delta and standard tank capacity (50L). */
+        /** Litres from % delta × the calibrated usable tank, not the 50 L factory stamp. */
         val fuelDeltaLiters: Double? = null,
         /** True if level rose by >= 3.0% during the trip indicating a refuel / brim event. */
         val isRefuelBrimEvent: Boolean = false,
@@ -106,7 +106,10 @@ object TripFuelSummary {
     private const val COAST_FUEL_LH = 0.15
     private const val MAX_GAP_MS = 15000L // slow PIDs legitimately arrive ~10 s apart
 
-    fun summarize(samples: List<SamplePoint>): Summary {
+    fun summarize(
+        samples: List<SamplePoint>,
+        tankCapacityL: Double = com.example.engine.PowertrainModel.TANK_CAPACITY_L
+    ): Summary {
         if (samples.isEmpty()) {
             return Summary(0.0, 0.0, null, 0L, 0.0, 0.0, 0.0, 0.0, 0.0, emptyList(), 0, false, false)
         }
@@ -300,7 +303,7 @@ object TripFuelSummary {
             endFuelPercent - startFuelPercent
         } else null
         val fuelDeltaLiters = if (fuelDeltaPercent != null) {
-            kotlin.math.abs(fuelDeltaPercent) / 100.0 * com.example.engine.PowertrainModel.TANK_CAPACITY_L
+            TankCapacity.litresFromPercent(fuelDeltaPercent, tankCapacityL)
         } else null
         val isRefuelBrimEvent = (fuelDeltaPercent ?: 0.0) >= 10.0
 

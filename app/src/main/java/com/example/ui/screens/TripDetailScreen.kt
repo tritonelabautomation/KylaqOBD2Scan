@@ -90,9 +90,11 @@ fun TripDetailScreen(
         )
 
     // "Log fuel" for this trip: fuel rate integrated over the stored samples.
-    val fuelSummary = remember(samples) {
+    val tankCapacityL = viewModel.tankCapacityL()
+    val fuelSummary = remember(samples, tankCapacityL) {
         com.example.analysis.TripFuelSummary.summarize(
-            samples.map { com.example.analysis.TripFuelSummary.SamplePoint(it.pid, it.instantMs, it.numericValue) }
+            samples.map { com.example.analysis.TripFuelSummary.SamplePoint(it.pid, it.instantMs, it.numericValue) },
+            tankCapacityL = tankCapacityL
         )
     }
 
@@ -368,6 +370,7 @@ fun TripDetailScreen(
                         TripOverviewView(
                             trip = trip, sampleCount = samples.size, rawCount = rawLogs.size, analysis = aiAnalysis,
                             summary = fuelSummary,
+                            tankCapacityL = tankCapacityL,
                             samples = samples,
                             pricePerL = viewModel.fuelLogRepository.entries().maxByOrNull { it.idMs }?.pricePerL ?: 0.0,
                             speedPoints = samples.filter { it.pid.takeLast(2) == "0D" }
@@ -690,7 +693,8 @@ private fun TripOverviewView(
      *  with everything else - the 2026-09-16 clipping fix forbids cards outside the list. */
     carpoolSlot: (@Composable () -> Unit)? = null,
     onExportGpx: () -> Unit = {},
-    onExportKml: () -> Unit = {}
+    onExportKml: () -> Unit = {},
+    tankCapacityL: Double = com.example.engine.PowertrainModel.TANK_CAPACITY_L
 ) {
     if (trip == null) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -907,7 +911,8 @@ private fun TripOverviewView(
         item {
             ThreeWayFuelCard(
                 tripId = trip.id,
-                fuelSummary = summary
+                fuelSummary = summary,
+                tankCapacityL = tankCapacityL
             )
         }
         fuelBatchComparison?.let { fbc ->

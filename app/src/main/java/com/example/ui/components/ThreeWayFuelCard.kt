@@ -46,7 +46,8 @@ import java.util.Locale
 fun ThreeWayFuelCard(
     tripId: String,
     fuelSummary: TripFuelSummary.Summary,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    tankCapacityL: Double = com.example.engine.PowertrainModel.TANK_CAPACITY_L
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -90,8 +91,10 @@ fun ThreeWayFuelCard(
         }
     }
 
-    val comparison = remember(fuelSummary, midData) {
-        midData?.takeIf { it.avgFuelEconomyKmL > 0.1 }?.let { ThreeWayFuelComparator.compare(tripId, fuelSummary, it) }
+    val comparison = remember(fuelSummary, midData, tankCapacityL) {
+        midData?.takeIf { it.avgFuelEconomyKmL > 0.1 }?.let {
+            ThreeWayFuelComparator.compare(tripId, fuelSummary, it, tankCapacityL = tankCapacityL)
+        }
     }
 
     Card(

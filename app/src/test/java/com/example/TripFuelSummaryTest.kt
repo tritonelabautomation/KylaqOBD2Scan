@@ -229,4 +229,16 @@ class TripFuelSummaryTest {
         assertEquals(35.0, summary.fuelDeltaLiters!!, 1e-9) // 70% of 50L = 35.0L
         assertEquals(true, summary.isRefuelBrimEvent)
     }
+
+    @Test
+    fun `brim litres use calibrated tank not factory 50L`() {
+        val samples = listOf(
+            point("012F", 1_000L, 17.6),
+            point("012F", 60_000L, 93.7)
+        )
+        val at50 = TripFuelSummary.summarize(samples, tankCapacityL = 50.0)
+        assertEquals(38.05, at50.fuelDeltaLiters!!, 0.05)
+        val atCal = TripFuelSummary.summarize(samples, tankCapacityL = 52.9)
+        assertEquals(40.27, atCal.fuelDeltaLiters!!, 0.05)
+    }
 }

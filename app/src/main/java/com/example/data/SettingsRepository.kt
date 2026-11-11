@@ -517,10 +517,10 @@ class SettingsRepository(private val context: Context) {
         prefs.edit().putLong("bg_location_last_declined", ms).apply()
 
     /**
-     * Usable tank capacity in litres, for turning a 012F percentage rise into estimated litres at a
-     * detected refuel. Boots at the Kylaq spec (50 L) and is re-derived from every pump-litre
-     * calibration - the owner's 09-17 fill already implies 50.35 L from a 61.8 pt rise, so the
-     * default is the spec and the calibration is the measurement.
+     * Usable tank capacity in litres, for turning a 012F percentage into litres.
+     * Boots at the Kylaq spec (50 L). Every auto-cut brim fill (pump litres vs start%→cut%)
+     * overwrites it; the owner can also type it on the Fuel screen. Trip cards must read
+     * this, never the factory 50 L constant - 2026-11-11 40.27 L fill implied 52.9 L.
      */
     fun tankCapacityL(): Double = prefs.getFloat("tank_capacity_l", 50.0f).toDouble()
 

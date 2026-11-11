@@ -130,6 +130,16 @@ fun FuelCostsScreen(
             contentPadding = PaddingValues(vertical = 12.dp)
         ) {
             item {
+                TankCapacityEditorCard(
+                    capacityL = capacityL,
+                    onSave = { litres ->
+                        viewModel.setTankCapacityL(litres)
+                        capacityL = viewModel.tankCapacityL()
+                    }
+                )
+            }
+
+            item {
                 RefuelTrackerCard(
                     events = refuelEvents,
                     since = sinceRefuel,
@@ -401,6 +411,7 @@ fun FuelCostsScreen(
             ?: viewModel.settingsRepository.lastLevelStamp()?.second
             ?: levelNow
         RefuelLoggingDialog(
+            currentTankCapacityL = capacityL,
             initialLiters = editTarget?.liters ?: receiptPrefill?.liters,
             initialPrice = editTarget?.pricePerL,
             initialOdoKm = editTarget?.odometerKm ?: receiptPrefill?.odoKm ?: odoNow,
@@ -428,7 +439,8 @@ fun FuelCostsScreen(
                         additiveCost = record.additiveCost
                     )
                 )
-                viewModel.calibrateAfterFuelEntry(record.pumpLitres, record.odometerKm, false)
+                viewModel.applyAutoCutCalibration(record)
+                capacityL = viewModel.tankCapacityL()
                 viewModel.triggerImmediateBackup()
                 if (record.fuelGrade != FuelLogCodec.GRADE_UNKNOWN) {
                     viewModel.tagFuelGrade(record.fuelGrade)
@@ -566,6 +578,54 @@ private fun RefuelTrackerCard(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun TankCapacityEditorCard(
+    capacityL: Double,
+    onSave: (Double) -> Unit
+) {
+    var text by remember(capacityL) {
+        mutableStateOf(String.format(java.util.Locale.US, "%.1f", capacityL))
+    }
+    val typed = text.toDoubleOrNull()
+    val valid = typed != null && typed in com.example.analysis.TankCapacity.MIN_L..com.example.analysis.TankCapacity.MAX_L
+    Column(
+        Modifier.fillMaxWidth().background(Color(0xFF1C1C1E), RoundedCornerShape(14.dp)).padding(14.dp)
+    ) {
+        Text("Usable tank capacity", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        Text(
+            "Factory 50.0 L. Auto-cut brim fills overwrite this from pump litres ÷ (cut% − start%). " +
+                "Edit here to compare trip litres against MID.",
+            color = Color(0xFF8E8E93), fontSize = 11.sp
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it.filter { ch -> ch.isDigit() || ch == '.' } },
+                label = { Text("Litres") },
+                singleLine = true,
+                modifier = Modifier.weight(1f)
+            )
+            Button(
+                onClick = { if (valid) onSave(typed!!) },
+                enabled = valid,
+                colors = ButtonDefaults.buttonColors(containerColor = NeonEmerald)
+            ) {
+                Text("Save", color = Color.Black, fontWeight = FontWeight.Bold)
+            }
+        }
+        Text(
+            String.format(
+                java.util.Locale.US,
+                "Now %.1f L  ·  factory %.1f L",
+                capacityL,
+                com.example.analysis.TankCapacity.NOMINAL_L
+            ),
+            color = CyberCyan, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp)
+        )
     }
 }
 
