@@ -55,6 +55,13 @@ class HeapBoundedRecoveryTest {
         assertEquals(200, HeapGuard.ROOM_INSERT_CHUNK)
         assertTrue(HeapGuard.AI_ANALYSIS_MAX_SAMPLES < 50_000)
         assertTrue(HeapGuard.RIDE_SHIFT_CAP <= 256)
+        assertTrue(HeapGuard.keepForFuelSummary("015E"))
+        assertTrue(HeapGuard.keepForFuelSummary("5E"))
+        assertTrue(HeapGuard.keepForFuelSummary("010D"))
+        assertTrue(HeapGuard.keepForFuelSummary("01A6"))
+        assertTrue(HeapGuard.keepForFuelSummary("012F"))
+        assertFalse(HeapGuard.keepForFuelSummary("0142"))
+        assertFalse(HeapGuard.keepForFuelSummary("0162"))
     }
 
     @Test
@@ -162,5 +169,33 @@ class HeapBoundedRecoveryTest {
         assertEquals(12, samples.size)
         assertEquals(900.0, samples.last().rpm!!, 0.001)
         assertEquals(40.0, samples.last().speedKmh!!, 0.001)
+    }
+
+    @Test
+    fun fuelSummaryCsvKeepsRateWhenOtherPidsDominate() {
+        val start = RecordTime.parseMillis("2026-11-11T15:59:00.000+05:30")!!
+        val rows = ArrayList<TransactionRecord>(720)
+        for (i in 0 until 120) {
+            val t = start + i * 1000L
+            rows.add(tx(t, "0C", 900.0))
+            rows.add(tx(t + 50, "5E", 4.0))
+            rows.add(tx(t + 100, "42", 14.0))
+            rows.add(tx(t + 150, "05", 90.0))
+            rows.add(tx(t + 200, "62", 10.0))
+            rows.add(tx(t + 250, "0D", 60.0))
+        }
+        val file = tmp.newFile("factor1.csv")
+        CsvExporter.exportTransactionsToCsv(
+            file,
+            RecordingMetadata(sessionId = "17c54147", sessionName = "run", startTimeUtc = RecordTime.stamp(start)),
+            rows
+        )
+        val pts = CsvExporter.readFuelSummaryPointsFromCsv(file)
+        assertTrue(pts.any { it.pid.equals("5E", ignoreCase = true) || it.pid.equals("015E", ignoreCase = true) })
+        val summary = com.example.analysis.TripFuelSummary.summarize(pts)
+        // 120 s at 4 L/h ≈ 0.133 L. Must not collapse to a chart-subsample trickle.
+        assertTrue("fuel ${summary.fuelLiters}", summary.fuelLiters > 0.10)
+        assertTrue("fuel ${summary.fuelLiters}", summary.fuelLiters < 0.18)
+        assertTrue("distance ${summary.distanceKm}", summary.distanceKm > 1.5)
     }
 }

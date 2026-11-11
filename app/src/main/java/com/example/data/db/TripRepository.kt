@@ -199,6 +199,17 @@ class TripRepository(context: Context) {
             sampleDao.samplesForTripPids(tripId, expanded)
         }
 
+    /** Fuel/speed/odo/tank/rpm only — Factor 1 must not use the mixed 8k chart stride. */
+    suspend fun getFuelSummaryPoints(tripId: String): List<com.example.analysis.TripFuelSummary.SamplePoint> =
+        withContext(Dispatchers.IO) {
+            val pids = listOf("015E", "5E", "019D", "9D", "010D", "0D", "01A6", "A6", "012F", "2F", "010C", "0C")
+            val rows = sampleDao.samplesForTripPids(tripId, pids)
+            val points = rows.map {
+                com.example.analysis.TripFuelSummary.SamplePoint(it.pid, it.timestamp, it.numericValue)
+            }
+            com.example.data.HeapGuard.capPerPid(points, { it.pid })
+        }
+
     suspend fun allTripsChronological(): List<TripEntity> = withContext(Dispatchers.IO) {
         tripDao.getAllTrips().reversed()
     }

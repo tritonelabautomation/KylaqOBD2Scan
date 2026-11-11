@@ -85,19 +85,28 @@ fun TripsOverviewScreen(
         loading = true
         val now = System.currentTimeMillis()
         val trips = withContext(Dispatchers.IO) { repo.recentTrips(300) }
-        val inputs = withContext(Dispatchers.Default) {
-            trips.filter { it.status != "RECORDING" || (it.sampleCount > 0 || it.rawLogCount > 0) }.map { t ->
-                val samples = repo.getSamplesForAnalysis(t.id)
-                val sPoints = if (samples.isNotEmpty()) {
-                    samples.map { TripFuelSummary.SamplePoint(it.pid, it.instantMs, it.numericValue) }
+        val inputs = withContext(Dispatchers.IO) {
+            val out = ArrayList<WeeklyTripOverview.TripInput>()
+            for (t in trips.filter { it.status != "RECORDING" || (it.sampleCount > 0 || it.rawLogCount > 0) }) {
+                val fuelPts = repo.getFuelSummaryPoints(t.id)
+                val sPoints = if (fuelPts.isNotEmpty()) {
+                    fuelPts
                 } else {
-                    viewModel.samplePointsFromDisk(t.id)
+                    val samples = repo.getSamplesForAnalysis(t.id)
+                    if (samples.isNotEmpty()) {
+                        samples.map { TripFuelSummary.SamplePoint(it.pid, it.instantMs, it.numericValue) }
+                    } else {
+                        viewModel.samplePointsFromDisk(t.id)
+                    }
                 }
-                WeeklyTripOverview.TripInput(
-                    tripId = t.id, title = t.title, startMs = t.startTimestamp,
-                    summary = TripFuelSummary.summarize(sPoints, tankCapacityL = viewModel.tankCapacityL())
+                out.add(
+                    WeeklyTripOverview.TripInput(
+                        tripId = t.id, title = t.title, startMs = t.startTimestamp,
+                        summary = TripFuelSummary.summarize(sPoints, tankCapacityL = viewModel.tankCapacityL())
+                    )
                 )
             }
+            out
         }
         overview = WeeklyTripOverview.overview(inputs, now, weekOffset)
         val ws = WeeklyTripOverview.weekStartMs(now, weekOffset)

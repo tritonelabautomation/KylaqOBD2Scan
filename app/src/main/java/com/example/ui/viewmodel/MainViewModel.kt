@@ -575,10 +575,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     s.coolantC?.let { points.add(com.example.analysis.TripFuelSummary.SamplePoint("0105", t, it)) }
                     s.engineTorquePct?.let { points.add(com.example.analysis.TripFuelSummary.SamplePoint("0162", t, it)) }
                     if (points.size >= com.example.data.HeapGuard.UI_SAMPLE_CAP * 2) {
-                        val half = ArrayList<com.example.analysis.TripFuelSummary.SamplePoint>(points.size / 2)
-                        for (i in points.indices step 2) half.add(points[i])
+                        val fuel = ArrayList<com.example.analysis.TripFuelSummary.SamplePoint>()
+                        val other = ArrayList<com.example.analysis.TripFuelSummary.SamplePoint>()
+                        for (p in points) {
+                            if (com.example.data.HeapGuard.keepForFuelSummary(p.pid)) fuel.add(p) else other.add(p)
+                        }
+                        val fuelKept = com.example.data.HeapGuard.capPerPid(fuel, { it.pid })
+                        val otherStride = com.example.data.HeapGuard.strideFor(other.size, com.example.data.HeapGuard.UI_SAMPLE_CAP / 2)
                         points.clear()
-                        points.addAll(half)
+                        points.addAll(fuelKept)
+                        if (otherStride <= 1) points.addAll(other)
+                        else points.addAll(other.filterIndexed { i, _ -> i % otherStride == 0 })
                     }
                 }
             }
@@ -596,6 +603,39 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun samplePointsFromRecordingDisk(rec: SavedRecording): List<com.example.analysis.TripFuelSummary.SamplePoint> {
         return samplePointsFromDisk(rec.metadata.sessionId)
     }
+
+    /**
+     * Factor 1 litres from the journal's fuel/speed PIDs, not the 8k mixed chart cap.
+     * Owner 2026-11-11: 17c54147 showed 1.15 L / 17.68 km/L after a refresh because
+     * strided 015E gaps hit the 15 s integrator clamp. MID was still 3.81 L / 8.40 km/L.
+     */
+    suspend fun loadFuelSummaryPoints(sessionId: String): List<com.example.analysis.TripFuelSummary.SamplePoint> =
+        withContext(Dispatchers.IO) {
+            val sessionDir = File(recordingManager.recordingsDir, "session_$sessionId")
+            val txCsv = File(sessionDir, "${sessionId}_transactions.csv")
+            val journalTx = recordingManager.journal.txFile(sessionId)
+            val sampleCsv = File(sessionDir, "${sessionId}_samples.csv")
+            val journalSample = recordingManager.journal.sampleFile(sessionId)
+            val tFile = when {
+                txCsv.exists() && txCsv.length() > 0L -> txCsv
+                journalTx.exists() && journalTx.length() > 0L -> journalTx
+                else -> null
+            }
+            if (tFile != null) {
+                val pts = com.example.data.CsvExporter.readFuelSummaryPointsFromCsv(tFile)
+                if (pts.isNotEmpty()) return@withContext pts
+            }
+            val sFile = when {
+                sampleCsv.exists() && sampleCsv.length() > 0L -> sampleCsv
+                journalSample.exists() && journalSample.length() > 0L -> journalSample
+                else -> null
+            }
+            if (sFile != null) {
+                val pts = com.example.data.CsvExporter.readFuelSummaryPointsFromCsv(sFile)
+                if (pts.isNotEmpty()) return@withContext pts
+            }
+            recordingManager.tripRepository.getFuelSummaryPoints(sessionId)
+        }
 
     /**
      * Loads samples for a trip from Room database, falling back to disk CSV/journal and

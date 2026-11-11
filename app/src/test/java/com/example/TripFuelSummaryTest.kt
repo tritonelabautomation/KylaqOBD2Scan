@@ -241,4 +241,36 @@ class TripFuelSummaryTest {
         val atCal = TripFuelSummary.summarize(samples, tankCapacityL = 52.9)
         assertEquals(40.27, atCal.fuelDeltaLiters!!, 0.05)
     }
+
+    @Test
+    fun mixedPidStrideHitsFifteenSecondCapButFuelOnlySeriesDoesNot() {
+        // 1 h at 4 L/h and 60 km/h, 1 Hz. Expected 4.0 L and 60 km.
+        val dense = mutableListOf<TripFuelSummary.SamplePoint>()
+        var ts = 0L
+        repeat(3600) {
+            dense.add(point("010C", ts, 900.0))
+            dense.add(point("010D", ts, 60.0))
+            dense.add(point("015E", ts, 4.0))
+            dense.add(point("0142", ts, 14.0))
+            dense.add(point("0105", ts, 90.0))
+            dense.add(point("0162", ts, 20.0))
+            ts += 1000
+        }
+        val full = TripFuelSummary.summarize(dense)
+        assertEquals(4.0, full.fuelLiters, 0.15)
+        assertEquals(60.0, full.distanceKm, 1.0)
+
+        val gappedFuel = dense.filter { it.pid == "015E" }.filterIndexed { i, _ -> i % 20 == 0 }
+        val gapped = gappedFuel + dense.filter { it.pid == "010D" }
+        val clipped = TripFuelSummary.summarize(gapped)
+        assertTrue(
+            "20 s fuel gaps must clip at 15 s: got ${clipped.fuelLiters} L",
+            clipped.fuelLiters < 3.4
+        )
+
+        val kept = dense.filter { com.example.data.HeapGuard.keepForFuelSummary(it.pid) }
+        val keptSum = TripFuelSummary.summarize(kept)
+        assertEquals(4.0, keptSum.fuelLiters, 0.15)
+        assertEquals(60.0, keptSum.distanceKm, 1.0)
+    }
 }

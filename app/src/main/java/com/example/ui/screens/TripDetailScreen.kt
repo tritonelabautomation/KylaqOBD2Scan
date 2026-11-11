@@ -70,6 +70,7 @@ fun TripDetailScreen(
 
     var trip by remember { mutableStateOf<TripEntity?>(null) }
     var samples by remember { mutableStateOf<List<TelemetrySampleEntity>>(emptyList()) }
+    var summaryPoints by remember { mutableStateOf<List<com.example.analysis.TripFuelSummary.SamplePoint>>(emptyList()) }
     var rawLogs by remember { mutableStateOf<List<RawLogEntity>>(emptyList()) }
     var aiAnalysis by remember { mutableStateOf<AiAnalysisEntity?>(null) }
     var isAnalyzing by remember { mutableStateOf(false) }
@@ -91,11 +92,10 @@ fun TripDetailScreen(
 
     // "Log fuel" for this trip: fuel rate integrated over the stored samples.
     val tankCapacityL = viewModel.tankCapacityL()
-    val fuelSummary = remember(samples, tankCapacityL) {
-        com.example.analysis.TripFuelSummary.summarize(
-            samples.map { com.example.analysis.TripFuelSummary.SamplePoint(it.pid, it.instantMs, it.numericValue) },
-            tankCapacityL = tankCapacityL
-        )
+    val fuelSummary = remember(summaryPoints, samples, tankCapacityL) {
+        val points = if (summaryPoints.isNotEmpty()) summaryPoints
+        else samples.map { com.example.analysis.TripFuelSummary.SamplePoint(it.pid, it.instantMs, it.numericValue) }
+        com.example.analysis.TripFuelSummary.summarize(points, tankCapacityL = tankCapacityL)
     }
 
     // OWNER FIX (2026-09-16 screenshots): opening a trip flashed the definitive
@@ -150,6 +150,7 @@ fun TripDetailScreen(
         samplesLoaded = false
         trip = tripRepo.getTripById(tripId)
         samples = viewModel.loadSamplesForTripWithFallback(tripId)
+        summaryPoints = viewModel.loadFuelSummaryPoints(tripId)
         if (trip == null || trip?.status == "RECORDING" || (trip?.sampleCount ?: 0) == 0) {
             trip = tripRepo.getTripById(tripId)
         }
@@ -264,6 +265,7 @@ fun TripDetailScreen(
                                 val ok = viewModel.recalculateTripMetrics(tripId)
                                 trip = tripRepo.getTripById(tripId)
                                 samples = tripRepo.getSamplesForAnalysis(tripId)
+                                summaryPoints = viewModel.loadFuelSummaryPoints(tripId)
                                 rawLogs = tripRepo.getRawLogsForTrip(tripId)
                                 aiAnalysis = tripRepo.getAnalysisForTrip(tripId)
                                 isRecalculating = false

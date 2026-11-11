@@ -40,4 +40,29 @@ object HeapGuard {
 
     fun strideFor(count: Int, cap: Int): Int =
         if (count <= cap) 1 else ((count + cap - 1) / cap).coerceAtLeast(2)
+
+    /**
+     * PIDs Factor 1 / tank / distance need. Mixed-stride of the whole journal
+     * (Room 24k then UI 8k) stretched 015E past [TripFuelSummary]'s 15 s gap
+     * cap, so 3.74 L became 1.15 L and 8.63 km/L became 17.68 km/L.
+     * Last two hex digits: 5E fuel-rate, 9D mass-flow, 0D speed, A6 odo,
+     * 2F tank %, 0C rpm.
+     */
+    private val FUEL_SUMMARY_TAILS = setOf("5E", "9D", "0D", "A6", "2F", "0C")
+
+    const val FUEL_PID_CAP = 8_000
+
+    fun keepForFuelSummary(pid: String): Boolean {
+        val n = pid.trim().uppercase().filter { it in '0'..'9' || it in 'A'..'F' }
+        if (n.length < 2) return false
+        return n.takeLast(2) in FUEL_SUMMARY_TAILS
+    }
+
+    fun <T> capPerPid(items: List<T>, pidOf: (T) -> String, cap: Int = FUEL_PID_CAP): List<T> {
+        if (items.isEmpty()) return items
+        return items.groupBy(pidOf).flatMap { (_, list) ->
+            val stride = strideFor(list.size, cap)
+            if (stride == 1) list else list.filterIndexed { i, _ -> i % stride == 0 }
+        }
+    }
 }

@@ -439,15 +439,65 @@ object CsvExporter {
                     val t = com.example.data.SessionRecoveryPolicy.wallEpochMs(stamp, mono)
                     out.add(com.example.analysis.TripFuelSummary.SamplePoint(pid, t, value))
                     if (out.size >= HeapGuard.UI_SAMPLE_CAP * 2) {
-                        val half = ArrayList<com.example.analysis.TripFuelSummary.SamplePoint>(out.size / 2)
-                        for (i in out.indices step 2) half.add(out[i])
+                        val fuel = ArrayList<com.example.analysis.TripFuelSummary.SamplePoint>()
+                        val other = ArrayList<com.example.analysis.TripFuelSummary.SamplePoint>()
+                        for (p in out) {
+                            if (HeapGuard.keepForFuelSummary(p.pid)) fuel.add(p) else other.add(p)
+                        }
+                        val fuelKept = HeapGuard.capPerPid(fuel, { it.pid })
+                        val otherStride = HeapGuard.strideFor(other.size, HeapGuard.UI_SAMPLE_CAP / 2)
                         out.clear()
-                        out.addAll(half)
+                        out.addAll(fuelKept)
+                        if (otherStride <= 1) out.addAll(other)
+                        else out.addAll(other.filterIndexed { i, _ -> i % otherStride == 0 })
                     }
                 }
             }
         }
         return out
+    }
+
+    /**
+     * Factor 1 source of truth: fuel rate, speed, odo, tank, rpm from the journal,
+     * never the mixed 8k chart subsample. Per-PID even stride keeps dt under the
+     * 15 s integrator cap so litres are not thrown away.
+     */
+    fun readFuelSummaryPointsFromCsv(file: File): List<com.example.analysis.TripFuelSummary.SamplePoint> {
+        val byPid = HashMap<String, ArrayList<com.example.analysis.TripFuelSummary.SamplePoint>>()
+        if (!file.exists()) return emptyList()
+        forEachTransactionFromCsv(file) { tx ->
+            val value = tx.decodedValue ?: return@forEachTransactionFromCsv
+            if (!HeapGuard.keepForFuelSummary(tx.pid)) return@forEachTransactionFromCsv
+            val t = SessionRecoveryPolicy.wallEpochMs(tx.timestampUtc, tx.timestampMonotonic)
+            val list = byPid.getOrPut(tx.pid) { ArrayList() }
+            list.add(com.example.analysis.TripFuelSummary.SamplePoint(tx.pid, t, value))
+            if (list.size >= HeapGuard.FUEL_PID_CAP * 2) {
+                val half = ArrayList<com.example.analysis.TripFuelSummary.SamplePoint>(list.size / 2)
+                for (i in list.indices step 2) half.add(list[i])
+                list.clear()
+                list.addAll(half)
+            }
+        }
+        if (byPid.isNotEmpty()) {
+            return byPid.values.flatten().sortedBy { it.timestampMs }
+        }
+        val fromWide = ArrayList<com.example.analysis.TripFuelSummary.SamplePoint>()
+        forEachSampleFromCsv(file) { smp ->
+            val t = RecordTime.parseMillis(smp.timestampUtc) ?: smp.timestampMonotonic
+            fun add(pid: String, value: Double?) {
+                if (value == null) return
+                fromWide.add(com.example.analysis.TripFuelSummary.SamplePoint(pid, t, value))
+            }
+            add("010D", smp.speedKmh)
+            add("015E", smp.fuelRateLh)
+            add("010C", smp.rpm)
+            if (fromWide.size >= HeapGuard.FUEL_PID_CAP * 6) {
+                val kept = HeapGuard.capPerPid(fromWide.toList(), { it.pid })
+                fromWide.clear()
+                fromWide.addAll(kept)
+            }
+        }
+        return HeapGuard.capPerPid(fromWide, { it.pid }).sortedBy { it.timestampMs }
     }
 
     /**

@@ -1099,7 +1099,7 @@ class RecordingManager(
         var seen = 0L
         var kept = 0L
         for (tx in CsvExporter.transactions(txCsv)) {
-            val keep = stride == 1 || seen % stride == 0L
+            val keep = HeapGuard.keepForFuelSummary(tx.pid) || stride == 1 || seen % stride == 0L
             seen++
             if (!keep) continue
             chunk.add(sampleEntityFromTx(sessionId, tx, kept))
@@ -1138,18 +1138,25 @@ class RecordingManager(
         val total = SessionJsonReader.countTransactionRows(sampleCsv)
         val stride = HeapGuard.strideFor(total, HeapGuard.ROOM_SAMPLE_CAP / 7)
         var seen = 0L
+        var lastCoreTs = 0L
         for (smp in CsvExporter.samples(sampleCsv)) {
-            val keep = stride == 1 || seen % stride == 0L
-            seen++
-            if (!keep) continue
             val instant = RecordTime.parseMillis(smp.timestampUtc) ?: smp.timestampMonotonic
-            addEntity(instant, smp.timestampUtc, smp.altitudeM, "010C", "Engine Speed", smp.rpm, "rpm")
-            addEntity(instant, smp.timestampUtc, smp.altitudeM, "010D", "Vehicle Speed", smp.speedKmh, "km/h")
-            addEntity(instant, smp.timestampUtc, smp.altitudeM, "0104", "Engine Load", smp.engineLoadPct, "%")
-            addEntity(instant, smp.timestampUtc, smp.altitudeM, "0105", "Engine Coolant Temperature", smp.coolantC, "°C")
-            addEntity(instant, smp.timestampUtc, smp.altitudeM, "0142", "Control Module Voltage", smp.voltageV, "V")
-            addEntity(instant, smp.timestampUtc, smp.altitudeM, "015E", "Engine Fuel Rate", smp.fuelRateLh, "L/h")
-            addEntity(instant, smp.timestampUtc, smp.altitudeM, "0162", "Actual Engine - Percent Torque", smp.engineTorquePct, "%")
+            val keepCore = lastCoreTs == 0L || instant - lastCoreTs >= 400L
+            val keepExtras = stride == 1 || seen % stride == 0L
+            seen++
+            if (!keepCore && !keepExtras) continue
+            if (keepCore) {
+                lastCoreTs = instant
+                addEntity(instant, smp.timestampUtc, smp.altitudeM, "010C", "Engine Speed", smp.rpm, "rpm")
+                addEntity(instant, smp.timestampUtc, smp.altitudeM, "010D", "Vehicle Speed", smp.speedKmh, "km/h")
+                addEntity(instant, smp.timestampUtc, smp.altitudeM, "015E", "Engine Fuel Rate", smp.fuelRateLh, "L/h")
+            }
+            if (keepExtras) {
+                addEntity(instant, smp.timestampUtc, smp.altitudeM, "0104", "Engine Load", smp.engineLoadPct, "%")
+                addEntity(instant, smp.timestampUtc, smp.altitudeM, "0105", "Engine Coolant Temperature", smp.coolantC, "°C")
+                addEntity(instant, smp.timestampUtc, smp.altitudeM, "0142", "Control Module Voltage", smp.voltageV, "V")
+                addEntity(instant, smp.timestampUtc, smp.altitudeM, "0162", "Actual Engine - Percent Torque", smp.engineTorquePct, "%")
+            }
             if (chunk.size >= HeapGuard.ROOM_INSERT_CHUNK) {
                 tripRepository.insertSamples(ArrayList(chunk))
                 chunk.clear()

@@ -98,14 +98,17 @@ object ThreeWayFuelComparator {
             f1ErrorPct == null -> "Awaiting High-Frequency Samples"
             abs(f1ErrorPct) <= 4.0 -> "Near-Perfect Match (<4% delta)"
             abs(f1ErrorPct) <= 8.0 -> "High Physics Convergence (4-8% delta)"
+            f1ErrorPct > 40.0 -> "OBD integral is short vs MID"
             f1ErrorPct < -8.0 -> "More Conservative Than MID (Reflects Dynamic Boost Pulls)"
             else -> "Slightly Optimistic vs MID"
         }
 
         val f1Explanation = when {
             f1ErrorPct == null -> "OBD fuel rate samples were insufficient for full dynamic integration."
-            abs(f1ErrorPct) <= 5.0 -> "Integrates microsecond PID 019D/015E fuel mass directly at cylinder ports, converging almost identically with the factory cluster."
-            f1ErrorPct < 0 -> "Captures aggressive turbo boost transient enrichments and stop-and-go idle fuel burn that cluster smoothing sometimes filters out."
+            f1ErrorPct != null && f1ErrorPct > 40.0 ->
+                "Fuel-rate gaps were clipped. Factor 1 litres are too low, so km/L looks like a miracle. MID is the burn for this trip."
+            abs(f1ErrorPct ?: 0.0) <= 5.0 -> "Integrates microsecond PID 019D/015E fuel mass directly at cylinder ports, converging almost identically with the factory cluster."
+            f1ErrorPct != null && f1ErrorPct < 0 -> "Captures aggressive turbo boost transient enrichments and stop-and-go idle fuel burn that cluster smoothing sometimes filters out."
             else -> "OBD injector sampling aligns smoothly with steady-state cruising."
         }
 
