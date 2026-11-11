@@ -39,6 +39,21 @@ class RideBehaviorRecorderTest {
     }
 
     @Test
+    fun `shift count stays accurate after the in-memory ring caps`() {
+        val rec = RideBehaviorRecorder()
+        rec.onSample(0L, "CRUISING", 2000.0, 40.0, 2, null)
+        val n = com.example.data.HeapGuard.RIDE_SHIFT_CAP + 40
+        for (i in 1..n) {
+            val gear = if (i % 2 == 0) 2 else 3
+            rec.onSample(i * 1000L, "CRUISING", 2200.0, 42.0, gear, null)
+        }
+        val s = rec.summary("x")
+        assertEquals(n, s.shiftCount)
+        assertTrue(s.avgUpshiftRpm != null && s.avgUpshiftRpm!! > 500.0)
+        assertEquals(s.shiftCount, n)
+    }
+
+    @Test
     fun `sport-like shift map flag triggers above 3000 rpm`() {
         val rec = RideBehaviorRecorder()
         rec.onSample(0L, "ACCELERATING", 3000.0, 30.0, 2, null)

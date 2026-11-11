@@ -12,6 +12,32 @@ object JsonExporter {
         metadata: RecordingMetadata,
         transactions: List<TransactionRecord>
     ) {
+        writeJson(file, metadata, transactions.size) { emit ->
+            transactions.forEach(emit)
+        }
+    }
+
+    /**
+     * Same session JSON as [exportToJson], streamed from the transactions CSV so a killed
+     * long drive can be recovered without holding every row in RAM.
+     */
+    fun exportToJsonFromCsv(
+        file: File,
+        metadata: RecordingMetadata,
+        txCsv: File
+    ) {
+        val count = SessionJsonReader.countTransactionRows(txCsv)
+        writeJson(file, metadata, count) { emit ->
+            CsvExporter.forEachTransactionFromCsv(txCsv, emit)
+        }
+    }
+
+    private fun writeJson(
+        file: File,
+        metadata: RecordingMetadata,
+        totalTransactions: Int,
+        emitAll: ((TransactionRecord) -> Unit) -> Unit
+    ) {
         file.parentFile?.mkdirs()
 
         val metaObj = JSONObject().apply {
@@ -35,7 +61,7 @@ object JsonExporter {
                 } ?: ""
             )
             put("appVersion", metadata.appVersion)
-            put("totalTransactions", transactions.size)
+            put("totalTransactions", totalTransactions)
             put("maxAltitudeM", metadata.maxAltitudeM ?: JSONObject.NULL)
             put("minAltitudeM", metadata.minAltitudeM ?: JSONObject.NULL)
             put("minVoltageV", metadata.minVoltageV ?: JSONObject.NULL)
@@ -54,45 +80,47 @@ object JsonExporter {
                 writer.write("  \"sessionMetadata\": ")
                 writer.write(metaObj.toString(2))
                 writer.write(",\n  \"transactions\": [\n")
-                for (idx in transactions.indices) {
-                    val tx = transactions[idx]
-                    val txObj = JSONObject().apply {
-                        put("id", tx.id)
-                        put(
-                            "timestampUtc",
-                            com.example.data.RecordTime.normalizeToIst(tx.timestampMonotonic, tx.timestampUtc)
-                                ?: tx.timestampUtc
-                        )
-                        put("timestampMonotonic", tx.timestampMonotonic)
-                        put("direction", tx.direction.name)
-                        put("elmCommand", tx.elmCommand)
-                        put("canTxId", tx.canTxId)
-                        put("canRxId", tx.canRxId)
-                        put("requestHex", tx.requestHex)
-                        put("responseHex", tx.responseHex)
-                        put("service", tx.service)
-                        put("pid", tx.pid)
-                        put("rawPayload", tx.rawPayload)
-                        put("decodedParameter", tx.decodedParameter)
-                        put("decodedValue", tx.decodedValue ?: JSONObject.NULL)
-                        put("decodedValueDisplay", tx.decodedValueDisplay)
-                        put("unit", tx.unit)
-                        put("decoderVersion", tx.decoderVersion)
-                        put("responseStatus", tx.responseStatus.name)
-                        put("errorMessage", tx.errorMessage ?: JSONObject.NULL)
-                    }
+                var idx = 0
+                emitAll { tx ->
+                    if (idx > 0) writer.write(",\n")
                     writer.write("    ")
-                    writer.write(txObj.toString())
-                    if (idx < transactions.lastIndex) writer.write(",")
-                    writer.write("\n")
+                    writer.write(transactionJson(tx).toString())
+                    idx++
                     if (idx % 5000 == 0) writer.flush()
                 }
+                if (idx > 0) writer.write("\n")
                 writer.write("  ]\n}\n")
             }
         } catch (e: Exception) {
             runCatching { file.delete() }
             throw e
         }
+    }
+
+    private fun transactionJson(tx: TransactionRecord): JSONObject = JSONObject().apply {
+        put("id", tx.id)
+        put(
+            "timestampUtc",
+            com.example.data.RecordTime.normalizeToIst(tx.timestampMonotonic, tx.timestampUtc)
+                ?: tx.timestampUtc
+        )
+        put("timestampMonotonic", tx.timestampMonotonic)
+        put("direction", tx.direction.name)
+        put("elmCommand", tx.elmCommand)
+        put("canTxId", tx.canTxId)
+        put("canRxId", tx.canRxId)
+        put("requestHex", tx.requestHex)
+        put("responseHex", tx.responseHex)
+        put("service", tx.service)
+        put("pid", tx.pid)
+        put("rawPayload", tx.rawPayload)
+        put("decodedParameter", tx.decodedParameter)
+        put("decodedValue", tx.decodedValue ?: JSONObject.NULL)
+        put("decodedValueDisplay", tx.decodedValueDisplay)
+        put("unit", tx.unit)
+        put("decoderVersion", tx.decoderVersion)
+        put("responseStatus", tx.responseStatus.name)
+        put("errorMessage", tx.errorMessage ?: JSONObject.NULL)
     }
 
     fun nullableDouble(obj: JSONObject, key: String): Double? =

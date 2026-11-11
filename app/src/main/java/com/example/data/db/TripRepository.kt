@@ -108,6 +108,26 @@ class TripRepository(context: Context) {
         sampleDao.getSamplesForTrip(tripId)
     }
 
+    suspend fun getSampleCountForTrip(tripId: String): Int = withContext(Dispatchers.IO) {
+        sampleDao.getSampleCountForTrip(tripId)
+    }
+
+    /**
+     * Samples for on-device analysis. A multi-hour drive can have hundreds of thousands of
+     * rows; loading them all is what filled the 512 MB heap on 1.0.832. Above
+     * [com.example.data.HeapGuard.AI_ANALYSIS_MAX_SAMPLES] we stride so peak RAM stays bounded.
+     */
+    suspend fun getSamplesForAnalysis(tripId: String): List<TelemetrySampleEntity> = withContext(Dispatchers.IO) {
+        val count = sampleDao.getSampleCountForTrip(tripId)
+        val cap = com.example.data.HeapGuard.AI_ANALYSIS_MAX_SAMPLES
+        if (count <= cap) {
+            sampleDao.getSamplesForTrip(tripId)
+        } else {
+            val stride = ((count + cap - 1) / cap).coerceAtLeast(2)
+            sampleDao.getSamplesForTripStrided(tripId, stride)
+        }
+    }
+
     suspend fun getRawLogsForTrip(tripId: String): List<RawLogEntity> = withContext(Dispatchers.IO) {
         rawLogDao.getRawLogsForTrip(tripId)
     }
@@ -205,7 +225,7 @@ class TripRepository(context: Context) {
 
     suspend fun runAiCarDoctorAnalysis(tripId: String): CarDoctorReport = withContext(Dispatchers.IO) {
         val trip = tripDao.getTripById(tripId) ?: throw IllegalArgumentException("Trip $tripId not found")
-        val samples = sampleDao.getSamplesForTrip(tripId)
+        val samples = getSamplesForAnalysis(tripId)
         val events = eventDao.getEventsForTrip(tripId)
 
         val report = ruleBasedEngine.analyzeTrip(trip, samples, events)

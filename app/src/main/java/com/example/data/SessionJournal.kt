@@ -257,7 +257,10 @@ class SessionJournal(private val journalDir: File) {
                 tx.exists() && !finishedFile(id).exists() &&
                     // A header-only journal is a session that never got an ECU response: nothing
                     // to rebuild, and rebuilding it would invent an empty trip.
-                    SessionRecoveryPolicy.hasDataRow(tx.length(), runCatching { tx.readLines().size }.getOrDefault(0))
+                    SessionRecoveryPolicy.hasDataRow(
+                        tx.length(),
+                        SessionJsonReader.countTransactionRows(tx) + 1
+                    )
             }
             .sortedByDescending { txFile(it).lastModified() }
     }

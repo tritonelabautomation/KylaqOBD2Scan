@@ -101,6 +101,11 @@ class RideBehaviorRecorder {
     private var lastGear: Int? = null
     private var lastGearTsMs = 0L
     private val shifts = mutableListOf<ShiftEvent>()
+    private var recordedShiftCount = 0
+    private var upshiftRpmSum = 0.0
+    private var upshiftRpmN = 0
+    private var peakUpshiftRpm: Double? = null
+    private var shiftDurSum = 0L
     private var lastRpm: Double? = null
     private var lastRpmTsMs = 0L
     private var pendingShiftRpm: Double? = null
@@ -150,6 +155,11 @@ class RideBehaviorRecorder {
         lastGear = null
         lastGearTsMs = 0L
         shifts.clear()
+        recordedShiftCount = 0
+        upshiftRpmSum = 0.0
+        upshiftRpmN = 0
+        peakUpshiftRpm = null
+        shiftDurSum = 0L
         lastRpm = null
         lastRpmTsMs = 0L
         pendingShiftRpm = null
@@ -248,7 +258,7 @@ class RideBehaviorRecorder {
         if (g != null) {
             if (lastGear != null && g != lastGear) {
                 // rpm BEFORE the drop is the shift point the TCU chose (D vs S vs M evidence).
-                shifts.add(ShiftEvent(lastGear, g, lastRpm ?: rpm ?: 0.0, tsMs - lastGearTsMs))
+                noteShift(ShiftEvent(lastGear, g, lastRpm ?: rpm ?: 0.0, tsMs - lastGearTsMs))
                 pendingShiftRpm = null
                 // In M every gear change is a driver paddle pull - count it as evidence.
                 if (modeTag == ModeTag.M && lastGear != null) {
@@ -265,7 +275,7 @@ class RideBehaviorRecorder {
                 pendingShiftRpm = lastRpm
                 pendingShiftTsMs = lastRpmTsMs
             } else if (pendingShiftRpm != null && drop < 100.0 && rpm > 800.0) {
-                shifts.add(ShiftEvent(null, null, pendingShiftRpm!!, tsMs - pendingShiftTsMs))
+                noteShift(ShiftEvent(null, null, pendingShiftRpm!!, tsMs - pendingShiftTsMs))
                 pendingShiftRpm = null
             }
         }
@@ -287,8 +297,21 @@ class RideBehaviorRecorder {
         lastAcTag = acTag
     }
 
+    private fun noteShift(event: ShiftEvent) {
+        recordedShiftCount++
+        if (event.rpmAtShift > 500.0) {
+            upshiftRpmSum += event.rpmAtShift
+            upshiftRpmN++
+            peakUpshiftRpm = maxOf(peakUpshiftRpm ?: event.rpmAtShift, event.rpmAtShift)
+        }
+        shiftDurSum += event.durationMs
+        if (shifts.size >= com.example.data.HeapGuard.RIDE_SHIFT_CAP) {
+            shifts.removeAt(0)
+        }
+        shifts.add(event)
+    }
+
     fun summary(dateUtc: String): RideSummary {
-        val upshiftRpms = shifts.map { it.rpmAtShift }.filter { it > 500.0 }
         return RideSummary(
             dateUtc = dateUtc,
             durationSec = firstTsMs?.let { f -> lastTsMs?.let { l -> if (l > f) (l - f) / 1000.0 else 0.0 } } ?: 0.0,
@@ -297,11 +320,10 @@ class RideBehaviorRecorder {
             gearSeconds = gearSeconds.toList(),
             elevationGainM = elevationGainM,
             elevationLossM = elevationLossM,
-            shiftCount = shifts.size,
-            avgUpshiftRpm = upshiftRpms.takeIf { it.isNotEmpty() }?.average(),
-            maxUpshiftRpm = upshiftRpms.maxOrNull(),
-            avgShiftDurationMs = shifts.map { it.durationMs }.takeIf { it.isNotEmpty() }
-                ?.average()?.toLong(),
+            shiftCount = recordedShiftCount,
+            avgUpshiftRpm = upshiftRpmN.takeIf { it > 0 }?.let { upshiftRpmSum / it },
+            maxUpshiftRpm = peakUpshiftRpm,
+            avgShiftDurationMs = recordedShiftCount.takeIf { it > 0 }?.let { shiftDurSum / it },
             modeTag = modeTag.name,
             converterSlipSec = converterSlipSec,
             converterLockedSec = converterLockedSec,

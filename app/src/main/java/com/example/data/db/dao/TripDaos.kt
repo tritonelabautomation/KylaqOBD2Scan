@@ -61,6 +61,15 @@ interface TelemetrySampleDao {
     @Query("SELECT * FROM telemetry_samples WHERE tripId = :tripId ORDER BY sequence ASC")
     suspend fun getSamplesForTrip(tripId: String): List<TelemetrySampleEntity>
 
+    @Query("SELECT COUNT(*) FROM telemetry_samples WHERE tripId = :tripId")
+    suspend fun getSampleCountForTrip(tripId: String): Int
+
+    @Query(
+        "SELECT * FROM telemetry_samples WHERE tripId = :tripId AND (sequence % :stride) = 0 " +
+            "ORDER BY sequence ASC"
+    )
+    suspend fun getSamplesForTripStrided(tripId: String, stride: Int): List<TelemetrySampleEntity>
+
     @Query("SELECT * FROM telemetry_samples WHERE tripId = :tripId AND pid = :pid ORDER BY sequence ASC")
     suspend fun getSamplesForPid(tripId: String, pid: String): List<TelemetrySampleEntity>
 

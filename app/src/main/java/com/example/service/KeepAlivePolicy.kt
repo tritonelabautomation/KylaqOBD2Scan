@@ -62,6 +62,14 @@ object KeepAlivePolicy {
     ): Boolean =
         pendingJournal || autoConnectEnabled || alwaysOnEnabled
 
+    /**
+     * Service start fires [android.app.Service.onCreate] then [android.app.Service.onStartCommand].
+     * Both used to launch session recovery, so a killed long drive was parsed twice into RAM
+     * (512 MB heap OOM on 1.0.832). One launch per process is enough; the deferred 60s sweep
+     * still finalizes journals that age out of the resume window.
+     */
+    fun shouldLaunchRecovery(alreadyLaunched: Boolean): Boolean = !alreadyLaunched
+
     enum class ServiceMode {
         STANDBY,
         CONNECTED,

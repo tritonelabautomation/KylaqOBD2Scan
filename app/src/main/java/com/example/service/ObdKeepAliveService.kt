@@ -20,6 +20,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
 import androidx.core.app.NotificationCompat
 import com.example.MainActivity
 import com.example.R
@@ -128,6 +129,7 @@ class ObdKeepAliveService : Service() {
 
     /** Remembered so [onTaskRemoved] can restart the service in the same state. */
     @Volatile private var lastRecordingState: Boolean = false
+    private val recoveryLaunched = AtomicBoolean(false)
 
     private var autoConnectJob: Job? = null
     private var autoRecordJob: Job? = null
@@ -458,6 +460,10 @@ class ObdKeepAliveService : Service() {
      * not up yet - a service restart must never crash the process it is trying to protect.
      */
     private fun recoverKilledSessions() {
+        // onCreate and onStartCommand both used to launch this; one parse of a long journal
+        // is enough. compareAndSet so a double-start cannot race two recoveries into RAM.
+        if (!KeepAlivePolicy.shouldLaunchRecovery(recoveryLaunched.get())) return
+        if (!recoveryLaunched.compareAndSet(false, true)) return
         recoveryScope.launch {
             runCatching {
                 com.example.di.AppContainer.init(applicationContext)

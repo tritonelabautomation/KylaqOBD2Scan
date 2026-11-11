@@ -51,4 +51,10 @@ class ObdKeepAliveServiceTest {
         assertEquals("OBD connected - logging ready", KeepAlivePolicy.notificationTitle(KeepAlivePolicy.ServiceMode.CONNECTED))
         assertEquals("OBD Standby - Ready to connect", KeepAlivePolicy.notificationTitle(KeepAlivePolicy.ServiceMode.STANDBY))
     }
+
+    @Test
+    fun `recovery launches once then skips the onStartCommand duplicate`() {
+        assertTrue(KeepAlivePolicy.shouldLaunchRecovery(false))
+        assertFalse(KeepAlivePolicy.shouldLaunchRecovery(true))
+    }
 }

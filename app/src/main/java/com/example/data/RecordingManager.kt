@@ -21,6 +21,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 
 data class SavedRecording(
     val metadata: RecordingMetadata,
@@ -126,6 +127,7 @@ class RecordingManager(
 
     private val _recoveryRunning = MutableStateFlow(false)
     val recoveryRunning: StateFlow<Boolean> = _recoveryRunning.asStateFlow()
+    private val recoveryGate = AtomicBoolean(false)
 
     init {
         // KILL-AUDIT FIX C: this constructor runs inside AppContainer.init, which MainViewModel
@@ -356,23 +358,20 @@ class RecordingManager(
             startTimeUtc = RecordTime.stamp(openedMs)
         )
         if (!journal.resume(metadata)) return null
-        val reloaded = CsvExporter.readTransactionsFromCsv(journal.txFile(sessionId)).map { tx ->
-            val wall = SessionRecoveryPolicy.wallEpochMs(tx.timestampUtc, tx.timestampMonotonic)
-            if (wall == tx.timestampMonotonic) tx else tx.copy(timestampMonotonic = wall)
-        }
+        // Ring only: the rest of the drive stays on disk. Loading the whole journal here
+        // is what filled the 512 MB heap when keep-alive resumed a long killed session.
+        val tailTransactions = CsvExporter.readLastTransactionsFromCsv(
+            journal.txFile(sessionId), HeapGuard.LIVE_RAM_ROWS
+        )
+        val tailSamples = CsvExporter.readLastSamplesFromCsv(
+            journal.sampleFile(sessionId), HeapGuard.LIVE_RAM_ROWS
+        )
         synchronized(activeTransactionList) {
             activeTransactionList.clear()
             activeSampleList.clear()
-            val tailTransactions = if (reloaded.size > 200) reloaded.takeLast(200) else reloaded
             activeTransactionList.addAll(tailTransactions)
-            val replayed = SessionRecoveryPolicy.replaySamples(
-                transactions = reloaded,
-                seed = SynchronizedSample(timestampUtc = "", timestampMonotonic = 0L),
-                merge = { acc, tx -> mergeSample(acc, tx).copy(altitudeM = tx.altitudeM) }
-            )
-            val tailSamples = if (replayed.size > 200) replayed.takeLast(200) else replayed
             activeSampleList.addAll(tailSamples)
-            currentSample = replayed.lastOrNull()
+            currentSample = tailSamples.lastOrNull()
                 ?: SynchronizedSample(timestampUtc = "", timestampMonotonic = 0L)
         }
         _currentSessionMetadata.value = metadata
@@ -442,8 +441,8 @@ class RecordingManager(
             val stamped = tx.copy(altitudeM = com.example.di.AppContainer.currentAltitudeM())
             lastRxAtMs = System.currentTimeMillis()
             
-            // FIX OOM: Ring buffer of 200 items for UI live monitor instead of unbounded array
-            if (activeTransactionList.size >= 200) {
+            // FIX OOM: Ring buffer of LIVE_RAM_ROWS for UI live monitor instead of unbounded array
+            if (activeTransactionList.size >= HeapGuard.LIVE_RAM_ROWS) {
                 activeTransactionList.removeAt(0)
             }
             activeTransactionList.add(stamped)
@@ -459,7 +458,7 @@ class RecordingManager(
                 altitudeM = com.example.di.AppContainer.currentAltitudeM()
             )
             currentSample = withAltitude
-            if (activeSampleList.size >= 200) {
+            if (activeSampleList.size >= HeapGuard.LIVE_RAM_ROWS) {
                 activeSampleList.removeAt(0)
             }
             activeSampleList.add(withAltitude)
@@ -500,16 +499,6 @@ class RecordingManager(
         // was restarted mid-drive (auto-reconnect after a kill): the old rows are on disk, the new
         // process only holds the rows it saw itself. Taking the longer source keeps the drive whole
         // rather than silently truncating it to whatever survived in memory.
-        val journalTx = if (journal.txFile(metadata.sessionId).exists()) {
-            runCatching { CsvExporter.readTransactionsFromCsv(journal.txFile(metadata.sessionId)) }
-                .getOrDefault(emptyList())
-        } else emptyList()
-        val journalSamples = if (journal.sampleFile(metadata.sessionId).exists()) {
-            runCatching { CsvExporter.readSamplesFromCsv(journal.sampleFile(metadata.sessionId)) }
-                .getOrDefault(emptyList())
-        } else emptyList()
-        val effectiveTx = SessionRecoveryPolicy.preferLonger(txList, journalTx)
-        val effectiveSamples = SessionRecoveryPolicy.preferLonger(sampleList, journalSamples)
         // KILL-AUDIT FIX A (owner 2026-09-19: "find hidden mechanism which could kill app during
         // trip and lose a trip data"): the `.finished` marker used to be written HERE - before
         // finalizeSession spends seconds writing the CSVs, the ZIP, the Room rows and the
@@ -530,13 +519,33 @@ class RecordingManager(
         _isRecording.value = false
         _currentSessionMetadata.value = null
 
-        val saved = finalizeSession(
-            metadata = metadata,
-            txList = effectiveTx,
-            sampleList = effectiveSamples,
-            rawLogFile = rawLogFile,
-            recovered = false
-        )
+        val journalTxFile = journal.txFile(metadata.sessionId)
+        val journalSampleFile = journal.sampleFile(metadata.sessionId)
+        val journalCount = SessionJsonReader.countTransactionRows(journalTxFile)
+        val journalSampleCount = SessionJsonReader.countTransactionRows(journalSampleFile)
+        // RAM lists are a 200-row HUD ring. A drive longer than that lives on the journal;
+        // materialising it here is the 512 MB keep-alive OOM. Stream from disk instead.
+        val saved = if (journalCount > txList.size) {
+            finalizeSessionFromFiles(
+                metadata = metadata,
+                txCsv = journalTxFile,
+                sampleCsv = journalSampleFile.takeIf { it.exists() && it.length() > 0L },
+                replaySamplesIfMissing = !SessionRecoveryPolicy.samplesUsable(journalSampleCount, journalCount),
+                rawLogFile = rawLogFile,
+                recovered = false
+            )
+        } else {
+            val journalSamples = if (journalSampleFile.exists()) {
+                CsvExporter.readLastSamplesFromCsv(journalSampleFile, HeapGuard.LIVE_RAM_ROWS)
+            } else emptyList()
+            finalizeSession(
+                metadata = metadata,
+                txList = txList,
+                sampleList = SessionRecoveryPolicy.preferLonger(sampleList, journalSamples),
+                rawLogFile = rawLogFile,
+                recovered = false
+            )
+        }
         // KILL-AUDIT FIX A: the marker is earned by the persisted trip, never by the intention to
         // persist one. finalizeSession throwing skips it too - the journal stays unfinished and
         // the next recovery pass rebuilds the drive instead of trusting a lie.
@@ -773,35 +782,7 @@ class RecordingManager(
 
         tripRepository.deleteSamplesForTrip(sessionId)
         runCatching {
-            tripRepository.insertSamples(
-                txList.mapIndexed { idx, tx ->
-                    TelemetrySampleEntity(
-                        tripId = sessionId,
-                        // Was `tx.timestampMonotonic`, which the live transport fills with
-                        // SystemClock.elapsedRealtime() - uptime, not an instant. This indexed
-                        // column is the trend chart's X axis and the fuel integrator's timeline, so
-                        // storing uptime made every axis label a 1970 clock time and made
-                        // cross-trip trends compare one phone's uptime against another's. The stamp
-                        // beside it states the real instant; store that. instantOf falls back to the
-                        // monotonic value only if the stamp cannot be read at all, which keeps the
-                        // column monotonic for ordering either way.
-                        timestamp = com.example.data.RecordTime.instantOf(
-                            tx.timestampMonotonic, tx.timestampUtc
-                        ) ?: tx.timestampMonotonic,
-                        timestampUtc = tx.timestampUtc,
-                        ecuCanId = tx.canRxId.ifBlank { "7E8" },
-                        pid = tx.pid,
-                        parameterName = tx.decodedParameter.ifBlank { "PID ${tx.pid}" },
-                        rawHex = tx.responseHex,
-                        numericValue = tx.decodedValue,
-                        displayValue = tx.decodedValueDisplay,
-                        unit = tx.unit,
-                        quality = "VALID",
-                        altitudeM = tx.altitudeM,
-                        sequence = idx.toLong()
-                    )
-                }
-            )
+            insertSampleEntitiesChunked(sessionId, txList)
         }.onFailure { android.util.Log.e("RecordingManager", "sample insert failed for $sessionId", it) }
 
         // Event-driven refuel detection (owner 2026-09-19): the tank level PID's rise across a
@@ -833,31 +814,18 @@ class RecordingManager(
         val journalTx = journal.txFile(sessionId)
         val journalSample = journal.sampleFile(sessionId)
 
-        val txList: List<TransactionRecord> = when {
-            txCsv.exists() && txCsv.length() > 0 -> runCatching { CsvExporter.readTransactionsFromCsv(txCsv) }.getOrDefault(emptyList())
-            journalTx.exists() && journalTx.length() > 0 -> runCatching { CsvExporter.readTransactionsFromCsv(journalTx) }.getOrDefault(emptyList())
-            else -> emptyList()
+        val txSrc = when {
+            txCsv.exists() && txCsv.length() > 0L -> txCsv
+            journalTx.exists() && journalTx.length() > 0L -> journalTx
+            else -> null
+        }
+        val sampleSrc = when {
+            sampleCsv.exists() && sampleCsv.length() > 0L -> sampleCsv
+            journalSample.exists() && journalSample.length() > 0L -> journalSample
+            else -> null
         }
 
-        val rawSampleList: List<SynchronizedSample> = when {
-            sampleCsv.exists() && sampleCsv.length() > 0 -> runCatching { CsvExporter.readSamplesFromCsv(sampleCsv) }.getOrDefault(emptyList())
-            journalSample.exists() && journalSample.length() > 0 -> runCatching { CsvExporter.readSamplesFromCsv(journalSample) }.getOrDefault(emptyList())
-            else -> emptyList()
-        }
-
-        val sampleList: List<SynchronizedSample> = if (txList.isNotEmpty() && (rawSampleList.isEmpty() || txList.size > rawSampleList.size * 2)) {
-            val replayed = SessionRecoveryPolicy.replaySamples(
-                transactions = txList,
-                seed = SynchronizedSample(timestampUtc = "", timestampMonotonic = 0L),
-                merge = { acc, tx -> mergeSample(acc, tx).copy(altitudeM = tx.altitudeM) }
-            )
-            runCatching { CsvExporter.exportSynchronizedSamplesToCsv(sampleCsv, replayed) }
-            replayed
-        } else {
-            rawSampleList
-        }
-
-        if (txList.isEmpty() && sampleList.isEmpty()) {
+        if (txSrc == null && sampleSrc == null) {
             val rawFile = File(rawLogsDir, "raw_log_$sessionId.txt").takeIf { it.exists() }
                 ?: File(sessionDir, "${sessionId}_raw.txt").takeIf { it.exists() }
             if (rawFile != null) {
@@ -867,6 +835,17 @@ class RecordingManager(
             return@withContext false
         }
 
+        val txCount = txSrc?.let { SessionJsonReader.countTransactionRows(it) } ?: 0
+        val sampleCount = sampleSrc?.let { SessionJsonReader.countTransactionRows(it) } ?: 0
+        if (txSrc != null && !SessionRecoveryPolicy.samplesUsable(sampleCount, txCount)) {
+            CsvExporter.replaySamplesToCsv(txSrc, sampleCsv) { acc, tx ->
+                mergeSample(acc, tx).copy(altitudeM = tx.altitudeM)
+            }
+        } else if (sampleSrc != null) {
+            copyIfDifferent(sampleSrc, sampleCsv)
+        }
+        if (txSrc != null) copyIfDifferent(txSrc, txCsv)
+
         val existingTrip = tripRepository.getTripById(sessionId)
         val metaFromJson = if (jsonFile.exists()) {
             runCatching { SessionJsonReader.readMetadata(jsonFile.reader()) }.getOrNull()
@@ -875,99 +854,206 @@ class RecordingManager(
             journal.readMeta(sessionId)
         } else emptyMap()
 
+        val stats = if (txCsv.exists()) CsvExporter.reduceTransactionsFromCsv(txCsv) else CsvTripStats()
         val sessionName = metaFromJson?.sessionName
             ?: existingTrip?.title
             ?: metaFromJournal["sessionName"]
             ?: "Kylaq Run $sessionId"
-        val vehicleName = metaFromJson?.vehicle
-            ?: existingTrip?.vehicleName
-            ?: metaFromJournal["vehicle"]
-            ?: "Škoda Kylaq 1.0 TSI (EA211)"
-        val adapterName = metaFromJson?.adapter
-            ?: existingTrip?.adapterName
-            ?: metaFromJournal["adapter"]
-            ?: "ELM327 Bluetooth"
-        val protocolName = metaFromJson?.protocol
-            ?: existingTrip?.protocolName
-            ?: metaFromJournal["protocol"]
-            ?: "ISO 15765-4 (CAN 11/500K)"
         val startStamp = metaFromJson?.startTimeUtc
             ?: existingTrip?.startTimeUtc
-            ?: txList.firstOrNull()?.timestampUtc
-            ?: sampleList.firstOrNull()?.timestampUtc
+            ?: stats.minEpochMs?.let { RecordTime.stamp(it) }
             ?: RecordTime.stamp(System.currentTimeMillis())
+        val metadata = RecordingMetadata(
+            sessionId = sessionId,
+            sessionName = sessionName,
+            vehicle = metaFromJson?.vehicle
+                ?: existingTrip?.vehicleName
+                ?: metaFromJournal["vehicle"]
+                ?: "Škoda Kylaq 1.0 TSI (EA211)",
+            adapter = metaFromJson?.adapter
+                ?: existingTrip?.adapterName
+                ?: metaFromJournal["adapter"]
+                ?: "ELM327 Bluetooth",
+            protocol = metaFromJson?.protocol
+                ?: existingTrip?.protocolName
+                ?: metaFromJournal["protocol"]
+                ?: "ISO 15765-4 (CAN 11/500K)",
+            startTimeUtc = startStamp,
+            startFuelPercent = existingTrip?.startFuelPercent,
+            endFuelPercent = existingTrip?.endFuelPercent,
+            fuelDeltaPercent = existingTrip?.fuelDeltaPercent,
+            minAltitudeM = existingTrip?.minAltitudeM,
+            maxAltitudeM = existingTrip?.maxAltitudeM,
+            minVoltageV = existingTrip?.minVoltageV,
+            maxVoltageV = existingTrip?.maxVoltageV
+        )
+        return@withContext persistTripFromCsv(
+            sessionId = sessionId,
+            metadata = metadata,
+            txCsv = txCsv.takeIf { it.exists() && it.length() > 0L },
+            sampleCsv = sampleCsv.takeIf { it.exists() && it.length() > 0L },
+            existingTrip = existingTrip
+        )
+    }
 
-        val validTimestamps = txList.mapNotNull {
-            val ms = SessionRecoveryPolicy.wallEpochMs(it.timestampUtc, it.timestampMonotonic)
-            if (ms in RecordTime.MIN_PLAUSIBLE_EPOCH_MS..RecordTime.MAX_PLAUSIBLE_EPOCH_MS) ms else null
-        }.ifEmpty {
-            sampleList.mapNotNull {
-                val ms = RecordTime.parseMillis(it.timestampUtc) ?: it.timestampMonotonic
-                if (ms in RecordTime.MIN_PLAUSIBLE_EPOCH_MS..RecordTime.MAX_PLAUSIBLE_EPOCH_MS) ms else null
+    /**
+     * Finalize a trip from on-disk CSVs without materialising the drive in RAM.
+     * Used by killed-session recovery and STOP of any drive longer than the HUD ring.
+     */
+    internal suspend fun finalizeSessionFromFiles(
+        metadata: RecordingMetadata,
+        txCsv: File,
+        sampleCsv: File?,
+        replaySamplesIfMissing: Boolean,
+        rawLogFile: File?,
+        recovered: Boolean
+    ): SavedRecording? {
+        val stats = CsvExporter.reduceTransactionsFromCsv(txCsv)
+        if (stats.count == 0) return null
+        val sessionId = metadata.sessionId
+        val startTimestamp = stats.minEpochMs
+            ?: RecordTime.parseMillis(metadata.startTimeUtc)?.takeIf {
+                it in RecordTime.MIN_PLAUSIBLE_EPOCH_MS..RecordTime.MAX_PLAUSIBLE_EPOCH_MS
             }
+            ?: System.currentTimeMillis()
+        val endTimestamp = stats.maxEpochMs ?: (startTimestamp + 1000L)
+        val endStamp = RecordTime.stamp(endTimestamp)
+
+        val sessionDir = File(recordingsDir, "session_$sessionId").apply { mkdirs() }
+        val txCsvFile = File(sessionDir, "${sessionId}_transactions.csv")
+        val sampleCsvFile = File(sessionDir, "${sessionId}_samples.csv")
+        val jsonFile = File(sessionDir, "$sessionId.json")
+        copyIfDifferent(txCsv, txCsvFile)
+
+        if (replaySamplesIfMissing || sampleCsv == null || !sampleCsv.exists() || sampleCsv.length() == 0L) {
+            CsvExporter.replaySamplesToCsv(txCsvFile, sampleCsvFile) { acc, tx ->
+                mergeSample(acc, tx).copy(altitudeM = tx.altitudeM)
+            }
+        } else {
+            copyIfDifferent(sampleCsv, sampleCsvFile)
         }
 
-        val startTimestamp = validTimestamps.minOrNull()
+        val liveAlt = com.example.di.AppContainer.tripAltitudeStats()
+        val journalRoute = journal.routeFile(sessionId)
+        val (sampleMinAlt, sampleMaxAlt) = CsvExporter.reduceAltitudeFromSamplesCsv(sampleCsvFile)
+        val altMin = when {
+            liveAlt != null && liveAlt.sampleCount > 0 -> liveAlt.minAltitudeM
+            sampleMinAlt != null -> sampleMinAlt
+            stats.minAltitudeM != null -> stats.minAltitudeM
+            else -> null
+        }
+        val altMax = when {
+            liveAlt != null && liveAlt.sampleCount > 0 -> liveAlt.maxAltitudeM
+            sampleMaxAlt != null -> sampleMaxAlt
+            stats.maxAltitudeM != null -> stats.maxAltitudeM
+            else -> null
+        }
+
+        val metadataForFiles = metadata.copy(
+            maxAltitudeM = altMax,
+            minAltitudeM = altMin,
+            minVoltageV = stats.minVoltageV,
+            maxVoltageV = stats.maxVoltageV,
+            startFuelPercent = stats.startFuelPercent ?: metadata.startFuelPercent,
+            endFuelPercent = stats.endFuelPercent ?: metadata.endFuelPercent,
+            fuelDeltaPercent = stats.fuelDeltaPercent ?: metadata.fuelDeltaPercent,
+            adapter = if (recovered) metadata.adapter + " (recovered after the app was killed)" else metadata.adapter
+        ).apply { endTimeUtc = endStamp }
+
+        runCatching { JsonExporter.exportToJsonFromCsv(jsonFile, metadataForFiles, txCsvFile) }
+            .onFailure { android.util.Log.e("RecordingManager", "exportToJsonFromCsv failed for $sessionId", it) }
+
+        val destRawLog = if (rawLogFile != null && rawLogFile.exists()) {
+            runCatching {
+                val dest = File(sessionDir, "${sessionId}_raw.txt")
+                rawLogFile.copyTo(dest, overwrite = true)
+                dest
+            }.getOrNull()
+        } else null
+
+        val destRouteFile = File(sessionDir, "${sessionId}_route.csv")
+        val gpxFile = File(sessionDir, "${sessionId}_route.gpx")
+        val kmlFile = File(sessionDir, "${sessionId}_route.kml")
+        val routeFiles = if (journalRoute.exists() && journalRoute.length() > 0) {
+            val pts = GpxExporter.readRoutePointsFromCsv(journalRoute)
+            if (pts.isNotEmpty()) {
+                runCatching {
+                    journalRoute.copyTo(destRouteFile, overwrite = true)
+                    GpxExporter.saveGpxFile(gpxFile, metadataForFiles.sessionName, pts)
+                    GpxExporter.saveKmlFile(kmlFile, metadataForFiles.sessionName, pts)
+                    listOf(destRouteFile, gpxFile, kmlFile)
+                }.getOrDefault(emptyList())
+            } else emptyList()
+        } else emptyList()
+
+        val zipFile = File(sessionDir, "${sessionId}_bundle.zip")
+        runCatching {
+            val bundleFiles = listOfNotNull(txCsvFile, sampleCsvFile, jsonFile, destRawLog) + routeFiles
+            ZipExporter.createTripZip(zipFile, bundleFiles)
+        }.onFailure { android.util.Log.e("RecordingManager", "zip bundle failed", it) }
+
+        persistTripFromCsv(
+            sessionId = sessionId,
+            metadata = metadataForFiles,
+            txCsv = txCsvFile,
+            sampleCsv = sampleCsvFile,
+            existingTrip = null,
+            startTimestampOverride = startTimestamp,
+            endTimestampOverride = endTimestamp
+        )
+
+        return SavedRecording(
+            metadata = metadataForFiles,
+            transactionCount = stats.count,
+            transactionCsvFile = txCsvFile,
+            samplesCsvFile = sampleCsvFile,
+            jsonFile = jsonFile,
+            rawLogFile = destRawLog,
+            zipFile = if (zipFile.exists()) zipFile else null
+        )
+    }
+
+    /**
+     * Room trip row + chunked sample insert from CSVs. Peak RAM is [HeapGuard.ROOM_INSERT_CHUNK]
+     * entities, never the whole drive.
+     */
+    private suspend fun persistTripFromCsv(
+        sessionId: String,
+        metadata: RecordingMetadata,
+        txCsv: File?,
+        sampleCsv: File?,
+        existingTrip: TripEntity?,
+        startTimestampOverride: Long? = null,
+        endTimestampOverride: Long? = null
+    ): Boolean {
+        val stats = if (txCsv != null && txCsv.exists()) {
+            CsvExporter.reduceTransactionsFromCsv(txCsv)
+        } else CsvTripStats()
+        if (stats.count == 0 && (sampleCsv == null || !sampleCsv.exists())) return false
+
+        val startTimestamp = startTimestampOverride
+            ?: stats.minEpochMs
             ?: existingTrip?.startTimestamp
-            ?: RecordTime.parseMillis(startStamp)
+            ?: RecordTime.parseMillis(metadata.startTimeUtc)
             ?: System.currentTimeMillis()
-        val endTimestamp = validTimestamps.maxOrNull()
+        val endTimestamp = endTimestampOverride
+            ?: stats.maxEpochMs
             ?: (startTimestamp + 1000L)
         val endStamp = RecordTime.stamp(endTimestamp)
         val durationSec = maxOf(1L, (endTimestamp - startTimestamp) / 1000)
+        val (sampleMinAlt, sampleMaxAlt) = if (sampleCsv != null) {
+            CsvExporter.reduceAltitudeFromSamplesCsv(sampleCsv)
+        } else null to null
+        val totalCount = maxOf(stats.count, sampleCsv?.let { SessionJsonReader.countTransactionRows(it) } ?: 0)
 
-        // Altitudes & Voltages
-        val altList = if (sampleList.any { it.altitudeM != null }) {
-            sampleList.mapNotNull { it.altitudeM }
-        } else {
-            txList.mapNotNull { it.altitudeM }
-        }
-        val altStats = if (altList.isNotEmpty()) com.example.analysis.AltitudeStats.reduce(altList) else null
-
-        val voltList = if (sampleList.any { it.voltageV != null }) {
-            sampleList.mapNotNull { smp -> smp.voltageV?.let { smp.timestampMonotonic to it } }
-        } else {
-            txList.filter { it.pid.equals("42", ignoreCase = true) || it.pid.equals("0142", ignoreCase = true) }
-                .mapNotNull { tx -> tx.decodedValue?.let { tx.timestampMonotonic to it } }
-        }
-        val voltStats = if (voltList.isNotEmpty()) com.example.analysis.VoltageStats.extremes(voltList) else null
-
-        val maxRpm = txList.filter { it.pid.equals("0C", ignoreCase = true) || it.pid.equals("010C", ignoreCase = true) }
-            .mapNotNull { it.decodedValue }.maxOrNull()
-            ?: sampleList.mapNotNull { it.rpm }.maxOrNull()
-            ?: 0.0
-        val maxSpeed = txList.filter { it.pid.equals("0D", ignoreCase = true) || it.pid.equals("010D", ignoreCase = true) }
-            .mapNotNull { it.decodedValue }.maxOrNull()
-            ?: sampleList.mapNotNull { it.speedKmh }.maxOrNull()
-            ?: 0.0
-        val maxCoolant = txList.filter { it.pid.equals("05", ignoreCase = true) || it.pid.equals("0105", ignoreCase = true) }
-            .mapNotNull { it.decodedValue }.maxOrNull()
-            ?: sampleList.mapNotNull { it.coolantC }.maxOrNull()
-            ?: 0.0
-        val avgVolt = if (voltList.isNotEmpty()) voltList.map { it.second }.average() else 0.0
-        val detectedEcus = txList.mapNotNull { it.canRxId.takeIf { id -> id.isNotBlank() } }.distinct()
-            .joinToString(", ").ifBlank { "7E8" }
-
-        val levelSamples = txList.filter {
-            it.pid.equals("2F", ignoreCase = true) || it.pid.equals("012F", ignoreCase = true)
-        }.mapNotNull { it.decodedValue }
-        val startFuelPercent = levelSamples.firstOrNull() ?: existingTrip?.startFuelPercent
-        val endFuelPercent = levelSamples.lastOrNull() ?: existingTrip?.endFuelPercent
-        val fuelDeltaPercent = if (startFuelPercent != null && endFuelPercent != null) {
-            endFuelPercent - startFuelPercent
-        } else existingTrip?.fuelDeltaPercent
-
-        val totalCount = maxOf(txList.size, sampleList.size)
-
-        // Update Trip Entity
         tripRepository.insertTrip(
             TripEntity(
                 id = sessionId,
-                title = sessionName,
-                vehicleName = vehicleName,
-                adapterName = adapterName,
-                protocolName = protocolName,
-                startTimeUtc = startStamp,
+                title = metadata.sessionName,
+                vehicleName = metadata.vehicle,
+                adapterName = metadata.adapter,
+                protocolName = metadata.protocol,
+                startTimeUtc = metadata.startTimeUtc,
                 endTimeUtc = endStamp,
                 startTimestamp = startTimestamp,
                 endTimestamp = endTimestamp,
@@ -975,88 +1061,146 @@ class RecordingManager(
                 status = "COMPLETED",
                 sampleCount = totalCount,
                 rawLogCount = totalCount,
-                maxRpm = maxRpm,
-                maxSpeedKmh = maxSpeed,
-                maxCoolantC = maxCoolant,
-                avgVoltageV = avgVolt,
-                detectedEcus = detectedEcus,
+                maxRpm = stats.maxRpm.takeIf { it > 0 } ?: existingTrip?.maxRpm ?: 0.0,
+                maxSpeedKmh = stats.maxSpeedKmh.takeIf { it > 0 } ?: existingTrip?.maxSpeedKmh ?: 0.0,
+                maxCoolantC = stats.maxCoolantC.takeIf { it > 0 } ?: existingTrip?.maxCoolantC ?: 0.0,
+                avgVoltageV = stats.avgVoltageV.takeIf { it > 0 } ?: existingTrip?.avgVoltageV ?: 0.0,
+                detectedEcus = stats.detectedEcus,
                 healthScore = 100,
-                maxAltitudeM = altStats?.maxAltitudeM ?: existingTrip?.maxAltitudeM,
-                minAltitudeM = altStats?.minAltitudeM ?: existingTrip?.minAltitudeM,
-                minVoltageV = voltStats?.minV ?: existingTrip?.minVoltageV,
-                maxVoltageV = voltStats?.maxV ?: existingTrip?.maxVoltageV,
-                startFuelPercent = startFuelPercent,
-                endFuelPercent = endFuelPercent,
-                fuelDeltaPercent = fuelDeltaPercent
+                maxAltitudeM = sampleMaxAlt ?: stats.maxAltitudeM ?: existingTrip?.maxAltitudeM ?: metadata.maxAltitudeM,
+                minAltitudeM = sampleMinAlt ?: stats.minAltitudeM ?: existingTrip?.minAltitudeM ?: metadata.minAltitudeM,
+                minVoltageV = stats.minVoltageV ?: existingTrip?.minVoltageV ?: metadata.minVoltageV,
+                maxVoltageV = stats.maxVoltageV ?: existingTrip?.maxVoltageV ?: metadata.maxVoltageV,
+                startFuelPercent = stats.startFuelPercent ?: existingTrip?.startFuelPercent ?: metadata.startFuelPercent,
+                endFuelPercent = stats.endFuelPercent ?: existingTrip?.endFuelPercent ?: metadata.endFuelPercent,
+                fuelDeltaPercent = stats.fuelDeltaPercent ?: existingTrip?.fuelDeltaPercent ?: metadata.fuelDeltaPercent
             )
         )
 
-        // Insert Room samples
         tripRepository.deleteSamplesForTrip(sessionId)
-        if (txList.isNotEmpty()) {
-            val entities = txList.mapIndexed { idx, tx ->
-                TelemetrySampleEntity(
-                    tripId = sessionId,
-                    timestamp = com.example.data.RecordTime.instantOf(tx.timestampMonotonic, tx.timestampUtc) ?: tx.timestampMonotonic,
-                    timestampUtc = tx.timestampUtc,
-                    ecuCanId = tx.canRxId.ifBlank { "7E8" },
-                    pid = tx.pid,
-                    parameterName = tx.decodedParameter.ifBlank { "PID ${tx.pid}" },
-                    rawHex = tx.responseHex,
-                    numericValue = tx.decodedValue,
-                    displayValue = tx.decodedValueDisplay,
-                    unit = tx.unit,
-                    quality = "VALID",
-                    altitudeM = tx.altitudeM,
-                    sequence = idx.toLong()
-                )
-            }
-            tripRepository.insertSamples(entities)
-        } else if (sampleList.isNotEmpty()) {
-            val entities = mutableListOf<TelemetrySampleEntity>()
-            var seq = 0L
-            sampleList.forEach { smp ->
-                val instant = com.example.data.RecordTime.parseMillis(smp.timestampUtc) ?: smp.timestampMonotonic
-                fun addEntity(pid: String, param: String, value: Double?, unit: String) {
-                    if (value != null) {
-                        entities.add(
-                            TelemetrySampleEntity(
-                                tripId = sessionId,
-                                timestamp = instant,
-                                timestampUtc = smp.timestampUtc,
-                                ecuCanId = "7E8",
-                                pid = pid,
-                                parameterName = param,
-                                rawHex = "",
-                                numericValue = value,
-                                displayValue = String.format(java.util.Locale.US, "%.1f %s", value, unit),
-                                unit = unit,
-                                quality = "VALID",
-                                altitudeM = smp.altitudeM,
-                                sequence = seq++
-                            )
-                        )
-                    }
-                }
-                addEntity("010C", "Engine Speed", smp.rpm, "rpm")
-                addEntity("010D", "Vehicle Speed", smp.speedKmh, "km/h")
-                addEntity("0104", "Engine Load", smp.engineLoadPct, "%")
-                addEntity("0105", "Engine Coolant Temperature", smp.coolantC, "°C")
-                addEntity("0142", "Control Module Voltage", smp.voltageV, "V")
-                addEntity("015E", "Engine Fuel Rate", smp.fuelRateLh, "L/h")
-                addEntity("0162", "Actual Engine - Percent Torque", smp.engineTorquePct, "%")
-            }
-            if (entities.isNotEmpty()) {
-                tripRepository.insertSamples(entities)
-            }
-        }
-
-        if (txList.isNotEmpty()) {
-            runCatching { detectRefuelEvents(txList) }
+        if (txCsv != null && stats.count > 0) {
+            insertSamplesFromTxCsv(sessionId, txCsv)
+            runCatching { detectRefuelEventsFromCsv(txCsv) }
+        } else if (sampleCsv != null) {
+            insertSamplesFromWideCsv(sessionId, sampleCsv)
         }
         runCatching { relinkCarpoolEntries() }
+            .onFailure { android.util.Log.e("RecordingManager", "carpool relink failed", it) }
         runCatching { tripRepository.runAiCarDoctorAnalysis(sessionId) }
-        true
+            .onFailure { android.util.Log.e("RecordingManager", "AI doctor failed for $sessionId", it) }
+        return true
+    }
+
+    private suspend fun insertSamplesFromTxCsv(sessionId: String, txCsv: File) {
+        val chunk = ArrayList<TelemetrySampleEntity>(HeapGuard.ROOM_INSERT_CHUNK)
+        var idx = 0L
+        for (tx in CsvExporter.transactions(txCsv)) {
+            chunk.add(sampleEntityFromTx(sessionId, tx, idx))
+            idx++
+            if (chunk.size >= HeapGuard.ROOM_INSERT_CHUNK) {
+                tripRepository.insertSamples(ArrayList(chunk))
+                chunk.clear()
+            }
+        }
+        if (chunk.isNotEmpty()) tripRepository.insertSamples(chunk)
+    }
+
+    private suspend fun insertSamplesFromWideCsv(sessionId: String, sampleCsv: File) {
+        val chunk = ArrayList<TelemetrySampleEntity>(HeapGuard.ROOM_INSERT_CHUNK)
+        var seq = 0L
+        fun addEntity(instant: Long, stamp: String, alt: Double?, pid: String, param: String, value: Double?, unit: String) {
+            if (value == null) return
+            chunk.add(
+                TelemetrySampleEntity(
+                    tripId = sessionId,
+                    timestamp = instant,
+                    timestampUtc = stamp,
+                    ecuCanId = "7E8",
+                    pid = pid,
+                    parameterName = param,
+                    rawHex = "",
+                    numericValue = value,
+                    displayValue = String.format(java.util.Locale.US, "%.1f %s", value, unit),
+                    unit = unit,
+                    quality = "VALID",
+                    altitudeM = alt,
+                    sequence = seq++
+                )
+            )
+        }
+        for (smp in CsvExporter.samples(sampleCsv)) {
+            val instant = RecordTime.parseMillis(smp.timestampUtc) ?: smp.timestampMonotonic
+            addEntity(instant, smp.timestampUtc, smp.altitudeM, "010C", "Engine Speed", smp.rpm, "rpm")
+            addEntity(instant, smp.timestampUtc, smp.altitudeM, "010D", "Vehicle Speed", smp.speedKmh, "km/h")
+            addEntity(instant, smp.timestampUtc, smp.altitudeM, "0104", "Engine Load", smp.engineLoadPct, "%")
+            addEntity(instant, smp.timestampUtc, smp.altitudeM, "0105", "Engine Coolant Temperature", smp.coolantC, "°C")
+            addEntity(instant, smp.timestampUtc, smp.altitudeM, "0142", "Control Module Voltage", smp.voltageV, "V")
+            addEntity(instant, smp.timestampUtc, smp.altitudeM, "015E", "Engine Fuel Rate", smp.fuelRateLh, "L/h")
+            addEntity(instant, smp.timestampUtc, smp.altitudeM, "0162", "Actual Engine - Percent Torque", smp.engineTorquePct, "%")
+            if (chunk.size >= HeapGuard.ROOM_INSERT_CHUNK) {
+                tripRepository.insertSamples(ArrayList(chunk))
+                chunk.clear()
+            }
+        }
+        if (chunk.isNotEmpty()) tripRepository.insertSamples(chunk)
+    }
+
+    private suspend fun insertSampleEntitiesChunked(sessionId: String, txList: List<TransactionRecord>) {
+        val chunk = ArrayList<TelemetrySampleEntity>(HeapGuard.ROOM_INSERT_CHUNK)
+        for (idx in txList.indices) {
+            chunk.add(sampleEntityFromTx(sessionId, txList[idx], idx.toLong()))
+            if (chunk.size >= HeapGuard.ROOM_INSERT_CHUNK) {
+                tripRepository.insertSamples(ArrayList(chunk))
+                chunk.clear()
+            }
+        }
+        if (chunk.isNotEmpty()) tripRepository.insertSamples(chunk)
+    }
+
+    private fun sampleEntityFromTx(sessionId: String, tx: TransactionRecord, idx: Long): TelemetrySampleEntity =
+        TelemetrySampleEntity(
+            tripId = sessionId,
+            timestamp = RecordTime.instantOf(tx.timestampMonotonic, tx.timestampUtc) ?: tx.timestampMonotonic,
+            timestampUtc = tx.timestampUtc,
+            ecuCanId = tx.canRxId.ifBlank { "7E8" },
+            pid = tx.pid,
+            parameterName = tx.decodedParameter.ifBlank { "PID ${tx.pid}" },
+            rawHex = tx.responseHex,
+            numericValue = tx.decodedValue,
+            displayValue = tx.decodedValueDisplay,
+            unit = tx.unit,
+            quality = "VALID",
+            altitudeM = tx.altitudeM,
+            sequence = idx
+        )
+
+    private fun copyIfDifferent(src: File, dest: File) {
+        if (!src.exists()) return
+        dest.parentFile?.mkdirs()
+        if (src.canonicalPath == dest.canonicalPath) return
+        src.copyTo(dest, overwrite = true)
+    }
+
+    private suspend fun detectRefuelEventsFromCsv(txCsv: File) {
+        val settings = com.example.di.AppContainer.settingsRepository
+        val rows = ArrayList<com.example.analysis.SinceRefuelStats.Row>()
+        for (tx in CsvExporter.transactions(txCsv)) {
+            val pid = com.example.analysis.TripFuelSummary.normalizePidKey(tx.pid)
+            if (pid == com.example.analysis.RefuelEventDetector.PID_LEVEL ||
+                pid == com.example.analysis.RefuelEventDetector.PID_SPEED ||
+                pid == com.example.analysis.RefuelEventDetector.PID_ODO ||
+                pid == com.example.analysis.RefuelEventDetector.PID_RPM
+            ) {
+                rows.add(
+                    com.example.analysis.SinceRefuelStats.Row(
+                        RecordTime.instantOf(tx.timestampMonotonic, tx.timestampUtc) ?: tx.timestampMonotonic,
+                        pid,
+                        tx.decodedValue
+                    )
+                )
+            }
+        }
+        persistRefuelEvents(com.example.analysis.RefuelSessionScan.scan(rows), settings)
     }
 
     /**
@@ -1273,7 +1417,7 @@ class RecordingManager(
      * archived so it is reported once instead of forever.
      */
     suspend fun recoverUnfinishedSessions(skipFreshMs: Long = 0L): RecoverySummary? = withContext(Dispatchers.IO) {
-        if (_recoveryRunning.value) return@withContext _journalRecovery.value
+        if (!recoveryGate.compareAndSet(false, true)) return@withContext _journalRecovery.value
         _recoveryRunning.value = true
         val summary = try {
             // KILL-AUDIT FIX C2: the dedup below trusts _savedRecordings, whose first load is now
@@ -1307,8 +1451,8 @@ class RecordingManager(
                 ) continue
                 if (id in savedIds) {
                     val existingTrip = runCatching { tripRepository.getTripById(id) }.getOrNull()
-                    val existingSamples = runCatching { tripRepository.getSamplesForTrip(id) }.getOrDefault(emptyList())
-                    if (existingTrip == null || existingTrip.status == "RECORDING" || existingSamples.isEmpty()) {
+                    val existingSampleCount = runCatching { tripRepository.getSampleCountForTrip(id) }.getOrDefault(0)
+                    if (existingTrip == null || existingTrip.status == "RECORDING" || existingSampleCount == 0) {
                         rebuildRoomTripFromDisk(id)
                     }
                     journal.discard(id)
@@ -1418,8 +1562,10 @@ class RecordingManager(
         } catch (e: Exception) {
             android.util.Log.e("RecordingManager", "auto recovery failed", e)
             RecoverySummary(failures = listOf("auto-recovery error: ${e.message ?: e.javaClass.simpleName}"))
+        } finally {
+            _recoveryRunning.value = false
+            recoveryGate.set(false)
         }
-        _recoveryRunning.value = false
         _journalRecovery.value = summary
         summary
     }
@@ -1435,39 +1581,24 @@ class RecordingManager(
      */
     internal suspend fun recoverJournalSession(sessionId: String, rawLogFile: File?): RecoveryOutcome {
         return try {
-            val txList = CsvExporter.readTransactionsFromCsv(journal.txFile(sessionId))
-            if (txList.isEmpty()) return RecoveryOutcome.NothingToRecover
-
-            // The journal's monotonic column is UPTIME (SystemClock.elapsedRealtime), not an
-            // instant: re-anchor every row to its own IST stamp before anything downstream -
-            // window, replayed wide rows, Room rows - reads a clock that says 1970.
-            val wallTx = txList.map { tx ->
-                val wall = SessionRecoveryPolicy.wallEpochMs(tx.timestampUtc, tx.timestampMonotonic)
-                if (wall == tx.timestampMonotonic) tx else tx.copy(timestampMonotonic = wall)
-            }
+            val txFile = journal.txFile(sessionId)
+            val stats = CsvExporter.reduceTransactionsFromCsv(txFile)
+            if (stats.count == 0) return RecoveryOutcome.NothingToRecover
 
             val meta = journal.readMeta(sessionId)
             // The trip window is the DATA window: first frame to last frame. The journal also
             // records when the session was opened, but using that as the start would add the
             // connect-to-first-response gap to every recovered duration - and the raw-log recovery
             // path has always used the first telemetry line, so the two now agree.
-            val startMs = wallTx.minOf { it.timestampMonotonic }
+            // Reduce uses wallEpochMs, so uptime in the monotonic column cannot pin the trip to 1970.
+            val startMs = stats.minEpochMs ?: return RecoveryOutcome.NothingToRecover
             val openedMs = meta["startEpochMillis"]?.toLongOrNull()
                 ?: RecordTime.parseMillis(meta["startTime"])
                 ?: startMs
 
-            val sampleRows = CsvExporter.readSamplesFromCsv(journal.sampleFile(sessionId))
-            // Samples journal missing or short (an older build, a write failure): replay the wide
-            // rows from the transactions so the trip still gets them. Same pure fold as live.
-            val samples = if (SessionRecoveryPolicy.samplesUsable(sampleRows.size, wallTx.size)) {
-                sampleRows
-            } else {
-                SessionRecoveryPolicy.replaySamples(
-                    transactions = wallTx,
-                    seed = SynchronizedSample(timestampUtc = "", timestampMonotonic = 0L),
-                    merge = { acc, tx -> mergeSample(acc, tx).copy(altitudeM = tx.altitudeM) }
-                )
-            }
+            val sampleFile = journal.sampleFile(sessionId)
+            val sampleCount = SessionJsonReader.countTransactionRows(sampleFile)
+            val replay = !SessionRecoveryPolicy.samplesUsable(sampleCount, stats.count)
 
             // Keep the name the drive was given when it started, but say it was recovered: the
             // owner looks for "Recovered Run" in the trip list to know a drive was rescued rather
@@ -1491,10 +1622,11 @@ class RecordingManager(
                 startTimeUtc = RecordTime.stamp(startMs)
             )
 
-            val saved = finalizeSession(
+            val saved = finalizeSessionFromFiles(
                 metadata = metadata,
-                txList = wallTx,
-                sampleList = samples,
+                txCsv = txFile,
+                sampleCsv = sampleFile.takeIf { it.exists() && it.length() > 0L },
+                replaySamplesIfMissing = replay,
                 rawLogFile = rawLogFile,
                 recovered = true
             ) ?: return RecoveryOutcome.NothingToRecover
