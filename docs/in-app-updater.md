@@ -172,23 +172,25 @@ PackageInstaller session, then ColorOS drops the confirmation as a blocked
 overlay. Tapping **Download & install** again only re-downloads. It will never
 show the system "scan / install" sheet from that build.
 
-**Do not uninstall.** ColorOS blocks both in-app Install now *and* Chrome's
-download popup as the installer. Use **Files** (My Files) as the installer:
+**Do not uninstall. Do not tap Download & install in the app** — 814 only
+re-downloads. Chrome's Install popup on an `.apk` is the same blocked loop.
 
-`https://github.com/tritonelabautomation/KylaqOBD2Scan/releases/latest/download/KylaqOBD2Scan.apk`
+Download the **ZIP** (Chrome will not try to install a zip):
 
-1. Open that link in Chrome only to **download**. Do not tap Install in Chrome.
-2. Settings → Additional settings → **Install unknown apps** → **Files** → allow.
-3. Open **Files / My Files** → Downloads → `KylaqOBD2Scan.apk` → Install.
-4. If Play Protect blocks it: Play Store → profile → Play Protect → Scan apps
-   with Play Protect → off, then retry from Files.
+`https://github.com/tritonelabautomation/KylaqOBD2Scan/releases/latest/download/KylaqOBD2Scan.zip`
+
+1. Close Kylaq completely.
+2. Open that ZIP link in Chrome. Wait for the download. Do not tap Open/Install.
+3. Settings → Additional settings → **Install unknown apps** → **My Files** → allow.
+4. Open **My Files** (phone's orange file manager, not Chrome) → Download →
+   `KylaqOBD2Scan.zip` → Extract → tap `KylaqOBD2Scan.apk` → Install.
+5. If Play Protect blocks it: Play Store → profile → Play Protect → Scan apps
+   with Play Protect → off, then retry from My Files.
 
 Same sideload signing key as 814, so this replaces the app in place.
 
 From 1.0.818 the in-app confirm sheet is delivered to MainActivity. CI still
-runs `assembleDebug` (a second buildType broke KSP). After packaging, CI
-clears `android:debuggable` / `testOnly` in the binary manifest and re-signs
-with the sideload key — ColorOS Files refuses GUI installs of debuggable APKs.
+runs `assembleDebug` (a second buildType broke KSP).
 
 ---
 
