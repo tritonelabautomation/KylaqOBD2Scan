@@ -53,6 +53,14 @@
     <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
     <uses-feature android:name="android.hardware.type.automotive" android:required="false" />
 
+    <!-- Fallback ACTION_VIEW installer resolvers (ColorOS File Manager, packageinstaller). -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:mimeType="application/vnd.android.package-archive" />
+        </intent>
+    </queries>
+
     <application
         android:name=".KylaqApplication"
         android:allowBackup="true"
@@ -81,6 +89,22 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!--
+          PackageInstaller status trampoline (2026-11-10): ColorOS/Oppo/Realme answer
+          ACTION_VIEW + FileProvider with a silent "App not installed" after Installing…
+          because they re-open the content:// URI after the grant is gone. The session
+          API copies the APK bytes first and delivers SUCCESS / PENDING_USER_ACTION /
+          FAILURE_* through this Activity so we can show the real reason. exported=false
+          is enough — the system invokes it via our PendingIntent, not an implicit Intent.
+        -->
+        <activity
+            android:name=".update.UpdateInstallActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.UpdateInstallTrampoline" />
 
         <!-- Sideload-friendly car-launcher entry (parked-surface activity pattern):
              CAR_LAUNCHER + NAVIGATION + APP_MAPS categories make the head-unit launcher

@@ -95,7 +95,9 @@ push to main or arena/*
  download to app-private filesDir/updates/, verify size + SHA-256
       ▼
  compare the installed signing certificate with the APK's
-      │   match/unknown → hand to the package installer (one system confirmation)
+      │   (GET_SIGNING_CERTIFICATES, then GET_SIGNATURES — ColorOS often returns
+      │    a null signingInfo for getPackageArchiveInfo with the modern flag)
+      │   match/unknown → PackageInstaller session (bytes copied, then one confirm)
       │   mismatch      → explain the one-time reinstall instead of firing an
       │                   installer that can only fail with "App not installed"
       ▼
@@ -105,7 +107,9 @@ push to main or arena/*
 | Piece | File |
 | --- | --- |
 | Feed parsing, fail-closed rules, throttling, SHA-256, size/progress formatting (pure JVM) | `app/src/main/java/com/example/update/AppUpdateFeed.kt` |
-| Fetch, verified download, signature comparison, install intent, "install unknown apps" routing | `app/src/main/java/com/example/update/UpdateManager.kt` |
+| Fetch, verified download, signature comparison, PackageInstaller session, "install unknown apps" routing | `app/src/main/java/com/example/update/UpdateManager.kt` |
+| PackageInstaller status codes → human error (pure JVM) | `app/src/main/java/com/example/update/UpdateInstallStatus.kt` |
+| Status trampoline Activity (PENDING_USER_ACTION / failure Toast) | `app/src/main/java/com/example/update/UpdateInstallActivity.kt` |
 | One flat UI state (`shouldPrompt`, progress, staged file, mismatch, error) | `app/src/main/java/com/example/update/UpdateUiState.kt` |
 | Check / download / install actions, auto-check throttle stamp | `MainViewModel`, `SettingsRepository.lastUpdateCheckMs` |
 | Launch prompt dialog | `MainActivity` (`dialog_app_update`) |
@@ -113,11 +117,12 @@ push to main or arena/*
 | Stable signing + feed URLs in `BuildConfig` | `app/build.gradle.kts`, `keystore/sideload.p12` |
 | Rolling-release publishing | `.github/workflows/build-apk.yml` → *Publish APK to the rolling release* |
 | `REQUEST_INSTALL_PACKAGES` (documented, with the honest limit) | `app/src/main/AndroidManifest.xml` |
-| Tests (17) | `app/src/test/java/com/example/AppUpdateFeedTest.kt` |
+| Tests | `app/src/test/java/com/example/AppUpdateFeedTest.kt`, `UpdateInstallStatusTest.kt` |
 
-The APK is served by FileProvider from app-private storage
-(`filesDir/updates/`), which the existing `<files-path name="files" path="." />` rule
-already covers — no new provider paths, and nothing lands in shared storage.
+The APK is downloaded to app-private storage (`filesDir/updates/`). Install no longer
+hands that file to ColorOS via FileProvider — `PackageInstaller.Session` copies the
+bytes, which is what stops the OEM "App not installed" sheet after Installing…. The
+FileProvider `<files-path>` rule stays for crash-log / recording shares.
 
 ---
 

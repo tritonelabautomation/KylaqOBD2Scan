@@ -2218,6 +2218,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             updateManager.openInstallPermissionSettings()
             return
         }
+        com.example.update.UpdateInstallActivity.listener = { success, message ->
+            if (!success && !message.isNullOrBlank()) {
+                _updateState.value = _updateState.value.copy(error = message)
+            }
+        }
         try {
             updateManager.install(apk)
         } catch (e: Exception) {
@@ -3078,5 +3083,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             buildNumber = com.example.BuildConfig.VERSION_CODE,
             gitCommit = com.example.BuildConfig.GIT_COMMIT
         )
+    }
+
+    override fun onCleared() {
+        com.example.update.UpdateInstallActivity.listener = null
+        super.onCleared()
     }
 }

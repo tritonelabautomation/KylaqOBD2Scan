@@ -1,8 +1,10 @@
 package com.example.update
 
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInfo
+import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -23,7 +25,7 @@ import java.net.URL
  * tap "Update" → progress bar → one system "Install?" prompt → app reopens in place with
  * all data, logs and permissions intact. No uninstall, no PC, no ZIP extraction.
  *
- * Two guards keep that promise honest:
+ * Three guards keep that promise honest:
  *  1. [download] verifies the SHA-256 published in `latest.json`; a truncated or altered
  *     download is deleted and never offered to the installer.
  *  2. [installedSignatureMatchesApk] detects the one case where an in-place update is
@@ -31,13 +33,21 @@ import java.net.URL
  *     before 2026-09-16 used a throwaway per-runner debug keystore). Instead of firing an
  *     installer that is guaranteed to fail with a cryptic "App not installed", the UI can
  *     explain that a one-time reinstall is needed and point at the backup/export first.
+ *  3. [install] streams the verified APK into a [PackageInstaller] session. The older
+ *     `ACTION_VIEW` + FileProvider path is what ColorOS/Oppo/Realme (and several other
+ *     OEM skins) answer with "App not installed" after showing Installing… — they re-read
+ *     the content:// URI after parsing the label and the grant is already gone. A session
+ *     copies the bytes up front, so the confirmation sheet no longer has to reopen the
+ *     file, and [UpdateInstallActivity] surfaces the real status code if it still fails.
  */
-class UpdateManager(private val context: Context) {
+class UpdateManager(context: Context) {
 
     class UpdateException(message: String) : Exception(message)
 
+    private val appContext: Context = context.applicationContext
+
     val updatesDir: File
-        get() = File(context.filesDir, "updates").apply { if (!exists()) mkdirs() }
+        get() = File(appContext.filesDir, "updates").apply { if (!exists()) mkdirs() }
 
     /**
      * Fetches and parses `latest.json`. Null means the check itself failed (offline,
@@ -122,18 +132,19 @@ class UpdateManager(private val context: Context) {
      * downloaded APK. `true` → in-place update will work. `false` → Android will refuse
      * (signature conflict) and a one-time uninstall/reinstall is required. `null` → could
      * not be determined, so the UI should just try and let the installer speak.
+     *
+     * Tries both [PackageManager.GET_SIGNING_CERTIFICATES] and the older
+     * [PackageManager.GET_SIGNATURES]: `getPackageArchiveInfo` on several OEM builds
+     * (ColorOS included) returns a PackageInfo whose `signingInfo` is null for the
+     * modern flag, which used to make us skip the mismatch warning and hand a
+     * guaranteed-to-fail APK to the installer.
      */
     @Suppress("DEPRECATION")
     fun installedSignatureMatchesApk(apk: File): Boolean? {
         return try {
-            val pm = context.packageManager
-            val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                PackageManager.GET_SIGNING_CERTIFICATES
-            } else {
-                PackageManager.GET_SIGNATURES
-            }
-            val installed = firstSignatureOf(pm.getPackageInfo(context.packageName, flags))
-            val candidate = firstSignatureOf(pm.getPackageArchiveInfo(apk.absolutePath, flags))
+            val pm = appContext.packageManager
+            val installed = firstReadableSignature(pm, installed = true, apkPath = null)
+            val candidate = firstReadableSignature(pm, installed = false, apkPath = apk.absolutePath)
             if (installed == null || candidate == null) null
             else java.security.MessageDigest.isEqual(installed, candidate)
         } catch (_: Exception) {
@@ -142,47 +153,191 @@ class UpdateManager(private val context: Context) {
     }
 
     @Suppress("DEPRECATION")
+    private fun firstReadableSignature(
+        pm: PackageManager,
+        installed: Boolean,
+        apkPath: String?
+    ): ByteArray? {
+        val flagSets = ArrayList<Int>(3)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            flagSets.add(PackageManager.GET_SIGNING_CERTIFICATES)
+            flagSets.add(PackageManager.GET_SIGNING_CERTIFICATES or PackageManager.GET_SIGNATURES)
+        }
+        flagSets.add(PackageManager.GET_SIGNATURES)
+        for (flags in flagSets) {
+            val info = try {
+                if (installed) pm.getPackageInfo(appContext.packageName, flags)
+                else pm.getPackageArchiveInfo(apkPath ?: return null, flags)
+            } catch (_: Exception) {
+                null
+            }
+            val bytes = firstSignatureOf(info)
+            if (bytes != null) return bytes
+        }
+        return null
+    }
+
+    @Suppress("DEPRECATION")
     private fun firstSignatureOf(info: PackageInfo?): ByteArray? {
         if (info == null) return null
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            val signing = info.signingInfo ?: return null
-            val signers = if (signing.hasMultipleSigners()) signing.apkContentsSigners else signing.signingCertificateHistory
-            signers?.firstOrNull()?.toByteArray()
-        } else {
-            info.signatures?.firstOrNull()?.toByteArray()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val signing = info.signingInfo
+            if (signing != null) {
+                val signers = if (signing.hasMultipleSigners()) {
+                    signing.apkContentsSigners
+                } else {
+                    signing.signingCertificateHistory
+                }
+                signers?.firstOrNull()?.toByteArray()?.let { return it }
+            }
         }
+        return info.signatures?.firstOrNull()?.toByteArray()
     }
 
     /** Android 8+ needs "install unknown apps" granted for this app before installing. */
     fun canRequestPackageInstalls(): Boolean =
-        Build.VERSION.SDK_INT < Build.VERSION_CODES.O || context.packageManager.canRequestPackageInstalls()
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.O || appContext.packageManager.canRequestPackageInstalls()
 
     fun openInstallPermissionSettings() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val intent = Intent(
             Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-            Uri.parse("package:${context.packageName}")
+            Uri.parse("package:${appContext.packageName}")
         ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         try {
-            context.startActivity(intent)
+            appContext.startActivity(intent)
         } catch (_: Exception) {
             // Some OEM builds omit the settings page; fall back to the generic screen.
             try {
-                context.startActivity(
+                appContext.startActivity(
                     Intent(Settings.ACTION_SECURITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 )
             } catch (_: Exception) {}
         }
     }
 
-    /** Hands the verified APK to Android's package installer (one system confirmation). */
+    /**
+     * Hands the verified APK to Android's package installer (one system confirmation).
+     *
+     * Prefers a [PackageInstaller] session so OEM skins cannot lose the FileProvider
+     * grant mid-install. Falls back to `ACTION_VIEW` only if creating a session throws.
+     */
     fun install(apk: File) {
-        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", apk)
+        if (!apk.exists() || apk.length() <= 0L) {
+            throw UpdateException("Staged APK is missing - tap Download & install again")
+        }
+        try {
+            installViaSession(apk)
+        } catch (e: UpdateException) {
+            throw e
+        } catch (e: Exception) {
+            try {
+                installViaViewIntent(apk)
+            } catch (_: Exception) {
+                throw UpdateException(
+                    "Could not open the installer: ${e.message ?: e.javaClass.simpleName}"
+                )
+            }
+        }
+    }
+
+    private fun installViaSession(apk: File) {
+        val installer = appContext.packageManager.packageInstaller
+        for (info in installer.mySessions) {
+            try {
+                installer.abandonSession(info.sessionId)
+            } catch (_: Exception) {
+            }
+        }
+
+        val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
+        params.setAppPackageName(appContext.packageName)
+        params.setSize(apk.length())
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            params.setInstallReason(PackageManager.INSTALL_REASON_USER)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            params.setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_REQUIRED)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            params.setPackageSource(PackageInstaller.PACKAGE_SOURCE_LOCAL_FILE)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            params.setDontKillApp(true)
+        }
+
+        val sessionId = installer.createSession(params)
+        val session = installer.openSession(sessionId)
+        try {
+            apk.inputStream().use { input ->
+                session.openWrite("base.apk", 0, apk.length()).use { output ->
+                    val buffer = ByteArray(64 * 1024)
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read <= 0) break
+                        output.write(buffer, 0, read)
+                    }
+                    session.fsync(output)
+                }
+            }
+            val pendingFlags = PendingIntent.FLAG_UPDATE_CURRENT or (
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    PendingIntent.FLAG_MUTABLE
+                } else {
+                    0
+                }
+            )
+            val statusIntent = Intent(appContext, UpdateInstallActivity::class.java).apply {
+                // Distinct data so FLAG_UPDATE_CURRENT cannot collapse two sessions.
+                data = Uri.parse("kylaq-update://session/$sessionId")
+            }
+            val pending = PendingIntent.getActivity(
+                appContext,
+                sessionId,
+                statusIntent,
+                pendingFlags
+            )
+            session.commit(pending.intentSender)
+        } catch (e: Exception) {
+            try {
+                installer.abandonSession(sessionId)
+            } catch (_: Exception) {
+            }
+            throw e
+        } finally {
+            try {
+                session.close()
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    /**
+     * Last-resort path for the handful of firmwares that throw from [PackageInstaller]
+     * itself. Explicitly grants the content URI to every resolver that claims the APK
+     * MIME type — the FLAG on the Intent is not enough on ColorOS.
+     */
+    private fun installViaViewIntent(apk: File) {
+        val uri = FileProvider.getUriForFile(
+            appContext,
+            "${appContext.packageName}.fileprovider",
+            apk
+        )
         val intent = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(uri, "application/vnd.android.package-archive")
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            clipData = android.content.ClipData.newRawUri("update", uri)
+            addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
         }
-        context.startActivity(intent)
+        val grantFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+        appContext.packageManager.queryIntentActivities(intent, 0).forEach { resolve ->
+            try {
+                appContext.grantUriPermission(resolve.activityInfo.packageName, uri, grantFlags)
+            } catch (_: Exception) {
+            }
+        }
+        appContext.startActivity(intent)
     }
 
     private fun openConnection(url: String): HttpURLConnection =
