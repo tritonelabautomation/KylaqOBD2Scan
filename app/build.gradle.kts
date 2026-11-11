@@ -138,6 +138,9 @@ android {
       storePassword = sideloadStorePassword
       keyAlias = sideloadKeyAlias
       keyPassword = sideloadKeyPassword
+      enableV1Signing = true
+      enableV2Signing = true
+      enableV3Signing = true
     }
     create("release") {
       val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
@@ -160,6 +163,20 @@ android {
       // updating never uninstalls the app and never costs the owner their data or
       // permissions. Guarded so a checkout without the key material still builds, falling
       // back to Gradle's per-machine debug keystore (updates then need a re-install).
+      if (sideloadStoreFile.exists()) {
+        signingConfig = signingConfigs.getByName("sideload")
+      }
+    }
+    // Phone distribution: ColorOS/Oppo refuse GUI installs of debuggable/testOnly APKs
+    // ("App not installed" after Installing…). Same sideload key as debug, so this
+    // replaces 814 in place. Android Studio still uses debug.
+    create("sideload") {
+      initWith(getByName("debug"))
+      matchingFallbacks += listOf("debug")
+      isDebuggable = false
+      isJniDebuggable = false
+      isMinifyEnabled = false
+      isCrunchPngs = false
       if (sideloadStoreFile.exists()) {
         signingConfig = signingConfigs.getByName("sideload")
       }

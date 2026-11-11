@@ -172,18 +172,22 @@ PackageInstaller session, then ColorOS drops the confirmation as a blocked
 overlay. Tapping **Download & install** again only re-downloads. It will never
 show the system "scan / install" sheet from that build.
 
-**Do not uninstall.** Install the current rolling APK from Chrome (same sideload
-key, trips and permissions stay):
+**Do not uninstall.** ColorOS blocks both in-app Install now *and* Chrome's
+download popup as the installer. Use **Files** (My Files) as the installer:
 
 `https://github.com/tritonelabautomation/KylaqOBD2Scan/releases/latest/download/KylaqOBD2Scan.apk`
 
-1. Open that link in **Chrome** on the phone (not inside this app).
-2. Allow the download. Open the file from the download notification.
-3. If ColorOS asks, allow Chrome / Files to install unknown apps.
-4. Confirm **Install**. The app replaces itself in place.
+1. Open that link in Chrome only to **download**. Do not tap Install in Chrome.
+2. Settings → Additional settings → **Install unknown apps** → **Files** → allow.
+3. Open **Files / My Files** → Downloads → `KylaqOBD2Scan.apk` → Install.
+4. If Play Protect blocks it: Play Store → profile → Play Protect → Scan apps
+   with Play Protect → off, then retry from Files.
 
-From 1.0.818 the confirm sheet is delivered to MainActivity (already on screen),
-and Settings also has **Install from browser instead**.
+Same sideload signing key as 814, so this replaces the app in place.
+
+From 1.0.818 the in-app confirm sheet is delivered to MainActivity, and CI
+publishes a non-debuggable `sideload` APK (ColorOS refuses GUI installs of
+debuggable/testOnly builds).
 
 ---
 
