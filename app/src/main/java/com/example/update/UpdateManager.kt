@@ -9,7 +9,6 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
-import androidx.core.content.FileProvider
 import com.example.BuildConfig
 import java.io.File
 import java.net.HttpURLConnection
@@ -219,8 +218,9 @@ class UpdateManager(context: Context) {
     /**
      * Hands the verified APK to Android's package installer (one system confirmation).
      *
-     * Prefers a [PackageInstaller] session so OEM skins cannot lose the FileProvider
-     * grant mid-install. Falls back to `ACTION_VIEW` only if creating a session throws.
+     * Uses a [PackageInstaller] session (bytes copied up front). Status comes back
+     * to [com.example.MainActivity] — a translucent trampoline is treated as a blocked
+     * overlay on ColorOS, which is why "Install now" used to do nothing.
      */
     fun install(apk: File) {
         if (!apk.exists() || apk.length() <= 0L) {
@@ -231,19 +231,19 @@ class UpdateManager(context: Context) {
         } catch (e: UpdateException) {
             throw e
         } catch (e: Exception) {
-            try {
-                installViaViewIntent(apk)
-            } catch (_: Exception) {
-                throw UpdateException(
-                    "Could not open the installer: ${e.message ?: e.javaClass.simpleName}"
-                )
-            }
+            throw UpdateException(
+                "Could not start the installer (${e.message ?: e.javaClass.simpleName}). " +
+                    "Open the APK from GitHub Releases in the phone browser and install " +
+                    "it there — same signing key, trips and permissions stay."
+            )
         }
     }
 
     private fun installViaSession(apk: File) {
         val installer = appContext.packageManager.packageInstaller
         for (info in installer.mySessions) {
+            val committed = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && info.isCommitted
+            if (committed) continue
             try {
                 installer.abandonSession(info.sessionId)
             } catch (_: Exception) {
@@ -257,7 +257,9 @@ class UpdateManager(context: Context) {
             params.setInstallReason(PackageManager.INSTALL_REASON_USER)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            params.setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_REQUIRED)
+            // Hint: skip the sheet when Android considers this a self-update. ColorOS
+            // still sends PENDING_USER_ACTION, which MainActivity then forwards.
+            params.setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             params.setPackageSource(PackageInstaller.PACKAGE_SOURCE_LOCAL_FILE)
@@ -287,9 +289,10 @@ class UpdateManager(context: Context) {
                     0
                 }
             )
-            val statusIntent = Intent(appContext, UpdateInstallActivity::class.java).apply {
-                // Distinct data so FLAG_UPDATE_CURRENT cannot collapse two sessions.
+            val statusIntent = Intent(appContext, com.example.MainActivity::class.java).apply {
+                action = UpdateInstallActivity.Broker.ACTION
                 data = Uri.parse("kylaq-update://session/$sessionId")
+                addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             val pending = PendingIntent.getActivity(
                 appContext,
@@ -298,6 +301,11 @@ class UpdateManager(context: Context) {
                 pendingFlags
             )
             session.commit(pending.intentSender)
+            android.widget.Toast.makeText(
+                appContext,
+                "Confirm the install on the next screen",
+                android.widget.Toast.LENGTH_SHORT
+            ).show()
         } catch (e: Exception) {
             try {
                 installer.abandonSession(sessionId)
@@ -310,34 +318,6 @@ class UpdateManager(context: Context) {
             } catch (_: Exception) {
             }
         }
-    }
-
-    /**
-     * Last-resort path for the handful of firmwares that throw from [PackageInstaller]
-     * itself. Explicitly grants the content URI to every resolver that claims the APK
-     * MIME type — the FLAG on the Intent is not enough on ColorOS.
-     */
-    private fun installViaViewIntent(apk: File) {
-        val uri = FileProvider.getUriForFile(
-            appContext,
-            "${appContext.packageName}.fileprovider",
-            apk
-        )
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(uri, "application/vnd.android.package-archive")
-            clipData = android.content.ClipData.newRawUri("update", uri)
-            addFlags(
-                Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
-            )
-        }
-        val grantFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION
-        appContext.packageManager.queryIntentActivities(intent, 0).forEach { resolve ->
-            try {
-                appContext.grantUriPermission(resolve.activityInfo.packageName, uri, grantFlags)
-            } catch (_: Exception) {
-            }
-        }
-        appContext.startActivity(intent)
     }
 
     private fun openConnection(url: String): HttpURLConnection =

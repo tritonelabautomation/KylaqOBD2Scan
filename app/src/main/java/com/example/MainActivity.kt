@@ -218,9 +218,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        com.example.update.UpdateInstallActivity.Broker.consume(this, intent)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        com.example.update.UpdateInstallActivity.Broker.consume(this, intent)
 
         // Crash-loop breaker (owner 2026-09-20: "Again app is crashing when I open it
         // crashes" with no log to say why): if the last starts died before their first

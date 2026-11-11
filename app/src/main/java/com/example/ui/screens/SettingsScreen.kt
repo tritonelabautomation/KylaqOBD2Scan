@@ -4,6 +4,8 @@ import android.app.Activity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -1593,6 +1595,37 @@ fun SettingsScreen(
                                 colors = ButtonDefaults.buttonColors(containerColor = ElectricAmber)
                             ) {
                                 Text("Install now", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "If no install sheet appears, ColorOS blocked it. Open the APK in the phone browser — same signing key, trips and permissions stay.",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            OutlinedButton(
+                                onClick = {
+                                    try {
+                                        context.startActivity(
+                                            Intent(
+                                                Intent.ACTION_VIEW,
+                                                Uri.parse(com.example.BuildConfig.UPDATE_APK_URL)
+                                            )
+                                        )
+                                    } catch (e: Exception) {
+                                        Toast.makeText(
+                                            context,
+                                            "Could not open the download: ${e.message ?: e.javaClass.simpleName}",
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                    }
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("btn_update_browser"),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Text("Install from browser instead", fontSize = 12.sp)
                             }
                         }
                     }

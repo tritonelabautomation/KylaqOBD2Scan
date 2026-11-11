@@ -81,6 +81,7 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTop"
             android:label="@string/app_name"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
             android:theme="@style/Theme.MyApplication">
@@ -91,20 +92,16 @@
         </activity>
 
         <!--
-          PackageInstaller status trampoline (2026-11-10): ColorOS/Oppo/Realme answer
-          ACTION_VIEW + FileProvider with a silent "App not installed" after Installing…
-          because they re-open the content:// URI after the grant is gone. The session
-          API copies the APK bytes first and delivers SUCCESS / PENDING_USER_ACTION /
-          FAILURE_* through this Activity so we can show the real reason. exported=false
-          is enough — the system invokes it via our PendingIntent, not an implicit Intent.
+          Fallback PackageInstaller status Activity. The live path delivers status to
+          MainActivity (already on screen): ColorOS blocks translucent noHistory
+          trampolines as overlay popups, which made Install now appear to do nothing.
         -->
         <activity
             android:name=".update.UpdateInstallActivity"
-            android:exported="false"
+            android:exported="true"
             android:excludeFromRecents="true"
-            android:noHistory="true"
-            android:taskAffinity=""
-            android:theme="@style/Theme.UpdateInstallTrampoline" />
+            android:launchMode="singleTop"
+            android:theme="@style/Theme.MyApplication" />
 
         <!-- Sideload-friendly car-launcher entry (parked-surface activity pattern):
              CAR_LAUNCHER + NAVIGATION + APP_MAPS categories make the head-unit launcher
