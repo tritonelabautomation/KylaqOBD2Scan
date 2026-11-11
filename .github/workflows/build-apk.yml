@@ -307,49 +307,52 @@ jobs:
           APPUPDATE_SUBJECT: ${{ github.event.head_commit.message }}
         run: |
           set -euo pipefail
-          APK="$(ls app/build/outputs/apk/debug/*.apk | head -1)"
+          shopt -s nullglob
+          apks=(app/build/outputs/apk/debug/*.apk)
+          if [ "${#apks[@]}" -eq 0 ]; then
+            echo "::error::No APK found under app/build/outputs/apk/debug"
+            exit 1
+          fi
+          APK="${apks[0]}"
+          case "${APPUPDATE_VC}" in
+            ''|*[!0-9]*)
+              echo "::error::versionCode from aapt is not numeric: '${APPUPDATE_VC}'"
+              exit 1
+              ;;
+          esac
           SHA256="$(sha256sum "$APK" | cut -d' ' -f1)"
           SIZE="$(stat -c%s "$APK")"
           cp "$APK" /tmp/KylaqOBD2Scan.apk
           # ColorOS Chrome hijacks .apk downloads into the same blocked installer
           # loop as in-app Update. A .zip is just a file; My Files extracts it.
-          rm -f /tmp/KylaqOBD2Scan.zip
-          zip -j /tmp/KylaqOBD2Scan.zip /tmp/KylaqOBD2Scan.apk
-
-          # A commit subject can contain quotes and backslashes, so it travels through
-          # the environment and is JSON-encoded by python instead of being interpolated.
-          APPUPDATE_SHA256="$SHA256" APPUPDATE_SIZE="$SIZE" \
-          APPUPDATE_APK_URL="https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/KylaqOBD2Scan.apk" \
-          python3 - <<'PY' > /tmp/latest.json
-          import datetime
-          import json
-          import os
-          import sys
-
+          # Do not require the `zip` binary — ubuntu-latest does not always ship it,
+          # and `set -e` then failed the job after the APK had already been built.
+          python3 - "$SIZE" "$SHA256" <<'PY'
+          import datetime, json, os, sys, zipfile
           env = os.environ
+          size, sha256 = sys.argv[1], sys.argv[2]
+          with zipfile.ZipFile("/tmp/KylaqOBD2Scan.zip", "w") as zf:
+              zf.write("/tmp/KylaqOBD2Scan.apk", "KylaqOBD2Scan.apk")
+          vc = int(env["APPUPDATE_VC"])
           subject = env.get("APPUPDATE_SUBJECT", "").strip().splitlines()
-          json.dump(
-              {
-                  "schema": 1,
-                  "versionCode": int(env["APPUPDATE_VC"]),
-                  "versionName": env["APPUPDATE_VN"],
-                  "apkUrl": env["APPUPDATE_APK_URL"],
-                  "assetName": "KylaqOBD2Scan.apk",
-                  "sha256": env["APPUPDATE_SHA256"],
-                  "sizeBytes": int(env["APPUPDATE_SIZE"]),
-                  "publishedAt": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                  "branch": env.get("GITHUB_REF_NAME", ""),
-                  "commitSha": env.get("GITHUB_SHA", "")[:8],
-                  "commitSubject": (subject[0][:200] if subject else ""),
-                  "notes": "Build %s (versionCode %s) from %s" % (
-                      env["APPUPDATE_VN"],
-                      env["APPUPDATE_VC"],
-                      env.get("GITHUB_REF_NAME", ""),
-                  ),
-              },
-              sys.stdout,
-              indent=2,
-          )
+          payload = {
+              "schema": 1,
+              "versionCode": vc,
+              "versionName": env["APPUPDATE_VN"],
+              "apkUrl": "https://github.com/%s/releases/latest/download/KylaqOBD2Scan.apk" % env["GITHUB_REPOSITORY"],
+              "assetName": "KylaqOBD2Scan.apk",
+              "sha256": sha256,
+              "sizeBytes": int(size),
+              "publishedAt": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "branch": env.get("GITHUB_REF_NAME", ""),
+              "commitSha": env.get("GITHUB_SHA", "")[:8],
+              "commitSubject": (subject[0][:200] if subject else ""),
+              "notes": "Build %s (versionCode %s) from %s" % (
+                  env["APPUPDATE_VN"], vc, env.get("GITHUB_REF_NAME", ""),
+              ),
+          }
+          with open("/tmp/latest.json", "w") as fh:
+              json.dump(payload, fh, indent=2)
           PY
 
           {
@@ -372,32 +375,50 @@ jobs:
 
           # The rolling release is created once, then updated in place forever, so
           # .../releases/latest/... always resolves to the newest build.
-          for i in 1 2 3; do
+          if ! gh release view latest >/dev/null 2>&1; then
             gh release create latest \
               --target "$GITHUB_SHA" \
               --title "Latest build (${APPUPDATE_VN}, code ${APPUPDATE_VC})" \
-              --notes-file /tmp/release-notes.md \
-              && break || echo "Retry $i creating rolling release..."
-            sleep 2
-          done
+              --notes-file /tmp/release-notes.md
+          fi
 
+          uploaded=0
           for i in 1 2 3 4 5; do
-            gh release upload latest /tmp/KylaqOBD2Scan.apk /tmp/KylaqOBD2Scan.zip /tmp/latest.json --clobber \
-              && break || echo "Retry $i uploading release assets..."
+            if gh release upload latest /tmp/KylaqOBD2Scan.apk /tmp/KylaqOBD2Scan.zip /tmp/latest.json --clobber; then
+              uploaded=1
+              break
+            fi
+            echo "Retry $i uploading release assets..."
             sleep 3
           done
+          if [ "$uploaded" -ne 1 ]; then
+            echo "::error::gh release upload failed after retries"
+            exit 1
+          fi
 
-          for i in 1 2 3; do
-            gh release edit latest \
-              --target "$GITHUB_SHA" \
-              --title "Latest build (${APPUPDATE_VN}, code ${APPUPDATE_VC})" \
-              --notes-file /tmp/release-notes.md \
-              && break || echo "Retry $i editing release..."
-            sleep 2
-          done
+          gh release edit latest \
+            --target "$GITHUB_SHA" \
+            --title "Latest build (${APPUPDATE_VN}, code ${APPUPDATE_VC})" \
+            --notes-file /tmp/release-notes.md
           echo "Published ${APPUPDATE_VN} (code ${APPUPDATE_VC}) to the rolling release."
 
+      - name: Comment publish failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          {
+            echo "**publish failed @ ${GITHUB_SHA:0:7}**"
+            echo
+            echo "APK built, rolling release did not update. versionName=${{ steps.apk-meta.outputs.version_name }} versionCode=${{ steps.apk-meta.outputs.version_code }}"
+          } > /tmp/pub-fail.md
+          PR="$(gh pr list --head "$GITHUB_REF_NAME" --json number --jq '.[0].number' 2>/dev/null || true)"
+          if [ -n "$PR" ]; then
+            gh pr comment "$PR" --body-file /tmp/pub-fail.md || true
+          fi
+
       - name: Build summary
+        if: always()
         run: |
           echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
