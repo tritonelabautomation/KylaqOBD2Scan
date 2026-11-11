@@ -165,6 +165,28 @@ rather than implying the UI already changed underneath.
 
 ---
 
+## ColorOS 814: in-app Download never reaches the installer
+
+Build 1.0.814 (and 1.0.816, which 814 can download but not install) commits a
+PackageInstaller session, then ColorOS drops the confirmation as a blocked
+overlay. Tapping **Download & install** again only re-downloads. It will never
+show the system "scan / install" sheet from that build.
+
+**Do not uninstall.** Install the current rolling APK from Chrome (same sideload
+key, trips and permissions stay):
+
+`https://github.com/tritonelabautomation/KylaqOBD2Scan/releases/latest/download/KylaqOBD2Scan.apk`
+
+1. Open that link in **Chrome** on the phone (not inside this app).
+2. Allow the download. Open the file from the download notification.
+3. If ColorOS asks, allow Chrome / Files to install unknown apps.
+4. Confirm **Install**. The app replaces itself in place.
+
+From 1.0.818 the confirm sheet is delivered to MainActivity (already on screen),
+and Settings also has **Install from browser instead**.
+
+---
+
 ## Honest limits
 
 - **No silent install.** Android grants that only to a system/store installer. The updater
