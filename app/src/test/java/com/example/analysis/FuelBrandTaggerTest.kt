@@ -165,6 +165,41 @@ class FuelBrandTaggerTest {
     }
 
     @Test
+    fun brimFillDuringTripIsBegumpetNotThePreviousBanjaraTank() {
+        val tripStart = 1_762_859_940_000L
+        val banjara = FuelLogCodec.FuelEntry(
+            idMs = tripStart - 3 * 86400_000L,
+            dateUtc = "2026-11-08T10:00:00Z",
+            liters = 39.31,
+            pricePerL = 115.72,
+            odometerKm = 4908.0,
+            station = "IOCL Banjrahills COCO",
+            grade = FuelLogCodec.GRADE_REGULAR,
+            note = ""
+        )
+        val begumpet = FuelLogCodec.FuelEntry(
+            idMs = tripStart + 70 * 60_000L,
+            dateUtc = "2026-11-11T17:09:00+05:30",
+            liters = 40.27,
+            pricePerL = 115.72,
+            odometerKm = 4987.0,
+            station = "IndianOil COCO BEGUMPET",
+            grade = FuelLogCodec.GRADE_REGULAR,
+            note = "K3597"
+        )
+        val tag = FuelBrandTagger.resolveFuelTag(
+            tripStartMs = tripStart,
+            fuelLogs = listOf(begumpet, banjara),
+            tripEndMs = tripStart + 2 * 3600_000L,
+            tripStartOdoKm = 4971.3,
+            tripEndOdoKm = 5003.6
+        )
+        assertEquals("IndianOil COCO BEGUMPET", tag.stationName)
+        assertEquals(FuelBrandTagger.FuelBrand.IOCL, tag.brand)
+        assertEquals(40.27, begumpet.liters, 1e-9)
+    }
+
+    @Test
     fun `blank station with XP95 grade is IOCL not Nayara`() {
         val fill = FuelLogCodec.FuelEntry(
             idMs = 1_762_000_000_000L,

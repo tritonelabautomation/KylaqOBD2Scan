@@ -746,12 +746,28 @@ private fun TripOverviewView(
     }
 
     var showFuelTagDialog by remember { mutableStateOf(false) }
-    val fuelTag = remember(trip.id, userOverride, validStartMs, fuelLogs.size, fuelLogs.maxOfOrNull { it.idMs }, bunkRecords.size) {
+    val linkedFill = remember(
+        trip.id, validStartMs, validEndMs, summary.startOdometerKm, summary.endOdometerKm,
+        fuelLogs.size, fuelLogs.maxOfOrNull { it.idMs }, bunkRecords.size
+    ) {
+        com.example.analysis.FillTripLinker.link(
+            fills = fuelLogs,
+            bunks = bunkRecords,
+            tripStartMs = validStartMs ?: trip.startTimestamp,
+            tripEndMs = validEndMs,
+            tripStartOdoKm = summary.startOdometerKm,
+            tripEndOdoKm = summary.endOdometerKm
+        )
+    }
+    val fuelTag = remember(trip.id, userOverride, validStartMs, validEndMs, summary.startOdometerKm, summary.endOdometerKm, fuelLogs.size, fuelLogs.maxOfOrNull { it.idMs }, bunkRecords.size) {
         com.example.analysis.FuelBrandTagger.resolveFuelTag(
             tripStartMs = validStartMs ?: trip.startTimestamp,
             userOverride = userOverride,
             fuelLogs = fuelLogs,
-            bunkRecords = bunkRecords
+            bunkRecords = bunkRecords,
+            tripEndMs = validEndMs,
+            tripStartOdoKm = summary.startOdometerKm,
+            tripEndOdoKm = summary.endOdometerKm
         )
     }
 
@@ -886,6 +902,7 @@ private fun TripOverviewView(
         item {
             TripFuelLogCard(
                 summary = summary,
+                linkedFill = linkedFill,
                 acOverrideState = userOverride.acState,
                 windowRolledDown = userOverride.windowRolledDown,
                 onUpdateAcState = onUpdateAcState
@@ -1798,6 +1815,7 @@ private fun InsightBlock(accent: Color, title: String, body: String) {
 @Composable
 private fun TripFuelLogCard(
     summary: com.example.analysis.TripFuelSummary.Summary,
+    linkedFill: com.example.analysis.FillTripLinker.Link? = null,
     acOverrideState: String? = null,
     windowRolledDown: Boolean = false,
     onUpdateAcState: ((acState: String?, windowDown: Boolean) -> Unit)? = null
@@ -1875,13 +1893,18 @@ private fun TripFuelLogCard(
                             )
                             val deltaColor = if (summary.isRefuelBrimEvent) NeonEmerald else if ((deltaPct ?: 0.0) < 0) ElectricAmber else TextSecondaryDark
                             val deltaSign = if ((deltaPct ?: 0.0) > 0) "+" else ""
+                            val pumpL = linkedFill?.takeIf { it.happenedOnThisTrip && it.pumpLitres > 0.5 }?.pumpLitres
+                            val litresLabel = when {
+                                pumpL != null -> " (pump ${String.format(java.util.Locale.US, "%.2f", pumpL)} L)"
+                                summary.fuelDeltaLiters != null -> " (${String.format(java.util.Locale.US, "%.2f", summary.fuelDeltaLiters)} L)"
+                                else -> ""
+                            }
                             Surface(
                                 color = deltaColor.copy(alpha = 0.15f),
                                 shape = RoundedCornerShape(6.dp)
                             ) {
                                 Text(
-                                    text = "$deltaSign${String.format(java.util.Locale.US, "%.1f", deltaPct ?: 0.0)}%" +
-                                        (summary.fuelDeltaLiters?.let { " (${String.format(java.util.Locale.US, "%.2f", it)} L)" } ?: ""),
+                                    text = "$deltaSign${String.format(java.util.Locale.US, "%.1f", deltaPct ?: 0.0)}%$litresLabel",
                                     color = deltaColor,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 11.sp,
@@ -1906,6 +1929,23 @@ private fun TripFuelLogCard(
                             }
                         }
                     }
+                }
+                val brimFill = linkedFill?.takeIf { it.happenedOnThisTrip && it.pumpLitres > 0.5 }
+                if (brimFill != null) {
+                    val station = brimFill.stationName.takeIf { it.isNotBlank() }
+                    val floatL = summary.fuelDeltaLiters
+                    Text(
+                        buildString {
+                            if (station != null) append(station).append(" · ")
+                            append(String.format(java.util.Locale.US, "receipt %.2f L", brimFill.pumpLitres))
+                            if (floatL != null) {
+                                append(String.format(java.util.Locale.US, " · float %.2f L", floatL))
+                            }
+                        },
+                        color = NeonEmerald,
+                        fontSize = 11.sp,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
                 }
             }
 

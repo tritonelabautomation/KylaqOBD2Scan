@@ -73,11 +73,16 @@ object FuelBatchTripComparator {
     ): ComparisonResult {
         val sortedFills = fuelEntries.sortedByDescending { it.idMs }
         val tripStartMs = trip.startTimestamp
-        val tripOdo = trip.endFuelPercent // or startOdometerKm
-
-        // Find the fill-up active during this trip (newest fill on or before trip start)
-        val activeFillIdx = sortedFills.indexOfFirst { it.idMs <= tripStartMs + 3600_000L }
-        val activeFill = if (activeFillIdx >= 0) sortedFills[activeFillIdx] else sortedFills.firstOrNull()
+        val linked = FillTripLinker.link(
+            fills = fuelEntries,
+            bunks = bunkRecords,
+            tripStartMs = tripStartMs,
+            tripEndMs = trip.endTimestamp,
+            tripStartOdoKm = summary.startOdometerKm,
+            tripEndOdoKm = summary.endOdometerKm
+        )
+        val activeFill = linked?.fill
+        val activeFillIdx = if (activeFill != null) sortedFills.indexOfFirst { it.idMs == activeFill.idMs } else -1
         val prevFill = if (activeFillIdx >= 0 && activeFillIdx + 1 < sortedFills.size) sortedFills[activeFillIdx + 1] else null
 
         val currentBunk = bunkRecords.firstOrNull { it.idMs == activeFill?.idMs }

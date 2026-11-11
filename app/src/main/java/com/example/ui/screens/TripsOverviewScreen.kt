@@ -397,8 +397,14 @@ private fun TripRow(
     fuelLogs: List<com.example.data.FuelLogCodec.FuelEntry> = emptyList()
 ) {
     val timeFmt = remember { com.example.data.RecordTime.formatter("HH:mm") }
-    val fuelTag = remember(trip.startMs, fuelLogs.size, fuelLogs.maxOfOrNull { it.idMs }) {
-        com.example.analysis.FuelBrandTagger.resolveFuelTag(trip.startMs, fuelLogs = fuelLogs)
+    val fuelTag = remember(trip.startMs, trip.durationSec, trip.startOdometerKm, trip.endOdometerKm, fuelLogs.size, fuelLogs.maxOfOrNull { it.idMs }) {
+        com.example.analysis.FuelBrandTagger.resolveFuelTag(
+            tripStartMs = trip.startMs,
+            fuelLogs = fuelLogs,
+            tripEndMs = trip.startMs + trip.durationSec * 1000L,
+            tripStartOdoKm = trip.startOdometerKm,
+            tripEndOdoKm = trip.endOdometerKm
+        )
     }
     Column(Modifier.fillMaxWidth().background(TtInner, RoundedCornerShape(14.dp)).clickable { onOpenTrip(trip.tripId) }.padding(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {

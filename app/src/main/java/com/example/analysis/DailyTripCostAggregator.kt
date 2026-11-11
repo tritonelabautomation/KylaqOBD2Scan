@@ -233,7 +233,10 @@ object DailyTripCostAggregator {
                 tripStartMs = startMs,
                 userOverride = userOverrides[trip.tripId],
                 fuelLogs = fuelLogs,
-                bunkRecords = bunkRecords
+                bunkRecords = bunkRecords,
+                tripEndMs = startMs + trip.durationSeconds * 1000L,
+                tripStartOdoKm = trip.startOdometerKm,
+                tripEndOdoKm = trip.endOdometerKm
             )
 
             DayTripItem(

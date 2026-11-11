@@ -119,7 +119,10 @@ object FuelBrandTagger {
         tripStartMs: Long,
         userOverride: TripUserOverride? = null,
         fuelLogs: List<FuelLogCodec.FuelEntry> = emptyList(),
-        bunkRecords: List<RefuelBunkRecord> = emptyList()
+        bunkRecords: List<RefuelBunkRecord> = emptyList(),
+        tripEndMs: Long? = null,
+        tripStartOdoKm: Double? = null,
+        tripEndOdoKm: Double? = null
     ): FuelTagInfo {
         // 1. Check if driver manually tagged/overrode the fuel on this trip
         if (userOverride != null && (!userOverride.fuelStation.isNullOrBlank() || !userOverride.fuelBrand.isNullOrBlank())) {
@@ -136,10 +139,18 @@ object FuelBrandTagger {
             )
         }
 
-        // 2. Automatically map to the latest active refuel before or at the trip start
-        val sortedFills = fuelLogs.sortedByDescending { it.idMs }
-        val activeFill = sortedFills.firstOrNull { it.idMs <= tripStartMs + 3600_000L } ?: sortedFills.firstOrNull()
-        val activeBunk = bunkRecords.firstOrNull { it.idMs == activeFill?.idMs }
+        // 2. Last refill ODO / trip window — not "newest fill within 1 h of start",
+        // which tagged Banjara Hills on the Begumpet brim run (fill was 70 min in).
+        val linked = FillTripLinker.link(
+            fills = fuelLogs,
+            bunks = bunkRecords,
+            tripStartMs = tripStartMs,
+            tripEndMs = tripEndMs,
+            tripStartOdoKm = tripStartOdoKm,
+            tripEndOdoKm = tripEndOdoKm
+        )
+        val activeFill = linked?.fill
+        val activeBunk = linked?.bunk
 
         if (activeFill != null) {
             val station = activeFill.station.ifBlank {

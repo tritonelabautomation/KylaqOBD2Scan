@@ -528,6 +528,31 @@ class SettingsRepository(private val context: Context) {
         prefs.edit().putFloat("tank_capacity_l", litres.toFloat()).apply()
 
     /**
+     * Last brim fill the owner logged: cluster odo, station, pump litres.
+     * Trips match this ODO into their 01A6 window instead of guessing the
+     * previous bunk from a 1-hour-from-start clock.
+     */
+    fun lastRefuelOdoKm(): Double? =
+        prefs.getFloat("last_refuel_odo_km", -1f).takeIf { it > 0f }?.toDouble()
+
+    fun lastRefuelStation(): String? =
+        prefs.getString("last_refuel_station", null)?.takeIf { it.isNotBlank() }
+
+    fun lastRefuelLitres(): Double? =
+        prefs.getFloat("last_refuel_litres", -1f).takeIf { it > 0f }?.toDouble()
+
+    fun lastRefuelAtMs(): Long = prefs.getLong("last_refuel_ms", 0L)
+
+    fun setLastRefuel(odoKm: Double?, station: String, litres: Double, atMs: Long) {
+        prefs.edit()
+            .putFloat("last_refuel_odo_km", (odoKm ?: -1.0).toFloat())
+            .putString("last_refuel_station", station)
+            .putFloat("last_refuel_litres", litres.toFloat())
+            .putLong("last_refuel_ms", atMs)
+            .apply()
+    }
+
+    /**
      * Last tank-level stamp of the previous session: "ts|levelPct|odoKmOrNull". The other half of a
      * between-sessions refuel event - the level rise itself happens while auto-record is off
      * (engine off at the pump), so only the two stamps either side of the gap can witness it.

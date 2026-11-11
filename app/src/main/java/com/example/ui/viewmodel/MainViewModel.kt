@@ -242,6 +242,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         com.example.analysis.TankCapacity.impliedFromFill(
             record.pumpLitres, record.startLevelPercent, record.autoCutPercent
         )?.let { setTankCapacityL(it) }
+        com.example.di.AppContainer.settingsRepository.setLastRefuel(
+            record.odometerKm, record.stationName, record.pumpLitres, record.idMs
+        )
         calibrateAfterFuelEntry(record.pumpLitres, record.odometerKm, partial = false)
     }
 
