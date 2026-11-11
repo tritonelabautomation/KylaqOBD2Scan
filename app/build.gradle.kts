@@ -166,19 +166,11 @@ android {
       if (sideloadStoreFile.exists()) {
         signingConfig = signingConfigs.getByName("sideload")
       }
-    }
-    // Phone distribution: ColorOS/Oppo refuse GUI installs of debuggable/testOnly APKs
-    // ("App not installed" after Installing…). Same sideload key as debug, so this
-    // replaces 814 in place. Android Studio still uses debug.
-    create("sideload") {
-      initWith(getByName("debug"))
-      matchingFallbacks += listOf("debug")
-      isDebuggable = false
-      isJniDebuggable = false
-      isMinifyEnabled = false
-      isCrunchPngs = false
-      if (sideloadStoreFile.exists()) {
-        signingConfig = signingConfigs.getByName("sideload")
+      // ColorOS Files / package installer refuse debuggable APKs ("App not installed").
+      // Android Studio locally stays debuggable; GitHub Actions ships a non-debug APK.
+      if (!System.getenv("GITHUB_ACTIONS").isNullOrBlank()) {
+        isDebuggable = false
+        isJniDebuggable = false
       }
     }
   }

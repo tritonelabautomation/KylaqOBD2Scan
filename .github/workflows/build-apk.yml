@@ -186,7 +186,7 @@ jobs:
             echo "::warning::No sideload keystore found - builds will fall back to a per-runner debug key and will NOT install over an existing install."
           fi
 
-      - name: Build sideload APK
+      - name: Build debug APK
         shell: bash
         env:
           # Empty when the secrets are not set; Gradle treats blank as absent and falls
@@ -197,11 +197,11 @@ jobs:
           CRASH_REPORT_TOKEN: ${{ secrets.CRASH_REPORT_TOKEN }}
         run: |
           set -o pipefail
-          gradle assembleSideload --stacktrace 2>&1 | tee /tmp/build.log
+          gradle assembleDebug -Pandroid.injected.debuggable=false --stacktrace 2>&1 | tee /tmp/build.log
           STATUS=$?
           if [ $STATUS -ne 0 ] && grep -q "ApplicationManager.getApplication() is null" /tmp/build.log; then
             echo "KSP2 worker-init NPE flake detected - retrying once with ksp.incremental=false..."
-            gradle assembleSideload --stacktrace -Pksp.incremental=false 2>&1 | tee /tmp/build.log
+            gradle assembleDebug -Pandroid.injected.debuggable=false --stacktrace -Pksp.incremental=false 2>&1 | tee /tmp/build.log
             STATUS=$?
           fi
           exit $STATUS
@@ -215,11 +215,21 @@ jobs:
           # Install aapt (part of Android SDK build-tools)
           sudo apt-get update -qq && sudo apt-get install -y -qq android-sdk-build-tools > /dev/null 2>&1 || true
 
-          APK_PATH="app/build/outputs/apk/sideload/app-sideload.apk"
+          APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
           if [ -f "$APK_PATH" ]; then
-            echo "version_name=$(aapt dump badging "$APK_PATH" 2>/dev/null | grep "versionName" | sed 's/.*versionName='"'"'\([^'"'"']*\)'"'"'.*/\1/')" >> $GITHUB_OUTPUT
-            echo "version_code=$(aapt dump badging "$APK_PATH" 2>/dev/null | grep "versionCode" | sed 's/.*versionCode='"'"'\([^'"'"']*\)'"'"'.*/\1/')" >> $GITHUB_OUTPUT
-            echo "pkg_name=$(aapt dump badging "$APK_PATH" 2>/dev/null | grep "package: name=" | sed 's/.*name='"'"'\([^'"'"']*\)'"'"'.*/\1/')" >> $GITHUB_OUTPUT
+            BADGING="$(aapt dump badging "$APK_PATH" 2>/dev/null || true)"
+            echo "$BADGING"
+            if echo "$BADGING" | grep -q "application-debuggable"; then
+              echo "::error::APK is debuggable. ColorOS Files refuses GUI install of debuggable APKs."
+              exit 1
+            fi
+            if echo "$BADGING" | grep -qi "testOnly='true'"; then
+              echo "::error::APK is testOnly. ColorOS Files refuses GUI install of testOnly APKs."
+              exit 1
+            fi
+            echo "version_name=$(echo "$BADGING" | grep "versionName" | sed 's/.*versionName='"'"'\([^'"'"']*\)'"'"'.*/\1/')" >> $GITHUB_OUTPUT
+            echo "version_code=$(echo "$BADGING" | grep "versionCode" | sed 's/.*versionCode='"'"'\([^'"'"']*\)'"'"'.*/\1/')" >> $GITHUB_OUTPUT
+            echo "pkg_name=$(echo "$BADGING" | grep "package: name=" | sed 's/.*name='"'"'\([^'"'"']*\)'"'"'.*/\1/')" >> $GITHUB_OUTPUT
             echo "sha_short=${GITHUB_SHA::8}" >> $GITHUB_OUTPUT
             echo "run_number=${GITHUB_RUN_NUMBER}" >> $GITHUB_OUTPUT
           else
@@ -231,25 +241,25 @@ jobs:
           fi
 
       # Rename APK to a deterministic, traceable name.
-      # Format: KylaqOBD2Scan-{versionName}-r{runNumber}-{git-sha}-sideload.apk
+      # Format: KylaqOBD2Scan-{versionName}-r{runNumber}-{git-sha}-debug.apk
       - name: Rename APK
         run: |
-          APK_PATH="app/build/outputs/apk/sideload/app-sideload.apk"
+          APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
           if [ -f "$APK_PATH" ]; then
             VN="${{ steps.apk-meta.outputs.version_name }}"
             VC="${{ steps.apk-meta.outputs.version_code }}"
             RN="${{ steps.apk-meta.outputs.run_number }}"
             SHA="${{ steps.apk-meta.outputs.sha_short }}"
-            NEW_NAME="KylaqOBD2Scan-${VN}-r${RN}-${SHA}-sideload.apk"
-            mv "$APK_PATH" "app/build/outputs/apk/sideload/$NEW_NAME"
+            NEW_NAME="KylaqOBD2Scan-${VN}-r${RN}-${SHA}-debug.apk"
+            mv "$APK_PATH" "app/build/outputs/apk/debug/$NEW_NAME"
             echo "Renamed to: $NEW_NAME"
           fi
 
-      - name: Upload sideload APK
+      - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: KylaqOBD2Scan-sideload-apk
-          path: app/build/outputs/apk/sideload/*.apk
+          name: KylaqOBD2Scan-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
 
       # ── In-app updater feed (owner request 2026-09-16) ───────────────────────────
       # Publishes every successful build of a working branch to ONE rolling GitHub
@@ -269,7 +279,7 @@ jobs:
           APPUPDATE_SUBJECT: ${{ github.event.head_commit.message }}
         run: |
           set -euo pipefail
-          APK="$(ls app/build/outputs/apk/sideload/*.apk | head -1)"
+          APK="$(ls app/build/outputs/apk/debug/*.apk | head -1)"
           SHA256="$(sha256sum "$APK" | cut -d' ' -f1)"
           SIZE="$(stat -c%s "$APK")"
           cp "$APK" /tmp/KylaqOBD2Scan.apk
@@ -313,8 +323,9 @@ jobs:
           {
             echo "Build ${APPUPDATE_VN} (versionCode ${APPUPDATE_VC}) from \`${GITHUB_REF_NAME}\` @ ${APPUPDATE_SHA_SHORT}."
             echo
-            echo "Install from inside the app: **Settings → App update → Download & install**, or accept the"
-            echo "update prompt that appears when a newer build is detected at launch."
+            echo "If you are still on **1.0.814**, do **not** tap Download & install in the app (it only"
+            echo "re-downloads) and do **not** tap Install in Chrome. Chrome-download the APK, then open it"
+            echo "from **Files / My Files**. Allow unknown apps for Files. Do not uninstall."
             echo
             echo "The APK installs **in place** over the current build (stable sideload signing key), so trips,"
             echo "raw logs, fuel records and granted permissions all survive - no uninstall, no ZIP extraction."

@@ -185,9 +185,10 @@ download popup as the installer. Use **Files** (My Files) as the installer:
 
 Same sideload signing key as 814, so this replaces the app in place.
 
-From 1.0.818 the in-app confirm sheet is delivered to MainActivity, and CI
-publishes a non-debuggable `sideload` APK (ColorOS refuses GUI installs of
-debuggable/testOnly builds).
+From 1.0.818 the in-app confirm sheet is delivered to MainActivity. CI still
+runs `assembleDebug` (a second `sideload` buildType broke KSP), but on GitHub
+Actions that debug type is **not** debuggable and **not** testOnly — ColorOS
+Files refuses GUI installs of debuggable/testOnly APKs.
 
 ---
 
