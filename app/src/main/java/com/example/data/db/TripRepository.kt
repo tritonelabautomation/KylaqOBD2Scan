@@ -119,7 +119,7 @@ class TripRepository(context: Context) {
      */
     suspend fun getSamplesForAnalysis(tripId: String): List<TelemetrySampleEntity> = withContext(Dispatchers.IO) {
         val count = sampleDao.getSampleCountForTrip(tripId)
-        val cap = com.example.data.HeapGuard.AI_ANALYSIS_MAX_SAMPLES
+        val cap = com.example.data.HeapGuard.UI_SAMPLE_CAP
         if (count <= cap) {
             sampleDao.getSamplesForTrip(tripId)
         } else {

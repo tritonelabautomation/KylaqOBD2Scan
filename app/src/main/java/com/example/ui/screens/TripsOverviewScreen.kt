@@ -87,7 +87,7 @@ fun TripsOverviewScreen(
         val trips = withContext(Dispatchers.IO) { repo.recentTrips(300) }
         val inputs = withContext(Dispatchers.Default) {
             trips.filter { it.status != "RECORDING" || (it.sampleCount > 0 || it.rawLogCount > 0) }.map { t ->
-                val samples = repo.getSamplesForTrip(t.id)
+                val samples = repo.getSamplesForAnalysis(t.id)
                 val sPoints = if (samples.isNotEmpty()) {
                     samples.map { TripFuelSummary.SamplePoint(it.pid, it.instantMs, it.numericValue) }
                 } else {

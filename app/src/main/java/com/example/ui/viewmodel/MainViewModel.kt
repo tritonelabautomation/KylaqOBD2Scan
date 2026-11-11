@@ -566,7 +566,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (sFile != null && sFile.length() > 0) {
             val points = mutableListOf<com.example.analysis.TripFuelSummary.SamplePoint>()
             runCatching {
-                com.example.data.CsvExporter.readSamplesFromCsv(sFile).forEach { s ->
+                com.example.data.CsvExporter.forEachSampleFromCsv(sFile) { s ->
                     val t = com.example.data.RecordTime.parseMillis(s.timestampUtc) ?: s.timestampMonotonic
                     s.speedKmh?.let { points.add(com.example.analysis.TripFuelSummary.SamplePoint("010D", t, it)) }
                     s.fuelRateLh?.let { points.add(com.example.analysis.TripFuelSummary.SamplePoint("015E", t, it)) }
@@ -574,6 +574,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     s.voltageV?.let { points.add(com.example.analysis.TripFuelSummary.SamplePoint("0142", t, it)) }
                     s.coolantC?.let { points.add(com.example.analysis.TripFuelSummary.SamplePoint("0105", t, it)) }
                     s.engineTorquePct?.let { points.add(com.example.analysis.TripFuelSummary.SamplePoint("0162", t, it)) }
+                    if (points.size >= com.example.data.HeapGuard.UI_SAMPLE_CAP * 2) {
+                        val half = ArrayList<com.example.analysis.TripFuelSummary.SamplePoint>(points.size / 2)
+                        for (i in points.indices step 2) half.add(points[i])
+                        points.clear()
+                        points.addAll(half)
+                    }
                 }
             }
             if (points.isNotEmpty()) return points
@@ -596,20 +602,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * backfilling Room asynchronously if Room is empty.
      */
     suspend fun loadSamplesForTripWithFallback(tripId: String): List<com.example.data.db.entities.TelemetrySampleEntity> = withContext(Dispatchers.IO) {
-        val trip = recordingManager.tripRepository.getTripById(tripId)
-        val roomSamples = recordingManager.tripRepository.getSamplesForTrip(tripId)
-        val expectedCount = maxOf(trip?.sampleCount ?: 0, trip?.rawLogCount ?: 0)
-
-        // If Room samples are empty or truncated (< 25% of expected transactions when > 1000 txs)
-        if (roomSamples.isEmpty() || (expectedCount > 1000 && roomSamples.size < expectedCount / 4)) {
+        val existing = recordingManager.tripRepository.getSampleCountForTrip(tripId)
+        if (existing == 0) {
+            // Rebuild writes Room in chunks; never pull the whole journal into RAM.
             recordingManager.rebuildRoomTripFromDisk(tripId)
-            val refreshed = recordingManager.tripRepository.getSamplesForTrip(tripId)
-            if (refreshed.isNotEmpty()) return@withContext refreshed
         }
-
-        if (roomSamples.isNotEmpty()) {
-            return@withContext roomSamples
-        }
+        val capped = recordingManager.tripRepository.getSamplesForAnalysis(tripId)
+        if (capped.isNotEmpty()) return@withContext capped
 
         val diskPoints = samplePointsFromDisk(tripId)
         diskPoints.mapIndexed { idx, pt ->

@@ -18,6 +18,26 @@ object HeapGuard {
     /** AI doctor downsamples a trip larger than this instead of loading every row. */
     const val AI_ANALYSIS_MAX_SAMPLES = 12_000
 
+    /**
+     * Compose / trip cards. Loading every Room row of a recovered drive into
+     * `var samples` is what filled 512 MB on 1.0.842 (Fuel screen + receipt OCR
+     * on top of trip 17c54147). Charts and summaries use this cap; the CSV is
+     * still the full journal.
+     */
+    const val UI_SAMPLE_CAP = 8_000
+
+    /** Room keeps at most this many sample rows per trip (stride the rest). */
+    const val ROOM_SAMPLE_CAP = 24_000
+
+    /** Refuel detector: level/speed/odo/rpm rows, not the whole journal. */
+    const val REFUEL_SCAN_MAX_ROWS = 16_000
+
+    /** OCR decode longest edge in px. Adobe Scan JPEGs were decoding at full sensor size. */
+    const val OCR_MAX_EDGE = 1600
+
     /** Ride X-ray keeps a ring of recent shifts; running totals are the source of truth. */
     const val RIDE_SHIFT_CAP = 256
+
+    fun strideFor(count: Int, cap: Int): Int =
+        if (count <= cap) 1 else ((count + cap - 1) / cap).coerceAtLeast(2)
 }

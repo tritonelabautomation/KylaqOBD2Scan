@@ -77,8 +77,7 @@ object FuelReceiptScanner {
         photoUri: String? = null
     ): FuelReceiptData? = withContext(Dispatchers.IO) {
         val rotation = getExifRotationDegrees(bytes)
-        val origBitmap = BitmapFactory.decodeStream(ByteArrayInputStream(bytes)) ?: return@withContext null
-        val oriented = if (rotation != 0) rotateBitmap(origBitmap, rotation) else origBitmap
+        val oriented = OcrBitmaps.decodeBounded(bytes, rotation) ?: return@withContext null
 
         // Pass 1: Direct Recognition on Original Image
         var result = runOcrPass(oriented)
@@ -87,12 +86,16 @@ object FuelReceiptScanner {
         // Pass 2: High Contrast Grayscale Pass (for faint thermal prints / glares)
         if (extracted == null || extracted.liters == null || extracted.pricePerL == null) {
             val highContrast = enhanceReceiptContrast(oriented)
-            val contrastResult = runOcrPass(highContrast)
-            if (contrastResult != null) {
-                val contrastExtracted = parseReceiptText(contrastResult.text, photoUri)
-                if (contrastExtracted != null && (contrastExtracted.liters != null || contrastExtracted.totalAmount != null)) {
-                    extracted = contrastExtracted
+            try {
+                val contrastResult = runOcrPass(highContrast)
+                if (contrastResult != null) {
+                    val contrastExtracted = parseReceiptText(contrastResult.text, photoUri)
+                    if (contrastExtracted != null && (contrastExtracted.liters != null || contrastExtracted.totalAmount != null)) {
+                        extracted = contrastExtracted
+                    }
                 }
+            } finally {
+                if (highContrast !== oriented) highContrast.recycle()
             }
         }
 
@@ -104,6 +107,7 @@ object FuelReceiptScanner {
             }
         }
 
+        if (!oriented.isRecycled) oriented.recycle()
         extracted
     }
 

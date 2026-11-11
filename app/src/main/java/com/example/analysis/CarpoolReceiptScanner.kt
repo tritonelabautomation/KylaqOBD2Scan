@@ -91,11 +91,10 @@ object CarpoolReceiptScanner {
         }
 
         val rotation = getExifRotationDegrees(bytes)
-        val rawBitmap = runCatching { BitmapFactory.decodeByteArray(bytes, 0, bytes.size) }.getOrNull()
+        val orientedBitmap = OcrBitmaps.decodeBounded(bytes, rotation)
 
-        if (rawBitmap != null) {
-            val orientedBitmap = if (rotation != 0) rotateBitmap(rawBitmap, rotation) else rawBitmap
-
+        if (orientedBitmap != null) {
+            try {
             // Pass 2: 2D Spatial On-Device ML Kit OCR
             val pass2 = runMlKitPass(orientedBitmap, photoUri)
             if (pass2 != null && pass2.riders.isNotEmpty()) {
@@ -104,7 +103,11 @@ object CarpoolReceiptScanner {
 
             // Pass 3: Contrast Enhanced ML Kit OCR
             val contrastBitmap = enhanceContrast(orientedBitmap)
-            val pass3 = runMlKitPass(contrastBitmap, photoUri)
+            val pass3 = try {
+                runMlKitPass(contrastBitmap, photoUri)
+            } finally {
+                if (contrastBitmap !== orientedBitmap) contrastBitmap.recycle()
+            }
             if (pass3 != null && pass3.riders.isNotEmpty()) {
                 return@withContext pass3
             }
@@ -114,6 +117,9 @@ object CarpoolReceiptScanner {
                 .maxByOrNull { (it.riders.size * 10) + (if ((it.totalEarned ?: 0.0) > 0) 5 else 0) }
             if (bestPartial != null && (bestPartial.riders.isNotEmpty() || (bestPartial.totalEarned ?: 0.0) > 0.0)) {
                 return@withContext bestPartial
+            }
+            } finally {
+                if (!orientedBitmap.isRecycled) orientedBitmap.recycle()
             }
         }
 

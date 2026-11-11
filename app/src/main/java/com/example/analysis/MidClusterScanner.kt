@@ -68,11 +68,10 @@ object MidClusterScanner {
         photoUri: String? = null
     ): MidClusterData? = withContext(Dispatchers.IO) {
         val rotation = getExifRotationDegrees(bytes)
-        val rawBitmap = runCatching { BitmapFactory.decodeByteArray(bytes, 0, bytes.size) }.getOrNull()
+        val orientedBitmap = OcrBitmaps.decodeBounded(bytes, rotation)
 
-        if (rawBitmap != null) {
-            val orientedBitmap = if (rotation != 0) rotateBitmap(rawBitmap, rotation) else rawBitmap
-
+        if (orientedBitmap != null) {
+            try {
             // Pass 1: Direct oriented image
             val pass1Result = runMlKitPass(orientedBitmap, tripId, photoUri)
             if (pass1Result != null && pass1Result.avgFuelEconomyKmL > 0.0 && pass1Result.distanceKm > 0.0) {
@@ -81,14 +80,22 @@ object MidClusterScanner {
 
             // Pass 2: High-contrast binarization (makes LCD white digits pop against dark background)
             val contrastBitmap = enhanceContrast(orientedBitmap)
-            val pass2Result = runMlKitPass(contrastBitmap, tripId, photoUri)
+            val pass2Result = try {
+                runMlKitPass(contrastBitmap, tripId, photoUri)
+            } finally {
+                if (contrastBitmap !== orientedBitmap) contrastBitmap.recycle()
+            }
             if (pass2Result != null && pass2Result.avgFuelEconomyKmL > 0.0 && pass2Result.distanceKm > 0.0) {
                 return@withContext pass2Result
             }
 
             // Pass 3: Center crop (focus on central Virtual Cockpit dial, eliminating steering wheel glare)
             val croppedBitmap = centerCrop(orientedBitmap)
-            val pass3Result = runMlKitPass(croppedBitmap, tripId, photoUri)
+            val pass3Result = try {
+                runMlKitPass(croppedBitmap, tripId, photoUri)
+            } finally {
+                if (croppedBitmap !== orientedBitmap) croppedBitmap.recycle()
+            }
             if (pass3Result != null && pass3Result.avgFuelEconomyKmL > 0.0) {
                 // Merge with best detected odo/range from full image if available
                 val mergedOdo = pass3Result.totalOdometerKm ?: pass1Result?.totalOdometerKm
@@ -106,6 +113,9 @@ object MidClusterScanner {
                 .maxByOrNull { (if (it.avgFuelEconomyKmL > 0) 10 else 0) + (if (it.distanceKm > 0) 5 else 0) + (if (it.durationMinutes > 0) 3 else 0) }
             if (bestPartial != null && (bestPartial.avgFuelEconomyKmL > 0.0 || bestPartial.distanceKm > 0.0)) {
                 return@withContext bestPartial
+            }
+            } finally {
+                if (!orientedBitmap.isRecycled) orientedBitmap.recycle()
             }
         }
 

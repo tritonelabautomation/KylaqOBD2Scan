@@ -263,7 +263,7 @@ fun TripDetailScreen(
                                 isRecalculating = true
                                 val ok = viewModel.recalculateTripMetrics(tripId)
                                 trip = tripRepo.getTripById(tripId)
-                                samples = tripRepo.getSamplesForTrip(tripId)
+                                samples = tripRepo.getSamplesForAnalysis(tripId)
                                 rawLogs = tripRepo.getRawLogsForTrip(tripId)
                                 aiAnalysis = tripRepo.getAnalysisForTrip(tripId)
                                 isRecalculating = false

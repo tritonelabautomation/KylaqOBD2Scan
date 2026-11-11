@@ -438,6 +438,12 @@ object CsvExporter {
                     val mono = p.getOrNull(2)?.toLongOrNull() ?: (RecordTime.parseMillis(stamp) ?: 0L)
                     val t = com.example.data.SessionRecoveryPolicy.wallEpochMs(stamp, mono)
                     out.add(com.example.analysis.TripFuelSummary.SamplePoint(pid, t, value))
+                    if (out.size >= HeapGuard.UI_SAMPLE_CAP * 2) {
+                        val half = ArrayList<com.example.analysis.TripFuelSummary.SamplePoint>(out.size / 2)
+                        for (i in out.indices step 2) half.add(out[i])
+                        out.clear()
+                        out.addAll(half)
+                    }
                 }
             }
         }

@@ -1093,11 +1093,17 @@ class RecordingManager(
     }
 
     private suspend fun insertSamplesFromTxCsv(sessionId: String, txCsv: File) {
+        val total = SessionJsonReader.countTransactionRows(txCsv)
+        val stride = HeapGuard.strideFor(total, HeapGuard.ROOM_SAMPLE_CAP)
         val chunk = ArrayList<TelemetrySampleEntity>(HeapGuard.ROOM_INSERT_CHUNK)
-        var idx = 0L
+        var seen = 0L
+        var kept = 0L
         for (tx in CsvExporter.transactions(txCsv)) {
-            chunk.add(sampleEntityFromTx(sessionId, tx, idx))
-            idx++
+            val keep = stride == 1 || seen % stride == 0L
+            seen++
+            if (!keep) continue
+            chunk.add(sampleEntityFromTx(sessionId, tx, kept))
+            kept++
             if (chunk.size >= HeapGuard.ROOM_INSERT_CHUNK) {
                 tripRepository.insertSamples(ArrayList(chunk))
                 chunk.clear()
@@ -1129,7 +1135,13 @@ class RecordingManager(
                 )
             )
         }
+        val total = SessionJsonReader.countTransactionRows(sampleCsv)
+        val stride = HeapGuard.strideFor(total, HeapGuard.ROOM_SAMPLE_CAP / 7)
+        var seen = 0L
         for (smp in CsvExporter.samples(sampleCsv)) {
+            val keep = stride == 1 || seen % stride == 0L
+            seen++
+            if (!keep) continue
             val instant = RecordTime.parseMillis(smp.timestampUtc) ?: smp.timestampMonotonic
             addEntity(instant, smp.timestampUtc, smp.altitudeM, "010C", "Engine Speed", smp.rpm, "rpm")
             addEntity(instant, smp.timestampUtc, smp.altitudeM, "010D", "Vehicle Speed", smp.speedKmh, "km/h")
@@ -1199,6 +1211,12 @@ class RecordingManager(
                         tx.decodedValue
                     )
                 )
+            }
+            if (rows.size >= HeapGuard.REFUEL_SCAN_MAX_ROWS * 2) {
+                val half = ArrayList<com.example.analysis.SinceRefuelStats.Row>(rows.size / 2)
+                for (i in rows.indices step 2) half.add(rows[i])
+                rows.clear()
+                rows.addAll(half)
             }
         }
         persistRefuelEvents(com.example.analysis.RefuelSessionScan.scan(rows), settings)
