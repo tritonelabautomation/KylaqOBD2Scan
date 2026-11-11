@@ -213,29 +213,36 @@ jobs:
       - name: Extract APK metadata
         id: apk-meta
         run: |
-          # Install aapt (part of Android SDK build-tools)
-          sudo apt-get update -qq && sudo apt-get install -y -qq android-sdk-build-tools > /dev/null 2>&1 || true
+          # Match app/build.gradle.kts: CI versionCode = 10000 + GITHUB_RUN_NUMBER.
+          # Do not wait on `apt-get install android-sdk-build-tools` — that hung Extract
+          # for ~15 min and still left versionName/versionCode empty, so Publish aborted.
+          VN="1.0.${GITHUB_RUN_NUMBER}"
+          VC="$((10000 + GITHUB_RUN_NUMBER))"
+          echo "version_name=${VN}" >> "$GITHUB_OUTPUT"
+          echo "version_code=${VC}" >> "$GITHUB_OUTPUT"
+          echo "pkg_name=com.aistudio.obdlogger.kxmpzq" >> "$GITHUB_OUTPUT"
+          echo "sha_short=${GITHUB_SHA::8}" >> "$GITHUB_OUTPUT"
+          echo "run_number=${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "Gradle version ${VN} / ${VC}"
 
           APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
-          if [ -f "$APK_PATH" ]; then
-            BADGING="$(aapt dump badging "$APK_PATH" 2>/dev/null || true)"
+          AAPT=""
+          if [ -n "${ANDROID_HOME:-}" ]; then
+            AAPT="$(ls -1 "${ANDROID_HOME}"/build-tools/*/aapt 2>/dev/null | tail -1 || true)"
+          fi
+          if [ -z "$AAPT" ]; then
+            AAPT="$(command -v aapt || true)"
+          fi
+          if [ -f "$APK_PATH" ] && [ -n "$AAPT" ]; then
+            BADGING="$("$AAPT" dump badging "$APK_PATH" 2>/dev/null || true)"
             echo "$BADGING"
             echo "$BADGING" > /tmp/apk-badging.txt
             if echo "$BADGING" | grep -qi "testOnly='true'"; then
               echo "::error::APK is testOnly. ColorOS Files refuses GUI install of testOnly APKs."
               exit 1
             fi
-            echo "version_name=$(echo "$BADGING" | grep "versionName" | sed 's/.*versionName='"'"'\([^'"'"']*\)'"'"'.*/\1/')" >> $GITHUB_OUTPUT
-            echo "version_code=$(echo "$BADGING" | grep "versionCode" | sed 's/.*versionCode='"'"'\([^'"'"']*\)'"'"'.*/\1/')" >> $GITHUB_OUTPUT
-            echo "pkg_name=$(echo "$BADGING" | grep "package: name=" | sed 's/.*name='"'"'\([^'"'"']*\)'"'"'.*/\1/')" >> $GITHUB_OUTPUT
-            echo "sha_short=${GITHUB_SHA::8}" >> $GITHUB_OUTPUT
-            echo "run_number=${GITHUB_RUN_NUMBER}" >> $GITHUB_OUTPUT
           else
-            echo "version_name=unknown" >> $GITHUB_OUTPUT
-            echo "version_code=0" >> $GITHUB_OUTPUT
-            echo "pkg_name=unknown" >> $GITHUB_OUTPUT
-            echo "sha_short=${GITHUB_SHA::8}" >> $GITHUB_OUTPUT
-            echo "run_number=${GITHUB_RUN_NUMBER}" >> $GITHUB_OUTPUT
+            echo "aapt not found; skipped testOnly check. Using Gradle ${VN} / ${VC}."
           fi
 
       # Action logs live on a host this environment cannot read. Mirror a failure
