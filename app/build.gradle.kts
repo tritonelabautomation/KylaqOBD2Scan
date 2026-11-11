@@ -166,12 +166,6 @@ android {
       if (sideloadStoreFile.exists()) {
         signingConfig = signingConfigs.getByName("sideload")
       }
-      // ColorOS Files / package installer refuse debuggable APKs ("App not installed").
-      // Android Studio locally stays debuggable; GitHub Actions ships a non-debug APK.
-      if (!System.getenv("GITHUB_ACTIONS").isNullOrBlank()) {
-        isDebuggable = false
-        isJniDebuggable = false
-      }
     }
   }
 
@@ -190,6 +184,30 @@ android {
   dependenciesInfo {
     includeInApk = false
     includeInBundle = true
+  }
+}
+
+// ColorOS Files refuses GUI installs of debuggable/testOnly APKs. Do not flip
+// debug.isDebuggable (a second variant / KSP worker-init NPE broke CI). On GitHub
+// Actions, rewrite the merged text manifests right before packageDebug so the
+// shipped APK is not debuggable while KSP still sees the normal debug variant.
+tasks.matching { it.name == "packageDebug" }.configureEach {
+  doFirst {
+    if (System.getenv("GITHUB_ACTIONS").isNullOrBlank()) return@doFirst
+    val root = layout.buildDirectory.get().asFile
+    root.walkTopDown()
+      .filter { it.isFile && it.name == "AndroidManifest.xml" }
+      .forEach { file ->
+        val original = file.readText()
+        if (!original.contains("<manifest") && !original.contains("<?xml")) return@forEach
+        val updated = original
+          .replace(Regex("""android:debuggable\s*=\s*["']true["']"""), """android:debuggable="false"""")
+          .replace(Regex("""android:testOnly\s*=\s*["']true["']"""), """android:testOnly="false"""")
+        if (updated != original) {
+          file.writeText(updated)
+          logger.lifecycle("CI: stripped debuggable/testOnly in ${file.relativeTo(root)}")
+        }
+      }
   }
 }
 

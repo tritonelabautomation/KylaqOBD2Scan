@@ -148,6 +148,7 @@ jobs:
     permissions:
       statuses: write
       contents: write
+      pull-requests: write
 
     steps:
       - name: Checkout source
@@ -197,11 +198,11 @@ jobs:
           CRASH_REPORT_TOKEN: ${{ secrets.CRASH_REPORT_TOKEN }}
         run: |
           set -o pipefail
-          gradle assembleDebug -Pandroid.injected.debuggable=false --stacktrace 2>&1 | tee /tmp/build.log
+          gradle assembleDebug --stacktrace 2>&1 | tee /tmp/build.log
           STATUS=$?
           if [ $STATUS -ne 0 ] && grep -q "ApplicationManager.getApplication() is null" /tmp/build.log; then
             echo "KSP2 worker-init NPE flake detected - retrying once with ksp.incremental=false..."
-            gradle assembleDebug -Pandroid.injected.debuggable=false --stacktrace -Pksp.incremental=false 2>&1 | tee /tmp/build.log
+            gradle assembleDebug --stacktrace -Pksp.incremental=false 2>&1 | tee /tmp/build.log
             STATUS=$?
           fi
           exit $STATUS
@@ -219,6 +220,7 @@ jobs:
           if [ -f "$APK_PATH" ]; then
             BADGING="$(aapt dump badging "$APK_PATH" 2>/dev/null || true)"
             echo "$BADGING"
+            echo "$BADGING" > /tmp/apk-badging.txt
             if echo "$BADGING" | grep -q "application-debuggable"; then
               echo "::error::APK is debuggable. ColorOS Files refuses GUI install of debuggable APKs."
               exit 1
@@ -238,6 +240,36 @@ jobs:
             echo "pkg_name=unknown" >> $GITHUB_OUTPUT
             echo "sha_short=${GITHUB_SHA::8}" >> $GITHUB_OUTPUT
             echo "run_number=${GITHUB_RUN_NUMBER}" >> $GITHUB_OUTPUT
+          fi
+
+      # Action logs live on a host this environment cannot read. Mirror a failure
+      # tail onto the PR so the next fix is not flying blind.
+      - name: Comment build failure tail
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          {
+            echo "**build failed @ ${GITHUB_SHA:0:7}**"
+            echo
+            if [ -f /tmp/apk-badging.txt ]; then
+              echo "aapt badging:"
+              echo '```'
+              cat /tmp/apk-badging.txt
+              echo '```'
+              echo
+            fi
+            echo "gradle tail:"
+            echo '```'
+            tail -n 120 /tmp/build.log 2>/dev/null || echo "(no /tmp/build.log)"
+            echo '```'
+          } > /tmp/build-fail.md
+          PR="${{ github.event.pull_request.number }}"
+          if [ -z "$PR" ]; then
+            PR="$(gh pr list --head "$GITHUB_REF_NAME" --json number --jq '.[0].number' 2>/dev/null || true)"
+          fi
+          if [ -n "$PR" ]; then
+            gh pr comment "$PR" --body-file /tmp/build-fail.md || echo "PR comment skipped (non-fatal)"
           fi
 
       # Rename APK to a deterministic, traceable name.
