@@ -17,6 +17,28 @@ enum class ProtocolHealth {
     ADAPTER_ERROR
 }
 
+/**
+ * How many valid ISO-TP messages constitute proof that the bus is talking, no matter what a
+ * connect-time probe concluded. Owner 2026-09-19: the dashboard showed NO_RESPONSE, grey CAN/ECU
+ * dots and "No ECU response received" WHILE 39,808 frames were flowing - a probe can miss an ECU
+ * that is still waking up, but live frames cannot lie.
+ */
+const val FRAME_EVIDENCE_THRESHOLD = 25
+
+/**
+ * Evidence over verdict: upgrades a stale NO_RESPONSE/UNKNOWN once [FRAME_EVIDENCE_THRESHOLD]
+ * valid frames have arrived. PARTIAL, WORKING and ADAPTER_ERROR are left alone - a partial
+ * capability bitmap and an adapter fault are claims the frame count cannot settle.
+ */
+fun healthAfterFrameEvidence(current: ProtocolHealth, validFrames: Long): ProtocolHealth =
+    if (validFrames >= FRAME_EVIDENCE_THRESHOLD &&
+        (current == ProtocolHealth.NO_RESPONSE || current == ProtocolHealth.UNKNOWN)
+    ) {
+        ProtocolHealth.WORKING
+    } else {
+        current
+    }
+
 enum class PidTestStatus {
     ECU_RESPONSE,
     NO_DATA,
