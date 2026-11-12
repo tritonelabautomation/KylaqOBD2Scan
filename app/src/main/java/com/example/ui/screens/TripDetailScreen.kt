@@ -92,10 +92,8 @@ fun TripDetailScreen(
 
     // "Log fuel" for this trip: fuel rate integrated over the stored samples.
     val tankCapacityL = viewModel.tankCapacityL()
-    val fuelSummary = remember(summaryPoints, samples, tankCapacityL) {
-        val points = if (summaryPoints.isNotEmpty()) summaryPoints
-        else samples.map { com.example.analysis.TripFuelSummary.SamplePoint(it.pid, it.instantMs, it.numericValue) }
-        com.example.analysis.TripFuelSummary.summarize(points, tankCapacityL = tankCapacityL)
+    val fuelSummary = remember(summaryPoints, tankCapacityL) {
+        com.example.analysis.TripFuelSummary.summarize(summaryPoints, tankCapacityL = tankCapacityL)
     }
 
     // OWNER FIX (2026-09-16 screenshots): opening a trip flashed the definitive

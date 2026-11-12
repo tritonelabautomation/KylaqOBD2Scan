@@ -104,7 +104,18 @@ object TripFuelSummary {
     private const val FUEL_DENSITY_KG_L = 0.745
     private const val COAST_SPEED_KMH = 20.0
     private const val COAST_FUEL_LH = 0.15
-    private const val MAX_GAP_MS = 15000L // slow PIDs legitimately arrive ~10 s apart
+    /**
+     * Hold last rate across multiplex / downsample gaps. 15 s used to clip 015E on
+     * recovered trips (3.74 L became 1.15 L, 8.63 km/L became 17.68). A gap longer
+     * than this is a recording hole, not a poll interval.
+     */
+    private const val MAX_GAP_MS = 120_000L
+
+    private fun dtSec(t0: Long, t1: Long): Double {
+        val gap = t1 - t0
+        if (gap <= 0L) return 0.0
+        return gap.coerceAtMost(MAX_GAP_MS) / 1000.0
+    }
 
     fun summarize(
         samples: List<SamplePoint>,
@@ -137,7 +148,7 @@ object TripFuelSummary {
         for (i in 1 until fuelSeries.size) {
             val (t0, rate) = fuelSeries[i - 1]
             val (t1, _) = fuelSeries[i]
-            val dt = (t1 - t0).coerceIn(0L, MAX_GAP_MS) / 1000.0
+            val dt = dtSec(t0, t1)
             fuelLiters += rate * dt / 3600.0
             val speedAt = valueAt(speedSeries, t0)
             if (rate <= COAST_FUEL_LH && speedAt != null && speedAt > COAST_SPEED_KMH) {
@@ -174,7 +185,7 @@ object TripFuelSummary {
         for (i in 1 until speedSeries.size) {
             val (t0, v0) = speedSeries[i - 1].first to speedSeries[i - 1].second
             val t1 = speedSeries[i].first
-            val dt = (t1 - t0).coerceIn(0L, MAX_GAP_MS) / 1000.0
+            val dt = dtSec(t0, t1)
             if (!odoDistanceUsed) {
                 distanceKm += v0 * dt / 3600.0
             }

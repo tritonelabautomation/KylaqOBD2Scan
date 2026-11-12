@@ -243,7 +243,7 @@ class TripFuelSummaryTest {
     }
 
     @Test
-    fun mixedPidStrideHitsFifteenSecondCapButFuelOnlySeriesDoesNot() {
+    fun twentySecondFuelGapsStillIntegrateFullHour() {
         // 1 h at 4 L/h and 60 km/h, 1 Hz. Expected 4.0 L and 60 km.
         val dense = mutableListOf<TripFuelSummary.SamplePoint>()
         var ts = 0L
@@ -262,15 +262,28 @@ class TripFuelSummaryTest {
 
         val gappedFuel = dense.filter { it.pid == "015E" }.filterIndexed { i, _ -> i % 20 == 0 }
         val gapped = gappedFuel + dense.filter { it.pid == "010D" }
-        val clipped = TripFuelSummary.summarize(gapped)
-        assertTrue(
-            "20 s fuel gaps must clip at 15 s: got ${clipped.fuelLiters} L",
-            clipped.fuelLiters < 3.4
-        )
+        val held = TripFuelSummary.summarize(gapped)
+        assertEquals("20 s 015E gaps are poll intervals, not holes", 4.0, held.fuelLiters, 0.2)
 
         val kept = dense.filter { com.example.data.HeapGuard.keepForFuelSummary(it.pid) }
         val keptSum = TripFuelSummary.summarize(kept)
         assertEquals(4.0, keptSum.fuelLiters, 0.15)
         assertEquals(60.0, keptSum.distanceKm, 1.0)
+    }
+
+    @Test
+    fun tenMinuteRecordingHoleIsNotCountedAsBurn() {
+        val samples = listOf(
+            point("015E", 0L, 4.0),
+            point("015E", 10_000L, 4.0),
+            point("015E", 10_000L + 10 * 60_000L, 4.0),
+            point("015E", 10_000L + 10 * 60_000L + 10_000L, 4.0),
+            point("010D", 0L, 60.0),
+            point("010D", 10_000L + 10 * 60_000L + 10_000L, 60.0)
+        )
+        val s = TripFuelSummary.summarize(samples)
+        // Two 10 s slices at 4 L/h plus at most a 120 s hole clamp — never 10 min of 4 L/h (0.67 L).
+        assertTrue("hole invented ${s.fuelLiters} L", s.fuelLiters < 0.25)
+        assertTrue(s.fuelLiters > 0.01)
     }
 }
