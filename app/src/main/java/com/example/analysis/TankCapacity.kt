@@ -63,9 +63,13 @@ object TankCapacity {
         return if (kotlin.math.abs(stored - LEGACY_NOMINAL_L) < 0.05) NOMINAL_L else stored
     }
 
-    /** Capacity is "measured" when it differs from the factory 45 L spec. */
+    /**
+     * Capacity is "measured" when it differs from the factory 45 L spec AND is not the legacy
+     * 50 L boot value — the two numbers this app ever wrote without a fill behind them.
+     */
     fun isCalibrated(storedL: Double?): Boolean {
         val stored = storedL?.let { sanitize(it) } ?: return false
+        if (kotlin.math.abs(stored - LEGACY_NOMINAL_L) < 0.05) return false
         return kotlin.math.abs(stored - NOMINAL_L) > 0.05
     }
 
