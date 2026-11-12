@@ -371,7 +371,6 @@ fun TripDetailScreen(
                             trip = trip, sampleCount = samples.size, rawCount = rawLogs.size, analysis = aiAnalysis,
                             summary = fuelSummary,
                             tankCapacityL = tankCapacityL,
-                            fillOnTrip = fillOnTrip,
                             samples = samples,
                             pricePerL = viewModel.fuelLogRepository.entries().maxByOrNull { it.idMs }?.pricePerL ?: 0.0,
                             speedPoints = samples.filter { it.pid.takeLast(2) == "0D" }
@@ -695,9 +694,7 @@ private fun TripOverviewView(
     carpoolSlot: (@Composable () -> Unit)? = null,
     onExportGpx: () -> Unit = {},
     onExportKml: () -> Unit = {},
-    tankCapacityL: Double = com.example.analysis.TankCapacity.NOMINAL_L,
-    /** This trip's own 012F fill (RefuelSplash), or null when no fill happened inside it. */
-    fillOnTrip: com.example.analysis.RefuelSplash.Result? = null
+    tankCapacityL: Double = com.example.analysis.TankCapacity.NOMINAL_L
 ) {
     if (trip == null) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
