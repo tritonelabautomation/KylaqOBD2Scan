@@ -21,7 +21,8 @@ class ThreeWayFuelComparatorTest {
         )
 
         // Factor 1 (OBD Mass Integration): 3.48 L consumed -> 8.91 km/L (~2.1% delta from MID)
-        // Factor 2 (Float Delta): 4.05 L consumed -> 7.65 km/L (~15.9% delta from float steps on 45L tank)
+        // Factor 2 (Float Delta): 4.05 L consumed -> 7.65 km/L (~15.9 % delta from float steps
+        // on the 45 L Kylaq tank; the same 9 pt delta on the old 50 L boot read 4.50 L)
         val summary = TripFuelSummary.Summary(
             fuelLiters = 3.48,
             distanceKm = 31.0,

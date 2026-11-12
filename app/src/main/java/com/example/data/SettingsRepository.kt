@@ -518,11 +518,19 @@ class SettingsRepository(private val context: Context) {
 
     /**
      * Usable tank capacity in litres, for turning a 012F percentage into litres.
-     * Boots at the Kylaq spec (50 L). Every auto-cut brim fill (pump litres vs start%→cut%)
-     * overwrites it; the owner can also type it on the Fuel screen. Trip cards must read
-     * this, never the factory 50 L constant - 2026-11-11 40.27 L fill implied 52.9 L.
+     * Boots at the Kylaq spec (45 L - the old 50 L was the Kushaq figure and made every
+     * trip ~11 % heavy). Every auto-cut brim fill (pump litres vs start%→cut%) overwrites
+     * it; the owner can also type it on the Fuel screen - 2026-11-11 40.27 L from
+     * 17.6 %→93.7 % implied 52.9 L.
      */
-    fun tankCapacityL(): Double = prefs.getFloat("tank_capacity_l", 50.0f).toDouble()
+    fun tankCapacityL(): Double = com.example.analysis.TankCapacity.effective(
+        prefs.getFloat("tank_capacity_l", com.example.analysis.TankCapacity.NOMINAL_L.toFloat()).toDouble()
+    )
+
+    /** True when a brim fill (or the owner) has measured the usable volume. */
+    fun tankCalibrated(): Boolean = com.example.analysis.TankCapacity.isCalibrated(
+        prefs.getFloat("tank_capacity_l", com.example.analysis.TankCapacity.NOMINAL_L.toFloat()).toDouble()
+    )
 
     fun setTankCapacityL(litres: Double) =
         prefs.edit().putFloat("tank_capacity_l", litres.toFloat()).apply()

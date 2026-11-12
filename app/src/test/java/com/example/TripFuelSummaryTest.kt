@@ -211,7 +211,9 @@ class TripFuelSummaryTest {
         assertEquals(85.0, summary.startFuelPercent!!, 1e-9)
         assertEquals(81.5, summary.endFuelPercent!!, 1e-9)
         assertEquals(-3.5, summary.fuelDeltaPercent!!, 1e-9)
-        assertEquals(1.75, summary.fuelDeltaLiters!!, 1e-9) // 3.5% of 50L = 1.75L
+        // 3.5 % of the 45 L Kylaq tank = 1.575 L. It used to be 1.75 L (the Kushaq 50 L
+        // figure), which is the "wrong calculations of fuel %" the owner reported 2026-11-12.
+        assertEquals(1.575, summary.fuelDeltaLiters!!, 1e-6)
         assertEquals(false, summary.isRefuelBrimEvent)
     }
 
@@ -226,7 +228,7 @@ class TripFuelSummaryTest {
         assertEquals(25.0, summary.startFuelPercent!!, 1e-9)
         assertEquals(95.0, summary.endFuelPercent!!, 1e-9)
         assertEquals(70.0, summary.fuelDeltaPercent!!, 1e-9)
-        assertEquals(35.0, summary.fuelDeltaLiters!!, 1e-9) // 70% of 50L = 35.0L
+        assertEquals(31.5, summary.fuelDeltaLiters!!, 1e-6) // 70 % of 45 L = 31.5 L
         assertEquals(true, summary.isRefuelBrimEvent)
     }
 

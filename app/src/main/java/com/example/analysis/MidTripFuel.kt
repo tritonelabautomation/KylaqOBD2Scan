@@ -8,6 +8,11 @@ import java.util.Locale
  * Owner 2026-11-11 recovered run 17c54147: 22.0% → 93.7% is the fill sitting in the
  * trip, not 37.98 L burned. OBD 3.74 L and MID 3.81 L are consumption. Float burn is
  * only the drop before the pump plus the drop after auto-cut.
+ *
+ * Owner 2026-11-12: the fill must be THIS TRIP's rise — a linked receipt usually means
+ * only "the batch in the tank" (docs: FillTripLinker keeps the last brim fill attached to
+ * later trips). Callers therefore pass the splash detected from this trip's own 012F
+ * samples ([RefuelSplash]); the receipt's window is never rendered as a fill on its own.
  */
 object MidTripFuel {
 
@@ -47,7 +52,7 @@ object MidTripFuel {
         } else null
 
         val fillRise = if (fillBeforePct != null && fillAfterPct != null) fillAfterPct - fillBeforePct else null
-        val pidFillL = if (fillRise != null && fillRise >= 4.0) {
+        val pidFillL = if (fillRise != null && fillRise >= TankCapacity.MIN_FILL_RISE_PCT) {
             TankCapacity.litresFromPercent(fillRise, tank)
         } else null
         val pump = pumpLitres?.takeIf { it > 0.5 }
@@ -62,6 +67,8 @@ object MidTripFuel {
                 val post = tripEndPct?.let { maxOf(0.0, fillAfterPct - it) } ?: 0.0
                 pre + post
             }
+            // A trip whose level ROSE by more than sensor slosh but which we could not
+            // attribute to a fill is still not burn: no negative consumption.
             tripStartPct != null && tripEndPct != null && tripStartPct > tripEndPct + 0.3 ->
                 tripStartPct - tripEndPct
             else -> null

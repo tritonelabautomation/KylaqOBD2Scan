@@ -52,7 +52,12 @@ object PowertrainModel {
     /** Petrol energy per litre: 43.4 MJ/kg × 0.745 kg/L. */
     const val FUEL_ENERGY_MJ_PER_L = 32.3
 
-    const val TANK_CAPACITY_L = 50.0
+    /**
+     * Kylaq 1.0 TSI factory tank. Was 50.0 (the Kushaq figure) until 2026-11-12, which made
+     * every PID 012F %→litre conversion ~11 % high. Trip cards use the CALIBRATED usable
+     * volume instead ([com.example.analysis.TankCapacity.effective]); this is only the spec.
+     */
+    const val TANK_CAPACITY_L = com.example.analysis.TankCapacity.NOMINAL_L
 
     /** Typical warm-idle consumption of a 1.0 TSI, used as a coasting baseline. */
     // QA/QC 2026-09-13 re-calibration (owner telemetry is the oracle): post-F-6 live

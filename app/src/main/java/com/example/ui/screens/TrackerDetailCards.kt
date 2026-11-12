@@ -198,11 +198,25 @@ fun TrackerSummaryCards(
                 Box(Modifier.fillMaxWidth().height(1.dp).background(TkInner))
                 Spacer(Modifier.height(8.dp))
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(
-                        if (fuelSplit.tripIsBrim) "Tank (fill on trip, not burn)" else "Tank Level (Start → End)",
-                        color = TkGray,
-                        fontSize = 13.sp
-                    )
+                    Column {
+                        Text(
+                            if (fuelSplit.tripIsBrim) "Tank (fill on trip, not burn)" else "Tank Level (Start → End)",
+                            color = TkGray,
+                            fontSize = 13.sp
+                        )
+                        // The litres behind a tank % must name their tank: 45 L factory vs a
+                        // measured usable volume are 11 % apart (owner 2026-11-12).
+                        fuelSplit.netBurnLitres?.let {
+                            Text(
+                                "%.2f L net float burn · tank %.1f L%s".format(
+                                    it, tankCapacityL,
+                                    if (com.example.analysis.TankCapacity.isCalibrated(tankCapacityL)) " measured" else " factory"
+                                ),
+                                color = TkDim,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
                     val delta = summary.fuelDeltaPercent ?: 0.0
                     val deltaStr = if (delta > 0) "+%.1f%%".format(delta) else "%.1f%%".format(delta)
                     val deltaCol = if (fuelSplit.tripIsBrim) TkGreen else if (delta < 0) TkOrange else TkGray
@@ -222,8 +236,7 @@ fun TrackerSummaryCards(
                 }
                 if (fuelSplit.tripIsBrim) {
                     Text(
-                        fuelSplit.netBurnLitres?.let { "Net float burn ${MidTripFuel.litres(it)} around the fill" }
-                            ?: "This rise is fuel in. Fuel used above is OBD, not the tank %.",
+                        "This rise is fuel in. Fuel used above is OBD, not the tank %.",
                         color = TkGray,
                         fontSize = 11.sp
                     )

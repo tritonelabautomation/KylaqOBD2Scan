@@ -119,7 +119,7 @@ object TripFuelSummary {
 
     fun summarize(
         samples: List<SamplePoint>,
-        tankCapacityL: Double = com.example.engine.PowertrainModel.TANK_CAPACITY_L
+        tankCapacityL: Double = TankCapacity.NOMINAL_L
     ): Summary {
         if (samples.isEmpty()) {
             return Summary(0.0, 0.0, null, 0L, 0.0, 0.0, 0.0, 0.0, 0.0, emptyList(), 0, false, false)

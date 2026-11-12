@@ -47,7 +47,7 @@ fun ThreeWayFuelCard(
     tripId: String,
     fuelSummary: TripFuelSummary.Summary,
     modifier: Modifier = Modifier,
-    tankCapacityL: Double = com.example.engine.PowertrainModel.TANK_CAPACITY_L,
+    tankCapacityL: Double = com.example.analysis.TankCapacity.NOMINAL_L,
     fillBeforePct: Double? = null,
     fillAfterPct: Double? = null,
     pumpLitres: Double? = null,
@@ -139,7 +139,10 @@ fun ThreeWayFuelCard(
                             letterSpacing = 0.5.sp
                         )
                         Text(
-                            text = "OBD Mass Flow vs Tank Float vs Cluster MID",
+                            text = "OBD Mass Flow vs Tank Float vs Cluster MID · tank " +
+                                String.format(Locale.US, "%.1f L", tankCapacityL) +
+                                if (com.example.analysis.TankCapacity.isCalibrated(tankCapacityL)) " (measured)"
+                                else " (factory)",
                             color = TextSecondaryDark,
                             fontSize = 10.sp
                         )
@@ -344,7 +347,7 @@ fun ThreeWayFuelCard(
                 // Factor 2 Card
                 FactorRowCard(
                     factorLabel = "FACTOR 2 · TANK FLOAT NET BURN",
-                    methodSubtitle = if (fillOnThisTrip) "Around the fill (PID 012F) — rise is not burn" else "Potentiometer Float % Drop (PID 012F)",
+                    methodSubtitle = if (fillOnThisTrip) "Around this trip's fill (PID 012F) — rise is not burn" else "Potentiometer Float % Drop (PID 012F)",
                     liters = comparison.factor2TankFloatDelta.fuelLiters,
                     kmL = comparison.factor2TankFloatDelta.economyKmL,
                     errorPct = comparison.factor2TankFloatDelta.errorPctVsMid,
@@ -387,7 +390,7 @@ fun ThreeWayFuelCard(
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "CALIBRATION VERDICT: ${if (comparison.closestFactorNumber == 1) "FACTOR 1 (OBD INTEGRATION) CLOSEST" else "FACTOR 2 CLOSEST"}",
+                                text = "CALIBRATION VERDICT: ${if (comparison.closestFactorNumber == 1) "FACTOR 1 (OBD INTEGRATION) CLOSEST" else "FACTOR 2 (TANK FLOAT) CLOSEST"}",
                                 color = if (comparison.closestFactorNumber == 1) NeonEmerald else ElectricAmber,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold

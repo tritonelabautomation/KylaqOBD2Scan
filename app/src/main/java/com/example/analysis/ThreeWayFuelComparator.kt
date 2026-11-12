@@ -1,6 +1,5 @@
 package com.example.analysis
 
-import com.example.engine.PowertrainModel
 import java.util.Locale
 import kotlin.math.abs
 
@@ -16,8 +15,9 @@ import kotlin.math.abs
  *
  *  2. **Factor 2 (Tank Float net burn PID 012F %)**:
  *     Fuel tank float level percentage drop ($\Delta \text{Level} = \text{Start \%} - \text{End \%}$)
- *     multiplied by official 45.0 L tank capacity. Subject to float potentiometer step quantization (~0.39%
- *     resolution = ±0.18 L), fuel slosh, vehicle tilt, and thermal expansion.
+ *     multiplied by the CALIBRATED usable tank (auto-cut fill measurement; factory 45 L until
+ *     one exists). Subject to float potentiometer step quantization (~0.39% resolution = ±0.18 L),
+ *     fuel slosh, vehicle tilt, and thermal expansion.
  *
  *  3. **Factor 3 (Vehicle Instrument Cluster MID "Since Start")**:
  *     Ground-truth cluster readout calculated by the Bosch/Continental ECU from injector pulse
@@ -61,7 +61,7 @@ object ThreeWayFuelComparator {
         tripId: String,
         fuelSummary: TripFuelSummary.Summary,
         midData: MidClusterData,
-        tankCapacityL: Double = PowertrainModel.TANK_CAPACITY_L,
+        tankCapacityL: Double = TankCapacity.NOMINAL_L,
         fillBeforePct: Double? = null,
         fillAfterPct: Double? = null,
         pumpLitres: Double? = null,

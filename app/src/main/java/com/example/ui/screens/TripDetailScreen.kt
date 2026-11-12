@@ -371,6 +371,7 @@ fun TripDetailScreen(
                             trip = trip, sampleCount = samples.size, rawCount = rawLogs.size, analysis = aiAnalysis,
                             summary = fuelSummary,
                             tankCapacityL = tankCapacityL,
+                            fillOnTrip = fillOnTrip,
                             samples = samples,
                             pricePerL = viewModel.fuelLogRepository.entries().maxByOrNull { it.idMs }?.pricePerL ?: 0.0,
                             speedPoints = samples.filter { it.pid.takeLast(2) == "0D" }
@@ -694,7 +695,9 @@ private fun TripOverviewView(
     carpoolSlot: (@Composable () -> Unit)? = null,
     onExportGpx: () -> Unit = {},
     onExportKml: () -> Unit = {},
-    tankCapacityL: Double = com.example.engine.PowertrainModel.TANK_CAPACITY_L
+    tankCapacityL: Double = com.example.analysis.TankCapacity.NOMINAL_L,
+    /** This trip's own 012F fill (RefuelSplash), or null when no fill happened inside it. */
+    fillOnTrip: com.example.analysis.RefuelSplash.Result? = null
 ) {
     if (trip == null) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -768,6 +771,34 @@ private fun TripOverviewView(
             tripEndMs = validEndMs,
             tripStartOdoKm = summary.startOdometerKm,
             tripEndOdoKm = summary.endOdometerKm
+        )
+    }
+
+    // FILL vs BATCH (owner 2026-11-12: "why is the refill % change shown in all trips?").
+    // The linker above answers "which fuel batch is in the tank" and deliberately keeps the
+    // last brim fill attached to LATER trips. A FILL is a physical event, so it is detected
+    // from this trip's own PID 012F samples: no rise in these samples ⇒ no fill card here,
+    // however the receipt was linked. When a rise IS present, the receipt only supplies
+    // station/pump litres if its own window matches the rise.
+    val tankSeries = remember(samples) {
+        samples.asSequence()
+            .filter { com.example.analysis.TripFuelSummary.normalizePidKey(it.pid) == "012F" }
+            .mapNotNull { s -> s.numericValue?.takeIf { it in 0.0..100.0 }?.let { s.instantMs to it } }
+            .sortedBy { it.first }
+            .toList()
+    }
+    val fillOnTrip = remember(
+        tankSeries, linkedFill?.fill?.idMs,
+        linkedFill?.fill?.startLevelPct, linkedFill?.fill?.endLevelPct,
+        linkedFill?.bunk?.startLevelPercent, linkedFill?.bunk?.autoCutPercent,
+        linkedFill?.pumpLitres, linkedFill?.happenedOnThisTrip
+    ) {
+        com.example.analysis.RefuelSplash.resolve(
+            levelSeries = tankSeries,
+            fillBeforePct = linkedFill?.bunk?.startLevelPercent ?: linkedFill?.fill?.startLevelPct,
+            fillAfterPct = linkedFill?.bunk?.autoCutPercent ?: linkedFill?.fill?.endLevelPct,
+            pumpLitres = linkedFill?.pumpLitres,
+            linkedReceiptOnTrip = linkedFill?.happenedOnThisTrip == true
         )
     }
 
@@ -903,6 +934,7 @@ private fun TripOverviewView(
             TripFuelLogCard(
                 summary = summary,
                 linkedFill = linkedFill,
+                fillOnTrip = fillOnTrip,
                 tankCapacityL = tankCapacityL,
                 acOverrideState = userOverride.acState,
                 windowRolledDown = userOverride.windowRolledDown,
@@ -931,10 +963,12 @@ private fun TripOverviewView(
                 tripId = trip.id,
                 fuelSummary = summary,
                 tankCapacityL = tankCapacityL,
-                fillBeforePct = linkedFill?.bunk?.startLevelPercent ?: linkedFill?.fill?.startLevelPct,
-                fillAfterPct = linkedFill?.bunk?.autoCutPercent ?: linkedFill?.fill?.endLevelPct,
-                pumpLitres = linkedFill?.pumpLitres,
-                fillOnThisTrip = linkedFill?.happenedOnThisTrip == true
+                // Factor 2 must be THIS trip's burn. The receipt's window is only passed when
+                // this trip actually recorded that rise (owner 2026-11-12).
+                fillBeforePct = fillOnTrip?.takeIf { it.happenedOnThisTrip }?.fillBeforePct,
+                fillAfterPct = fillOnTrip?.takeIf { it.happenedOnThisTrip }?.fillAfterPct,
+                pumpLitres = fillOnTrip?.takeIf { it.receiptMatches }?.pumpLitres,
+                fillOnThisTrip = fillOnTrip?.happenedOnThisTrip == true
             )
         }
         fuelBatchComparison?.let { fbc ->
@@ -955,10 +989,10 @@ private fun TripOverviewView(
                 minAltitudeM = effectiveMinAlt,
                 altitudeBlankReason = if (effectiveMaxAlt == null) altitudeBlankReason else null,
                 tankCapacityL = tankCapacityL,
-                fillBeforePct = linkedFill?.bunk?.startLevelPercent ?: linkedFill?.fill?.startLevelPct,
-                fillAfterPct = linkedFill?.bunk?.autoCutPercent ?: linkedFill?.fill?.endLevelPct,
-                pumpLitres = linkedFill?.pumpLitres,
-                fillOnThisTrip = linkedFill?.happenedOnThisTrip == true
+                fillBeforePct = fillOnTrip?.takeIf { it.happenedOnThisTrip }?.fillBeforePct,
+                fillAfterPct = fillOnTrip?.takeIf { it.happenedOnThisTrip }?.fillAfterPct,
+                pumpLitres = fillOnTrip?.takeIf { it.receiptMatches }?.pumpLitres,
+                fillOnThisTrip = fillOnTrip?.happenedOnThisTrip == true
             )
         }
         item {
@@ -1825,8 +1859,12 @@ private fun InsightBlock(accent: Color, title: String, body: String) {
 @Composable
 private fun TripFuelLogCard(
     summary: com.example.analysis.TripFuelSummary.Summary,
+    /** The fuel batch in the tank (names the bunk on the tank line). Not necessarily a fill here. */
     linkedFill: com.example.analysis.FillTripLinker.Link? = null,
-    tankCapacityL: Double = 50.0,
+    /** This TRIP's own 012F rise, or none. Only a [com.example.analysis.RefuelSplash] fill is rendered. */
+    fillOnTrip: com.example.analysis.RefuelSplash.Result? = null,
+    /** Calibrated usable tank (L) - the number every %→L conversion below uses. */
+    tankCapacityL: Double = com.example.analysis.TankCapacity.NOMINAL_L,
     acOverrideState: String? = null,
     windowRolledDown: Boolean = false,
     onUpdateAcState: ((acState: String?, windowDown: Boolean) -> Unit)? = null
@@ -1878,18 +1916,21 @@ private fun TripFuelLogCard(
                 fontSize = 13.sp
             )
 
-            // Tank % is a window, not burn. A mid-trip fill is fuel in; OBD/MID are consumption.
+            // Tank % is a window, not burn. A fill INSIDE this trip is fuel in; OBD/MID are
+            // consumption. Owner 2026-11-12: the fill window must come from this trip's own
+            // 012F rise - the linked receipt's window ("the batch in the tank") is NOT a fill.
             val startFuel = summary.startFuelPercent
             val endFuel = summary.endFuelPercent
             val deltaPct = summary.fuelDeltaPercent
+            val onTripFill = fillOnTrip?.takeIf { it.happenedOnThisTrip }
             val fuelSplit = com.example.analysis.MidTripFuel.split(
                 tripStartPct = startFuel,
                 tripEndPct = endFuel,
                 tankL = tankCapacityL,
-                fillBeforePct = linkedFill?.bunk?.startLevelPercent ?: linkedFill?.fill?.startLevelPct,
-                fillAfterPct = linkedFill?.bunk?.autoCutPercent ?: linkedFill?.fill?.endLevelPct,
-                pumpLitres = linkedFill?.pumpLitres,
-                fillOnThisTrip = linkedFill?.happenedOnThisTrip == true
+                fillBeforePct = onTripFill?.fillBeforePct,
+                fillAfterPct = onTripFill?.fillAfterPct,
+                pumpLitres = onTripFill?.pumpLitres,
+                fillOnThisTrip = onTripFill != null
             )
             if (startFuel != null && endFuel != null) {
                 Spacer(modifier = Modifier.height(8.dp))
@@ -1950,9 +1991,11 @@ private fun TripFuelLogCard(
                         }
                     }
                 }
-                val fillLine = com.example.analysis.MidTripFuel.fillWindowLine(fuelSplit)
-                val pumpLine = com.example.analysis.MidTripFuel.pumpVsPidLine(fuelSplit)
-                if (fillLine != null || pumpLine != null || linkedFill?.happenedOnThisTrip == true) {
+                // Only a fill recorded INSIDE this trip gets a fill/pump line. A later trip
+                // that merely burns the same batch shows nothing here (owner 2026-11-12).
+                val fillLine = onTripFill?.let { com.example.analysis.MidTripFuel.fillWindowLine(fuelSplit) }
+                val pumpLine = onTripFill?.let { com.example.analysis.MidTripFuel.pumpVsPidLine(fuelSplit) }
+                if (fillLine != null || pumpLine != null) {
                     val station = linkedFill?.stationName?.takeIf { it.isNotBlank() }
                     Text(
                         buildString {
@@ -1960,16 +2003,26 @@ private fun TripFuelLogCard(
                             fillLine?.let { append(it) }
                             if (fillLine != null && pumpLine != null) append(" · ")
                             pumpLine?.let { append(it) }
-                            if (fillLine == null && pumpLine == null && linkedFill != null) {
-                                append(String.format(java.util.Locale.US, "pump %.2f L", linkedFill.pumpLitres))
-                            }
                         },
                         color = NeonEmerald,
                         fontSize = 11.sp,
                         modifier = Modifier.padding(top = 4.dp)
                     )
+                } else if (linkedFill != null) {
+                    // Batch context, NOT a fill: say so, so the % above is never read as a pump.
+                    Text(
+                        "Fuel in tank: ${linkedFill.stationName.ifBlank { "logged fill" }}" +
+                            String.format(
+                                java.util.Locale.US,
+                                " · %.2f L batch, filled outside this trip",
+                                linkedFill.pumpLitres
+                            ),
+                        color = TextSecondaryDark,
+                        fontSize = 11.sp,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
                 }
-                if (fuelSplit.tripIsBrim) {
+                if (fuelSplit.tripIsBrim || onTripFill != null) {
                     Text(
                         fuelSplit.netBurnLitres?.let {
                             String.format(java.util.Locale.US, "Net float burn %.2f L around the fill — not the tank rise.", it)

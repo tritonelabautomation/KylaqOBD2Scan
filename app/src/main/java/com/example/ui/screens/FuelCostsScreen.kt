@@ -74,7 +74,7 @@ fun FuelCostsScreen(
     var longTerm by remember { mutableStateOf<com.example.analysis.SinceRefuelStats.Stats?>(null) }
     var odoNow by remember { mutableStateOf<Double?>(null) }
     var levelNow by remember { mutableStateOf<Double?>(null) }
-    var capacityL by remember { mutableStateOf(50.0) }
+    var capacityL by remember { mutableStateOf(com.example.analysis.TankCapacity.NOMINAL_L) }
     LaunchedEffect(refresh, refuelEvents, ddTab) {
         if (ddTab == 0) sinceStart = viewModel.sinceStartStats()
         if (ddTab == 2) longTerm = viewModel.longTermStats()
@@ -640,8 +640,8 @@ private fun TankCapacityEditorCard(
     ) {
         Text("Usable tank capacity", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
         Text(
-            "Factory 50.0 L. Auto-cut brim fills overwrite this from pump litres ÷ (cut% − start%). " +
-                "Edit here to compare trip litres against MID.",
+            "Factory 45.0 L (Kylaq spec — 50 L is the Kushaq figure). Auto-cut brim fills overwrite " +
+                "this from pump litres ÷ (cut% − start%); every trip's %→litres uses it.",
             color = Color(0xFF8E8E93), fontSize = 11.sp
         )
         Spacer(Modifier.height(8.dp))
@@ -661,10 +661,12 @@ private fun TankCapacityEditorCard(
                 Text("Save", color = Color.Black, fontWeight = FontWeight.Bold)
             }
         }
+        val calibrated = com.example.analysis.TankCapacity.isCalibrated(capacityL)
         Text(
             String.format(
                 java.util.Locale.US,
-                "Now %.1f L  ·  factory %.1f L",
+                if (calibrated) "Now %.1f L (measured from a brim fill)  ·  factory %.1f L"
+                else "Now %.1f L (factory spec, no brim fill measured yet)  ·  factory %.1f L",
                 capacityL,
                 com.example.analysis.TankCapacity.NOMINAL_L
             ),

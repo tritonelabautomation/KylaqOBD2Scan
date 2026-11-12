@@ -24,8 +24,8 @@ object DailyTripCostAggregator {
     /** Fallback fuel price per liter (INR) when no fuel log is available. */
     const val DEFAULT_FUEL_PRICE_INR = 100.0
 
-    /** Škoda Kylaq 50L fuel tank capacity. */
-    const val TANK_CAPACITY_LITERS = 50.0
+    /** Škoda Kylaq factory tank (45 L). Callers with a calibrated tank pass their own value. */
+    const val TANK_CAPACITY_LITERS = TankCapacity.NOMINAL_L
 
     data class TripRecordInput(
         val tripId: String,
@@ -212,7 +212,8 @@ object DailyTripCostAggregator {
             val derivedLiters = if (trip.fuelLiters > 0.001) {
                 trip.fuelLiters
             } else if (trip.fuelDeltaPercent != null && trip.fuelDeltaPercent < 0) {
-                kotlin.math.abs(trip.fuelDeltaPercent) * tankCapacityL / 100.0
+                // A tank % is only burn when the level FELL; lit(1) below rides the same tank.
+                TankCapacity.litresFromPercent(trip.fuelDeltaPercent, tankCapacityL)
             } else {
                 0.0
             }

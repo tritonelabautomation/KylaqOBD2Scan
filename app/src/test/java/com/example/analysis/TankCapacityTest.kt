@@ -1,14 +1,39 @@
 package com.example.analysis
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
  * Owner 2026-11-11 IndianOil COCO Begumpet auto-cut: receipt 40.27 L, start 17.6 %,
  * cut 93.7 %. The 50 L factory number made every trip litre (and km/L vs MID) wrong.
+ *
+ * Owner 2026-11-12 (trip screenshots): the app still printed a 3.53 pt drop as 1.76 L
+ * (a ~49.9 L tank) on every trip while a 40.3 pt fill window read 34.25 L (a 45.0 L tank).
+ * The Kylaq spec is 45 L; 50 L is the Kushaq figure.
  */
 class TankCapacityTest {
+
+    @Test
+    fun factoryTankIsTheKylaq45LNotTheKushaq50L() {
+        assertEquals(45.0, TankCapacity.NOMINAL_L, 1e-9)
+        // 2026-11-12 trip: 91.8 % → 83.9 % = 7.9 pt. At 45 L that is 3.56 L.
+        assertEquals(3.555, TankCapacity.litresFromPercent(7.9), 0.01)
+        // 2026-11-11 trip: 27.8 % → 22.0 % = 5.8 pt ⇒ 2.61 L, not the old 2.90 L.
+        assertEquals(2.61, TankCapacity.litresFromPercent(5.8), 0.01)
+    }
+
+    @Test
+    fun effectiveCapacityIsFactoryUntilAFillMeasuresIt() {
+        assertEquals(45.0, TankCapacity.effective(null), 1e-9)
+        assertEquals(45.0, TankCapacity.effective(50.0), 1e-9) // a stale 50 L boot is not a measurement
+        assertEquals(52.9, TankCapacity.effective(52.9), 1e-9)
+        assertFalse(TankCapacity.isCalibrated(null))
+        assertFalse(TankCapacity.isCalibrated(45.0))
+        assertTrue(TankCapacity.isCalibrated(52.9))
+    }
 
     @Test
     fun ownerAutoCutFillImplies52_9LNot50() {
