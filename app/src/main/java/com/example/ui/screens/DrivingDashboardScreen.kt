@@ -42,6 +42,8 @@ fun DrivingDashboardScreen(
     val transmissionState by viewModel.transmissionState.collectAsStateWithLifecycle()
 
     val isConnected = connectionState == ConnectionState.CONNECTED
+    val acAuto by viewModel.acAutoMode.collectAsStateWithLifecycle()
+    val steeringAngleData by viewModel.steeringAngleState.collectAsStateWithLifecycle()
 
     val rpm = liveDecodedMap["010C"] ?: "--"
     val speed = liveDecodedMap["010D"] ?: "--"
@@ -51,6 +53,7 @@ fun DrivingDashboardScreen(
     val load = liveDecodedMap["0104"] ?: "--"
     val voltage = liveDecodedMap["0142"] ?: "--"
     val iat = liveDecodedMap["010F"] ?: "--"
+    val fuelLevel = liveDecodedMap["012F"] ?: "--"
 
     Scaffold(
         topBar = {
@@ -154,9 +157,13 @@ fun DrivingDashboardScreen(
                     // Transmission Gear
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("GEAR: ", color = TextSecondaryDark, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        // Selector mode tag prefixes the gear: D3 / S3 / M3 like the cluster.
+                        // J1979 exposes no range PID, so the owner tags D/S/M with one tap and
+                        // every gear-second + shift point is logged under that tag (D-vs-S evidence).
+                        val mode = viewModel.rideMode
                         val gearText = when {
-                            transmissionState.actualGear != null -> "G${transmissionState.actualGear}"
-                            transmissionState.estimatedGear != null -> "G${transmissionState.estimatedGear} (Est)"
+                            transmissionState.actualGear != null -> "$mode${transmissionState.actualGear}"
+                            transmissionState.estimatedGear != null -> "$mode${transmissionState.estimatedGear} (Est)"
                             else -> transmissionState.selectedRange.ifBlank { "—" }
                         }
                         Text(
@@ -165,6 +172,70 @@ fun DrivingDashboardScreen(
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace
+                        )
+                    }
+
+                    // Tap to cycle the selector tag: D -> S -> M (paddle).
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(ElectricAmber.copy(alpha = 0.15f))
+                            .clickable {
+                                viewModel.setRideMode(
+                                    when (viewModel.rideMode) {
+                                        "D" -> "S"
+                                        "S" -> "M"
+                                        else -> "D"
+                                    }
+                                )
+                            }
+                            .padding(horizontal = 6.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            "MODE ${viewModel.rideMode}",
+                            color = ElectricAmber,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+
+                    // Tap to cycle the climate tag: OFF -> AC -> BLOWER. No J1979 PID exposes
+                    // the AC clutch on this ECU, so the owner tags it and the ride recorder
+                    // splits seconds/km/fuel per state -> per-ride AC-vs-no-AC economy.
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(
+                                when (viewModel.rideAc) {
+                                    "AC" -> NeonEmerald.copy(alpha = 0.15f)
+                                    "BLOWER" -> ElectricAmber.copy(alpha = 0.15f)
+                                    else -> TextSecondaryDark.copy(alpha = 0.15f)
+                                }
+                            )
+                            .clickable {
+                                viewModel.setRideAc(
+                                    when (viewModel.rideAc) {
+                                        "OFF" -> "AC"
+                                        "AC" -> "BLOWER"
+                                        else -> "OFF"
+                                    }
+                                )
+                            }
+                            .padding(horizontal = 6.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            when (viewModel.rideAc) {
+                                "AC" -> if (acAuto) "AC AUTO" else "AC ON"
+                                "BLOWER" -> "BLOWER"
+                                else -> "AC OFF"
+                            },
+                            color = when (viewModel.rideAc) {
+                                "AC" -> NeonEmerald
+                                "BLOWER" -> ElectricAmber
+                                else -> TextSecondaryDark
+                            },
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Black
                         )
                     }
 
@@ -316,18 +387,19 @@ fun DrivingDashboardScreen(
                         .weight(1f),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    val steerAngle = steeringAngleData.rawAngleDeg?.let { String.format(java.util.Locale.US, "%+.1f°", it) } ?: "--"
+                    HudGaugeCard(
+                        title = "STEER ANGLE",
+                        value = if (steeringAngleData.isValid) steerAngle else "--",
+                        icon = Icons.Default.DirectionsCar,
+                        color = if (steeringAngleData.isValid) CyberCyan else TextSecondaryDark,
+                        modifier = Modifier.weight(1f)
+                    )
                     HudGaugeCard(
                         title = "VOLTAGE",
                         value = voltage,
                         icon = Icons.Default.BatteryChargingFull,
                         color = NeonEmerald,
-                        modifier = Modifier.weight(1f)
-                    )
-                    HudGaugeCard(
-                        title = "THROTTLE",
-                        value = throttle,
-                        icon = Icons.Default.Tune,
-                        color = ElectricAmber,
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -339,17 +411,17 @@ fun DrivingDashboardScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     HudGaugeCard(
-                        title = "ENGINE LOAD",
-                        value = load,
-                        icon = Icons.Default.FitnessCenter,
-                        color = CyberCyanDark,
+                        title = "FUEL TANK",
+                        value = fuelLevel,
+                        icon = Icons.Default.LocalGasStation,
+                        color = ElectricAmber,
                         modifier = Modifier.weight(1f)
                     )
                     HudGaugeCard(
-                        title = "INTAKE TEMP",
-                        value = iat,
-                        icon = Icons.Default.Air,
-                        color = Color(0xFF81D4FA),
+                        title = "THROTTLE",
+                        value = throttle,
+                        icon = Icons.Default.Tune,
+                        color = ElectricAmber,
                         modifier = Modifier.weight(1f)
                     )
                 }

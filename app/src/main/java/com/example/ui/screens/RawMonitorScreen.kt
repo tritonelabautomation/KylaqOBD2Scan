@@ -197,7 +197,8 @@ fun RawMonitorScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(Color(0xFF070B0E))
-                    .testTag("raw_transactions_list")
+                    .testTag("raw_transactions_list"),
+                contentPadding = PaddingValues(bottom = 96.dp),
             ) {
                 items(filteredTransactions, key = { it.id }) { tx ->
                     RawTransactionRow(
@@ -227,7 +228,9 @@ fun RawTransactionRow(
     }
 
     val isResearch = tx.pid.equals("6D", ignoreCase = true) || tx.pid.equals("70", ignoreCase = true)
-    val timeFormatted = tx.timestampUtc.takeLast(12).removeSuffix("Z")
+    // Not takeLast(12).removeSuffix("Z"): the stamp is IST with a +05:30 offset now, so cutting a
+    // fixed number of characters off the end printed "05.123+05:30".
+    val timeFormatted = com.example.data.RecordTime.timeOfDay(tx.timestampUtc)
 
     Row(
         modifier = Modifier

@@ -21,32 +21,67 @@ class PidDecoderAdversarialTest {
     private val rpmPid = PidDefinition(
         id = "010C", service = "01", pid = "0C",
         name = "Engine RPM", shortName = "RPM", unit = "RPM",
-        decoderType = DecoderType.RPM_FORMULA, isResearch = false
+        decoderType = DecoderType.RPM_FORMULA, isResearch = false,
+        defaultIntervalMs = 500L
     )
 
     private val researchPid = PidDefinition(
         id = "01FF", service = "01", pid = "FF",
         name = "Research PID", shortName = "RFFD", unit = "",
-        decoderType = DecoderType.RESEARCH_RAW, isResearch = true
+        decoderType = DecoderType.RESEARCH_RAW, isResearch = true,
+        defaultIntervalMs = 500L
     )
 
     private val speedPid = PidDefinition(
         id = "010D", service = "01", pid = "0D",
         name = "Vehicle Speed", shortName = "SPD", unit = "km/h",
-        decoderType = DecoderType.RAW_A_KMH, isResearch = false
+        decoderType = DecoderType.RAW_A_KMH, isResearch = false,
+        defaultIntervalMs = 500L
     )
 
     private val throttlePid = PidDefinition(
         id = "0111", service = "01", pid = "11",
         name = "Throttle Position", shortName = "Throttle", unit = "%",
-        decoderType = DecoderType.PERCENT_255, isResearch = false
+        decoderType = DecoderType.PERCENT_255, isResearch = false,
+        defaultIntervalMs = 500L
     )
 
     private val fuelTypePid = PidDefinition(
         id = "0151", service = "01", pid = "51",
         name = "Fuel Type", shortName = "Fuel", unit = "",
-        decoderType = DecoderType.FUEL_TYPE_ENUM, isResearch = false
+        decoderType = DecoderType.FUEL_TYPE_ENUM, isResearch = false,
+        defaultIntervalMs = 500L
     )
+
+    // ── Category 0: J1979 error sentinels must not fake a reading ──────────
+
+    @Test
+    fun testLambdaErrorSentinel_ffff_decodesToNoData() {
+        val lambdaPid = PidDefinition(
+            id = "0144", service = "01", pid = "44",
+            name = "Commanded Equivalence Ratio (Lambda)",
+            shortName = "Lambda", unit = "λ",
+            decoderType = DecoderType.EQUIVALENCE_RATIO, isResearch = false,
+            defaultIntervalMs = 500L
+        )
+        val result = PidDecoder.decode(lambdaPid, listOf(0x41, 0x44, 0xFF, 0xFF))
+        assertNull("0xFFFF is the J1979 not-available indicator, not lambda 2.000",
+            result.numericValue)
+    }
+
+    @Test
+    fun testLambdaNormalValue_stillDecodes() {
+        val lambdaPid = PidDefinition(
+            id = "0144", service = "01", pid = "44",
+            name = "Commanded Equivalence Ratio (Lambda)",
+            shortName = "Lambda", unit = "λ",
+            decoderType = DecoderType.EQUIVALENCE_RATIO, isResearch = false,
+            defaultIntervalMs = 500L
+        )
+        // 0x8000 / 32768 = 1.000 lambda
+        val result = PidDecoder.decode(lambdaPid, listOf(0x41, 0x44, 0x80, 0x00))
+        assertEquals(1.0, result.numericValue!!, 1e-9)
+    }
 
     // ── Category 1: Wrong PID byte ────────────────────────────────────────
 

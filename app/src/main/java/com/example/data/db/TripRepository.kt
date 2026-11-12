@@ -5,6 +5,7 @@ import com.example.ai.AiAnalysisEngine
 import com.example.ai.CarDoctorReport
 import com.example.ai.DoctorObservation
 import com.example.ai.RuleBasedAnalysisEngine
+import com.example.data.db.dao.SampleRow
 import com.example.data.db.entities.*
 import com.example.model.TransactionRecord
 import kotlinx.coroutines.Dispatchers
@@ -36,6 +37,10 @@ class TripRepository(context: Context) {
 
     suspend fun insertVehicle(vehicle: VehicleEntity) = withContext(Dispatchers.IO) {
         newEntitiesDao.insertVehicle(vehicle)
+    }
+
+    suspend fun deleteVehicle(vehicleId: String) = withContext(Dispatchers.IO) {
+        newEntitiesDao.deleteVehicleById(vehicleId)
     }
 
     suspend fun insertProtocolTestResult(result: ProtocolTestResultEntity) = withContext(Dispatchers.IO) {
@@ -70,8 +75,57 @@ class TripRepository(context: Context) {
         tripDao.getTripById(tripId)
     }
 
+    suspend fun getAllTrips(): List<TripEntity> = withContext(Dispatchers.IO) {
+        tripDao.getAllTrips()
+    }
+
+    suspend fun recentTrips(limit: Int): List<TripEntity> = withContext(Dispatchers.IO) {
+        tripDao.getAllTrips().take(limit)
+    }
+
+    suspend fun samplesForTrips(tripIds: List<String>, pids: List<String>): List<TelemetrySampleEntity> = withContext(Dispatchers.IO) {
+        if (tripIds.isEmpty()) emptyList() else {
+            val expanded = pids.flatMap { p ->
+                listOf(p, if (p.startsWith("01")) p.substring(2) else "01$p")
+            }.distinct()
+            sampleDao.getSamplesForTrips(tripIds, expanded)
+        }
+    }
+
+    suspend fun trendSamples(tripIds: List<String>): List<TelemetrySampleEntity> = withContext(Dispatchers.IO) {
+        if (tripIds.isEmpty()) {
+            emptyList()
+        } else {
+            sampleDao.getSamplesForTrips(
+                tripIds,
+                // Both stored pid forms (4-hex + 2-hex) - see TripTrendAnalyzer.TREND_PROJECTION_PIDS.
+                com.example.analysis.TripTrendAnalyzer.TREND_PROJECTION_PIDS
+            )
+        }
+    }
+
     suspend fun getSamplesForTrip(tripId: String): List<TelemetrySampleEntity> = withContext(Dispatchers.IO) {
         sampleDao.getSamplesForTrip(tripId)
+    }
+
+    suspend fun getSampleCountForTrip(tripId: String): Int = withContext(Dispatchers.IO) {
+        sampleDao.getSampleCountForTrip(tripId)
+    }
+
+    /**
+     * Samples for on-device analysis. A multi-hour drive can have hundreds of thousands of
+     * rows; loading them all is what filled the 512 MB heap on 1.0.832. Above
+     * [com.example.data.HeapGuard.AI_ANALYSIS_MAX_SAMPLES] we stride so peak RAM stays bounded.
+     */
+    suspend fun getSamplesForAnalysis(tripId: String): List<TelemetrySampleEntity> = withContext(Dispatchers.IO) {
+        val count = sampleDao.getSampleCountForTrip(tripId)
+        val cap = com.example.data.HeapGuard.UI_SAMPLE_CAP
+        if (count <= cap) {
+            sampleDao.getSamplesForTrip(tripId)
+        } else {
+            val stride = ((count + cap - 1) / cap).coerceAtLeast(2)
+            sampleDao.getSamplesForTripStrided(tripId, stride)
+        }
     }
 
     suspend fun getRawLogsForTrip(tripId: String): List<RawLogEntity> = withContext(Dispatchers.IO) {
@@ -94,15 +148,85 @@ class TripRepository(context: Context) {
         tripDao.updateTrip(trip)
     }
 
+    suspend fun updateTripAltitude(tripId: String, maxAlt: Double?, minAlt: Double?) = withContext(Dispatchers.IO) {
+        val trip = tripDao.getTripById(tripId)
+        if (trip != null && (trip.maxAltitudeM == null || trip.minAltitudeM == null) && (maxAlt != null || minAlt != null)) {
+            tripDao.updateTrip(trip.copy(
+                maxAltitudeM = maxAlt ?: trip.maxAltitudeM,
+                minAltitudeM = minAlt ?: trip.minAltitudeM
+            ))
+        }
+    }
+
+    private val refuelDao = db.refuelEventDao()
+
+    suspend fun insertRefuelEvent(e: RefuelEventEntity) = withContext(Dispatchers.IO) {
+        refuelDao.insertRefuelEvent(e)
+    }
+
+    fun refuelEventsFlow(): Flow<List<RefuelEventEntity>> = refuelDao.refuelEventsFlow()
+
+    suspend fun refuelEvents(): List<RefuelEventEntity> = withContext(Dispatchers.IO) {
+        refuelDao.refuelEvents()
+    }
+
+    suspend fun calibrateRefuelEvent(idMs: Long, pumpL: Double) = withContext(Dispatchers.IO) {
+        refuelDao.calibrate(idMs, pumpL)
+    }
+
+    suspend fun calibratedPumpFor(idMs: Long): Double? = withContext(Dispatchers.IO) {
+        refuelDao.calibratedPumpFor(idMs)
+    }
+
+    suspend fun samplesSince(ts: Long, pids: List<String>): List<SampleRow> =
+        withContext(Dispatchers.IO) {
+            val expanded = pids.flatMap { p ->
+                listOf(p, if (p.startsWith("01")) p.substring(2) else "01$p")
+            }.distinct()
+            sampleDao.samplesSince(ts, expanded)
+        }
+
+    suspend fun latestNumericFor(pid: String): Double? = withContext(Dispatchers.IO) {
+        val alt = if (pid.startsWith("01")) pid.substring(2) else "01$pid"
+        sampleDao.latestNumericFor(pid) ?: sampleDao.latestNumericFor(alt)
+    }
+
+    suspend fun samplesForTripPids(tripId: String, pids: List<String>): List<SampleRow> =
+        withContext(Dispatchers.IO) {
+            val expanded = pids.flatMap { p ->
+                listOf(p, if (p.startsWith("01")) p.substring(2) else "01$p")
+            }.distinct()
+            sampleDao.samplesForTripPids(tripId, expanded)
+        }
+
+    /** Fuel/speed/odo/tank/rpm only — Factor 1 must not use the mixed 8k chart stride. */
+    suspend fun getFuelSummaryPoints(tripId: String): List<com.example.analysis.TripFuelSummary.SamplePoint> =
+        withContext(Dispatchers.IO) {
+            val pids = listOf("015E", "5E", "019D", "9D", "010D", "0D", "01A6", "A6", "012F", "2F", "010C", "0C")
+            val rows = sampleDao.samplesForTripPids(tripId, pids)
+            val points = rows.map {
+                com.example.analysis.TripFuelSummary.SamplePoint(it.pid, it.timestamp, it.numericValue)
+            }
+            com.example.data.HeapGuard.capPerPid(points, { it.pid })
+        }
+
+    suspend fun allTripsChronological(): List<TripEntity> = withContext(Dispatchers.IO) {
+        tripDao.getAllTrips().reversed()
+    }
+
     suspend fun insertSamples(samples: List<TelemetrySampleEntity>) = withContext(Dispatchers.IO) {
         if (samples.isNotEmpty()) {
-            sampleDao.insertSamples(samples)
+            samples.chunked(500).forEach { chunk ->
+                sampleDao.insertSamples(chunk)
+            }
         }
     }
 
     suspend fun insertRawLogs(logs: List<RawLogEntity>) = withContext(Dispatchers.IO) {
         if (logs.isNotEmpty()) {
-            rawLogDao.insertRawLogs(logs)
+            logs.chunked(500).forEach { chunk ->
+                rawLogDao.insertRawLogs(chunk)
+            }
         }
     }
 
@@ -112,13 +236,16 @@ class TripRepository(context: Context) {
 
     suspend fun runAiCarDoctorAnalysis(tripId: String): CarDoctorReport = withContext(Dispatchers.IO) {
         val trip = tripDao.getTripById(tripId) ?: throw IllegalArgumentException("Trip $tripId not found")
-        val samples = sampleDao.getSamplesForTrip(tripId)
+        val samples = getSamplesForAnalysis(tripId)
         val events = eventDao.getEventsForTrip(tripId)
 
         val report = ruleBasedEngine.analyzeTrip(trip, samples, events)
 
         // Store analysis in Room database
-        val nowUtc = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).format(Date())
+        // IST with its offset (owner mandate 2026-09-17). This used to be a literal 'Z' with no
+        // timeZone set, i.e. device-local wall time LABELLED as UTC - a stamp that lied about its
+        // own zone by five and a half hours.
+        val nowUtc = com.example.data.RecordTime.stamp()
         val obsArray = JSONArray()
         report.observations.forEach { obs ->
             val obj = JSONObject().apply {
@@ -159,6 +286,10 @@ class TripRepository(context: Context) {
         tripDao.updateTrip(trip.copy(healthScore = report.healthScore))
 
         report
+    }
+
+    suspend fun deleteSamplesForTrip(tripId: String) = withContext(Dispatchers.IO) {
+        sampleDao.deleteSamplesForTrip(tripId)
     }
 
     suspend fun deleteTrip(tripId: String) = withContext(Dispatchers.IO) {

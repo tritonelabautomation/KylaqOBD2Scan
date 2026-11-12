@@ -139,7 +139,8 @@ object SafetyValidator {
         // Safe configuration and query AT commands exact matches
         val safeAtExact = listOf(
             "ATZ", "ATE0", "ATE1", "ATL0", "ATL1", "ATS0", "ATS1", "ATH0", "ATH1",
-            "ATDP", "ATDPN", "ATRV", "ATBI", "ATBD", "ATI", "AT@1", "ATPC", "ATCS", "ATMA"
+            "ATDP", "ATDPN", "ATRV", "ATBI", "ATBD", "ATI", "AT@1", "AT@2", "ATPC", "ATCS", "ATMA",
+            "ATCRA", "ATAR", "ATWS", "ATD", "ATAL", "ATCFC0", "ATCFC1", "STI", "STP", "STDI"
         )
 
         if (safeAtExact.contains(cmd)) {
@@ -149,10 +150,15 @@ object SafetyValidator {
         // Pattern matched AT commands with strictly validated suffixes
         if (cmd.matches(Regex("^ATSP[0-9A]$"))) return ValidationResult.Allowed
         if (cmd.matches(Regex("^ATSH[0-9A-F]{3,8}$"))) return ValidationResult.Allowed
-        if (cmd.matches(Regex("^ATCRA[0-9A-F]{3,8}$"))) return ValidationResult.Allowed
+        if (cmd.matches(Regex("^ATCRA([0-9A-F]{3,8})?$"))) return ValidationResult.Allowed
+        if (cmd.matches(Regex("^ATCM[0-9A-F]{3,8}$"))) return ValidationResult.Allowed
+        if (cmd.matches(Regex("^ATCF[0-9A-F]{3,8}$"))) return ValidationResult.Allowed
         if (cmd.matches(Regex("^ATCAF[01]$"))) return ValidationResult.Allowed
         if (cmd.matches(Regex("^ATST[0-9A-F]{2}$"))) return ValidationResult.Allowed
         if (cmd.matches(Regex("^ATAT[012]$"))) return ValidationResult.Allowed
+        if (cmd.matches(Regex("^ATFCSH[0-9A-F]{3,8}$"))) return ValidationResult.Allowed
+        if (cmd.matches(Regex("^ATFCSD[0-9A-F]{2,16}$"))) return ValidationResult.Allowed
+        if (cmd.matches(Regex("^ATFCSM[0-9A-F]{1,2}$"))) return ValidationResult.Allowed
 
         return ValidationResult.Rejected("AT Command '$cmd' is not in the approved safe read-only configuration list or has malformed syntax.")
     }
