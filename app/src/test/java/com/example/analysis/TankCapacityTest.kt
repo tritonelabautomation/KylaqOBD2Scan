@@ -28,10 +28,14 @@ class TankCapacityTest {
     @Test
     fun effectiveCapacityIsFactoryUntilAFillMeasuresIt() {
         assertEquals(45.0, TankCapacity.effective(null), 1e-9)
-        assertEquals(45.0, TankCapacity.effective(50.0), 1e-9) // a stale 50 L boot is not a measurement
+        // Every device that has not logged a fill since the spec fix still carries the old
+        // 50 L boot value in prefs. That is a leftover, not a measurement.
+        assertEquals(45.0, TankCapacity.effective(50.0), 1e-9)
+        assertEquals(45.0, TankCapacity.effective(45.0), 1e-9)
         assertEquals(52.9, TankCapacity.effective(52.9), 1e-9)
         assertFalse(TankCapacity.isCalibrated(null))
         assertFalse(TankCapacity.isCalibrated(45.0))
+        assertFalse(TankCapacity.isCalibrated(50.0)) // legacy boot value
         assertTrue(TankCapacity.isCalibrated(52.9))
     }
 

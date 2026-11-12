@@ -67,6 +67,8 @@ class RefuelSplashTest {
         assertFalse(resolved.happenedOnThisTrip)
         assertNull(resolved.pumpLitres)
         assertNull(resolved.fillBeforePct)
+        assertNull(resolved.fillAfterPct)
+        assertEquals(RefuelSplash.Evidence.NONE, resolved.evidence)
     }
 
     @Test

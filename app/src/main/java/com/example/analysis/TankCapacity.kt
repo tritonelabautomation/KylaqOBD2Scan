@@ -20,6 +20,12 @@ object TankCapacity {
     /** Kylaq 1.0 TSI factory tank (autocar spec). Boot value, not the Kushaq 50 L. */
     const val NOMINAL_L = 45.0
 
+    /**
+     * The old boot value (the Kushaq number). Present in prefs on devices that have not
+     * logged a fill since 2026-11-12, so it must not be mistaken for a measured tank.
+     */
+    const val LEGACY_NOMINAL_L = 50.0
+
     const val MIN_L = 30.0
     const val MAX_L = 80.0
 
@@ -44,18 +50,23 @@ object TankCapacity {
         litres.takeIf { it in MIN_L..MAX_L }
 
     /**
-     * THE tank capacity to print on a trip: the calibrated value when one has been measured
-     * on this account, otherwise the factory 45 L. A settings value equal to the factory
-     * boot value is not a measurement, so it is not reported as one.
+     * THE tank capacity to print on a trip: the calibrated usable volume once a brim fill has
+     * measured one, otherwise the factory spec.
+     *
+     * A value equal to [LEGACY_NOMINAL_L] (50.0) is the old boot default, left in prefs on
+     * every device that has not logged a fill since the spec was corrected — it is a leftover,
+     * not a measurement, so it reads as the 45 L spec. Anything else (the owner's typed value
+     * or a fill-derived one) is honoured as-is.
      */
     fun effective(storedL: Double?): Double {
-        val stored = storedL?.let { sanitize(it) }
-        return stored ?: NOMINAL_L
+        val stored = storedL?.let { sanitize(it) } ?: return NOMINAL_L
+        return if (kotlin.math.abs(stored - LEGACY_NOMINAL_L) < 0.05) NOMINAL_L else stored
     }
 
-    /** True only when [storedL] differs from the factory value, i.e. a fill measured it. */
+    /** Capacity is "measured" when it differs from the factory 45 L spec. */
     fun isCalibrated(storedL: Double?): Boolean {
         val stored = storedL?.let { sanitize(it) } ?: return false
         return kotlin.math.abs(stored - NOMINAL_L) > 0.05
     }
+
 }

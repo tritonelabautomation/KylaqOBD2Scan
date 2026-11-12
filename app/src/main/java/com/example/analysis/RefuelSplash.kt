@@ -147,10 +147,14 @@ object RefuelSplash {
             fillAfterPct - fillBeforePct >= MIN_RISE_PCT
         ) fillAfterPct - fillBeforePct else null
 
+        // A trip that HAS a usable tank series is judged by it alone: no rise in its own
+        // samples means no fill here, even if the linker says the receipt landed inside the
+        // trip window (that is exactly the 2026-11-10 / 2026-11-12 false positive).
+        val samplesSpeak = levelSeries.count { validPct(it.second) } >= 3
         val shown = when {
             splash != null -> splash
-            // No usable tank series but the trip's own timer says the pump was here.
-            linkedReceiptOnTrip && fillBeforePct != null && fillAfterPct != null -> Splash(
+            // No usable tank series at all: the trip's own linked window is the only evidence.
+            !samplesSpeak && linkedReceiptOnTrip && fillBeforePct != null && fillAfterPct != null -> Splash(
                 beforePct = fillBeforePct,
                 afterPct = fillAfterPct,
                 atMs = 0L,
@@ -160,11 +164,13 @@ object RefuelSplash {
         }
 
         if (shown == null) {
+            // Nothing to show: no fill window, no pump litres — the caller may still name the
+            // batch, but must not print a "Fill x → y" line.
             return Result(
                 splash = null,
                 receiptMatches = false,
-                fillBeforePct = fillBeforePct,
-                fillAfterPct = fillAfterPct,
+                fillBeforePct = null,
+                fillAfterPct = null,
                 pumpLitres = null,
                 evidence = Evidence.NONE
             )
