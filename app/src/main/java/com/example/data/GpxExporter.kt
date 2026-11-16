@@ -23,12 +23,22 @@ object GpxExporter {
      * Generates a standard GPX 1.1 XML string from route points.
      * Compatible with Strava, Google Earth, Garmin Connect, and GPX viewers.
      */
-    fun exportToGpx(
+    /**
+     * Streams a GPX document straight to [writer], one track point at a time.
+     *
+     * AUDIT MEM-01 (2026-11-12): the original built the entire document in a `StringWriter`
+     * (`points.joinToString`, then `writer.toString()`) and only then wrote it out - two full
+     * copies of the whole route in memory at once. On a long drive that is the same class of
+     * allocation that caused the 2026-11-16 OOM, in an export path the heap fix did not cover.
+     * Writing incrementally keeps peak memory at a couple of formatted lines regardless of
+     * route length, and produces byte-identical output.
+     */
+    fun writeGpx(
+        writer: Appendable,
         tripName: String,
         points: List<GpsRoutePoint>,
         vehicle: String = "Škoda Kylaq 1.0 TSI"
-    ): String {
-        val writer = StringWriter()
+    ) {
         writer.appendLine("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
         writer.appendLine("<gpx version=\"1.1\" creator=\"KylaqOBD2Scan\" xmlns=\"http://www.topografix.com/GPX/1/1\">")
         writer.appendLine("  <metadata>")
@@ -57,18 +67,17 @@ object GpxExporter {
         writer.appendLine("    </trkseg>")
         writer.appendLine("  </trk>")
         writer.appendLine("</gpx>")
-
-        return writer.toString()
     }
 
     /**
-     * Generates a standard KML 2.2 document string for Google Earth / Google Maps.
+     * Streams a KML 2.2 document straight to [writer], one coordinate at a time.
+     * See [writeGpx] for why this exists (AUDIT MEM-01).
      */
-    fun exportToKml(
+    fun writeKml(
+        writer: Appendable,
         tripName: String,
         points: List<GpsRoutePoint>
-    ): String {
-        val writer = StringWriter()
+    ) {
         writer.appendLine("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
         writer.appendLine("<kml xmlns=\"http://www.opengis.net/kml/2.2\">")
         writer.appendLine("  <Document>")
@@ -87,16 +96,52 @@ object GpxExporter {
         writer.appendLine("        <tessellate>1</tessellate>")
         writer.appendLine("        <coordinates>")
 
-        val coordString = points.joinToString(" ") { pt ->
-            "${String.format(Locale.US, "%.6f", pt.longitude)},${String.format(Locale.US, "%.6f", pt.latitude)},${String.format(Locale.US, "%.1f", pt.altitudeM ?: 0.0)}"
+        // Coordinates are space separated in KML; emit them incrementally instead of
+        // materialising one giant joined string. The 10-space indent matches the original
+        // `writer.appendLine("          $coordString")` byte for byte.
+        writer.append("          ")
+        var first = true
+        for (pt in points) {
+            if (!first) writer.append(" ")
+            first = false
+            writer.append(
+                String.format(
+                    Locale.US,
+                    "%.6f,%.6f,%.1f",
+                    pt.longitude,
+                    pt.latitude,
+                    pt.altitudeM ?: 0.0
+                )
+            )
         }
-        writer.appendLine("          $coordString")
+        writer.appendLine()
+
         writer.appendLine("        </coordinates>")
         writer.appendLine("      </LineString>")
         writer.appendLine("    </Placemark>")
         writer.appendLine("  </Document>")
         writer.appendLine("</kml>")
+    }
 
+    fun exportToGpx(
+        tripName: String,
+        points: List<GpsRoutePoint>,
+        vehicle: String = "Škoda Kylaq 1.0 TSI"
+    ): String {
+        val writer = StringWriter()
+        writeGpx(writer, tripName, points, vehicle)
+        return writer.toString()
+    }
+
+    /**
+     * Generates a standard KML 2.2 document string for Google Earth / Google Maps.
+     */
+    fun exportToKml(
+        tripName: String,
+        points: List<GpsRoutePoint>
+    ): String {
+        val writer = StringWriter()
+        writeKml(writer, tripName, points)
         return writer.toString()
     }
 
@@ -105,7 +150,8 @@ object GpxExporter {
      */
     fun saveGpxFile(destFile: File, tripName: String, points: List<GpsRoutePoint>): File {
         destFile.parentFile?.mkdirs()
-        destFile.writeText(exportToGpx(tripName, points))
+        // AUDIT MEM-01: stream to disk; never build the document in memory first.
+        destFile.bufferedWriter().use { writeGpx(it, tripName, points) }
         return destFile
     }
 
@@ -114,7 +160,8 @@ object GpxExporter {
      */
     fun saveKmlFile(destFile: File, tripName: String, points: List<GpsRoutePoint>): File {
         destFile.parentFile?.mkdirs()
-        destFile.writeText(exportToKml(tripName, points))
+        // AUDIT MEM-01: stream to disk; never build the document in memory first.
+        destFile.bufferedWriter().use { writeKml(it, tripName, points) }
         return destFile
     }
 

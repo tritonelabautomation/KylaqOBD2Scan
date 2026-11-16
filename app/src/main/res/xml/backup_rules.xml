@@ -11,5 +11,9 @@
          Only lightweight shared preferences (user settings, profiles) are backed up. -->
     <exclude domain="database" path="obd_research_logger.db"/>
     <exclude domain="file" path="recordings"/>
+    <!-- AUDIT SEC-01 (2026-11-12): raw OBD frame history and crash stack traces carry vehicle
+         and location data; keep them out of cloud auto-backup. -->
+    <exclude domain="file" path="raw_logs"/>
+    <exclude domain="file" path="crash_logs"/>
     <include domain="sharedpref" path="."/>
 </full-backup-content>

@@ -1173,6 +1173,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         /** 16 MiB of CSV is far past any real Fuelio export; beyond it the file is not one. */
         private const val MAX_FUELIO_EXPORT_CHARS = 16 * 1024 * 1024
+
+        /** AUDIT AI-02: how many chat messages are retained in memory for the AI Doctor. */
+        internal const val AI_CHAT_HISTORY_LIMIT = 60
+
+        /** AUDIT AI-02: how many of those are sent as context on the next request. */
+        internal const val AI_REQUEST_HISTORY_LIMIT = 20
     }
 
     fun verifySelectedProtocol() {
@@ -3088,14 +3094,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun sendAiMessage(query: String) {
         val userMsg = com.example.model.ChatMessage(sender = com.example.model.MessageSender.USER, text = query)
         val loadingMsg = com.example.model.ChatMessage(sender = com.example.model.MessageSender.CAR_DOCTOR, text = "Analyzing...")
-        _aiChatHistory.value = _aiChatHistory.value + userMsg + loadingMsg
+        // AUDIT AI-02 (2026-11-12): this list used to grow for the whole process lifetime, and
+        // the entire list was then serialised into every Gemini request. Keeping only a tail
+        // bounds both the heap and the request body; the conversation still reads correctly
+        // because the oldest turns are the ones that no longer matter to a diagnosis.
+        _aiChatHistory.value = (_aiChatHistory.value + userMsg + loadingMsg)
+            .takeLast(AI_CHAT_HISTORY_LIMIT)
 
         viewModelScope.launch {
             val context = buildDiagnosticContext()
             
             // Map history to AiMessage format
+            // AUDIT AI-02: bound what goes over the wire independently of what is stored, so a
+            // long session cannot produce an unbounded request body (or an unbounded bill).
             val historyForAi = _aiChatHistory.value
                 .dropLast(1) // Remove the "Analyzing..." message
+                .takeLast(AI_REQUEST_HISTORY_LIMIT)
                 .map {
                     com.example.ai.AiMessage(
                         role = if (it.sender == com.example.model.MessageSender.USER) "user" else "model",

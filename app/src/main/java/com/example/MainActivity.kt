@@ -309,7 +309,18 @@ fun MainApp(viewModel: MainViewModel) {
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
-        val allGranted = permissions.values.all { it }
+        // AUDIT PERM-01 (2026-11-12): this used to be `permissions.values.all { it }`, which
+        // folded ACCESS_FINE_LOCATION, ACCESS_BACKGROUND_LOCATION and POST_NOTIFICATIONS into
+        // one "Bluetooth is granted" flag. Declining only the notification prompt set it false,
+        // so the app believed Bluetooth was unavailable while it was fully granted. The flag now
+        // reflects the Bluetooth permissions it claims to describe and nothing else.
+        val bluetoothKeys = permissions.keys.filter {
+            it == Manifest.permission.BLUETOOTH_CONNECT ||
+                it == Manifest.permission.BLUETOOTH_SCAN ||
+                it == Manifest.permission.BLUETOOTH ||
+                it == Manifest.permission.BLUETOOTH_ADMIN
+        }
+        val allGranted = bluetoothKeys.isNotEmpty() && bluetoothKeys.all { permissions[it] == true }
         hasBluetoothPermission = allGranted
         // Background location (owner field report 2026-09-18: "Altitude"). On API 29 the startup
         // dialog carries an "allow all the time" checkbox; if the foreground grant came back but the

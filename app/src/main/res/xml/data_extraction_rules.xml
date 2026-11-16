@@ -10,6 +10,12 @@
              are included in cloud backup. -->
         <exclude domain="database" path="obd_research_logger.db" />
         <exclude domain="file" path="recordings" />
+        <!-- AUDIT SEC-01 (2026-11-12): raw_logs/ holds the full OBD frame history and
+             crash_logs/ holds stack traces that quote vehicle and location data. Neither is
+             large enough to trip the backup quota, but both are rich in exactly the telemetry
+             the owner never agreed to upload, so neither may leave the device by auto-backup. -->
+        <exclude domain="file" path="raw_logs" />
+        <exclude domain="file" path="crash_logs" />
         <include domain="sharedpref" path="." />
     </cloud-backup>
     <device-transfer>

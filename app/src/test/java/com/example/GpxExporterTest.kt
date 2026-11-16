@@ -2,6 +2,7 @@ package com.example
 
 import com.example.data.GpsRoutePoint
 import com.example.data.GpxExporter
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -100,5 +101,64 @@ class GpxExporterTest {
         } finally {
             tempFile.delete()
         }
+    }
+
+    /**
+     * AUDIT MEM-01 (2026-11-12): the streaming writers must produce exactly what the old
+     * StringWriter path produced. The export format is what Google Earth and the owner's
+     * tooling consume, so "streamed" must not mean "slightly different".
+     */
+    @Test
+    fun `streamed GPX output is identical to the string export`() {
+        val points = listOf(
+            GpsRoutePoint(
+                timestampMs = 1726000000000L,
+                latitude = 17.4483,
+                longitude = 78.3915,
+                altitudeM = 542.0,
+                speedKmh = 45.0,
+                rpm = 1800.0
+            ),
+            GpsRoutePoint(
+                timestampMs = 1726000060000L,
+                latitude = 17.4490,
+                longitude = 78.3920,
+                altitudeM = 544.5,
+                speedKmh = 52.0,
+                rpm = null
+            )
+        )
+        val stringExport = GpxExporter.exportToGpx("Morning run", points)
+        val streamed = StringBuilder().also { GpxExporter.writeGpx(it, "Morning run", points) }
+        assertEquals(stringExport, streamed.toString())
+    }
+
+    @Test
+    fun `streamed KML output is identical to the string export`() {
+        val points = listOf(
+            GpsRoutePoint(
+                timestampMs = 1726000000000L,
+                latitude = 17.4483,
+                longitude = 78.3915,
+                altitudeM = 542.0,
+                speedKmh = 45.0,
+                rpm = 1800.0
+            )
+        )
+        val stringExport = GpxExporter.exportToKml("Evening run", points)
+        val streamed = StringBuilder().also { GpxExporter.writeKml(it, "Evening run", points) }
+        assertEquals(stringExport, streamed.toString())
+    }
+
+    @Test
+    fun `streamed exports handle an empty route without throwing`() {
+        assertEquals(
+            GpxExporter.exportToGpx("Empty", emptyList()),
+            StringBuilder().also { GpxExporter.writeGpx(it, "Empty", emptyList()) }.toString()
+        )
+        assertEquals(
+            GpxExporter.exportToKml("Empty", emptyList()),
+            StringBuilder().also { GpxExporter.writeKml(it, "Empty", emptyList()) }.toString()
+        )
     }
 }
