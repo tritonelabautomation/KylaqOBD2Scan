@@ -3,6 +3,7 @@ package com.example.data
 import android.util.JsonReader
 import android.util.JsonToken
 import com.example.model.RecordingMetadata
+import com.example.model.TransactionRecord
 import java.io.File
 import java.io.Reader
 import java.io.Writer
@@ -142,12 +143,21 @@ object SessionJsonReader {
         var startTimeUtc = ""
         var endTimeUtc: String? = null
         var appVersion: String? = null
+        var vehicleId: String? = null
+        var maxAltitudeM: Double? = null
+        var minAltitudeM: Double? = null
+        var minVoltageV: Double? = null
+        var maxVoltageV: Double? = null
+        var startFuelPercent: Double? = null
+        var endFuelPercent: Double? = null
+        var fuelDeltaPercent: Double? = null
         jr.beginObject()
         while (jr.hasNext()) {
             when (jr.nextName()) {
                 "sessionId" -> sessionId = nextStringOrNull(jr) ?: ""
                 "sessionName" -> sessionName = nextStringOrNull(jr)
                 "vehicle" -> vehicle = nextStringOrNull(jr)
+                "vehicleId" -> vehicleId = nextStringOrNull(jr)
                 "profile" -> profile = nextStringOrNull(jr)
                 "adapter" -> adapter = nextStringOrNull(jr)
                 "protocol" -> protocol = nextStringOrNull(jr)
@@ -155,6 +165,17 @@ object SessionJsonReader {
                 "startTimeUtc" -> startTimeUtc = nextStringOrNull(jr) ?: ""
                 "endTimeUtc" -> endTimeUtc = nextStringOrNull(jr)
                 "appVersion" -> appVersion = nextStringOrNull(jr)
+                // Measured trip summaries. These MUST be carried through: a backup ->
+                // reinstall -> import round trip that dropped them silently stripped the
+                // elevation profile, the battery extremes and the fuel change from every past
+                // trip (the same data-loss the old JSONObject reader guarded against).
+                "maxAltitudeM" -> maxAltitudeM = nextDoubleOrNull(jr)
+                "minAltitudeM" -> minAltitudeM = nextDoubleOrNull(jr)
+                "minVoltageV" -> minVoltageV = nextDoubleOrNull(jr)
+                "maxVoltageV" -> maxVoltageV = nextDoubleOrNull(jr)
+                "startFuelPercent" -> startFuelPercent = nextDoubleOrNull(jr)
+                "endFuelPercent" -> endFuelPercent = nextDoubleOrNull(jr)
+                "fuelDeltaPercent" -> fuelDeltaPercent = nextDoubleOrNull(jr)
                 else -> jr.skipValue()
             }
         }
@@ -164,14 +185,178 @@ object SessionJsonReader {
             sessionId = sessionId,
             sessionName = sessionName ?: "Session $sessionId",
             vehicle = vehicle ?: "Škoda Kylaq 1.0 TSI",
+            vehicleId = vehicleId,
             profile = profile ?: "India-Market 1.0 TSI",
             adapter = adapter ?: "ELM327 v1.5",
             protocol = protocol ?: "ISO 15765-4",
             canBitrate = canBitrate ?: "500 kbps",
             startTimeUtc = startTimeUtc,
             endTimeUtc = endTimeUtc,
-            appVersion = appVersion ?: "1.0"
+            appVersion = appVersion ?: "1.0",
+            maxAltitudeM = maxAltitudeM,
+            minAltitudeM = minAltitudeM,
+            minVoltageV = minVoltageV,
+            maxVoltageV = maxVoltageV,
+            startFuelPercent = startFuelPercent,
+            endFuelPercent = endFuelPercent,
+            fuelDeltaPercent = fuelDeltaPercent
         )
+    }
+
+    /**
+     * Streams a session JSON body into [onTransaction], returning the metadata and the number of
+     * transaction objects visited.
+     *
+     * ## Why (owner crashes 2026-11-16)
+     *
+     * `ZipImporter` used to restore an imported trip with `JSONObject(jsonFile.readText())`. For a
+     * drive bundle that is the entire document as one `String`, then a complete `org.json` tree on
+     * top of it, then a `TransactionRecord` list on top of THAT - three full copies of the drive,
+     * simultaneously, in a process that had already died at
+     * `Failed to allocate a 56 byte allocation ... target footprint 536870912`. Importing a
+     * long drive was effectively guaranteed to blow the heap.
+     *
+     * [JsonReader] parses incrementally: peak memory is one transaction object, and the caller's
+     * callback decides what to keep. `metadata` is captured field by field exactly as
+     * [readMetadata] does, and unknown sibling arrays (`anomalies`, `dtcs`, ...) are `skipValue()`d
+     * so a newer bundle's extra sections cannot break an older app.
+     */
+    fun readSession(
+        input: Reader,
+        onTransaction: (TransactionRecord) -> Unit
+    ): Pair<RecordingMetadata?, Int> {
+        var meta: RecordingMetadata? = null
+        var txCount = 0
+        try {
+            JsonReader(input).use { jr ->
+                jr.beginObject()
+                while (jr.hasNext()) {
+                    when (jr.nextName()) {
+                        "sessionMetadata" -> meta = readMetaObject(jr)
+                        "transactions" -> {
+                            jr.beginArray()
+                            while (jr.hasNext()) {
+                                val tx = readTransactionObject(jr)
+                                if (tx != null) {
+                                    txCount++
+                                    onTransaction(tx)
+                                }
+                            }
+                            jr.endArray()
+                        }
+                        else -> jr.skipValue()
+                    }
+                }
+                jr.endObject()
+            }
+        } catch (_: Exception) {
+            // A truncated or foreign document: keep whatever was streamed before the damage and
+            // report no metadata rather than throwing away a partially readable bundle.
+            return null to txCount
+        }
+        return meta to txCount
+    }
+
+    /**
+     * One `transactions[]` element. Field defaults mirror the old `JSONObject` path exactly
+     * (`canRxId` fell back to "7E8", `direction` to RX, `responseStatus` to OK, and so on), so a
+     * streamed import produces byte-identical records to the one it replaces.
+     */
+    private fun readTransactionObject(jr: JsonReader): TransactionRecord? {
+        var id: String? = null
+        var timestampUtc: String? = null
+        var timestampMonotonic = 0L
+        var direction = com.example.model.Direction.RX
+        var elmCommand = ""
+        var canTxId = ""
+        var canRxId = "7E8"
+        var requestHex = ""
+        var responseHex = ""
+        var service = ""
+        var pid = ""
+        var rawPayload = ""
+        var decodedParameter = ""
+        var decodedValue: Double? = null
+        var decodedValueDisplay = ""
+        var unit = ""
+        var responseStatus = com.example.model.ResponseStatus.OK
+        var errorMessage: String? = null
+
+        jr.beginObject()
+        while (jr.hasNext()) {
+            when (jr.nextName()) {
+                "id" -> id = nextStringOrNull(jr)
+                "timestampUtc" -> timestampUtc = nextStringOrNull(jr)
+                "timestampMonotonic" -> timestampMonotonic = nextLongOrNull(jr)
+                "direction" -> direction = parseEnum(
+                    nextStringOrNull(jr), com.example.model.Direction.RX
+                ) { com.example.model.Direction.valueOf(it) }
+                "elmCommand" -> elmCommand = nextStringOrNull(jr) ?: ""
+                "canTxId" -> canTxId = nextStringOrNull(jr) ?: ""
+                "canRxId" -> canRxId = nextStringOrNull(jr) ?: "7E8"
+                "requestHex" -> requestHex = nextStringOrNull(jr) ?: ""
+                "responseHex" -> responseHex = nextStringOrNull(jr) ?: ""
+                "service" -> service = nextStringOrNull(jr) ?: ""
+                "pid" -> pid = nextStringOrNull(jr) ?: ""
+                "rawPayload" -> rawPayload = nextStringOrNull(jr) ?: ""
+                "decodedParameter" -> decodedParameter = nextStringOrNull(jr) ?: ""
+                "decodedValue" -> decodedValue = nextDoubleOrNull(jr)
+                "decodedValueDisplay" -> decodedValueDisplay = nextStringOrNull(jr) ?: ""
+                "unit" -> unit = nextStringOrNull(jr) ?: ""
+                "responseStatus" -> responseStatus = parseEnum(
+                    nextStringOrNull(jr), com.example.model.ResponseStatus.OK
+                ) { com.example.model.ResponseStatus.valueOf(it) }
+                "errorMessage" -> errorMessage = nextStringOrNull(jr)
+                else -> jr.skipValue()
+            }
+        }
+        jr.endObject()
+        // `timestampUtc` was `optString(..., startTimeUtc)` in the old reader; a missing one is
+        // left empty here and the caller substitutes the bundle's start time (see ZipImporter).
+        return TransactionRecord(
+            id = id ?: java.util.UUID.randomUUID().toString(),
+            timestampUtc = timestampUtc ?: "",
+            timestampMonotonic = timestampMonotonic,
+            direction = direction,
+            elmCommand = elmCommand,
+            canTxId = canTxId,
+            canRxId = canRxId,
+            requestHex = requestHex,
+            responseHex = responseHex,
+            service = service,
+            pid = pid,
+            rawPayload = rawPayload,
+            decodedParameter = decodedParameter,
+            decodedValue = decodedValue,
+            decodedValueDisplay = decodedValueDisplay,
+            unit = unit,
+            responseStatus = responseStatus,
+            errorMessage = errorMessage?.ifBlank { null }
+        )
+    }
+
+    /**
+     * Enum-or-default, matching the old `optString` + `valueOf` + catch behaviour: a bundle written
+     * by a newer build with an enum value this build does not know must not fail the import.
+     */
+    private inline fun <T> parseEnum(raw: String?, fallback: T, of: (String) -> T): T =
+        if (raw == null) fallback else try { of(raw) } catch (_: Exception) { fallback }
+
+    private fun nextLongOrNull(jr: JsonReader): Long = try {
+        if (jr.peek() == JsonToken.NUMBER) jr.nextLong() else { jr.skipValue(); 0L }
+    } catch (_: Exception) {
+        0L
+    }
+
+    private fun nextDoubleOrNull(jr: JsonReader): Double? = try {
+        when (jr.peek()) {
+            JsonToken.NULL -> { jr.nextNull(); null }
+            JsonToken.NUMBER -> jr.nextDouble()
+            JsonToken.STRING -> jr.nextString().toDoubleOrNull()
+            else -> { jr.skipValue(); null }
+        }
+    } catch (_: Exception) {
+        null
     }
 
     private fun nextStringOrNull(jr: JsonReader): String? =

@@ -1170,6 +1170,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val batchTestResults = _batchTestResults.asStateFlow()
     companion object {
         const val PROTOCOL_SETTLE_DELAY_MS = 400L
+
+        /** 16 MiB of CSV is far past any real Fuelio export; beyond it the file is not one. */
+        private const val MAX_FUELIO_EXPORT_CHARS = 16 * 1024 * 1024
     }
 
     fun verifySelectedProtocol() {
@@ -1686,8 +1689,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun importFuelioCsv(uri: android.net.Uri) {
         viewModelScope.launch {
             try {
+                // Bounded read. A Fuelio export is a few hundred KB; anything vastly larger is a
+                // wrong file, and slurping it whole into a heap that already crashed at 512 MB
+                // (owner reports 2026-11-16) is exactly the kind of `readText()` this audit removed.
                 val text = getApplication<android.app.Application>().contentResolver.openInputStream(uri)?.use {
-                    it.reader(java.nio.charset.StandardCharsets.UTF_8).readText()
+                    val reader = it.reader(java.nio.charset.StandardCharsets.UTF_8)
+                    val sb = StringBuilder()
+                    val buf = CharArray(8192)
+                    while (true) {
+                        val n = reader.read(buf)
+                        if (n < 0) break
+                        sb.append(buf, 0, n)
+                        if (sb.length > MAX_FUELIO_EXPORT_CHARS) break
+                    }
+                    sb.toString()
                 }
                 if (text == null) {
                     _fuelioImportNotice.value = "Could not read that file - pick the CSV exported from Fuelio."

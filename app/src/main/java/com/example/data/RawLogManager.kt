@@ -64,6 +64,12 @@ class RawLogManager(
         const val CONN_LOG_RETENTION_DAYS = 7L
 
         /**
+         * How often the published list may be rebuilt. Four times a second reads as real-time on
+         * screen; per-frame rebuilding was pure allocation churn (see [onRawLog]).
+         */
+        const val PUBLISH_INTERVAL_MS = 250L
+
+        /**
          * Pure retention rule, exposed for tests: a connection log is prunable when it is older
          * than the window; a session log never is, whatever its age.
          */
@@ -83,6 +89,26 @@ class RawLogManager(
     private var currentSessionLogFile: File? = null
     private var fileWriter: FileWriter? = null
 
+    /**
+     * Frames per second, not per frame-pair.
+     *
+     * `internalBuffer.toList()` on every `onRawLog` call made the live console allocate a fresh
+     * 1000-element list at the polling rate - dozens per second, for the whole drive. That churn
+     * is one of the reasons the heap was permanently close to its ceiling by the time the 2026-11-16
+     * `OutOfMemoryError` (56-byte allocation, `target footprint 536870912`) fired. The list the
+     * console renders does not need to be fresher than a human eye can read, so publishing is
+     * throttled to [PUBLISH_INTERVAL_MS] and the ring itself never leaves this class.
+     */
+    private var lastPublishMs: Long = 0L
+
+    /**
+     * Current ring size, which the memory guard shrinks under pressure. Disk is unaffected:
+     * every line is written and flushed to `raw_log_<sessionId>.txt` regardless of this number,
+     * so a smaller ring costs the owner nothing but a shorter scrollback.
+     */
+    @Volatile
+    private var ringLimit: Int = maxBufferCapacity
+
     /** Lines that could not be written. Non-zero means the log is INCOMPLETE - say so. */
     private var failures: Int = 0
     private var lastFailureText: String? = null
@@ -95,9 +121,45 @@ class RawLogManager(
     /** The file lines are going to right now, or null. */
     val currentLogFile: File? get() = currentSessionLogFile
 
+    /** How often the published list may be rebuilt. Four times a second reads as real-time. */
+    private val publishIntervalMs: Long = PUBLISH_INTERVAL_MS
+
+    /**
+     * Strongly held because [MemoryGuard] registers shedder WEAKLY - an inline lambda would be
+     * collected at once and never fire. Declared before the `init` block so it exists when the
+     * registration below runs (Kotlin initialises in declaration order).
+     */
+    private val ringShedder: (HeapPressure.Level) -> Unit = { level -> applyRingLimit(level) }
+
     init {
         if (!logDirectory.exists()) {
             logDirectory.mkdirs()
+        }
+        // Keep the ring honest about the heap: under pressure it shrinks, and it never grows back
+        // past what the guard allows. Registered here so a console opened mid-drive is covered.
+        MemoryGuard.addShedder(ringShedder)
+    }
+
+    private fun applyRingLimit(level: HeapPressure.Level) {
+        val cap = HeapPressure.ringSizeAt(
+            level,
+            maxBufferCapacity,
+            HeapGuard.RAW_LOG_RING_ELEVATED,
+            HeapGuard.RAW_LOG_RING_CRITICAL
+        ).coerceAtMost(maxBufferCapacity)
+        ringLimit = cap
+        synchronized(internalBuffer) {
+            var trimmed = false
+            while (internalBuffer.size > cap) {
+                internalBuffer.removeFirst()
+                trimmed = true
+            }
+            // Republish immediately on a shed so the console does not keep showing rows that
+            // are no longer held; on the way back up leave the next frame to repopulate it.
+            if (trimmed) {
+                lastPublishMs = 0L
+                _logs.value = internalBuffer.toList()
+            }
         }
     }
 
@@ -132,11 +194,19 @@ class RawLogManager(
         )
 
         synchronized(internalBuffer) {
-            if (internalBuffer.size >= maxBufferCapacity) {
+            val cap = ringLimit.coerceAtLeast(1)
+            if (internalBuffer.size >= cap) {
                 internalBuffer.removeFirst()
             }
             internalBuffer.addLast(entry)
-            _logs.value = internalBuffer.toList()
+            // Throttled publish: the ring keeps every line up to its cap, but the observer list
+            // (a full copy plus a recomposition) is rebuilt at most four times a second rather
+            // than on every single frame. See [PUBLISH_INTERVAL_MS].
+            val now = System.currentTimeMillis()
+            if (MemoryGuard.shouldPublish(lastPublishMs, now, publishIntervalMs)) {
+                lastPublishMs = now
+                _logs.value = internalBuffer.toList()
+            }
         }
 
         // Write to file if a log is open. Flushed per line: a kill after this call keeps it.

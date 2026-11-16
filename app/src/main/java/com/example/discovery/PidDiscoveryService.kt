@@ -712,11 +712,26 @@ class PidDiscoveryService(
         return sb.toString()
     }
 
+    /**
+     * Discovery console, bounded.
+     *
+     * This list had NO cap: a full PID sweep appends thousands of lines (`ECU 7E8 Bitmap for
+     * 0120: ... (32 supported)` per base PID, per ECU, plus every salvage attempt) and kept them
+     * all for the life of the process. That is exactly the kind of
+     * long-lived growth that made a 56-byte allocation fail (owner crash 2026-11-16). The full
+     * record is still written to the JSON export, so the console only needs a readable tail.
+     */
     private fun appendLog(message: String) {
         val timestamp = logStamp()
         val entry = "[$timestamp] $message"
+        val cap = com.example.data.MemoryGuard.ringSize(
+            com.example.data.HeapGuard.DISCOVERY_LOG_CAP,
+            com.example.data.HeapGuard.DISCOVERY_LOG_CAP / 2,
+            com.example.data.HeapGuard.DISCOVERY_LOG_CAP / 5
+        ).coerceAtLeast(1)
         val current = _rawLogEntries.value.toMutableList()
         current.add(entry)
+        while (current.size > cap) current.removeAt(0)
         _rawLogEntries.value = current
     }
 }

@@ -2,6 +2,8 @@ package com.example.scheduler
 
 import android.os.SystemClock
 import com.example.bluetooth.ElmTransport
+import com.example.data.HeapGuard
+import com.example.data.MemoryGuard
 import com.example.data.PollingSpeedMode
 import com.example.data.RecordingManager
 import com.example.data.SettingsRepository
@@ -107,6 +109,15 @@ class ObdScheduler(
     private val _pidRawHistory = MutableStateFlow<Map<String, List<TransactionRecord>>>(emptyMap())
     val pidRawHistory: StateFlow<Map<String, List<TransactionRecord>>> = _pidRawHistory.asStateFlow()
     @Volatile private var lastHistoryPublishMs = 0L
+
+    private companion object {
+        /**
+         * How often the research history may be republished. It used to be every frame past a
+         * 500 ms gate, which still meant a full `mapValues { toList() }` several times a second
+         * for every polled PID - all of it garbage within milliseconds.
+         */
+        const val HISTORY_PUBLISH_MS = 1_000L
+    }
 
     // Powertrain Intelligence StateFlows
     private val _realtimeEconomy = MutableStateFlow(
@@ -916,16 +927,32 @@ class ObdScheduler(
     private fun primaryNumeric(pidId: String): Double? =
         telemetryStore.numericValue(pidId, capabilityManager.getPreferredEcuForPid(pidId))
 
+    /**
+     * Per-PID research history, at most [HeapGuard.RAW_HISTORY_PER_PID] frames each (fewer under
+     * heap pressure - see [MemoryGuard]).
+     *
+     * The map is a fixed, small set (one deque per polled PID) and each deque is a ring, so this
+     * is bounded by construction. What was NOT bounded was the republishing: every frame took a
+     * `mapValues { toList() }` snapshot of every PID's whole ring - hundreds of fresh lists per
+     * second during a drive, all of them short-lived garbage. Under the 512 MB heap that
+     * allocation rate is what kept the heap full between collections (owner crash 2026-11-16).
+     * The snapshot now runs on a timer, and its cadence slows further as pressure rises.
+     */
     private fun appendRawHistory(pidId: String, record: TransactionRecord) {
-        val deque = rawHistoryMap.getOrPut(pidId) { java.util.ArrayDeque(50) }
+        val cap = MemoryGuard.ringSize(
+            HeapGuard.RAW_HISTORY_PER_PID,
+            HeapGuard.RAW_HISTORY_PER_PID_ELEVATED,
+            HeapGuard.RAW_HISTORY_PER_PID_CRITICAL
+        )
+        val deque = rawHistoryMap.getOrPut(pidId) { java.util.ArrayDeque(cap.coerceAtLeast(1)) }
         synchronized(deque) {
-            if (deque.size >= 50) {
+            while (deque.size >= cap.coerceAtLeast(1)) {
                 deque.removeFirst()
             }
             deque.addLast(record)
         }
         val now = SystemClock.elapsedRealtime()
-        if (now - lastHistoryPublishMs > 500L) {
+        if (MemoryGuard.shouldPublish(lastHistoryPublishMs, now, HISTORY_PUBLISH_MS)) {
             lastHistoryPublishMs = now
             val snapshot = rawHistoryMap.mapValues { entry ->
                 synchronized(entry.value) { entry.value.toList() }

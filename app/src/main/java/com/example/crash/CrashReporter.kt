@@ -41,6 +41,16 @@ object CrashReporter {
     private const val KEY_LAST_UPLOAD_MS = "last_upload_ms"
     private const val TAG = "CrashReporter"
 
+    /**
+     * Crash records examined per launch. Two failures in one session (the 2026-11-16 pair) both
+     * get reported; a hundred-deep backlog drains over a few starts instead of loading every
+     * record into a heap that is already suspect.
+     */
+    private const val MAX_UPLOADS_PER_LAUNCH = 3
+
+    /** A single crash record is a few KB; anything past this is not a stack trace. */
+    private const val MAX_CRASH_FILE_BYTES = 512L * 1024L
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     fun onAppStarted(context: Context) {
@@ -84,8 +94,14 @@ object CrashReporter {
 
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val uploaded = prefs.getStringSet(KEY_UPLOADED, emptySet())?.toMutableSet() ?: mutableSetOf()
-        val files = CrashJournal.crashFiles(context)
-        if (files.isEmpty()) return
+        // Newest first, and only the newest few per launch. `crashFiles` lists EVERY record ever
+        // written, and the app was crashing in a loop: reading each file with `readText()` to
+        // build an issue - at startup, on the heap that had just died of exhaustion - is how the
+        // uploader becomes part of the problem. Files are never deleted (never-lose-logs); the
+        // backlog simply drains a few per launch, newest first.
+        val allFiles = CrashJournal.crashFiles(context)
+        if (allFiles.isEmpty()) return
+        val files = allFiles.take(MAX_UPLOADS_PER_LAUNCH)
 
         // Throttle: at most once per 5 minutes to avoid spamming GitHub on boot loop (unless forced)
         val now = System.currentTimeMillis()
@@ -98,6 +114,8 @@ object CrashReporter {
         var anyUploaded = false
         for (file in files) {
             if (file.name in uploaded) continue
+            // Size-guarded read: a corrupt or runaway file cannot be loaded whole.
+            if (file.length() > MAX_CRASH_FILE_BYTES) continue
             val text = runCatching { file.readText() }.getOrNull() ?: continue
             if (text.length < 20) continue
 

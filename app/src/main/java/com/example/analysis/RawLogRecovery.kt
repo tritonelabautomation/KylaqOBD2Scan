@@ -101,6 +101,108 @@ object RawLogRecovery {
      * @param tz the zone an UNDATED line's time-of-day is read in - it decides which calendar day a
      *   line belongs to, and therefore which day the recovered trip is filed under. Defaults to IST.
      */
+    /**
+     * Streams a raw log into [onTelemetry], one line at a time, and returns how many rows it kept.
+     *
+     * ## Why this exists (owner crashes 2026-11-16)
+     *
+     * [extractTelemetry] already reads the file line by line, but it COLLECTS the result: a
+     * 90-minute drive is hundreds of thousands of [Telemetry] objects, and `recoverFromRawLog`
+     * then mapped every one of them into a `TransactionRecord` and a `SynchronizedSample` besides -
+     * three object graphs for one drive, held simultaneously, in the recovery path that runs on
+     * app start after a kill. That is precisely the shape that produced
+     * `Failed to allocate a 56 byte allocation ... target footprint 536870912`: not one big
+     * allocation, but a heap already full of long-lived objects.
+     *
+     * With this entry point the caller writes each row to disk as it arrives (the journal CSV and
+     * the samples CSV are the record), so peak RAM is one [Telemetry]. Nothing is lost: the rows
+     * are the same rows [extractTelemetry] would have returned.
+     *
+     * @param tz zone an UNDATED line's time-of-day is read in; defaults to IST, same as the
+     *   collecting overload, so both paths file a drive under the same calendar day.
+     */
+    fun forEachTelemetry(
+        file: java.io.File,
+        tz: TimeZone = com.example.data.RecordTime.zone,
+        onTelemetry: (Telemetry) -> Unit
+    ): Int {
+        val anchorMillis = file.lastModified()
+        val cal = Calendar.getInstance(tz).apply {
+            timeInMillis = anchorMillis
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        val dayStart = cal.timeInMillis
+        var count = 0
+        runCatching {
+            file.useLines { lines ->
+                for (line in lines) {
+                    val parsed = parseLine(line, dayStart, anchorMillis, tz) ?: continue
+                    count++
+                    onTelemetry(parsed)
+                }
+            }
+        }
+        return count
+    }
+
+    /**
+     * One log line -> one [Telemetry], or null when the line is not a single-frame Mode-01 answer.
+     *
+     * Extracted from the two public entry points so the streaming and collecting paths share the
+     * EXACT same parsing - they used to be two copies of the same block, and a parser that
+     * disagrees with itself is how a recovered trip silently loses a PID.
+     */
+    internal fun parseLine(
+        line: String,
+        dayStart: Long,
+        anchorMillis: Long,
+        tz: TimeZone
+    ): Telemetry? {
+        val epoch: Long
+        val dirGroup: String
+        val bodyGroup: String
+
+        val dated = DATED_LINE.matchEntire(line)
+        if (dated != null) {
+            // The line states its own date - use it exactly, no anchoring heuristic.
+            epoch = Calendar.getInstance(tz).apply {
+                clear()
+                set(
+                    dated.groupValues[1].toInt(),
+                    dated.groupValues[2].toInt() - 1,
+                    dated.groupValues[3].toInt(),
+                    dated.groupValues[4].toInt(),
+                    dated.groupValues[5].toInt(),
+                    dated.groupValues[6].toInt()
+                )
+                set(Calendar.MILLISECOND, dated.groupValues[7].toInt())
+            }.timeInMillis
+            dirGroup = dated.groupValues[8]
+            bodyGroup = dated.groupValues[9]
+        } else {
+            val m = LINE.matchEntire(line) ?: return null
+            val hours = m.groupValues[1].toLong()
+            val minutes = m.groupValues[2].toLong()
+            val seconds = m.groupValues[3].toLong()
+            val millis = m.groupValues[4].toLong()
+            val timeOfDay = ((hours * 60 + minutes) * 60 + seconds) * 1000 + millis
+            var guessed = dayStart + timeOfDay
+            // Drive ended just after midnight: an evening time-of-day would land ~24 h in
+            // the future relative to the anchor - it belongs to the previous day.
+            if (guessed - anchorMillis > 12L * 3_600_000L) guessed -= 24L * 3_600_000L
+            epoch = guessed
+            dirGroup = m.groupValues[5]
+            bodyGroup = m.groupValues[6]
+        }
+
+        if (dirGroup == "TX >") return null
+        val (canId, frameHex) = splitCanId(bodyGroup)
+        return telemetryFromFrame(epoch, canId, frameHex)
+    }
+
     fun extractTelemetry(
         file: java.io.File,
         tz: TimeZone = com.example.data.RecordTime.zone

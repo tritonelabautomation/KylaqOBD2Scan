@@ -3,6 +3,7 @@ package com.example
 import android.app.Application
 import com.example.crash.CrashReporter
 import com.example.data.CrashJournal
+import com.example.data.MemoryGuard
 
 /**
  * Process entry point, registered via `android:name` in the manifest so its onCreate
@@ -21,6 +22,11 @@ class KylaqApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         CrashJournal.install(this)
+        // BEFORE anything allocates a ring: the watchdog must already be watching when the
+        // reconnect, the recovery pass and the first dashboard all start pulling frames in.
+        // Owner crashes 2026-11-16 (`OutOfMemoryError` at `target footprint 536870912` and a
+        // GcWatcher finalizer timeout) were both "the heap was already full when this ran".
+        MemoryGuard.start(this)
         CrashReporter.onAppStarted(this)
 
         runCatching {

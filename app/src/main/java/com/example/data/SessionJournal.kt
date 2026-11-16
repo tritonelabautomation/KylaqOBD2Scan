@@ -101,11 +101,19 @@ class SessionJournal(private val journalDir: File) {
     fun readMeta(id: String): Map<String, String> {
         val f = metaFile(id)
         if (!f.exists()) return emptyMap()
+        // Streamed, not `readLines()`: a meta file is small by construction, but this runs during
+        // kill recovery when the heap is already suspect - there is no reason to build a list of
+        // lines to read a handful of key=value pairs (2026-11-16 heap audit).
         return runCatching {
-            f.readLines().mapNotNull { line ->
-                val i = line.indexOf('=')
-                if (i <= 0) null else line.substring(0, i).trim() to line.substring(i + 1).trim()
-            }.toMap()
+            val out = LinkedHashMap<String, String>()
+            f.bufferedReader().use { reader ->
+                while (true) {
+                    val line = reader.readLine() ?: break
+                    val i = line.indexOf('=')
+                    if (i > 0) out[line.substring(0, i).trim()] = line.substring(i + 1).trim()
+                }
+            }
+            out
         }.getOrDefault(emptyMap())
     }
 

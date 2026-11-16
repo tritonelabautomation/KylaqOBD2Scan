@@ -69,6 +69,21 @@ class RecordingManager(
 
     private val activeTransactionList = mutableListOf<TransactionRecord>()
     private val activeSampleList = mutableListOf<SynchronizedSample>()
+
+    /**
+     * Live-ring size, shrunk by [MemoryGuard] under heap pressure. The journal on disk gets every
+     * frame before `recordTransaction` returns, so this only bounds the HUD window.
+     */
+    @Volatile
+    private var liveRingLimit: Int = HeapGuard.LIVE_RAM_ROWS
+
+    /**
+     * Publish throttle for [currentTransactions]. This used to rebuild the whole 200-row list on
+     * EVERY frame - the highest churn path in the app, running for the entire drive - which is a
+     * large part of why the heap sat near its 512 MB ceiling and eventually failed a 56-byte
+     * allocation (owner crash 2026-11-16). Four times a second is indistinguishable on screen.
+     */
+    private var lastTransactionPublishMs: Long = 0L
     private var currentSample = SynchronizedSample(
         timestampUtc = "",
         timestampMonotonic = 0L
@@ -83,6 +98,43 @@ class RecordingManager(
      */
     private val managerScope =
         CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
+
+    /**
+     * Strongly held because [MemoryGuard] registers weakly - a lambda created inline at the
+     * registration site would have no other reference and be collected before it ever fires.
+     *
+     * Declared BEFORE the `init` block below on purpose: Kotlin runs property initialisers and
+     * init blocks in declaration order, so registering first would register a null.
+     */
+    private val liveRingShedder: (HeapPressure.Level) -> Unit = { level ->
+        liveRingLimit = HeapPressure.ringSizeAt(
+            level,
+            HeapGuard.LIVE_RAM_ROWS,
+            HeapGuard.LIVE_RAM_ROWS_ELEVATED,
+            HeapGuard.LIVE_RAM_ROWS_CRITICAL
+        )
+        synchronized(activeTransactionList) {
+            var trimmed = false
+            while (activeTransactionList.size > liveRingLimit) {
+                activeTransactionList.removeAt(0)
+                trimmed = true
+            }
+            if (trimmed) {
+                lastTransactionPublishMs = 0L
+                _currentTransactions.value = activeTransactionList.toList()
+            }
+        }
+    }
+
+    /**
+     * Registers with the memory watchdog: under heap pressure the live ring shrinks and the
+     * published list is trimmed to match. Nothing on disk is touched - the journal already holds
+     * every frame - so this only ever shortens a scrollback, never a drive (owner report
+     * 2026-11-16: repeated `OutOfMemoryError`, `target footprint 536870912`).
+     */
+    init {
+        MemoryGuard.addShedder(liveRingShedder)
+    }
 
     /**
      * Restart-refuel candidate (owner 2026-09-19: "when restart my car after refuel obviously you
@@ -140,6 +192,9 @@ class RecordingManager(
 
     companion object {
         const val SILENT_LIMIT_MS: Long = 5 * 60_000L
+
+        /** How often [currentTransactions] may be republished. See [lastTransactionPublishMs]. */
+        const val TRANSACTION_PUBLISH_MS = 250L
 
         /** Pure so the watchdog rule is testable: silent only counts once a first RX existed. */
         fun shouldAutoStop(lastRxMs: Long, nowMs: Long, silentLimitMs: Long = SILENT_LIMIT_MS): Boolean =
@@ -265,6 +320,7 @@ class RecordingManager(
 
         _currentSessionMetadata.value = metadata
         _currentTransactions.value = emptyList()
+        lastTransactionPublishMs = 0L
         _isRecording.value = true
         restartLevelCheckArmed = true
         synchronized(startupLevelSamples) {
@@ -438,15 +494,27 @@ class RecordingManager(
             // trend and trip logs?"): stamp at intake so EVERY persisted sample row
             // carries the elevation of its own moment; null when no accuracy-gated
             // fix exists at that instant - gaps stay gaps.
-            val stamped = tx.copy(altitudeM = com.example.di.AppContainer.currentAltitudeM())
+            // ONE altitude read per frame, not two: the same instant's elevation is stamped on
+            // the transaction row and on the wide sample row, so they can never disagree, and the
+            // hot path makes half the calls it used to.
+            val altitudeM = com.example.di.AppContainer.currentAltitudeM()
+            val stamped = tx.copy(altitudeM = altitudeM)
             lastRxAtMs = System.currentTimeMillis()
-            
-            // FIX OOM: Ring buffer of LIVE_RAM_ROWS for UI live monitor instead of unbounded array
-            if (activeTransactionList.size >= HeapGuard.LIVE_RAM_ROWS) {
+
+            // FIX OOM: Ring buffer for the UI live monitor instead of an unbounded array. The cap
+            // comes from liveRingLimit so [MemoryGuard] can shrink it while the heap is tight.
+            val ring = liveRingLimit.coerceAtLeast(1)
+            if (activeTransactionList.size >= ring) {
                 activeTransactionList.removeAt(0)
             }
             activeTransactionList.add(stamped)
-            _currentTransactions.value = activeTransactionList.toList()
+            // Throttled publish - see [lastTransactionPublishMs]. `toList()` plus the list the
+            // monitor renders were being rebuilt per frame; that is the churn being removed.
+            val publishNow = System.currentTimeMillis()
+            if (MemoryGuard.shouldPublish(lastTransactionPublishMs, publishNow, TRANSACTION_PUBLISH_MS)) {
+                lastTransactionPublishMs = publishNow
+                _currentTransactions.value = activeTransactionList.toList()
+            }
 
             // Wide-row merge, extracted to the pure companion RecordingManager.mergeSample so
             // journal recovery replays the identical rows.
@@ -454,11 +522,9 @@ class RecordingManager(
             // Per-sample GPS altitude for the trip log (owner 2026-09-15). Stamped on every
             // row so the samples CSV carries the elevation profile; null when no accuracy-gated
             // fix with altitude exists at that moment - never the 0.0 default.
-            val withAltitude = updated.copy(
-                altitudeM = com.example.di.AppContainer.currentAltitudeM()
-            )
+            val withAltitude = updated.copy(altitudeM = altitudeM)
             currentSample = withAltitude
-            if (activeSampleList.size >= HeapGuard.LIVE_RAM_ROWS) {
+            if (activeSampleList.size >= ring) {
                 activeSampleList.removeAt(0)
             }
             activeSampleList.add(withAltitude)
@@ -1800,65 +1866,106 @@ class RecordingManager(
                 sessionDirCheck.deleteRecursively()
             }
 
-            val telemetry = com.example.analysis.RawLogRecovery.extractTelemetry(file)
-            if (telemetry.size < 10) return@withContext RecoveryOutcome.NothingToRecover
+            // ── STREAMED RECOVERY (2026-11-16 heap fix) ─────────────────────────────────────
+            //
+            // This used to materialise the whole drive three times over: a `List<Telemetry>` for
+            // every parsed frame, then a `TransactionRecord` for each, then a
+            // `SynchronizedSample` for each - all held at once, inside the recovery path that runs
+            // at app start after a kill. On the owner's phone that path is what died with
+            // `Failed to allocate a 56 byte allocation ... target footprint 536870912` and, worse,
+            // with a `GcWatcher.finalize() timed out after 10 seconds` from the resulting GC
+            // thrash (crashes 2026-11-16 12:32 and 20:35 IST).
+            //
+            // Recovery does not need the drive in RAM: it needs it on disk. So the raw log is now
+            // streamed line by line into the two CSVs that ARE the trip, and the same streaming
+            // finalizer that journal recovery already uses builds the Room rows from those files.
+            // Peak RAM is one frame. Nothing is dropped - a recovered trip is shaped exactly as
+            // before, because the rows written here are the rows the old path produced.
+            val workDir = File(recordingsDir, ".recover_$sessionId").apply { mkdirs() }
+            val workTx = File(workDir, "${sessionId}_transactions.csv")
+            val workSamples = File(workDir, "${sessionId}_samples.csv")
+            var firstMs = 0L
+            var lastMs = 0L
+            var written = 0
+            var acc = SynchronizedSample(timestampUtc = "", timestampMonotonic = 0L)
 
-            val txList = telemetry.map { t ->
-                val pidDef = com.example.model.StandardPidCatalog.lookup(t.pidHex2)
-                // decode() needs the payload WITH its "41 <pid>" header - handing it the
-                // bare data bytes returns INVALID_RESPONSE (strict malformed-frame rule).
-                val decoded = com.example.protocol.PidDecoder.decode(pidDef, t.decodeBytes)
-                TransactionRecord(
-                    timestampUtc = iso(t.epochMillis),
-                    timestampMonotonic = t.epochMillis,
-                    direction = Direction.RX,
-                    canRxId = t.canId,
-                    requestHex = "01${t.pidHex2}",
-                    responseHex = t.responseHex,
-                    service = "01",
-                    pid = pidDef.pid,
-                    rawPayload = t.payloadBytes.joinToString("") { "%02X".format(it) },
-                    decodedParameter = decoded.parameterName,
-                    decodedValue = decoded.numericValue,
-                    decodedValueDisplay = decoded.displayValue,
-                    unit = decoded.unit,
-                    responseStatus = ResponseStatus.OK
-                )
+            workTx.bufferedWriter().use { txWriter ->
+                workSamples.bufferedWriter().use { sampleWriter ->
+                    txWriter.append(CsvExporter.TRANSACTIONS_HEADER).append('\n')
+                    sampleWriter.append(CsvExporter.SAMPLES_HEADER).append('\n')
+                    com.example.analysis.RawLogRecovery.forEachTelemetry(file) { t ->
+                        val pidDef = com.example.model.StandardPidCatalog.lookup(t.pidHex2)
+                        // decode() needs the payload WITH its "41 <pid>" header - handing it the
+                        // bare data bytes returns INVALID_RESPONSE (strict malformed-frame rule).
+                        val decoded = com.example.protocol.PidDecoder.decode(pidDef, t.decodeBytes)
+                        val tx = TransactionRecord(
+                            timestampUtc = iso(t.epochMillis),
+                            timestampMonotonic = t.epochMillis,
+                            direction = Direction.RX,
+                            canRxId = t.canId,
+                            requestHex = "01${t.pidHex2}",
+                            responseHex = t.responseHex,
+                            service = "01",
+                            pid = pidDef.pid,
+                            rawPayload = t.payloadBytes.joinToString("") { "%02X".format(it) },
+                            decodedParameter = decoded.parameterName,
+                            decodedValue = decoded.numericValue,
+                            decodedValueDisplay = decoded.displayValue,
+                            unit = decoded.unit,
+                            responseStatus = ResponseStatus.OK
+                        )
+                        txWriter.append(CsvExporter.transactionRow(sessionId, tx)).append('\n')
+                        // Same pure fold the live recorder uses, applied one frame at a time.
+                        acc = mergeSample(acc, tx)
+                        sampleWriter.append(CsvExporter.sampleRow(acc)).append('\n')
+                        if (written == 0) firstMs = t.epochMillis
+                        lastMs = t.epochMillis
+                        written++
+                    }
+                }
             }
-            val startMs = telemetry.first().epochMillis
-            val endMs = telemetry.last().epochMillis
+
+            if (written < 10) {
+                workDir.deleteRecursively()
+                return@withContext RecoveryOutcome.NothingToRecover
+            }
+
             val metadata = RecordingMetadata(
                 sessionId = sessionId,
-                sessionName = "Recovered Run " + RecordTime.display(startMs),
-                startTimeUtc = iso(startMs),
+                sessionName = "Recovered Run " + RecordTime.display(firstMs),
+                startTimeUtc = iso(firstMs),
                 adapter = "ELM327 Bluetooth (recovered from raw log)"
             )
-            metadata.endTimeUtc = iso(endMs)
-
-            // This path used to write an EMPTY samples CSV, so a trip recovered from its raw log
-            // came back with a transactions file and no curves, no fuel trend and no X-ray wide
-            // rows. Replay the same pure fold the live recorder uses and the recovered trip is
-            // shaped exactly like a stopped one.
-            val sampleList = SessionRecoveryPolicy.replaySamples(
-                transactions = txList,
-                seed = SynchronizedSample(timestampUtc = "", timestampMonotonic = 0L),
-                merge = { acc, tx -> mergeSample(acc, tx) }
-            )
+            metadata.endTimeUtc = iso(lastMs)
 
             // One finalization path for STOP, orphan save, journal recovery and raw-log recovery:
             // they had already drifted (this one skipped the altitude/voltage extremes and wrote no
             // sample rows), and drift between copies of the same job is how a trip ends up half
-            // saved.
-            finalizeSession(
-                metadata = metadata,
-                txList = txList,
-                sampleList = sampleList,
-                rawLogFile = file,
-                recovered = true
-            )
-
+            // saved. `finalizeSessionFromFiles` reads the CSVs we just wrote - it never holds the
+            // drive either, so the whole path stays bounded.
+            val saved = try {
+                finalizeSessionFromFiles(
+                    metadata = metadata,
+                    txCsv = workTx,
+                    sampleCsv = workSamples,
+                    replaySamplesIfMissing = false,
+                    rawLogFile = file,
+                    recovered = true
+                )
+            } finally {
+                // The work dir holds what the session dir now holds; leaving it would double the
+                // disk cost of every recovered drive.
+                workDir.deleteRecursively()
+            }
+            if (saved == null) {
+                // The rows were written but Room refused them. Say so - silence is the one
+                // outcome this class must never produce (owner mandate, 2026-09-16).
+                return@withContext RecoveryOutcome.Failed(
+                    "recovered ${written} frame(s) but the trip could not be saved"
+                )
+            }
             loadSavedRecordings()
-            RecoveryOutcome.Recovered(sessionId, txList.size)
+            RecoveryOutcome.Recovered(sessionId, written)
         } catch (e: Exception) {
             e.printStackTrace()
             RecoveryOutcome.Failed(e.message ?: e.javaClass.simpleName)

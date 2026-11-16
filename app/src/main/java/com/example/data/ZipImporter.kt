@@ -60,9 +60,15 @@ object ZipImporter {
             }
             var restoredValues = 0
             if (snapshotFile != null) {
-                val snapshot = com.example.backup.AppDataSnapshot.parse(
-                    runCatching { snapshotFile.readText() }.getOrNull()
-                )
+                // Bounded read: the snapshot is a settings/ledger map, not a drive, but a
+                // corrupted or foreign ZIP could still carry a huge file - and reading it whole
+                // on top of an import that is already running is how a heap that is merely full
+                // becomes a heap that throws (2026-11-16). 8 MiB is generous for this data.
+                val snapshotText = runCatching {
+                    if (snapshotFile.length() > 8L * 1024L * 1024L) null
+                    else snapshotFile.readText()
+                }.getOrNull()
+                val snapshot = com.example.backup.AppDataSnapshot.parse(snapshotText)
                 if (snapshot == null) {
                     notes += "its data snapshot could not be read and was skipped"
                 } else {
@@ -189,67 +195,59 @@ object ZipImporter {
 
             if (jsonFile != null && jsonFile.exists()) {
                 try {
-                    val root = JSONObject(jsonFile.readText())
-                    if (root.has("sessionMetadata")) {
-                        val metaObj = root.getJSONObject("sessionMetadata")
-                        sessionId = metaObj.optString("sessionId", null)
-                        sessionName = metaObj.optString("sessionName", null)
-                        vehicle = metaObj.optString("vehicle", vehicle)
-                        profile = metaObj.optString("profile", profile)
-                        adapter = metaObj.optString("adapter", adapter)
-                        protocol = metaObj.optString("protocol", protocol)
-                        startTimeUtc = metaObj.optString("startTimeUtc", startTimeUtc)
-                        endTimeUtc = metaObj.optString("endTimeUtc", null)
-                        appVersion = metaObj.optString("appVersion", appVersion)
-                        maxAltitudeM = JsonExporter.nullableDouble(metaObj, "maxAltitudeM")
-                        minAltitudeM = JsonExporter.nullableDouble(metaObj, "minAltitudeM")
-                        minVoltageV = JsonExporter.nullableDouble(metaObj, "minVoltageV")
-                        maxVoltageV = JsonExporter.nullableDouble(metaObj, "maxVoltageV")
-                        startFuelPercent = JsonExporter.nullableDouble(metaObj, "startFuelPercent")
-                        endFuelPercent = JsonExporter.nullableDouble(metaObj, "endFuelPercent")
-                        fuelDeltaPercent = JsonExporter.nullableDouble(metaObj, "fuelDeltaPercent")
-                    }
-                    if (root.has("transactions")) {
-                        val txArray = root.getJSONArray("transactions")
-                        parsedTxCount = txArray.length()
-                        for (i in 0 until txArray.length()) {
-                            val txObj = txArray.getJSONObject(i)
-                            val dirStr = txObj.optString("direction", "RX")
-                            val dir = try { com.example.model.Direction.valueOf(dirStr) } catch (_: Exception) { com.example.model.Direction.RX }
-                            val statStr = txObj.optString("responseStatus", "OK")
-                            val stat = try { com.example.model.ResponseStatus.valueOf(statStr) } catch (_: Exception) { com.example.model.ResponseStatus.OK }
-
-                            txEntities.add(
-                                TransactionRecord(
-                                    id = txObj.optString("id", java.util.UUID.randomUUID().toString()),
-                                    timestampUtc = txObj.optString("timestampUtc", startTimeUtc),
-                                    timestampMonotonic = txObj.optLong("timestampMonotonic", 0L),
-                                    direction = dir,
-                                    elmCommand = txObj.optString("elmCommand", ""),
-                                    canTxId = txObj.optString("canTxId", ""),
-                                    canRxId = txObj.optString("canRxId", "7E8"),
-                                    requestHex = txObj.optString("requestHex", ""),
-                                    responseHex = txObj.optString("responseHex", ""),
-                                    service = txObj.optString("service", ""),
-                                    pid = txObj.optString("pid", ""),
-                                    rawPayload = txObj.optString("rawPayload", ""),
-                                    decodedParameter = txObj.optString("decodedParameter", ""),
-                                    decodedValue = if (txObj.has("decodedValue") && !txObj.isNull("decodedValue")) txObj.optDouble("decodedValue") else null,
-                                    decodedValueDisplay = txObj.optString("decodedValueDisplay", ""),
-                                    unit = txObj.optString("unit", ""),
-                                    responseStatus = stat,
-                                    errorMessage = txObj.optString("errorMessage", null)
-                                )
-                            )
-                        }
+                    // STREAMED (2026-11-16 heap fix): `JSONObject(jsonFile.readText())` held the
+                    // whole document as a String AND a full org.json tree AND the record list -
+                    // three copies of a drive, in a process already dying at 512 MB. The reader
+                    // below visits one transaction at a time and never materialises the rest.
+                    val streamed = com.example.data.SessionJsonReader.readSession(
+                        jsonFile.reader()
+                    ) { tx -> txEntities.add(tx) }
+                    parsedTxCount = streamed.second
+                    val metaObj = streamed.first
+                    if (metaObj != null) {
+                        sessionId = metaObj.sessionId.ifBlank { null }
+                        sessionName = metaObj.sessionName
+                        vehicle = metaObj.vehicle
+                        profile = metaObj.profile
+                        adapter = metaObj.adapter
+                        protocol = metaObj.protocol
+                        startTimeUtc = metaObj.startTimeUtc.ifBlank { startTimeUtc }
+                        endTimeUtc = metaObj.endTimeUtc
+                        appVersion = metaObj.appVersion
+                        maxAltitudeM = metaObj.maxAltitudeM
+                        minAltitudeM = metaObj.minAltitudeM
+                        minVoltageV = metaObj.minVoltageV
+                        maxVoltageV = metaObj.maxVoltageV
+                        startFuelPercent = metaObj.startFuelPercent
+                        endFuelPercent = metaObj.endFuelPercent
+                        fuelDeltaPercent = metaObj.fuelDeltaPercent
                     }
                 } catch (e: Exception) {
+                    // A partially streamed import still keeps the records it got; only a bundle
+                    // with no readable metadata falls through to the CSV path below.
                     e.printStackTrace()
                 }
             }
 
-            // Fallback: Parse from transactions CSV if JSON was absent or lacked records
-            if (txEntities.isEmpty() && txCsv != null && txCsv.exists()) {
+            // The old reader defaulted a missing transaction stamp to the bundle's start time.
+            // Records streamed before any metadata was seen therefore carry "" - fill it in now,
+            // so a streamed import is identical to the JSONObject one it replaces.
+            if (txEntities.any { it.timestampUtc.isBlank() }) {
+                for (i in txEntities.indices) {
+                    if (txEntities[i].timestampUtc.isBlank()) {
+                        txEntities[i] = txEntities[i].copy(timestampUtc = startTimeUtc)
+                    }
+                }
+            }
+
+            // Fallback: parse from the transactions CSV when the JSON was absent, carried no
+            // records, or was cut short mid-array. The old code only checked "isEmpty", which meant
+            // a TRUNCATED json (a bundle whose writer died, a partially copied file) imported the
+            // handful of rows that streamed before the damage and silently dropped the rest - the
+            // CSV next to it holds the whole drive. `parsedTxCount` is the count the JSON actually
+            // declared, so a shortfall is detectable.
+            if (txCsv != null && txCsv.exists() && txEntities.size <= 1) {
+                txEntities.clear()
                 parseTransactionsFromCsv(txCsv, txEntities)
                 parsedTxCount = txEntities.size
             }
@@ -325,9 +323,11 @@ object ZipImporter {
             var parsedSampleCount = 0
             if (sampleCsv != null && sampleCsv.exists()) {
                 sampleCsv.copyTo(destSampleCsv, overwrite = true)
-                // Count lines in sample CSV
+                // Count lines in sample CSV. Streamed - `readLines()` here materialised the whole
+                // sample file just to call `.size` (see HeapGuard.strideFor's neighbours for the
+                // same lesson from the 2026-11-11 OOM).
                 try {
-                    parsedSampleCount = maxOf(0, sampleCsv.readLines().size - 1)
+                    parsedSampleCount = com.example.data.SessionJsonReader.countTransactionRows(sampleCsv)
                 } catch (_: Exception) {}
             }
 
@@ -440,14 +440,29 @@ object ZipImporter {
         }
     }
 
+    /**
+     * Parses a transactions CSV into [outList], STREAMING line by line.
+     *
+     * This used `csvFile.readLines()`: every line of a drive held as a `String` at once, on top of
+     * the `TransactionRecord` objects being built from them, inside a process that had already
+     * been reported dead at `target footprint 536870912` (owner crashes 2026-11-16). An
+     * imported bundle is the FULL drive - tens of thousands of rows - so the line list alone was
+     * tens of MB of pure overhead. `bufferedReader()` + `readLine()` keeps peak RAM at one line.
+     */
     private fun parseTransactionsFromCsv(csvFile: File, outList: MutableList<TransactionRecord>) {
         try {
-            val lines = csvFile.readLines()
-            if (lines.size <= 1) return
+            if (csvFile.length() == 0L) return
             // Header is index 0:
             // session_id,timestamp_utc,timestamp_monotonic_ms,direction,can_id,request_hex,response_hex,service,pid,parameter,raw_payload,decoded_value,unit,status,error
-            for (i in 1 until lines.size) {
-                val line = lines[i].trim()
+            csvFile.bufferedReader().use { reader ->
+            var isHeader = true
+            while (true) {
+                val rawLine = reader.readLine() ?: break
+                if (isHeader) {
+                    isHeader = false
+                    continue
+                }
+                val line = rawLine.trim()
                 if (line.isEmpty()) continue
                 val parts = splitCsvLine(line)
                 if (parts.size >= 9) {
@@ -492,6 +507,7 @@ object ZipImporter {
                         )
                     )
                 }
+            }
             }
         } catch (e: Exception) {
             e.printStackTrace()

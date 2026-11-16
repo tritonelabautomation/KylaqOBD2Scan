@@ -61,11 +61,28 @@
         </intent>
     </queries>
 
+    <!--
+        android:largeHeap was REMOVED 2026-11-16.
+
+        It was there because the recorder once held whole drives in RAM, and on the owner's OnePlus
+        it bought a 512 MB ceiling. That ceiling is exactly where the app died:
+            Failed to allocate a 56 byte allocation ...
+            target footprint 536870912, growth limit 536870912
+        A 56-byte allocation failing means the heap was already full of long-lived data - the extra
+        headroom was being consumed, not sparing the app - and the larger heap made every GC cycle
+        longer, which is what produced the companion crash,
+        `GcWatcher.finalize() timed out after 10 seconds`.
+
+        Nothing needs it any more: every path that used to materialise a drive now streams
+        (recovery writes CSVs frame by frame, the importer parses JSON with a JsonReader), and
+        MemoryGuard sheds RAM rings at 70 % of whatever ceiling exists. Running at the normal
+        per-app heap means GC runs sooner, in smaller increments, and the process is a smaller
+        target for the low-memory killer. Do not re-add it without measuring.
+    -->
     <application
         android:name=".KylaqApplication"
         android:allowBackup="true"
         android:hasFragileUserData="true"
-        android:largeHeap="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"

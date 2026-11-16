@@ -100,6 +100,54 @@ class CrashJournalPolicyTest {
     }
 
     @Test
+    fun aRecordCanCarryTheHeapStateThatMadeAnOomFixable() {
+        // Owner crashes 2026-11-16: the stack said only that a 56-byte allocation failed. Without
+        // the heap numbers there was no way to tell a leak from a legitimately full drive, which
+        // is exactly why they recurred. The heap line must be recorded and must NOT be mistaken
+        // for part of the stack when summarising.
+        val r = CrashJournalPolicy.formatRecord(
+            istTime = "2026-11-16 20:35:00",
+            versionName = "1.0.860",
+            device = "OnePlus CPH2793 (Android 16, SDK 36)",
+            threadName = "binder:5625_1",
+            stackTrace = "java.lang.OutOfMemoryError: Failed to allocate a 56 byte allocation\n" +
+                "\tat android.os.Parcel.obtain(Parcel.java:5591)\n" +
+                "\tat com.example.data.RecordingManager.recordTransaction(RecordingManager.kt:495)",
+            heapState = "used=498MB max=512MB (97%) level=CRITICAL trim=15 sheds=12"
+        )
+        assertTrue(r.contains("heap: used=498MB max=512MB (97%) level=CRITICAL"))
+        assertEquals("2026-11-16 20:35:00", CrashJournalPolicy.crashedAt(r))
+        val summary = CrashJournalPolicy.summarize(r)!!
+        assertTrue(summary.startsWith("java.lang.OutOfMemoryError"))
+        assertFalse("heap line is not a stack frame", summary.contains("level=CRITICAL"))
+    }
+
+    @Test
+    fun aPressureTailAppendsAfterTheStackAndIsIgnoredBySummarize() {
+        val r = CrashJournalPolicy.formatRecord(
+            istTime = "2026-11-16 12:32:00",
+            versionName = "1.0.860",
+            device = "OnePlus CPH2793",
+            threadName = "FinalizerWatchdogDaemon",
+            stackTrace = "java.util.concurrent.TimeoutException: GcWatcher timed out\n" +
+                "\tat com.example.data.RecordingManager.recordTransaction(RecordingManager.kt:495)",
+            pressureTail = "2026-11-16 12:31:50+05:30 sample level=CRITICAL used=500MB max=512MB (97%)"
+        )
+        assertTrue(r.contains("memory pressure log"))
+        val summary = CrashJournalPolicy.summarize(r)!!
+        assertTrue(summary.startsWith("java.util.concurrent.TimeoutException"))
+        assertFalse(summary.contains("pressure log"))
+    }
+
+    @Test
+    fun recordsWithoutHeapStateAreUnchanged() {
+        // Older records (and older callers) must still parse exactly as before.
+        val r = record("java.lang.IllegalStateException: boom")
+        assertFalse(r.contains("heap:"))
+        assertEquals("java.lang.IllegalStateException: boom", CrashJournalPolicy.summarize(r))
+    }
+
+    @Test
     fun noRecordNoSummaryNoStamp() {
         assertNull(CrashJournalPolicy.summarize(null))
         assertNull(CrashJournalPolicy.summarize("   "))

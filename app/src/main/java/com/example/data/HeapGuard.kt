@@ -3,14 +3,58 @@ package com.example.data
 /**
  * Hard caps so a long drive or a killed-session recovery cannot fill the ART heap.
  *
- * Owner crash 2026-11-11 19:02 IST on 1.0.832: `OutOfMemoryError` at 512 MB
- * (`largeHeap`) inside `ObdKeepAliveService.onCreate` while recovery materialised
- * every journal row, every Room sample, and the AI-doctor copy of the same list.
- * Peak RAM for those paths must stay a handful of rows, never the whole trip.
+ * Owner crash 2026-11-11 19:02 IST on 1.0.832: `OutOfMemoryError` at 512 MB (the
+ * `largeHeap` ceiling the app used to request - removed 2026-11-16) inside
+ * `ObdKeepAliveService.onCreate` while recovery materialised every journal row, every
+ * Room sample, and the AI-doctor copy of the same list. Peak RAM for those paths must
+ * stay a handful of rows, never the whole trip.
+ *
+ * These are STATIC ceilings chosen for the worst case. [MemoryGuard] is the dynamic half:
+ * it measures the real heap at runtime and shrinks the rings below ([LIVE_RAM_ROWS],
+ * [RAW_LOG_RING], ...) before the process reaches its limit.
  */
 object HeapGuard {
     /** Live HUD / monitor ring. The on-disk journal is the full drive. */
     const val LIVE_RAM_ROWS = 200
+
+    /**
+     * What the live ring may keep when the heap is tight ([HeapPressure.Level.ELEVATED] /
+     * `CRITICAL`). Shrinking this cannot lose a drive: `RecordingManager.recordTransaction`
+     * appends every frame to the on-disk journal before it returns, so the ring is a HUD window
+     * over data that is already safe. 20 rows is still several seconds of polling on screen -
+     * the owner sees the same live numbers, we just stop holding a second copy of history.
+     */
+    const val LIVE_RAM_ROWS_ELEVATED = 60
+
+    /** Emergency ring: the last handful of frames, enough for the HUD to keep moving. */
+    const val LIVE_RAM_ROWS_CRITICAL = 20
+
+    /** Raw-log console ring (what `RawLogManager` renders). Disk keeps every line regardless. */
+    const val RAW_LOG_RING = 1000
+    const val RAW_LOG_RING_ELEVATED = 200
+    const val RAW_LOG_RING_CRITICAL = 50
+
+    /**
+     * Research history kept per polled PID (`ObdScheduler.pidRawHistory`). Small by design - it
+     * backs the "last N frames" table on the PID detail screen, not an archive. Shrinks under
+     * pressure because the same frames are on disk in the raw log.
+     */
+    const val RAW_HISTORY_PER_PID = 50
+    const val RAW_HISTORY_PER_PID_ELEVATED = 20
+    const val RAW_HISTORY_PER_PID_CRITICAL = 6
+
+    /** Failed journal/UART line cache is capped so a bad link cannot grow it without bound. */
+    const val MAX_TRACKED_FAILURES = 500
+
+    /** Discovery console lines kept in RAM. The full JSON export is written separately. */
+    const val DISCOVERY_LOG_CAP = 500
+
+    /**
+     * Crash records retained for the "what happened" surfaces. Files are NEVER deleted
+     * (never-lose-logs) - this only bounds how many the app will *read back* at once, so a
+     * thousand old crashes cannot fill the heap on launch.
+     */
+    const val CRASH_READ_SCAN_CAP = 40
 
     /** Room `insertSamples` batch. One chunk in RAM at a time. */
     const val ROOM_INSERT_CHUNK = 200

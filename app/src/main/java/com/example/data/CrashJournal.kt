@@ -57,7 +57,14 @@ object CrashJournal {
                 device = "${Build.MANUFACTURER} ${Build.MODEL} " +
                     "(Android ${Build.VERSION.RELEASE}, SDK ${Build.VERSION.SDK_INT})",
                 threadName = thread.name,
-                stackTrace = stack
+                stackTrace = stack,
+                // Heap state at the moment of death, plus the run-up (2026-11-16). The two
+                // OutOfMemoryError reports we got could only say that a 56-byte allocation failed;
+                // nothing said how full the heap had been, for how long, or whether the watchdog
+                // had already tried to shed. That is the difference between a fixable report and a
+                // mystery, and it is free to record.
+                heapState = MemoryGuard.describeState(),
+                pressureTail = MemoryGuard.pressureLogTail(1_500)
             )
         )
         writeStreak(context, readStreak(context) + 1)
@@ -85,8 +92,31 @@ object CrashJournal {
     fun latestCrashFile(context: Context): File? =
         crashFiles(context).firstOrNull()
 
+    /**
+     * The newest crash record, for the "Previous run crashed" notice.
+     *
+     * Capped: this runs on the LAUNCH path, and the notice only ever shows the first two lines
+     * ([CrashJournalPolicy.summarize]). Reading an unbounded file at startup - on the very heap
+     * that just died of exhaustion, which is the situation this notice exists for - was one more
+     * avoidable allocation on the worst possible moment of the app's life (2026-11-16).
+     */
     fun latestCrashText(context: Context): String? =
-        latestCrashFile(context)?.let { runCatching { it.readText() }.getOrNull() }
+        latestCrashFile(context)?.let { file ->
+            runCatching {
+                val limit = CrashJournalPolicy.MAX_NOTICE_READ_CHARS
+                if (file.length() <= limit) file.readText()
+                else file.bufferedReader().use { reader ->
+                    val buf = CharArray(limit)
+                    var filled = 0
+                    while (filled < limit) {
+                        val n = reader.read(buf, filled, limit - filled)
+                        if (n < 0) break
+                        filled += n
+                    }
+                    String(buf, 0, filled)
+                }
+            }.getOrNull()
+        }
 
     fun lastCrashSummary(context: Context): String? =
         CrashJournalPolicy.summarize(latestCrashText(context))
