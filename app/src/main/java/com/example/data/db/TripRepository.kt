@@ -10,6 +10,7 @@ import com.example.data.db.entities.*
 import com.example.model.TransactionRecord
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import androidx.room.withTransaction
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -292,20 +293,36 @@ class TripRepository(context: Context) {
         sampleDao.deleteSamplesForTrip(tripId)
     }
 
+    /**
+     * Deletes one trip and every row that belongs to it, atomically.
+     *
+     * AUDIT DB-04 (2026-11-12): these were five independent DAO calls with no transaction.
+     * A failure or process death partway through left orphaned samples, raw logs, diagnostic
+     * events and AI analyses pointing at a trip that no longer existed - invisible in the UI
+     * but still consuming storage. `withTransaction` makes the delete all-or-nothing, so a
+     * partially deleted trip can no longer exist.
+     */
     suspend fun deleteTrip(tripId: String) = withContext(Dispatchers.IO) {
-        tripDao.deleteTripById(tripId)
-        sampleDao.deleteSamplesForTrip(tripId)
-        rawLogDao.deleteRawLogsForTrip(tripId)
-        eventDao.deleteEventsForTrip(tripId)
-        aiAnalysisDao.deleteAnalysisForTrip(tripId)
+        db.withTransaction {
+            // Children first, parent last: if anything throws, the rollback restores the
+            // parent too, so the trip stays fully readable rather than half-removed.
+            sampleDao.deleteSamplesForTrip(tripId)
+            rawLogDao.deleteRawLogsForTrip(tripId)
+            eventDao.deleteEventsForTrip(tripId)
+            aiAnalysisDao.deleteAnalysisForTrip(tripId)
+            tripDao.deleteTripById(tripId)
+        }
     }
 
+    /** Same atomicity guarantee as [deleteTrip], for the "delete everything" path. */
     suspend fun deleteAllTrips() = withContext(Dispatchers.IO) {
-        tripDao.deleteAllTrips()
-        sampleDao.deleteAllSamples()
-        rawLogDao.deleteAllRawLogs()
-        eventDao.deleteAllEvents()
-        aiAnalysisDao.deleteAllAnalyses()
+        db.withTransaction {
+            sampleDao.deleteAllSamples()
+            rawLogDao.deleteAllRawLogs()
+            eventDao.deleteAllEvents()
+            aiAnalysisDao.deleteAllAnalyses()
+            tripDao.deleteAllTrips()
+        }
     }
 
     suspend fun getStorageStats(): StorageStats = withContext(Dispatchers.IO) {

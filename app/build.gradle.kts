@@ -169,6 +169,13 @@ android {
     }
   }
 
+  // AUDIT DB-01 (2026-11-12): schema export was off, so Room had no historical
+  // schemas to validate the 13 hand-written migrations against and no schema diff
+  // was reviewable in git. Exported JSON now lands in app/schemas and is committed.
+  ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+  }
+
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_11
     targetCompatibility = JavaVersion.VERSION_11
@@ -243,6 +250,7 @@ dependencies {
   testImplementation("org.json:json:20240303")
   testImplementation(libs.kotlinx.coroutines.test)
   testImplementation(libs.robolectric)
+  testImplementation(libs.androidx.room.testing)
   testImplementation(libs.roborazzi)
   testImplementation(libs.roborazzi.compose)
   testImplementation(libs.roborazzi.junit.rule)

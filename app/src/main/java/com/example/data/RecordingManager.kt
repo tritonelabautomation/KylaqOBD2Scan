@@ -2202,26 +2202,54 @@ class RecordingManager(
         }
     }
 
+    /**
+     * Deletes one recording: database rows first, files only after the database confirms.
+     *
+     * AUDIT DB-05 (2026-11-12): the order used to be the other way round - the session
+     * directory was deleted first, then the trip rows were removed in a detached coroutine
+     * whose failure was only logged. If that second step failed, the files were already gone
+     * and what remained was a trip row with no session behind it: unreadable in the UI and
+     * unrecoverable from disk. That breaks the standing rule that nothing removed may be
+     * unrecoverable. Row deletion now happens first and atomically (see
+     * [TripRepository.deleteTrip]), and the files are only removed once it has committed; if
+     * it fails, the recording stays fully intact and the failure is surfaced in the log
+     * instead of eating half the owner's data.
+     *
+     * AUDIT ARCH-01 (2026-11-12): the detached `CoroutineScope(Dispatchers.IO)` is gone -
+     * this runs in the manager-owned [managerScope], which has a real SupervisorJob and is
+     * cancellable, so delete work cannot outlive the manager.
+     */
     fun deleteRecording(sessionId: String) {
-        val sessionDir = File(recordingsDir, "session_$sessionId")
-        if (sessionDir.exists()) {
-            sessionDir.deleteRecursively()
+        managerScope.launch {
+            val rowsDeleted = runCatching { tripRepository.deleteTrip(sessionId) }.isSuccess
+            if (!rowsDeleted) {
+                android.util.Log.e(
+                    "RecordingManager",
+                    "trip delete failed - keeping session files so the recording stays recoverable"
+                )
+                return@launch
+            }
+            val sessionDir = File(recordingsDir, "session_$sessionId")
+            if (sessionDir.exists()) sessionDir.deleteRecursively()
             loadSavedRecordings()
-        }
-        CoroutineScope(Dispatchers.IO).launch {
-            runCatching { tripRepository.deleteTrip(sessionId) }
-                .onFailure { android.util.Log.e("RecordingManager", "trip delete failed", it) }
         }
     }
 
+    /** Same ordering guarantee as [deleteRecording] for the "delete everything" path. */
     fun deleteAllRecordings() {
-        recordingsDir.listFiles()?.forEach { file ->
-            if (file.isDirectory) file.deleteRecursively() else file.delete()
-        }
-        loadSavedRecordings()
-        CoroutineScope(Dispatchers.IO).launch {
-            runCatching { tripRepository.deleteAllTrips() }
-                .onFailure { android.util.Log.e("RecordingManager", "delete-all failed", it) }
+        managerScope.launch {
+            val rowsDeleted = runCatching { tripRepository.deleteAllTrips() }.isSuccess
+            if (!rowsDeleted) {
+                android.util.Log.e(
+                    "RecordingManager",
+                    "delete-all failed - keeping session files so recordings stay recoverable"
+                )
+                return@launch
+            }
+            recordingsDir.listFiles()?.forEach { file ->
+                if (file.isDirectory) file.deleteRecursively() else file.delete()
+            }
+            loadSavedRecordings()
         }
     }
 

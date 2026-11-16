@@ -31,7 +31,9 @@ import com.example.data.db.entities.*
         RefuelEventEntity::class
     ],
     version = 14,
-    exportSchema = false
+    // AUDIT DB-01 (2026-11-12): was false. Room now writes its schema JSON to
+    // app/schemas so migrations can be validated and schema changes reviewed.
+    exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
 
@@ -56,7 +58,14 @@ abstract class AppDatabase : RoomDatabase() {
                     "obd_research_logger.db"
                 )
                     .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14)
-                    .fallbackToDestructiveMigrationOnDowngrade()
+                    // AUDIT DB-02 (2026-11-12): this builder used to call
+                    // `fallbackToDestructiveMigrationOnDowngrade()`, which DELETES the entire
+                    // database when the on-disk version is newer than the running APK - exactly
+                    // what happens when the owner rolls back a bad update. Every trip, sample,
+                    // raw log and DTC record disappeared silently, with no warning.
+                    // A downgrade must never trade recorded data for a clean start, so the
+                    // destructive fallback is gone: Room now raises instead of deleting, which
+                    // leaves the .db file byte-for-byte intact for a later, newer build to open.
                     .build()
                 INSTANCE = instance
                 instance
