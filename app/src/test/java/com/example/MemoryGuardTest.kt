@@ -50,7 +50,14 @@ class MemoryGuardTest {
         rawLogDir = File(context.filesDir, "guard_raw_logs_${System.nanoTime()}").apply { mkdirs() }
     }
 
-    /** Feeds [n] frames through the real listener entry point. */
+    /**
+     * Feeds [n] frames through the real listener entry point.
+     *
+     * Publishing is deliberately throttled to [RawLogManager.PUBLISH_INTERVAL_MS] (that throttle
+     * IS the fix - the old code rebuilt the list on every frame), so a burst of frames does not
+     * each publish. Callers that assert on [RawLogManager.logs] cross the window first via
+     * [waitForPublishWindow].
+     */
     private fun feed(manager: RawLogManager, n: Int) {
         for (i in 0 until n) {
             manager.onRawLog(
@@ -62,6 +69,11 @@ class MemoryGuardTest {
                 status = "OK"
             )
         }
+    }
+
+    /** Crosses one publish window so the next frame definitely republishes. */
+    private fun waitForPublishWindow() {
+        Thread.sleep(RawLogManager.PUBLISH_INTERVAL_MS + 20L)
     }
 
     @Test
@@ -89,6 +101,9 @@ class MemoryGuardTest {
     fun theRawLogRingShrinksUnderPressureAndKeepsShowingFrames() {
         val manager = RawLogManager(rawLogDir)
         feed(manager, HeapGuard.RAW_LOG_RING)
+        // One more frame, after a full window, so the published list reflects the burst.
+        waitForPublishWindow()
+        feed(manager, 1)
         assertEquals(HeapGuard.RAW_LOG_RING, manager.logs.value.size)
 
         MemoryGuard.forceBandForTest(HeapPressure.Level.CRITICAL)
@@ -102,6 +117,7 @@ class MemoryGuardTest {
         assertFalse(manager.logs.value.isEmpty())
 
         // And the live HUD keeps moving while the heap is tight.
+        waitForPublishWindow()
         feed(manager, 10)
         assertTrue(manager.logs.value.isNotEmpty())
         assertTrue(manager.logs.value.size <= HeapGuard.RAW_LOG_RING_CRITICAL)
@@ -115,9 +131,15 @@ class MemoryGuardTest {
         assertTrue(manager.logs.value.size <= HeapGuard.RAW_LOG_RING_CRITICAL)
 
         MemoryGuard.forceBandForTest(HeapPressure.Level.NORMAL)
+        // The ring grows back to the normal cap and the next window republishes it, so the owner
+        // gets the full scrollback again as soon as the squeeze is over.
         feed(manager, HeapGuard.RAW_LOG_RING)
-        // Recovered: the cap is back to the full ring, and the ring refills to it.
-        assertTrue(manager.logs.value.size > HeapGuard.RAW_LOG_RING_CRITICAL)
+        waitForPublishWindow()
+        feed(manager, 1)
+        assertTrue(
+            "expected the ring to refill past the emergency cap, was ${manager.logs.value.size}",
+            manager.logs.value.size > HeapGuard.RAW_LOG_RING_CRITICAL
+        )
     }
 
     @Test

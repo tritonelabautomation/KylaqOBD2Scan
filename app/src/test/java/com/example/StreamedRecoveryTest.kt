@@ -70,11 +70,15 @@ class StreamedRecoveryTest {
 
     /** A realistic raw log: rpm + speed + coolant + voltage, dated, one frame per 130 ms. */
     private fun writeRawLog(name: String, driveDay: Long, polls: Int): File {
+        // Every frame is a complete single-frame Mode-01 answer: PCI, 41, PID, data.
+        // ("7E9041420D62" was a typo for the voltage frame - 11 hex characters cannot be
+        // byte-aligned, so a strict parser correctly refuses it. Fixed here rather than
+        // loosening the parser: the parser is right and the fixture was wrong.)
         val frames = listOf(
-            "7E804410C0F28",   // 41 0C 0F 28 -> 970 rpm
-            "7E8 04410D50",    // 41 0D 50    -> 80 km/h
-            "7E804410559",     // 41 05 59    -> 49 C
-            "7E9041420D62"     // 41 42 0D 62 -> 13.77 V
+            "7E8" + "04" + "41" + "0C" + "0F28",   // 41 0C 0F 28 -> 970 rpm
+            "7E8 " + "04" + "41" + "0D" + "50",    // 41 0D 50    -> 80 km/h  (separated id form)
+            "7E8" + "04" + "41" + "05" + "59",     // 41 05 59    -> 49 C
+            "7E9" + "04" + "41" + "42" + "0D62"    // 41 42 0D 62 -> 13.77 V
         )
         val file = File(rawLogDir, name)
         val sb = StringBuilder()
@@ -128,7 +132,9 @@ class StreamedRecoveryTest {
         // The transactions file must carry the drive, and it must be readable back through the
         // SAME streaming reader the import path uses.
         val rows = CsvExporter.readTransactionsFromCsv(txCsv)
-        assertEquals(100, rows.size) // 25 polls x 4 frames
+        // 25 polls x 4 frames. If a fixture frame is malformed the parser drops it and this number
+        // falls - which is exactly how the bad voltage fixture above was caught.
+        assertEquals("a frame in the fixture stopped parsing", 100, rows.size)
         assertEquals("0C", rows[0].pid)
         assertTrue("RPM must decode: ${rows[0].decodedValue}", (rows[0].decodedValue ?: 0.0) > 500.0)
 
