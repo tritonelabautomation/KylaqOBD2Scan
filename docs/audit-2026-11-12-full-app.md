@@ -155,4 +155,38 @@ Ordering is driven by blast radius and by which fixes unlock tests for the rest.
 
 ## 6. Delivery status
 
-Stage 1 (this register) and Stage 2 (the plan above) are complete. **No code has been changed for the findings in this document yet.** Per the directive, implementation begins only once the audit and plan are committed.
+Stage 1 (register) and Stage 2 (plan) are complete and committed. Implementation has begun.
+
+### Fixed and verified by CI (2026-11-12)
+
+| ID | Fix | Test |
+|---|---|---|
+| DB-01 | `exportSchema = true` + `room.schemaLocation`; schemas now committed under `app/schemas/` | enabled by build; DB-03 unblocked |
+| DB-02 | Removed `fallbackToDestructiveMigrationOnDowngrade()`; a downgrade now refuses instead of deleting | `DeleteSafetyPolicyTest` (3 downgrade cases) |
+| DB-02b | `downgradeHelpMessage()` / `isDowngradeRefusal()` so the refusal is diagnosable, not an opaque crash loop | — (reaches the auto-filed crash report) |
+| DB-04 | `deleteTrip` / `deleteAllTrips` wrapped in `db.withTransaction`, children first | `DeleteSafetyPolicyTest` (fails at every step ⇒ nothing commits) |
+| DB-05 | Delete order inverted: rows first, files only after the DB commits; failure keeps the recording | `DeleteSafetyPolicyTest` (both directions) |
+| ARCH-01 | Detached `CoroutineScope` launches removed from both delete paths | — |
+| MEM-01 | GPX/KML stream to disk; `exportToGpx`/`exportToKml` delegate to the streaming writers | `GpxExporterTest` +3 byte-identity cases |
+| AI-02 | Chat history capped at 60 stored / 20 sent | `ConversationAndPermissionPolicyTest` (4 cases) |
+| PERM-01 | Bluetooth flag computed from Bluetooth permissions only | `ConversationAndPermissionPolicyTest` (4 cases) |
+| SEC-01 | `raw_logs/` and `crash_logs/` excluded from cloud backup | `ConversationAndPermissionPolicyTest` |
+| IMP-04 | Entry cap 5 000, per-entry cap 512 MB, 64 MB free-space precheck | `ZipLimitPolicyTest` (7 cases) |
+
+### CI result at `84ad03e`
+
+```
+unit-tests: success    build: success
+131 suites, 1046 tests, 0 failed, 0 errored, 1 skipped   (was 1020 before this work)
+release published: 1.0.874 / code 10874
+```
+
+### Still open
+
+- **DB-03** migration tests — schemas now exist, the `MigrationTestHelper` suite is not written yet.
+- **MEM-02** unbounded DAO reads (`getSamplesForTrip`, `getSamplesForPid`, `getSamplesForTrips`, `getRawLogsForTrip`).
+- **IMP-05** staging-then-commit for imports.
+- **REL-02** `lintDebug` CI gate. **REL-03** R8 for release.
+- **AI-03** API key as a query parameter.
+- **REL-01** branch/`main` divergence — needs an owner decision, cannot be fixed from code.
+- **API-01 retracted**; **PERM-02**, **SEC-02**, BT/OBD hardware items remain unverified.
