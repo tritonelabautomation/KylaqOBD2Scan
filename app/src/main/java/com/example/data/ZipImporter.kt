@@ -32,6 +32,24 @@ object ZipImporter {
     private const val MAX_ZIP_UNCOMPRESSED_BYTES = 2048 * 1024 * 1024L // 2GB safety ceiling for multi-month backups
 
     /**
+     * AUDIT IMP-04 (2026-11-12).
+     *
+     * The unzip loop enforced one limit - a 2 GB *total* - and nothing else. A crafted or
+     * simply corrupt archive could therefore still hurt the owner:
+     *  - 100 000 tiny entries meant 100 000 files were created before the byte ceiling ever
+     *    came into play, exhausting inodes and turning the import into thousands of syscalls;
+     *  - a single 1.9 GB entry passed the total check and filled the volume in one write;
+     *  - nothing checked free space first, so the failure arrived as an IOException partway
+     *    through extraction, on a device whose storage was now full.
+     * The ceilings below are deliberately generous for a real backup (a month of trips is a
+     * handful of files totalling tens of MB) while making each failure mode bounded and
+     * reported before it can damage anything.
+     */
+    internal const val MAX_ZIP_ENTRIES = 5_000
+    internal const val MAX_SINGLE_ENTRY_BYTES = 512L * 1024 * 1024 // 512MB for the largest single file
+    internal const val MIN_FREE_SPACE_BYTES = 64L * 1024 * 1024 // keep 64MB headroom on the volume
+
+    /**
      * Imports a user-selected ZIP from a content Uri (SAF / ACTION_OPEN_DOCUMENT).
      */
     suspend fun importTripZip(
@@ -538,13 +556,26 @@ object ZipImporter {
     private fun unzipSafely(context: Context, uri: Uri, destDir: File): List<File> {
         val extractedFiles = mutableListOf<File>()
         var totalBytesRead = 0L
+        var entryCount = 0
         val inputStream: InputStream = context.contentResolver.openInputStream(uri)
             ?: throw IllegalStateException("Cannot open input stream for URI: $uri")
+
+        // AUDIT IMP-04: refuse before writing anything if the volume cannot hold the archive.
+        // Checked against the 2 GB ceiling (the worst case we permit), so the check is a
+        // floor on safety rather than a guess about this particular archive's contents.
+        ensureFreeSpace(destDir)
 
         ZipInputStream(inputStream).use { zis ->
             var entry: ZipEntry? = zis.nextEntry
             while (entry != null) {
                 if (!entry.isDirectory) {
+                    entryCount++
+                    if (entryCount > MAX_ZIP_ENTRIES) {
+                        throw IllegalStateException(
+                            "Archive contains more than $MAX_ZIP_ENTRIES entries; refusing to extract. " +
+                                "A Kylaq backup has a handful of files, so this is not a real backup."
+                        )
+                    }
                     val entryName = entry.name.replace("\\", "/")
                     val simpleName = File(entryName).name
                     if (simpleName.isNotBlank() && !simpleName.startsWith(".")) {
@@ -554,10 +585,19 @@ object ZipImporter {
                             throw SecurityException("Zip Slip path traversal attempt detected in entry: ${entry.name}")
                         }
 
+                        var entryBytes = 0L
                         FileOutputStream(targetFile).use { fos ->
                             val buffer = ByteArray(8192)
                             var len: Int
                             while (zis.read(buffer).also { len = it } > 0) {
+                                entryBytes += len
+                                // AUDIT IMP-04: bound a single entry, not just the total, so
+                                // one oversized file cannot consume the whole allowance.
+                                if (entryBytes > MAX_SINGLE_ENTRY_BYTES) {
+                                    throw IllegalStateException(
+                                        "Entry '${entry.name}' exceeds the $MAX_SINGLE_ENTRY_BYTES byte limit."
+                                    )
+                                }
                                 totalBytesRead += len
                                 if (totalBytesRead > MAX_ZIP_UNCOMPRESSED_BYTES) {
                                     throw IllegalStateException("Zip decompression size exceeded safety ceiling of 2GB.")
@@ -573,5 +613,20 @@ object ZipImporter {
             }
         }
         return extractedFiles
+    }
+
+    /**
+     * AUDIT IMP-04: fails fast, before extraction, when the destination volume is too full to
+     * hold even the smallest permissible import plus headroom. Without this the owner found out
+     * the disk was full via an IOException halfway through writing files.
+     */
+    private fun ensureFreeSpace(destDir: File) {
+        val usable = runCatching { destDir.usableSpace }.getOrDefault(Long.MAX_VALUE)
+        if (usable < MIN_FREE_SPACE_BYTES) {
+            throw IllegalStateException(
+                "Not enough free storage to import safely: ${usable / (1024 * 1024)}MB available, " +
+                    "${MIN_FREE_SPACE_BYTES / (1024 * 1024)}MB required. Free up space and try again."
+            )
+        }
     }
 }
