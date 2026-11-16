@@ -166,7 +166,9 @@ class MemoryGuardTest {
             val tail = MemoryGuard.pressureLogTail(2_000)
             assertNotNull("the guard must leave a diagnostic trail", tail)
             assertTrue(tail!!, tail.contains("level=CRITICAL"))
-            assertEquals(HeapPressure.PRESSURE_LOG_NAME, MemoryGuard.PRESSURE_LOG_NAME)
+            // The diagnostic file lives outside crash_logs/ and stays bounded - assert the name
+            // so a future rename cannot quietly start writing huge files into the crash dir.
+            assertEquals("memory_pressure.log", MemoryGuard.PRESSURE_LOG_NAME)
         } finally {
             // Never leave a 5-second sampler running for the next test class in this JVM.
             MemoryGuard.resetForTests()
