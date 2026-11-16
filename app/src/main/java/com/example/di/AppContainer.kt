@@ -80,13 +80,32 @@ object AppContainer {
     lateinit var reminderRepository: ReminderRepository
     lateinit var tripPlanRepository: TripPlanRepository
     lateinit var manualRepository: com.example.manual.ManualRepository
+
+    /**
+     * AUDIT DB-02: set when the database could not be opened because it was written by a newer
+     * build. Null means "no database problem". The UI shows this instead of a silent crash loop.
+     */
+    @Volatile
+    var fatalDatabaseMessage: String? = null
+        private set
     
     fun init(context: Context) {
         if (isInitialized) return
         synchronized(this) {
             if (isInitialized) return
             
-            val appDb = AppDatabase.getInstance(context)
+            // AUDIT DB-02 (2026-11-12): a downgrade is now refused rather than wiping the
+            // database, so this open can throw. Record what happened in a place the UI can
+            // show, then rethrow - the container must not come up half-initialised.
+            val appDb = try {
+                AppDatabase.getInstance(context)
+            } catch (t: Throwable) {
+                if (AppDatabase.isDowngradeRefusal(t)) {
+                    fatalDatabaseMessage = AppDatabase.downgradeHelpMessage()
+                    android.util.Log.e("AppContainer", fatalDatabaseMessage, t)
+                }
+                throw t
+            }
             catalogRepository = CatalogRepository(appDb)
             
             // Load catalog asynchronously if empty

@@ -71,5 +71,38 @@ abstract class AppDatabase : RoomDatabase() {
                 instance
             }
         }
+
+        /**
+         * AUDIT DB-02 (2026-11-12) follow-up: what the owner sees when a downgrade is refused.
+         *
+         * Removing `fallbackToDestructiveMigrationOnDowngrade()` protects the data, but Room
+         * signals a downgrade by throwing while opening. Without this, every caller of
+         * [getInstance] would die with an opaque `IllegalStateException` from deep inside Room -
+         * a crash loop on launch, which is hardly an improvement over data loss. This turns the
+         * refusal into a plain-English diagnosis and, crucially, says that the data is still
+         * there so the owner does not "fix" it by clearing app storage.
+         */
+        fun downgradeHelpMessage(): String =
+            "This phone's trip database was written by a NEWER version of KylaqOBD2Scan than " +
+                "the one now installed (a downgrade). The app will not open or erase it, because " +
+                "that would destroy your recorded trips, samples, raw logs and DTC history. " +
+                "Install the newer version again to read your data. Do NOT clear app storage - " +
+                "your recordings are still on this device and will open normally as soon as the " +
+                "newer build is reinstalled."
+
+        /** True when [throwable] is Room refusing to open a database written by a newer build. */
+        fun isDowngradeRefusal(throwable: Throwable): Boolean {
+            var t: Throwable? = throwable
+            while (t != null) {
+                val m = t.message.orEmpty()
+                if (m.contains("downgrade", ignoreCase = true) ||
+                    m.contains("A migration from", ignoreCase = true) && m.contains("not found", ignoreCase = true)
+                ) {
+                    return true
+                }
+                t = t.cause
+            }
+            return false
+        }
     }
 }
