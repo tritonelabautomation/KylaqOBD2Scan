@@ -121,18 +121,27 @@ class MemoryGuardTest {
         feed(manager, 10)
         assertTrue(manager.logs.value.isNotEmpty())
         assertTrue(manager.logs.value.size <= HeapGuard.RAW_LOG_RING_CRITICAL)
+        // The ring itself is capped, not just the published view.
+        assertEquals(HeapGuard.RAW_LOG_RING_CRITICAL, manager.currentRingLimit)
     }
 
     @Test
     fun theRawLogRingComesBackWhenPressureClears() {
         val manager = RawLogManager(rawLogDir)
         MemoryGuard.forceBandForTest(HeapPressure.Level.CRITICAL)
+        assertEquals(HeapGuard.RAW_LOG_RING_CRITICAL, manager.currentRingLimit)
         feed(manager, HeapGuard.RAW_LOG_RING)
         assertTrue(manager.logs.value.size <= HeapGuard.RAW_LOG_RING_CRITICAL)
 
+        // The squeeze ends. NORMAL must be DELIVERED to the rings, not swallowed - an early-return
+        // for NORMAL would leave every ring small for the rest of the process, so the owner would
+        // silently lose the full console scrollback after the first memory warning of a drive.
         MemoryGuard.forceBandForTest(HeapPressure.Level.NORMAL)
-        // The ring grows back to the normal cap and the next window republishes it, so the owner
-        // gets the full scrollback again as soon as the squeeze is over.
+        assertEquals(HeapGuard.RAW_LOG_RING, manager.currentRingLimit)
+        assertEquals(HeapPressure.Level.NORMAL, MemoryGuard.currentLevel())
+
+        // And the ring really refills to the restored cap.
+        waitForPublishWindow()
         feed(manager, HeapGuard.RAW_LOG_RING)
         waitForPublishWindow()
         feed(manager, 1)
@@ -140,6 +149,24 @@ class MemoryGuardTest {
             "expected the ring to refill past the emergency cap, was ${manager.logs.value.size}",
             manager.logs.value.size > HeapGuard.RAW_LOG_RING_CRITICAL
         )
+    }
+
+    @Test
+    fun theRingLimitsFollowTheBandInBothDirections() {
+        val manager = RawLogManager(rawLogDir)
+        assertEquals(HeapGuard.RAW_LOG_RING, manager.currentRingLimit)
+
+        MemoryGuard.forceBandForTest(HeapPressure.Level.ELEVATED)
+        assertEquals(HeapGuard.RAW_LOG_RING_ELEVATED, manager.currentRingLimit)
+
+        MemoryGuard.forceBandForTest(HeapPressure.Level.CRITICAL)
+        assertEquals(HeapGuard.RAW_LOG_RING_CRITICAL, manager.currentRingLimit)
+
+        MemoryGuard.forceBandForTest(HeapPressure.Level.ELEVATED)
+        assertEquals(HeapGuard.RAW_LOG_RING_ELEVATED, manager.currentRingLimit)
+
+        MemoryGuard.forceBandForTest(HeapPressure.Level.NORMAL)
+        assertEquals(HeapGuard.RAW_LOG_RING, manager.currentRingLimit)
     }
 
     @Test

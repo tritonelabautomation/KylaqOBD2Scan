@@ -109,6 +109,13 @@ class RawLogManager(
     @Volatile
     private var ringLimit: Int = maxBufferCapacity
 
+    /**
+     * Rows the ring currently holds at most. Exposed because it is the thing the memory guard
+     * actually changes, and asserting on it directly is deterministic - unlike timing the
+     * publish throttle, which is what made the first version of these tests flaky.
+     */
+    internal val currentRingLimit: Int get() = ringLimit
+
     /** Lines that could not be written. Non-zero means the log is INCOMPLETE - say so. */
     private var failures: Int = 0
     private var lastFailureText: String? = null

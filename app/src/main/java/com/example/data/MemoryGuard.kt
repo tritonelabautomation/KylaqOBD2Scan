@@ -96,6 +96,10 @@ object MemoryGuard : ComponentCallbacks2 {
     @Volatile
     private var logFile: File? = null
 
+    /** Set once a Context is seen, even if [start] was not called from it. */
+    @Volatile
+    private var fallbackLogFile: File? = null
+
     @Volatile
     private var sampler: Job? = null
 
@@ -112,6 +116,8 @@ object MemoryGuard : ComponentCallbacks2 {
             if (started) return
             started = true
         }
+        // A band recorded before start() must still leave a trail - see [record].
+        fallbackLogFile = File(context.filesDir, PRESSURE_LOG_NAME)
         runCatching {
             val app = context.applicationContext
             logFile = File(app.filesDir, PRESSURE_LOG_NAME)
@@ -227,12 +233,22 @@ object MemoryGuard : ComponentCallbacks2 {
 
     override fun onConfigurationChanged(newConfig: Configuration) = Unit
 
+    /**
+     * Pushes a band through the shed path.
+     *
+     * NORMAL is delivered too, on purpose: it is how every ring LEARNS IT MAY GROW BACK. The first
+     * version returned early for NORMAL, which meant a ring shrunk during a squeeze stayed small
+     * for the rest of the process - the owner would have lost the full console scrollback for the
+     * remainder of the drive even after the heap recovered.
+     */
     private fun applyBand(band: HeapPressure.Level, trigger: String) {
-        if (band == HeapPressure.Level.NORMAL) return
+        val changed = _level.value != band
         _level.value = band
-        shedCount++
-        shedAll(band)
-        record(band, lastUsedBytes, lastMaxBytes, trigger)
+        if (band != HeapPressure.Level.NORMAL) shedCount++
+        if (changed || band != HeapPressure.Level.NORMAL) {
+            shedAll(band)
+            record(band, lastUsedBytes, lastMaxBytes, trigger)
+        }
     }
 
     // ── Diagnostics ─────────────────────────────────────────────────────────────────────
@@ -242,7 +258,9 @@ object MemoryGuard : ComponentCallbacks2 {
      * support screen can quote what led up to a death instead of guessing.
      */
     private fun record(level: HeapPressure.Level, used: Long, max: Long, trigger: String) {
-        val file = logFile ?: return
+        // Fall back to `files/` if [start] was never called, so the trail exists in tests and in
+        // any future caller that gets a band without registering component callbacks.
+        val file = logFile ?: fallbackLogFile ?: return
         runCatching {
             if (file.length() > PRESSURE_LOG_MAX_BYTES) {
                 val previous = File(file.parentFile, "$PRESSURE_LOG_NAME.1")
@@ -280,7 +298,7 @@ object MemoryGuard : ComponentCallbacks2 {
      * file is capped at [PRESSURE_LOG_MAX_BYTES], but a read still never assumes that.
      */
     fun pressureLogTail(maxChars: Int = 4_000): String? {
-        val file = logFile ?: return null
+        val file = logFile ?: fallbackLogFile ?: return null
         if (!file.isFile) return null
         return runCatching {
             val length = file.length()
@@ -307,5 +325,6 @@ object MemoryGuard : ComponentCallbacks2 {
         sampler = null
         started = false
         logFile = null
+        fallbackLogFile = null
     }
 }
