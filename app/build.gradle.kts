@@ -42,6 +42,28 @@ val computedVersionCode = if (githubRunNumber > 0) {
 // upload key (my-upload-key.jks), which stays out of the repo — publishing to Play later
 // is unaffected and this key can be rotated at any time.
 //
+// AUDIT PHASE-2 (2026-11-12) — SUPERSEDED, DO NOT TRUST THIS KEY AS A SECRET.
+// The reasoning above is a non-argument. A committed private key plus a published password is
+// not "integrity from repo write access"; it is a key anyone who can read the repo can sign
+// with. Measured certificate (see docs/audit-release-2026-11-12.md):
+//   SHA-256 10:F5:29:99:F8:A4:6B:BF:28:2F:DA:C4:3B:B1:15:AB:17:63:AB:63:58:74:31:9E:41:95:00:1B:AD:4B:37:E1
+//   SHA-1   EC:B8:C9:F9:3B:E4:51:E5:A0:1C:31:29:67:B0:6B:1B:3D:11:C5:77
+// The private key IS extractable with the documented password (`openssl pkcs12 -nocerts`), so
+// this is a confirmed compromise, not a theoretical one.
+//
+// What it does and does not allow: the in-app updater already pins the SHA-256 published in
+// latest.json and compares the installed certificate against the downloaded APK's, so an
+// attacker still has to beat both to get a malicious update in. But an APK side-loaded by hand
+// from anywhere else installs silently over this one, because it is signed with the same key.
+//
+// Migration constraint (minSdk 24): Android only accepts a signing-certificate change for an
+// existing install if the APK carries an `apksigner --lineage` proof, which requires minSdk 28+.
+// On API 24-27 a new key means uninstall -> reinstall, i.e. the owner loses the Room DB,
+// every recording, raw log and granted permission. There is no code fix for that. The only
+// zero-data-loss rotation is to keep signing with THIS key and protect it properly: move it to
+// Actions secrets (SIDELOAD_KEYSTORE_BASE64 + passwords), delete keystore/sideload.p12 from the
+// tree, and treat the old key as sensitive rather than public.
+//
 // Precedence: if SIDELOAD_KEYSTORE_PATH / SIDELOAD_STORE_PASSWORD / SIDELOAD_KEY_PASSWORD
 // are set (e.g. decoded from GitHub Actions secrets), they win and the committed key is
 // never read — so the repo can move to secret-held signing without any code change.
