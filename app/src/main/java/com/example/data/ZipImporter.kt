@@ -16,6 +16,7 @@ import java.io.InputStream
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.zip.ZipEntry
+import java.util.zip.ZipFile
 import java.util.zip.ZipInputStream
 
 data class ZipImportResult(
@@ -50,6 +51,85 @@ object ZipImporter {
     internal const val MIN_FREE_SPACE_BYTES = 64L * 1024 * 1024 // keep 64MB headroom on the volume
 
     /**
+     * AUDIT PHASE-4 (2026-11-12): headroom kept free on top of the archive's real uncompressed
+     * size. Extraction is not the only consumer - Room journal, WAL and the page cache all grow
+     * while the import commits - so requiring "exactly the uncompressed size" would still strand
+     * the owner mid-commit on a nearly full phone.
+     */
+    internal const val IMPORT_WORKING_RESERVE_BYTES = 128L * 1024 * 1024
+
+
+    /**
+     * AUDIT PHASE-4 (2026-11-12): what a ZIP *declares* about itself, read from its central
+     * directory before a single byte is extracted.
+     *
+     * The previous code only discovered an archive's real size while decompressing it, which is
+     * the wrong moment: by then files have already been written and the volume is filling up.
+     * Reading the directory first turns the size check into a decision instead of an autopost-
+     * mortem, and it also lets duplicate filenames be rejected before they silently overwrite.
+     */
+    internal data class ArchivePlan(
+        val entryCount: Int,
+        val totalUncompressedBytes: Long,
+        val largestEntryBytes: Long,
+        val duplicateNames: List<String>,
+        val unsafePaths: List<String>
+    )
+
+    /**
+     * Inspects the archive's central directory. Returns a plain description of it, or throws if
+     * the archive cannot even be read as a ZIP.
+     *
+     * Note: [ZipFile] needs a seekable file, so the caller copies the content Uri to a private
+     * temp file first. That copy is bounded by the download size, not the decompressed size.
+     */
+    internal fun inspectArchive(archive: File): ArchivePlan {
+        val seen = HashMap<String, String>() // normalized name -> first raw name
+        val duplicates = mutableListOf<String>()
+        val unsafe = mutableListOf<String>()
+        var count = 0
+        var total = 0L
+        var largest = 0L
+        ZipFile(archive).use { zip ->
+            val entries = zip.entries()
+            while (entries.hasMoreElements()) {
+                val e = entries.nextElement()
+                if (e.isDirectory) continue
+                count++
+                if (e.size > 0) {
+                    total += e.size
+                    if (e.size > largest) largest = e.size
+                }
+                val normalized = normalizeEntryName(e.name)
+                if (normalized.isEmpty() || normalized.contains("..")) {
+                    unsafe.add(e.name)
+                } else {
+                    val previous = seen.put(normalized, e.name)
+                    if (previous != null && previous != e.name) duplicates.add(e.name)
+                }
+            }
+        }
+        return ArchivePlan(count, total, largest, duplicates, unsafe)
+    }
+
+    /**
+     * AUDIT PHASE-4: the importer keeps only `File(entryName).name`, so `a/trip.json` and
+     * `b/trip.json` both land as `trip.json` - the second silently overwriting the first. That
+     * can merge or corrupt two sessions without any error. Normalising the way the extractor
+     * does and rejecting collisions is the fix; a real backup never collides.
+     */
+    internal fun normalizeEntryName(raw: String): String {
+        val slashed = raw.replace('\\', '/').trim()
+        val simple = slashed.substringAfterLast('/')
+        if (simple.isBlank() || simple.startsWith(".")) return ""
+        return if (slashed.contains("..")) ".." + "/" + simple else simple
+    }
+
+    /** Free-space requirement: the archive's real uncompressed size plus a working reserve. */
+    internal fun requiredSpaceBytes(plan: ArchivePlan): Long =
+        plan.totalUncompressedBytes + IMPORT_WORKING_RESERVE_BYTES
+
+    /**
      * Imports a user-selected ZIP from a content Uri (SAF / ACTION_OPEN_DOCUMENT).
      */
     suspend fun importTripZip(
@@ -60,6 +140,16 @@ object ZipImporter {
     ): ZipImportResult = withContext(Dispatchers.IO) {
         val tempDir = File(context.cacheDir, "import_${System.currentTimeMillis()}").apply { mkdirs() }
         try {
+            // AUDIT PHASE-4 (2026-11-12): inspect the central directory and refuse the archive
+            // BEFORE extracting anything. Previously the only size check ran while decompressing,
+            // i.e. after files were already written to a volume that might be nearly full, and
+            // duplicate normalized filenames silently overwrote each other.
+            val archiveCopy = copyUriToTempFile(context, uri, File(context.cacheDir, "_inspect"))
+            val plan = inspectArchive(archiveCopy)
+            archiveCopy.delete()
+            preflightRejection(plan, tempDir)?.let { reason ->
+                return@withContext ZipImportResult(success = false, message = reason)
+            }
             val unzippedFiles = unzipSafely(context, uri, tempDir)
             if (unzippedFiles.isEmpty()) {
                 return@withContext ZipImportResult(
@@ -548,6 +638,64 @@ object ZipImporter {
         }
         tokens.add(sb.toString().trim())
         return tokens
+    }
+
+
+    /**
+     * Copies the picked Uri to a private file so the central directory can be read ([ZipFile]
+     * needs a seekable file, a SAF Uri is a stream).
+     *
+     * AUDIT PHASE-4: this copy lives in its own cache subdirectory, NOT in the extraction temp
+     * dir. If it shared that directory it would add its own size to the space the pre-flight
+     * check just measured, quietly making the check wrong by the size of the archive.
+     * The caller deletes it as soon as the directory has been read.
+     */
+    private fun copyUriToTempFile(context: Context, uri: Uri, dir: File): File {
+        dir.mkdirs()
+        val out = File(dir, "_archive_${System.currentTimeMillis()}.zip")
+        val input = context.contentResolver.openInputStream(uri)
+            ?: throw IllegalStateException("Cannot open input stream for URI: $uri")
+        input.use { source ->
+            FileOutputStream(out).use { sink -> source.copyTo(sink, 64 * 1024) }
+        }
+        return out
+    }
+
+    /**
+     * AUDIT PHASE-4 (2026-11-12): every reason to refuse an archive, decided from its declared
+     * contents and the free space on the volume, before extraction starts. Returns null when the
+     * archive is acceptable.
+     */
+    private fun preflightRejection(plan: ArchivePlan, destDir: File): String? {
+        if (plan.unsafePaths.isNotEmpty()) {
+            return "Archive contains unsafe paths (${plan.unsafePaths.take(3).joinToString()}); " +
+                "refusing to import. This archive did not come from KylaqOBD2Scan's exporter."
+        }
+        if (plan.duplicateNames.isNotEmpty()) {
+            return "Archive contains duplicate filenames (${plan.duplicateNames.take(3).joinToString()}); " +
+                "extracting them would silently overwrite one session with another. Refusing to import."
+        }
+        if (plan.entryCount > MAX_ZIP_ENTRIES) {
+            return "Archive declares ${plan.entryCount} entries, more than the $MAX_ZIP_ENTRIES limit. " +
+                "A Kylaq backup has a handful of files, so this is not a real backup."
+        }
+        if (plan.totalUncompressedBytes > MAX_ZIP_UNCOMPRESSED_BYTES) {
+            return "Archive expands to ${plan.totalUncompressedBytes / (1024 * 1024)}MB, more than the " +
+                "${MAX_ZIP_UNCOMPRESSED_BYTES / (1024 * 1024)}MB limit."
+        }
+        if (plan.largestEntryBytes > MAX_SINGLE_ENTRY_BYTES) {
+            return "Archive contains a single file of ${plan.largestEntryBytes / (1024 * 1024)}MB, " +
+                "more than the ${MAX_SINGLE_ENTRY_BYTES / (1024 * 1024)}MB per-file limit."
+        }
+        val required = requiredSpaceBytes(plan)
+        val usable = runCatching { destDir.usableSpace }.getOrDefault(Long.MAX_VALUE)
+        if (usable < required) {
+            return "Not enough free storage to import safely: " +
+                "${usable / (1024 * 1024)}MB available, this backup needs " +
+                "${required / (1024 * 1024)}MB (its ${plan.totalUncompressedBytes / (1024 * 1024)}MB " +
+                "contents plus a working reserve). Free up space and try again."
+        }
+        return null
     }
 
     /**
