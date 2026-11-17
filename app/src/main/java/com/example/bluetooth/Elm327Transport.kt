@@ -69,6 +69,12 @@ class BluetoothElmTransport(
     @Volatile
     private var connected: Boolean = false
 
+    /** Reason the most recent connect() attempt failed - lets BluetoothManager
+     *  classify BUSY (another app holds the single RFCOMM channel) vs TIMEOUT. */
+    @Volatile
+    var lastConnectError: String? = null
+        private set
+
     /** Captures the Bluetooth device MAC address at construction time so it can be
      *  stored in scan session records — fixing the regression where all sessions had
      *  adapterAddress = "00:00:00:00:00:00". */
@@ -82,6 +88,7 @@ class BluetoothElmTransport(
     }
 
     override suspend fun connect(): Boolean = withContext(Dispatchers.IO) {
+        lastConnectError = null
         try {
             if (!socket.isConnected) {
                 // FIX P0-1: Bound RFCOMM connect() with a 15s timeout.
@@ -102,12 +109,14 @@ class BluetoothElmTransport(
             true
         } catch (e: TimeoutCancellationException) {
             connected = false
+            lastConnectError = "Connection timeout after ${CONNECT_TIMEOUT_MS}ms (peer may be unreachable)"
             logRaw(isTx = false, canId = null, text = "Connection timeout after ${CONNECT_TIMEOUT_MS}ms (peer may be unreachable)", status = "TIMEOUT")
             // Best-effort cleanup of the stuck socket so the next attempt starts fresh
             try { socket.close() } catch (_: Exception) {}
             false
         } catch (e: Exception) {
             connected = false
+            lastConnectError = e.localizedMessage ?: e.javaClass.simpleName
             logRaw(isTx = false, canId = null, text = "Connection failed: ${e.localizedMessage}", status = "ERROR")
             false
         }
@@ -162,6 +171,28 @@ class BluetoothElmTransport(
         }
 
         try {
+            // ELM327 BUFFER-LAG ROOT CAUSE (owner Kylaq discovery run 2026-09-16 08:57 IST,
+            // re-confirmed by the exported JSON): the adapter can still be holding the PREVIOUS
+            // command's frame when the next one is written, so answers land one command late -
+            // TX 0100 returned a stale garbled frame, TX 0120 returned the 41 00 bitmap, TX 0180
+            // returned the 41 A0 bitmap. Rejecting the PID mismatch was correct, but the cost was
+            // real: the 0x00/0x20 blocks vanished (RPM, speed, coolant, MAP, timing, fuel rate),
+            // PID 83/85/86 were never discovered, and a capability bitmap was decoded as "DPF
+            // Temperature". Anything already sitting in the socket when we are about to transmit
+            // is by definition an orphan - drop it so the next read belongs to this command.
+            // Non-blocking, bounded, never waits for a response.
+            var drainPasses = 0
+            while (drainPasses < 8) {
+                val pending = inStream.available()
+                if (pending <= 0) break
+                val skipped = inStream.read(ByteArray(minOf(pending, 512)))
+                if (skipped <= 0) break
+                drainPasses++
+            }
+            if (drainPasses > 0) {
+                logRaw(isTx = false, canId = null, text = "[DRAINED $drainPasses stale RX chunk(s) before TX]", status = "LAG_GUARD")
+            }
+
             // Write command with carriage return
             val cmdBytes = (cleanCmd + "\r").toByteArray(Charsets.US_ASCII)
             out.write(cmdBytes)
@@ -232,9 +263,8 @@ class BluetoothElmTransport(
     }
 
     private fun logRaw(isTx: Boolean, canId: String?, text: String, status: String) {
-        val nowUtc = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
-            timeZone = TimeZone.getTimeZone("UTC")
-        }.format(Date())
+        // IST with offset (owner 2026-09-17: records use IST only, never UTC).
+        val nowUtc = com.example.data.RecordTime.stamp()
         rawLogListener?.onRawLog(
             timestampUtc = nowUtc,
             timestampMonotonic = SystemClock.elapsedRealtime(),

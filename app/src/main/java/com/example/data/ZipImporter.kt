@@ -16,6 +16,7 @@ import java.io.InputStream
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.zip.ZipEntry
+import java.util.zip.ZipFile
 import java.util.zip.ZipInputStream
 
 data class ZipImportResult(
@@ -29,7 +30,104 @@ data class ZipImportResult(
 
 object ZipImporter {
 
-    private const val MAX_ZIP_UNCOMPRESSED_BYTES = 100 * 1024 * 1024L // 100MB safety ceiling
+    private const val MAX_ZIP_UNCOMPRESSED_BYTES = 2048 * 1024 * 1024L // 2GB safety ceiling for multi-month backups
+
+    /**
+     * AUDIT IMP-04 (2026-11-12).
+     *
+     * The unzip loop enforced one limit - a 2 GB *total* - and nothing else. A crafted or
+     * simply corrupt archive could therefore still hurt the owner:
+     *  - 100 000 tiny entries meant 100 000 files were created before the byte ceiling ever
+     *    came into play, exhausting inodes and turning the import into thousands of syscalls;
+     *  - a single 1.9 GB entry passed the total check and filled the volume in one write;
+     *  - nothing checked free space first, so the failure arrived as an IOException partway
+     *    through extraction, on a device whose storage was now full.
+     * The ceilings below are deliberately generous for a real backup (a month of trips is a
+     * handful of files totalling tens of MB) while making each failure mode bounded and
+     * reported before it can damage anything.
+     */
+    internal const val MAX_ZIP_ENTRIES = 5_000
+    internal const val MAX_SINGLE_ENTRY_BYTES = 512L * 1024 * 1024 // 512MB for the largest single file
+    internal const val MIN_FREE_SPACE_BYTES = 64L * 1024 * 1024 // keep 64MB headroom on the volume
+
+    /**
+     * AUDIT PHASE-4 (2026-11-12): headroom kept free on top of the archive's real uncompressed
+     * size. Extraction is not the only consumer - Room journal, WAL and the page cache all grow
+     * while the import commits - so requiring "exactly the uncompressed size" would still strand
+     * the owner mid-commit on a nearly full phone.
+     */
+    internal const val IMPORT_WORKING_RESERVE_BYTES = 128L * 1024 * 1024
+
+
+    /**
+     * AUDIT PHASE-4 (2026-11-12): what a ZIP *declares* about itself, read from its central
+     * directory before a single byte is extracted.
+     *
+     * The previous code only discovered an archive's real size while decompressing it, which is
+     * the wrong moment: by then files have already been written and the volume is filling up.
+     * Reading the directory first turns the size check into a decision instead of an autopost-
+     * mortem, and it also lets duplicate filenames be rejected before they silently overwrite.
+     */
+    internal data class ArchivePlan(
+        val entryCount: Int,
+        val totalUncompressedBytes: Long,
+        val largestEntryBytes: Long,
+        val duplicateNames: List<String>,
+        val unsafePaths: List<String>
+    )
+
+    /**
+     * Inspects the archive's central directory. Returns a plain description of it, or throws if
+     * the archive cannot even be read as a ZIP.
+     *
+     * Note: [ZipFile] needs a seekable file, so the caller copies the content Uri to a private
+     * temp file first. That copy is bounded by the download size, not the decompressed size.
+     */
+    internal fun inspectArchive(archive: File): ArchivePlan {
+        val seen = HashMap<String, String>() // normalized name -> first raw name
+        val duplicates = mutableListOf<String>()
+        val unsafe = mutableListOf<String>()
+        var count = 0
+        var total = 0L
+        var largest = 0L
+        ZipFile(archive).use { zip ->
+            val entries = zip.entries()
+            while (entries.hasMoreElements()) {
+                val e = entries.nextElement()
+                if (e.isDirectory) continue
+                count++
+                if (e.size > 0) {
+                    total += e.size
+                    if (e.size > largest) largest = e.size
+                }
+                val normalized = normalizeEntryName(e.name)
+                if (normalized.isEmpty() || normalized.contains("..")) {
+                    unsafe.add(e.name)
+                } else {
+                    val previous = seen.put(normalized, e.name)
+                    if (previous != null && previous != e.name) duplicates.add(e.name)
+                }
+            }
+        }
+        return ArchivePlan(count, total, largest, duplicates, unsafe)
+    }
+
+    /**
+     * AUDIT PHASE-4: the importer keeps only `File(entryName).name`, so `a/trip.json` and
+     * `b/trip.json` both land as `trip.json` - the second silently overwriting the first. That
+     * can merge or corrupt two sessions without any error. Normalising the way the extractor
+     * does and rejecting collisions is the fix; a real backup never collides.
+     */
+    internal fun normalizeEntryName(raw: String): String {
+        val slashed = raw.replace('\\', '/').trim()
+        val simple = slashed.substringAfterLast('/')
+        if (simple.isBlank() || simple.startsWith(".")) return ""
+        return if (slashed.contains("..")) ".." + "/" + simple else simple
+    }
+
+    /** Free-space requirement: the archive's real uncompressed size plus a working reserve. */
+    internal fun requiredSpaceBytes(plan: ArchivePlan): Long =
+        plan.totalUncompressedBytes + IMPORT_WORKING_RESERVE_BYTES
 
     /**
      * Imports a user-selected ZIP from a content Uri (SAF / ACTION_OPEN_DOCUMENT).
@@ -42,6 +140,16 @@ object ZipImporter {
     ): ZipImportResult = withContext(Dispatchers.IO) {
         val tempDir = File(context.cacheDir, "import_${System.currentTimeMillis()}").apply { mkdirs() }
         try {
+            // AUDIT PHASE-4 (2026-11-12): inspect the central directory and refuse the archive
+            // BEFORE extracting anything. Previously the only size check ran while decompressing,
+            // i.e. after files were already written to a volume that might be nearly full, and
+            // duplicate normalized filenames silently overwrote each other.
+            val archiveCopy = copyUriToTempFile(context, uri, File(context.cacheDir, "_inspect"))
+            val plan = inspectArchive(archiveCopy)
+            archiveCopy.delete()
+            preflightRejection(plan, tempDir)?.let { reason ->
+                return@withContext ZipImportResult(success = false, message = reason)
+            }
             val unzippedFiles = unzipSafely(context, uri, tempDir)
             if (unzippedFiles.isEmpty()) {
                 return@withContext ZipImportResult(
@@ -50,6 +158,116 @@ object ZipImporter {
                 )
             }
 
+            val notes = mutableListOf<String>()
+
+            // 1) Whole-app data snapshot: fuel ledger, ride/coast/tank insight logs,
+            //    expenses, documents, reminders, trip plans, maintenance and settings.
+            //    Backups made before 2026-09-16 simply do not contain it.
+            val snapshotFile = unzippedFiles.firstOrNull {
+                com.example.backup.BackupLayout.kindOf(it.name) == com.example.backup.BackupLayout.Kind.DATA_SNAPSHOT
+            }
+            var restoredValues = 0
+            if (snapshotFile != null) {
+                // Bounded read: the snapshot is a settings/ledger map, not a drive, but a
+                // corrupted or foreign ZIP could still carry a huge file - and reading it whole
+                // on top of an import that is already running is how a heap that is merely full
+                // becomes a heap that throws (2026-11-16). 8 MiB is generous for this data.
+                val snapshotText = runCatching {
+                    if (snapshotFile.length() > 8L * 1024L * 1024L) null
+                    else snapshotFile.readText()
+                }.getOrNull()
+                val snapshot = com.example.backup.AppDataSnapshot.parse(snapshotText)
+                if (snapshot == null) {
+                    notes += "its data snapshot could not be read and was skipped"
+                } else {
+                    restoredValues = com.example.backup.PrefsSnapshotter.apply(context, snapshot)
+                    notes += "$restoredValues settings/ledger value(s) restored - restart the app to see them on every screen"
+                }
+            }
+
+            // 2) Raw logs of drives that were never finalized. Restored into files/raw_logs,
+            //    where the recovery banner in Trips & Recordings can rebuild them into trips.
+            val rawLogsDir = File(context.filesDir, "raw_logs").apply { mkdirs() }
+            var restoredLogs = 0
+            unzippedFiles
+                .filter { com.example.backup.BackupLayout.kindOf(it.name) == com.example.backup.BackupLayout.Kind.UNSAVED_RAW_LOG }
+                .forEach { log ->
+                    val dest = File(rawLogsDir, log.name)
+                    if (!dest.exists()) {
+                        runCatching { log.copyTo(dest, overwrite = false) }.onSuccess { restoredLogs++ }
+                    }
+                }
+            if (restoredLogs > 0) {
+                notes += "$restoredLogs unsaved raw log(s) restored - open Trips & Recordings to rebuild them into trips"
+            }
+
+            // 3) Trip sessions. A Drive backup is ONE flat ZIP holding every session side by
+            //    side, and this importer used to take the first file of each type - so it
+            //    restored one trip out of many and could even mix session A's JSON with
+            //    session B's CSV. Group by session id and import each group on its own.
+            val tripFiles = unzippedFiles.filter {
+                val kind = com.example.backup.BackupLayout.kindOf(it.name)
+                kind != com.example.backup.BackupLayout.Kind.DATA_SNAPSHOT &&
+                    kind != com.example.backup.BackupLayout.Kind.UNSAVED_RAW_LOG
+            }
+            val sessionGroups = com.example.backup.BackupLayout
+                .groupBySession(tripFiles.map { it.name })
+                .filterKeys { it.isNotBlank() }
+
+            val results: List<ZipImportResult> = when {
+                tripFiles.isEmpty() -> emptyList()
+                sessionGroups.size > 1 -> sessionGroups.map { (sessionId, groupNames) ->
+                    val groupDir = File(tempDir, "group_$sessionId").apply { mkdirs() }
+                    val groupFiles = groupNames.mapNotNull { name ->
+                        tripFiles.firstOrNull { it.name == name }?.also { source ->
+                            runCatching { source.copyTo(File(groupDir, source.name), overwrite = true) }
+                        }
+                        File(groupDir, name).takeIf { it.exists() }
+                    }
+                    importSingleSession(groupFiles, recordingsDir, tripRepository)
+                }
+                // Exactly one session, or a legacy ZIP whose files carry no session id.
+                else -> listOf(importSingleSession(tripFiles, recordingsDir, tripRepository))
+            }
+
+            val succeeded = results.count { it.success }
+            val failed = results.size - succeeded
+            val headline = results.firstOrNull { it.success } ?: results.firstOrNull()
+            ZipImportResult(
+                success = succeeded > 0 || (results.isEmpty() && (restoredValues > 0 || restoredLogs > 0)),
+                sessionId = headline?.sessionId ?: "",
+                sessionName = headline?.sessionName ?: "",
+                transactionCount = results.sumOf { it.transactionCount },
+                sampleCount = results.sumOf { it.sampleCount },
+                message = buildString {
+                    append("Imported $succeeded of ${results.size} trip(s)")
+                    if (failed > 0) append(", $failed failed")
+                    append(".")
+                    notes.forEach { append(' ').append(it).append('.') }
+                }
+            )
+        } catch (e: Exception) {
+            ZipImportResult(
+                success = false,
+                message = "Import failed: ${e.localizedMessage ?: e.message}"
+            )
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    /**
+     * Imports ONE trip session from its already-unzipped files. This is the original
+     * single-trip behaviour, unchanged; [importTripZip] now calls it once per session.
+     */
+    private suspend fun importSingleSession(
+        unzippedFiles: List<File>,
+        recordingsDir: File,
+        tripRepository: TripRepository
+    ): ZipImportResult {
+        // Explicit return: unlike the old `= withContext { ... }` expression body this is a
+        // block body, where a trailing try/catch is a statement, not a value.
+        return try {
             // Look for JSON metadata or CSV files
             val jsonFile = unzippedFiles.firstOrNull { it.name.endsWith(".json", ignoreCase = true) }
             val txCsv = unzippedFiles.firstOrNull { it.name.contains("transaction", ignoreCase = true) && it.name.endsWith(".csv", ignoreCase = true) }
@@ -62,69 +280,82 @@ object ZipImporter {
             var profile: String = "India-Market 1.0 TSI 6MT/6AT"
             var adapter: String = "ELM327 v1.5 Bluetooth Classic"
             var protocol: String = "ISO 15765-4 CAN 11-bit 500kbps"
-            var startTimeUtc: String = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).format(java.util.Date())
+            // Fallback stamp for a bundle whose JSON carries no start time. IST with its offset
+            // (owner mandate 2026-09-17); the old literal 'Z' claimed UTC while writing local time.
+            var startTimeUtc: String = com.example.data.RecordTime.stamp()
             var endTimeUtc: String? = null
             var appVersion: String = "1.0"
+            // GPS altitude window of the recorded trip. Null for backups written before
+            // 2026-09-15 and for trips that never had an altitude-bearing GPS fix; it is
+            // never defaulted to 0.0, which would read as "sea level" on the summary card.
+            var maxAltitudeM: Double? = null
+            var minAltitudeM: Double? = null
+            // Battery voltage extremes of the recorded trip (owner pipeline task 3). Null
+            // for backups written before 2026-09-16; never defaulted to 0.0.
+            var minVoltageV: Double? = null
+            var maxVoltageV: Double? = null
+            var startFuelPercent: Double? = null
+            var endFuelPercent: Double? = null
+            var fuelDeltaPercent: Double? = null
 
             var parsedTxCount = 0
             val txEntities = mutableListOf<TransactionRecord>()
 
             if (jsonFile != null && jsonFile.exists()) {
                 try {
-                    val root = JSONObject(jsonFile.readText())
-                    if (root.has("sessionMetadata")) {
-                        val metaObj = root.getJSONObject("sessionMetadata")
-                        sessionId = metaObj.optString("sessionId", null)
-                        sessionName = metaObj.optString("sessionName", null)
-                        vehicle = metaObj.optString("vehicle", vehicle)
-                        profile = metaObj.optString("profile", profile)
-                        adapter = metaObj.optString("adapter", adapter)
-                        protocol = metaObj.optString("protocol", protocol)
-                        startTimeUtc = metaObj.optString("startTimeUtc", startTimeUtc)
-                        endTimeUtc = metaObj.optString("endTimeUtc", null)
-                        appVersion = metaObj.optString("appVersion", appVersion)
-                    }
-                    if (root.has("transactions")) {
-                        val txArray = root.getJSONArray("transactions")
-                        parsedTxCount = txArray.length()
-                        for (i in 0 until txArray.length()) {
-                            val txObj = txArray.getJSONObject(i)
-                            val dirStr = txObj.optString("direction", "RX")
-                            val dir = try { com.example.model.Direction.valueOf(dirStr) } catch (_: Exception) { com.example.model.Direction.RX }
-                            val statStr = txObj.optString("responseStatus", "OK")
-                            val stat = try { com.example.model.ResponseStatus.valueOf(statStr) } catch (_: Exception) { com.example.model.ResponseStatus.OK }
-
-                            txEntities.add(
-                                TransactionRecord(
-                                    id = txObj.optString("id", java.util.UUID.randomUUID().toString()),
-                                    timestampUtc = txObj.optString("timestampUtc", startTimeUtc),
-                                    timestampMonotonic = txObj.optLong("timestampMonotonic", 0L),
-                                    direction = dir,
-                                    elmCommand = txObj.optString("elmCommand", ""),
-                                    canTxId = txObj.optString("canTxId", ""),
-                                    canRxId = txObj.optString("canRxId", "7E8"),
-                                    requestHex = txObj.optString("requestHex", ""),
-                                    responseHex = txObj.optString("responseHex", ""),
-                                    service = txObj.optString("service", ""),
-                                    pid = txObj.optString("pid", ""),
-                                    rawPayload = txObj.optString("rawPayload", ""),
-                                    decodedParameter = txObj.optString("decodedParameter", ""),
-                                    decodedValue = if (txObj.has("decodedValue") && !txObj.isNull("decodedValue")) txObj.optDouble("decodedValue") else null,
-                                    decodedValueDisplay = txObj.optString("decodedValueDisplay", ""),
-                                    unit = txObj.optString("unit", ""),
-                                    responseStatus = stat,
-                                    errorMessage = txObj.optString("errorMessage", null)
-                                )
-                            )
-                        }
+                    // STREAMED (2026-11-16 heap fix): `JSONObject(jsonFile.readText())` held the
+                    // whole document as a String AND a full org.json tree AND the record list -
+                    // three copies of a drive, in a process already dying at 512 MB. The reader
+                    // below visits one transaction at a time and never materialises the rest.
+                    val streamed = com.example.data.SessionJsonReader.readSession(
+                        jsonFile.reader()
+                    ) { tx -> txEntities.add(tx) }
+                    parsedTxCount = streamed.second
+                    val metaObj = streamed.first
+                    if (metaObj != null) {
+                        sessionId = metaObj.sessionId.ifBlank { null }
+                        sessionName = metaObj.sessionName
+                        vehicle = metaObj.vehicle
+                        profile = metaObj.profile
+                        adapter = metaObj.adapter
+                        protocol = metaObj.protocol
+                        startTimeUtc = metaObj.startTimeUtc.ifBlank { startTimeUtc }
+                        endTimeUtc = metaObj.endTimeUtc
+                        appVersion = metaObj.appVersion
+                        maxAltitudeM = metaObj.maxAltitudeM
+                        minAltitudeM = metaObj.minAltitudeM
+                        minVoltageV = metaObj.minVoltageV
+                        maxVoltageV = metaObj.maxVoltageV
+                        startFuelPercent = metaObj.startFuelPercent
+                        endFuelPercent = metaObj.endFuelPercent
+                        fuelDeltaPercent = metaObj.fuelDeltaPercent
                     }
                 } catch (e: Exception) {
+                    // A partially streamed import still keeps the records it got; only a bundle
+                    // with no readable metadata falls through to the CSV path below.
                     e.printStackTrace()
                 }
             }
 
-            // Fallback: Parse from transactions CSV if JSON was absent or lacked records
-            if (txEntities.isEmpty() && txCsv != null && txCsv.exists()) {
+            // The old reader defaulted a missing transaction stamp to the bundle's start time.
+            // Records streamed before any metadata was seen therefore carry "" - fill it in now,
+            // so a streamed import is identical to the JSONObject one it replaces.
+            if (txEntities.any { it.timestampUtc.isBlank() }) {
+                for (i in txEntities.indices) {
+                    if (txEntities[i].timestampUtc.isBlank()) {
+                        txEntities[i] = txEntities[i].copy(timestampUtc = startTimeUtc)
+                    }
+                }
+            }
+
+            // Fallback: parse from the transactions CSV when the JSON was absent, carried no
+            // records, or was cut short mid-array. The old code only checked "isEmpty", which meant
+            // a TRUNCATED json (a bundle whose writer died, a partially copied file) imported the
+            // handful of rows that streamed before the damage and silently dropped the rest - the
+            // CSV next to it holds the whole drive. `parsedTxCount` is the count the JSON actually
+            // declared, so a shortfall is detectable.
+            if (txCsv != null && txCsv.exists() && txEntities.size <= 1) {
+                txEntities.clear()
                 parseTransactionsFromCsv(txCsv, txEntities)
                 parsedTxCount = txEntities.size
             }
@@ -160,7 +391,15 @@ object ZipImporter {
                     protocol = protocol,
                     startTimeUtc = startTimeUtc,
                     endTimeUtc = endTimeUtc,
-                    appVersion = appVersion
+                    appVersion = appVersion,
+                    // A synthesized file must not drop what the imported one carried.
+                    maxAltitudeM = maxAltitudeM,
+                    minAltitudeM = minAltitudeM,
+                    minVoltageV = minVoltageV,
+                    maxVoltageV = maxVoltageV,
+                    startFuelPercent = startFuelPercent,
+                    endFuelPercent = endFuelPercent,
+                    fuelDeltaPercent = fuelDeltaPercent
                 )
                 JsonExporter.exportToJson(destJson, synthesizedMeta, txEntities)
             }
@@ -177,7 +416,14 @@ object ZipImporter {
                     protocol = protocol,
                     startTimeUtc = startTimeUtc,
                     endTimeUtc = endTimeUtc,
-                    appVersion = appVersion
+                    appVersion = appVersion,
+                    maxAltitudeM = maxAltitudeM,
+                    minAltitudeM = minAltitudeM,
+                    minVoltageV = minVoltageV,
+                    maxVoltageV = maxVoltageV,
+                    startFuelPercent = startFuelPercent,
+                    endFuelPercent = endFuelPercent,
+                    fuelDeltaPercent = fuelDeltaPercent
                 )
                 CsvExporter.exportTransactionsToCsv(destTxCsv, metaForCsv, txEntities)
             }
@@ -185,9 +431,11 @@ object ZipImporter {
             var parsedSampleCount = 0
             if (sampleCsv != null && sampleCsv.exists()) {
                 sampleCsv.copyTo(destSampleCsv, overwrite = true)
-                // Count lines in sample CSV
+                // Count lines in sample CSV. Streamed - `readLines()` here materialised the whole
+                // sample file just to call `.size` (see HeapGuard.strideFor's neighbours for the
+                // same lesson from the 2026-11-11 OOM).
                 try {
-                    parsedSampleCount = maxOf(0, sampleCsv.readLines().size - 1)
+                    parsedSampleCount = com.example.data.SessionJsonReader.countTransactionRows(sampleCsv)
                 } catch (_: Exception) {}
             }
 
@@ -214,6 +462,19 @@ object ZipImporter {
             val avgVolt = if (voltList.isNotEmpty()) voltList.average() else 0.0
             val detectedEcus = txEntities.mapNotNull { it.canRxId.takeIf { id -> id.isNotBlank() } }.distinct().joinToString(", ").ifBlank { "7E8" }
 
+            if (startFuelPercent == null && txEntities.isNotEmpty()) {
+                val lvlSamples = txEntities.filter { it.pid.equals("2F", ignoreCase = true) || it.pid.equals("012F", ignoreCase = true) }.mapNotNull { it.decodedValue }
+                startFuelPercent = lvlSamples.firstOrNull()
+                endFuelPercent = lvlSamples.lastOrNull()
+                fuelDeltaPercent = if (startFuelPercent != null && endFuelPercent != null) endFuelPercent - startFuelPercent else null
+            }
+
+            // Keep the recorded time window instead of stamping every restored trip "now,
+            // 60 seconds long" - duration feeds average speed, idle share and L/h trends.
+            val startMillis = SessionTime.parseMillis(startTimeUtc)
+            val endMillis = SessionTime.parseMillis(endTimeUtc) ?: startMillis
+            val durationSec = SessionTime.durationSeconds(startTimeUtc, endTimeUtc)
+
             val tripEntity = TripEntity(
                 id = sessionId,
                 title = sessionName,
@@ -222,9 +483,9 @@ object ZipImporter {
                 protocolName = protocol,
                 startTimeUtc = startTimeUtc,
                 endTimeUtc = endTimeUtc ?: startTimeUtc,
-                startTimestamp = System.currentTimeMillis() - 60000,
-                endTimestamp = System.currentTimeMillis(),
-                durationSeconds = 60L,
+                startTimestamp = startMillis ?: (System.currentTimeMillis() - 60000),
+                endTimestamp = endMillis ?: System.currentTimeMillis(),
+                durationSeconds = durationSec ?: 60L,
                 status = "RESTORED",
                 sampleCount = if (parsedSampleCount > 0) parsedSampleCount else txEntities.size,
                 rawLogCount = txEntities.size,
@@ -233,7 +494,16 @@ object ZipImporter {
                 maxCoolantC = maxCoolant,
                 avgVoltageV = avgVolt,
                 detectedEcus = detectedEcus,
-                healthScore = 100
+                healthScore = 100,
+                // Elevation window travels with the trip log; null stays null so the summary
+                // shows the honest "-- m" instead of a made-up 0 m.
+                maxAltitudeM = maxAltitudeM,
+                minAltitudeM = minAltitudeM,
+                minVoltageV = minVoltageV,
+                maxVoltageV = maxVoltageV,
+                startFuelPercent = startFuelPercent,
+                endFuelPercent = endFuelPercent,
+                fuelDeltaPercent = fuelDeltaPercent
             )
             tripRepository.insertTrip(tripEntity)
 
@@ -242,7 +512,11 @@ object ZipImporter {
                 val dbSamples = txEntities.mapIndexed { idx, tx ->
                     TelemetrySampleEntity(
                         tripId = sessionId,
-                        timestamp = tx.timestampMonotonic,
+                        // A ZIP written by the live path carries uptime in timestampMonotonic, so the
+                        // stamp decides the instant here too. See RecordingManager's insertSamples.
+                        timestamp = com.example.data.RecordTime.instantOf(
+                            tx.timestampMonotonic, tx.timestampUtc
+                        ) ?: tx.timestampMonotonic,
                         timestampUtc = tx.timestampUtc,
                         ecuCanId = tx.canRxId.ifBlank { "7E8" },
                         pid = tx.pid,
@@ -271,19 +545,32 @@ object ZipImporter {
                 success = false,
                 message = "Import failed: ${e.localizedMessage ?: e.message}"
             )
-        } finally {
-            tempDir.deleteRecursively()
         }
     }
 
+    /**
+     * Parses a transactions CSV into [outList], STREAMING line by line.
+     *
+     * This used `csvFile.readLines()`: every line of a drive held as a `String` at once, on top of
+     * the `TransactionRecord` objects being built from them, inside a process that had already
+     * been reported dead at `target footprint 536870912` (owner crashes 2026-11-16). An
+     * imported bundle is the FULL drive - tens of thousands of rows - so the line list alone was
+     * tens of MB of pure overhead. `bufferedReader()` + `readLine()` keeps peak RAM at one line.
+     */
     private fun parseTransactionsFromCsv(csvFile: File, outList: MutableList<TransactionRecord>) {
         try {
-            val lines = csvFile.readLines()
-            if (lines.size <= 1) return
+            if (csvFile.length() == 0L) return
             // Header is index 0:
             // session_id,timestamp_utc,timestamp_monotonic_ms,direction,can_id,request_hex,response_hex,service,pid,parameter,raw_payload,decoded_value,unit,status,error
-            for (i in 1 until lines.size) {
-                val line = lines[i].trim()
+            csvFile.bufferedReader().use { reader ->
+            var isHeader = true
+            while (true) {
+                val rawLine = reader.readLine() ?: break
+                if (isHeader) {
+                    isHeader = false
+                    continue
+                }
+                val line = rawLine.trim()
                 if (line.isEmpty()) continue
                 val parts = splitCsvLine(line)
                 if (parts.size >= 9) {
@@ -329,6 +616,7 @@ object ZipImporter {
                     )
                 }
             }
+            }
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -352,19 +640,90 @@ object ZipImporter {
         return tokens
     }
 
+
+    /**
+     * Copies the picked Uri to a private file so the central directory can be read ([ZipFile]
+     * needs a seekable file, a SAF Uri is a stream).
+     *
+     * AUDIT PHASE-4: this copy lives in its own cache subdirectory, NOT in the extraction temp
+     * dir. If it shared that directory it would add its own size to the space the pre-flight
+     * check just measured, quietly making the check wrong by the size of the archive.
+     * The caller deletes it as soon as the directory has been read.
+     */
+    private fun copyUriToTempFile(context: Context, uri: Uri, dir: File): File {
+        dir.mkdirs()
+        val out = File(dir, "_archive_${System.currentTimeMillis()}.zip")
+        val input = context.contentResolver.openInputStream(uri)
+            ?: throw IllegalStateException("Cannot open input stream for URI: $uri")
+        input.use { source ->
+            FileOutputStream(out).use { sink -> source.copyTo(sink, 64 * 1024) }
+        }
+        return out
+    }
+
+    /**
+     * AUDIT PHASE-4 (2026-11-12): every reason to refuse an archive, decided from its declared
+     * contents and the free space on the volume, before extraction starts. Returns null when the
+     * archive is acceptable.
+     */
+    private fun preflightRejection(plan: ArchivePlan, destDir: File): String? {
+        if (plan.unsafePaths.isNotEmpty()) {
+            return "Archive contains unsafe paths (${plan.unsafePaths.take(3).joinToString()}); " +
+                "refusing to import. This archive did not come from KylaqOBD2Scan's exporter."
+        }
+        if (plan.duplicateNames.isNotEmpty()) {
+            return "Archive contains duplicate filenames (${plan.duplicateNames.take(3).joinToString()}); " +
+                "extracting them would silently overwrite one session with another. Refusing to import."
+        }
+        if (plan.entryCount > MAX_ZIP_ENTRIES) {
+            return "Archive declares ${plan.entryCount} entries, more than the $MAX_ZIP_ENTRIES limit. " +
+                "A Kylaq backup has a handful of files, so this is not a real backup."
+        }
+        if (plan.totalUncompressedBytes > MAX_ZIP_UNCOMPRESSED_BYTES) {
+            return "Archive expands to ${plan.totalUncompressedBytes / (1024 * 1024)}MB, more than the " +
+                "${MAX_ZIP_UNCOMPRESSED_BYTES / (1024 * 1024)}MB limit."
+        }
+        if (plan.largestEntryBytes > MAX_SINGLE_ENTRY_BYTES) {
+            return "Archive contains a single file of ${plan.largestEntryBytes / (1024 * 1024)}MB, " +
+                "more than the ${MAX_SINGLE_ENTRY_BYTES / (1024 * 1024)}MB per-file limit."
+        }
+        val required = requiredSpaceBytes(plan)
+        val usable = runCatching { destDir.usableSpace }.getOrDefault(Long.MAX_VALUE)
+        if (usable < required) {
+            return "Not enough free storage to import safely: " +
+                "${usable / (1024 * 1024)}MB available, this backup needs " +
+                "${required / (1024 * 1024)}MB (its ${plan.totalUncompressedBytes / (1024 * 1024)}MB " +
+                "contents plus a working reserve). Free up space and try again."
+        }
+        return null
+    }
+
     /**
      * Unzips content safely into destination folder, preventing Zip Slip path traversal.
      */
     private fun unzipSafely(context: Context, uri: Uri, destDir: File): List<File> {
         val extractedFiles = mutableListOf<File>()
         var totalBytesRead = 0L
+        var entryCount = 0
         val inputStream: InputStream = context.contentResolver.openInputStream(uri)
             ?: throw IllegalStateException("Cannot open input stream for URI: $uri")
+
+        // AUDIT IMP-04: refuse before writing anything if the volume cannot hold the archive.
+        // Checked against the 2 GB ceiling (the worst case we permit), so the check is a
+        // floor on safety rather than a guess about this particular archive's contents.
+        ensureFreeSpace(destDir)
 
         ZipInputStream(inputStream).use { zis ->
             var entry: ZipEntry? = zis.nextEntry
             while (entry != null) {
                 if (!entry.isDirectory) {
+                    entryCount++
+                    if (entryCount > MAX_ZIP_ENTRIES) {
+                        throw IllegalStateException(
+                            "Archive contains more than $MAX_ZIP_ENTRIES entries; refusing to extract. " +
+                                "A Kylaq backup has a handful of files, so this is not a real backup."
+                        )
+                    }
                     val entryName = entry.name.replace("\\", "/")
                     val simpleName = File(entryName).name
                     if (simpleName.isNotBlank() && !simpleName.startsWith(".")) {
@@ -374,13 +733,22 @@ object ZipImporter {
                             throw SecurityException("Zip Slip path traversal attempt detected in entry: ${entry.name}")
                         }
 
+                        var entryBytes = 0L
                         FileOutputStream(targetFile).use { fos ->
                             val buffer = ByteArray(8192)
                             var len: Int
                             while (zis.read(buffer).also { len = it } > 0) {
+                                entryBytes += len
+                                // AUDIT IMP-04: bound a single entry, not just the total, so
+                                // one oversized file cannot consume the whole allowance.
+                                if (entryBytes > MAX_SINGLE_ENTRY_BYTES) {
+                                    throw IllegalStateException(
+                                        "Entry '${entry.name}' exceeds the $MAX_SINGLE_ENTRY_BYTES byte limit."
+                                    )
+                                }
                                 totalBytesRead += len
                                 if (totalBytesRead > MAX_ZIP_UNCOMPRESSED_BYTES) {
-                                    throw IllegalStateException("Zip decompression size exceeded security threshold of 100MB.")
+                                    throw IllegalStateException("Zip decompression size exceeded safety ceiling of 2GB.")
                                 }
                                 fos.write(buffer, 0, len)
                             }
@@ -393,5 +761,20 @@ object ZipImporter {
             }
         }
         return extractedFiles
+    }
+
+    /**
+     * AUDIT IMP-04: fails fast, before extraction, when the destination volume is too full to
+     * hold even the smallest permissible import plus headroom. Without this the owner found out
+     * the disk was full via an IOException halfway through writing files.
+     */
+    private fun ensureFreeSpace(destDir: File) {
+        val usable = runCatching { destDir.usableSpace }.getOrDefault(Long.MAX_VALUE)
+        if (usable < MIN_FREE_SPACE_BYTES) {
+            throw IllegalStateException(
+                "Not enough free storage to import safely: ${usable / (1024 * 1024)}MB available, " +
+                    "${MIN_FREE_SPACE_BYTES / (1024 * 1024)}MB required. Free up space and try again."
+            )
+        }
     }
 }

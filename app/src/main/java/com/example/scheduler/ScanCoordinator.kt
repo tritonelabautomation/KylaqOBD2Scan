@@ -85,7 +85,7 @@ class ScanCoordinator(
 
         try {
             // 1. Adapter Init & Protocol Detect via DiagnosticSession
-            _progress.value = ScanProgress(ScanPhase.INIT_ADAPTER, "Initializing ELM327 for Ã…Â koda Kylaq...", 0.05f)
+            _progress.value = ScanProgress(ScanPhase.INIT_ADAPTER, "Initializing ELM327 for Škoda Kylaq...", 0.05f)
             val initResult = com.example.protocol.DiagnosticSession.initialize(transport)
             if (!initResult.isSuccess) {
                 return failScan("Adapter initialization failed")
@@ -206,37 +206,14 @@ class ScanCoordinator(
 
             // 6. Current & Pending DTCs
             _progress.value = ScanProgress(ScanPhase.READ_DTCS, "Scanning for Faults (DTCs)...", 0.6f)
-            val dtcDecoder = DtcDecoder
-            
-            // Mode 03 (Current)
-            val mode03 = transport.sendCommand("03", 3000)
-            if (mode03.status == com.example.model.ResponseStatus.OK) {
-                // FIX P0-5: pass mode=0x03 so DtcDecoder requires positive ack 0x43
-                val codes = dtcDecoder.extractDtcs(mode03.lines.joinToString(""), mode = 0x03)
-                codes.forEach { code ->
-                    dtcs.add(DtcRecordEntity(vehicleId = vehicleId, tripId = sessionId, timestamp = System.currentTimeMillis(), code = code, description = "Active Fault", status = "ACTIVE"))
-                }
-            }
 
-            // Mode 07 (Pending)
-            val mode07 = transport.sendCommand("07", 3000)
-            if (mode07.status == com.example.model.ResponseStatus.OK) {
-                // FIX P0-5: pass mode=0x07 so DtcDecoder requires positive ack 0x47
-                val codes = dtcDecoder.extractDtcs(mode07.lines.joinToString(""), mode = 0x07)
-                codes.forEach { code ->
-                    dtcs.add(DtcRecordEntity(vehicleId = vehicleId, tripId = sessionId, timestamp = System.currentTimeMillis(), code = code, description = "Pending Fault", status = "PENDING"))
-                }
-            }
-
-            // Mode 0A (Permanent)
-            val mode0A = transport.sendCommand("0A", 3000)
-            if (mode0A.status == com.example.model.ResponseStatus.OK) {
-                // FIX P0-5: pass mode=0x0A so DtcDecoder requires positive ack 0x4A
-                val codes = dtcDecoder.extractDtcs(mode0A.lines.joinToString(""), mode = 0x0A)
-                codes.forEach { code ->
-                    dtcs.add(DtcRecordEntity(vehicleId = vehicleId, tripId = sessionId, timestamp = System.currentTimeMillis(), code = code, description = "Permanent Fault", status = "PERMANENT"))
-                }
-            }
+            // FIX (DTC scan always reported zero faults): the raw ELM327 lines were glued
+            // together ("7E803430104") and handed straight to DtcDecoder, which requires a
+            // positive ack at offset 0 — so nothing was ever decoded. Responses are now
+            // reassembled per CAN id with IsoTpParser first, exactly like MainViewModel does.
+            collectDtcs(transport, "03", 0x03, "Active Fault", "ACTIVE")
+            collectDtcs(transport, "07", 0x07, "Pending Fault", "PENDING")
+            collectDtcs(transport, "0A", 0x0A, "Permanent Fault", "PERMANENT")
 
             if (isCancelled) return cancelScan()
 
@@ -288,6 +265,59 @@ class ScanCoordinator(
         val res = transport.sendCommand(cmd, timeoutMs)
         if (res.status != com.example.model.ResponseStatus.OK) errorCount++
         return res.status == com.example.model.ResponseStatus.OK
+    }
+
+    /**
+     * Reads one DTC mode over the bus and stores the decoded codes.
+     *
+     * Each ECU answer is reassembled with [IsoTpParser] (multi-ECU and multi-frame safe)
+     * before decoding, and the mode is passed through so [DtcDecoder] can require the
+     * matching positive ack (43 / 47 / 4A).
+     */
+    private suspend fun collectDtcs(
+        transport: ElmTransport,
+        command: String,
+        mode: Int,
+        description: String,
+        status: String
+    ) {
+        val resp = transport.sendCommand(command, 3000)
+        if (resp.status != ResponseStatus.OK) {
+            errorCount++
+            return
+        }
+        val messages = try {
+            IsoTpParser.reassembleLines(resp.lines)
+        } catch (_: Exception) {
+            emptyList()
+        }
+        val codes = LinkedHashSet<String>()
+        for (msg in messages) {
+            if (msg.isMalformed || msg.reconstructedBytes.isEmpty()) continue
+            codes.addAll(DtcDecoder.extractDtcs(msg.reconstructedPayloadHex, mode = mode))
+        }
+        if (messages.isEmpty()) {
+            // No ISO-TP frames recovered — fall back to the raw lines so adapters that answer
+            // without headers still produce a result. Line by line, never glued together:
+            // two ECUs answering ("7E803430104" + "7E903430108") would otherwise be decoded
+            // as one long payload and invent DTCs out of the second frame's CAN id.
+            resp.lines.forEach { line ->
+                codes.addAll(DtcDecoder.extractDtcs(line, mode = mode))
+            }
+        }
+        val timestamp = System.currentTimeMillis()
+        codes.forEach { code ->
+            dtcs.add(
+                DtcRecordEntity(
+                    vehicleId = vehicleId,
+                    tripId = sessionId,
+                    timestamp = timestamp,
+                    code = code,
+                    description = description,
+                    status = status
+                )
+            )
+        }
     }
 
     private suspend fun failScan(reason: String): ScanSessionEntity {

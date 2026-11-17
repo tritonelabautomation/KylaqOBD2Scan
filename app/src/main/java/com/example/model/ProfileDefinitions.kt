@@ -26,12 +26,22 @@ object ProfileDefinitions {
         DiagnosticRequest("0146", "Ambient Air Temp", "01", "46", "Ambient air temperature", DecoderType.TEMP_MINUS_40),
         DiagnosticRequest("0151", "Fuel Type", "01", "51", "Vehicle fuel type", DecoderType.FUEL_TYPE_ENUM),
         DiagnosticRequest("0152", "Ethanol Fuel %", "01", "52", "Ethanol fuel percentage", DecoderType.PERCENT_255),
-        DiagnosticRequest("019D", "Engine Fuel Rate", "01", "9D", "Engine fuel rate", DecoderType.FUEL_RATE_20),
-        DiagnosticRequest("0123", "Fuel Rail Pressure", "01", "23", "Fuel rail pressure (manifold vacuum)", DecoderType.FUEL_RAIL_PRESSURE)
+        DiagnosticRequest("015E", "Engine Fuel Rate (Vol)", "01", "5E", "Engine fuel rate (volume, L/h)", DecoderType.FUEL_RATE_20),
+        // QA/QC fuel audit 2026-09-13 (F-1 then F-6): was FUEL_RATE_20 (L/h); F-1 moved it to the
+        // mass decoder; F-6 (owner live telemetry + stoichiometric air-model cross-check)
+        // recalibrated the mass resolution to 0.02 g/s per count (/50) - /10 produced
+        // physically impossible 4-7 L/h idle readings on the EA211.
+        DiagnosticRequest("019D", "Engine Fuel Rate (Mass)", "01", "9D", "Engine fuel rate (mass, g/s)", DecoderType.FUEL_RATE_MASS_50),
+        // QA/QC fuel audit 2026-09-13 (F-3): "(manifold vacuum)" is the $22 wording; J1979 $23 is
+        // fuel rail GAUGE pressure (diesel/GDI), 10 kPa/bit - the formula was already correct.
+        DiagnosticRequest("0123", "Fuel Rail Pressure", "01", "23", "Fuel rail gauge pressure (direct injection)", DecoderType.FUEL_RAIL_PRESSURE)
     )
 
     val vagExperimentalRequests = listOf(
-        DiagnosticRequest("01A6", "VW Candidate A6", "01", "A6", "Experimental EA211 value", DecoderType.RESEARCH_RAW),
+        // Was "VW Candidate A6 / Experimental EA211 value". J1979 PID A6 is the ODOMETER and
+        // the real Kylaq answered it on 2026-09-16 with 00 00 86 EB = 3453.9 km, so it is a
+        // known channel, not a VW research candidate.
+        DiagnosticRequest("01A6", "Odometer", "01", "A6", "J1979 odometer, 0.1 km/bit (real car answered 3453.9 km)", DecoderType.ODOMETER_4B),
         DiagnosticRequest("01B0", "VW Candidate B0", "01", "B0", "Candidate Boost pressure target", DecoderType.RESEARCH_RAW),
         DiagnosticRequest("01B1", "VW Candidate B1", "01", "B1", "Candidate Boost pressure actual", DecoderType.RESEARCH_RAW),
         DiagnosticRequest("01C0", "VW Candidate C0", "01", "C0", "Candidate Oil temp", DecoderType.RESEARCH_RAW)

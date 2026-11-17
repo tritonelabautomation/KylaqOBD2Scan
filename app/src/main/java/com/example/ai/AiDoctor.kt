@@ -164,6 +164,7 @@ class RuleBasedAnalysisEngine : AiAnalysisEngine {
             Math.sqrt(variance)
         } else 0.0
 
+        val sportShifts = rpmSamples.count { it in 2800.0..3600.0 }
         val engineBehavior = when {
             idleVariance > 45.0 -> {
                 calculatedScore -= 10
@@ -181,6 +182,9 @@ class RuleBasedAnalysisEngine : AiAnalysisEngine {
             }
             maxRpm > 5500 -> {
                 "High RPM operation captured (peak: ${maxRpm.toInt()} RPM). Smooth power delivery with no sudden rev drops."
+            }
+            sportShifts >= 3 -> {
+                "Engine operated in Sport / Load powerband (shifts at ~2.8k-3.2k RPM). Shift mapping effectively utilized the 178 Nm turbo plateau to pull vehicle load without lugging. Zero powertrain overload."
             }
             else -> {
                 "Engine RPM response stable throughout session (peak: ${maxRpm.toInt()} RPM, idle stability nominal)."

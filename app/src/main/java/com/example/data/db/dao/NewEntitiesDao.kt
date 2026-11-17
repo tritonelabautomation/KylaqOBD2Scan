@@ -18,8 +18,11 @@ interface NewEntitiesDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertVehicle(vehicle: VehicleEntity)
 
-    @Query("SELECT * FROM vehicles")
+    @Query("SELECT * FROM vehicles ORDER BY sortOrder ASC, id ASC")
     fun getAllVehicles(): Flow<List<VehicleEntity>>
+
+    @Query("DELETE FROM vehicles WHERE id = :id")
+    suspend fun deleteVehicleById(id: String)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertProtocolTestResult(result: ProtocolTestResultEntity)
