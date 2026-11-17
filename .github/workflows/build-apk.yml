@@ -22,6 +22,60 @@ jobs:
   # see the gate on the `build` job. Leaving the two jobs parallel meant a red suite still
   # produced a signed APK and still published it to the rolling release that phones install
   # from (build 10192 shipped with broken raw-log recovery this way).
+  # AUDIT REL-02 (2026-11-12): Android lint was never run in CI, so every lint-class defect -
+  # missing permissions, backup rules, lifecycle misuse, unused resources - was invisible until
+  # it reached a phone. This job runs it as a REPORTING gate first: the baseline of existing
+  # findings is unknown, so failing the build immediately would block releases on pre-existing
+  # noise rather than on anything this work introduced. It publishes the count and the top
+  # findings, and the build job does not `needs:` it yet.
+  # To promote it to a hard gate: add `needs: [unit-tests, lint]` to the build job once the
+  # report shows only acceptable findings.
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle 9.3.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+
+      # continue-on-error: the point of this job today is to produce a count, not to block.
+      - name: Run Android lint
+        id: lint
+        continue-on-error: true
+        shell: bash
+        run: |
+          gradle lintDebug --stacktrace 2>&1 | tee /tmp/lint.log
+
+      - name: Summarise lint findings
+        if: always()
+        shell: bash
+        run: |
+          REPORT=$(find app/build/reports -name "lint-results-debug.txt" 2>/dev/null | head -1)
+          if [ -n "$REPORT" ]; then
+            ERRORS=$(grep -c "Error:" "$REPORT" || true)
+            WARNINGS=$(grep -c "Warning:" "$REPORT" || true)
+            echo "lint: ${ERRORS:-0} error(s), ${WARNINGS:-0} warning(s)" | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "### Android lint" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Severity | Count |" >> "$GITHUB_STEP_SUMMARY"
+            echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Error | ${ERRORS:-0} |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Warning | ${WARNINGS:-0} |" >> "$GITHUB_STEP_SUMMARY"
+            head -40 "$REPORT" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "lint report not produced - see job log" | tee -a "$GITHUB_STEP_SUMMARY"
+            tail -n 60 /tmp/lint.log
+          fi
+
   unit-tests:
     runs-on: ubuntu-latest
 
