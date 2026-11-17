@@ -72,6 +72,9 @@ fun TripDetailScreen(
     var samples by remember { mutableStateOf<List<TelemetrySampleEntity>>(emptyList()) }
     var summaryPoints by remember { mutableStateOf<List<com.example.analysis.TripFuelSummary.SamplePoint>>(emptyList()) }
     var rawLogs by remember { mutableStateOf<List<RawLogEntity>>(emptyList()) }
+    // AUDIT MEM-02: total frames on record for this trip, so the console can say how much of
+    // the log it is showing instead of silently presenting a bounded view as the whole thing.
+    var rawLogTotal by remember { mutableStateOf(0) }
     var aiAnalysis by remember { mutableStateOf<AiAnalysisEntity?>(null) }
     var isAnalyzing by remember { mutableStateOf(false) }
 
@@ -152,7 +155,9 @@ fun TripDetailScreen(
         if (trip == null || trip?.status == "RECORDING" || (trip?.sampleCount ?: 0) == 0) {
             trip = tripRepo.getTripById(tripId)
         }
-        rawLogs = tripRepo.getRawLogsForTrip(tripId)
+        // AUDIT MEM-02 (2026-11-12): load only the console's newest frames, not the whole log.
+        rawLogs = tripRepo.getRecentRawLogsForTrip(tripId)
+        rawLogTotal = tripRepo.getRawLogCountForTrip(tripId)
         aiAnalysis = tripRepo.getAnalysisForTrip(tripId)
         samplesLoaded = true
     }
@@ -264,7 +269,9 @@ fun TripDetailScreen(
                                 trip = tripRepo.getTripById(tripId)
                                 samples = tripRepo.getSamplesForAnalysis(tripId)
                                 summaryPoints = viewModel.loadFuelSummaryPoints(tripId)
-                                rawLogs = tripRepo.getRawLogsForTrip(tripId)
+                                // AUDIT MEM-02 (2026-11-12): load only the console's newest frames, not the whole log.
+        rawLogs = tripRepo.getRecentRawLogsForTrip(tripId)
+        rawLogTotal = tripRepo.getRawLogCountForTrip(tripId)
                                 aiAnalysis = tripRepo.getAnalysisForTrip(tripId)
                                 isRecalculating = false
                                 Toast.makeText(context, if (ok) "Trip metrics & ${samples.size} samples recalculated from disk" else "Recalculation complete", Toast.LENGTH_SHORT).show()
@@ -368,7 +375,7 @@ fun TripDetailScreen(
                     } else {
                         val sessionDir = File(context.filesDir, "recordings/session_$tripId")
                         TripOverviewView(
-                            trip = trip, sampleCount = samples.size, rawCount = rawLogs.size, analysis = aiAnalysis,
+                            trip = trip, sampleCount = samples.size, rawCount = if (rawLogTotal > 0) rawLogTotal else rawLogs.size, analysis = aiAnalysis,
                             summary = fuelSummary,
                             tankCapacityL = tankCapacityL,
                             samples = samples,
@@ -649,6 +656,7 @@ fun TripDetailScreen(
                 TripDetailTab.RAW_LOGS -> {
                     TripRawLogsView(
                         rawLogs = rawLogs,
+                        rawLogTotal = rawLogTotal,
                         selectedFilter = rawFilter,
                         onSelectFilter = { rawFilter = it }
                     )
@@ -1524,6 +1532,7 @@ private fun DoctorSection(title: String, body: String) {
 @Composable
 private fun TripRawLogsView(
     rawLogs: List<RawLogEntity>,
+    rawLogTotal: Int = 0,
     selectedFilter: String,
     onSelectFilter: (String) -> Unit
 ) {
@@ -1534,6 +1543,17 @@ private fun TripRawLogsView(
         modifier = Modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
+        // AUDIT MEM-02 (2026-11-12): the console now loads a bounded number of the newest
+        // frames. Saying so is the whole point of the owner's "honest labels" rule - a
+        // truncated view presented as the complete log would be the actual bug.
+        if (rawLogTotal > rawLogs.size) {
+            Text(
+                "Showing the newest ${rawLogs.size} of $rawLogTotal recorded frames. " +
+                    "The full log is preserved on disk and is included in every export.",
+                color = Color.White.copy(alpha = 0.6f),
+                fontSize = 11.sp
+            )
+        }
         // Filter Chips
         ScrollableTabRow(
             selectedTabIndex = filters.indexOf(selectedFilter).coerceAtLeast(0),

@@ -12,6 +12,16 @@ interface TripDao {
     @Query("SELECT * FROM trips ORDER BY startTimestamp DESC")
     suspend fun getAllTrips(): List<TripEntity>
 
+    /**
+     * AUDIT MEM-02 (2026-11-12): the "recent trips" screens asked for 50 and 300 trips but went
+     * through `getAllTrips().take(n)`, which loads *every* trip ever recorded into memory and
+     * then throws most of them away. On an owner with 500 saved trips that is 500 rows read and
+     * 500 objects allocated to display 50. The LIMIT now happens in SQLite, so the row count
+     * that reaches the heap is the row count that reaches the screen.
+     */
+    @Query("SELECT * FROM trips ORDER BY startTimestamp DESC LIMIT :limit")
+    suspend fun getRecentTrips(limit: Int): List<TripEntity>
+
     @Query("SELECT * FROM trips WHERE id = :tripId LIMIT 1")
     suspend fun getTripById(tripId: String): TripEntity?
 
@@ -106,6 +116,21 @@ interface RawLogDao {
 
     @Query("SELECT * FROM raw_logs WHERE tripId = :tripId AND category = :category ORDER BY timestamp ASC")
     suspend fun getRawLogsByCategory(tripId: String, category: String): List<RawLogEntity>
+
+    /**
+     * AUDIT MEM-02 (2026-11-12): the trip-detail diagnostic console used to load the trip's
+     * *entire* raw log - one row per OBD frame, tens of thousands for a long drive - to render
+     * a scrolling list that only ever shows a screenful. The newest [limit] rows are enough for
+     * that view, and nothing is lost from disk: the full log stays in the table and the
+     * exporter and recovery paths still read it in full.
+     *
+     * DESC + LIMIT selects the newest rows efficiently; the caller re-sorts ascending.
+     */
+    @Query("SELECT * FROM raw_logs WHERE tripId = :tripId ORDER BY timestamp DESC LIMIT :limit")
+    suspend fun getRecentRawLogsForTrip(tripId: String, limit: Int): List<RawLogEntity>
+
+    @Query("SELECT COUNT(*) FROM raw_logs WHERE tripId = :tripId")
+    suspend fun getRawLogCountForTrip(tripId: String): Int
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertRawLogs(logs: List<RawLogEntity>)

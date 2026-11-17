@@ -70,6 +70,15 @@ object HeapGuard {
      */
     const val UI_SAMPLE_CAP = 8_000
 
+    /**
+     * AUDIT MEM-02 (2026-11-12): how many raw OBD frames the trip-detail diagnostic console
+     * loads for display. A long drive records tens of thousands of frames; the console renders
+     * a scrolling list that shows a screenful at a time, so loading the whole log was pure
+     * waste. 2 000 gives generous scrollback while keeping the loaded set bounded regardless
+     * of how long the owner drives. The full log stays on disk and in the database.
+     */
+    const val RAW_CONSOLE_ROWS = 2_000
+
     /** Room keeps at most this many sample rows per trip (stride the rest). */
     const val ROOM_SAMPLE_CAP = 24_000
 

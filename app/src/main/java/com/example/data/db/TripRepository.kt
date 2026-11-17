@@ -80,8 +80,14 @@ class TripRepository(context: Context) {
         tripDao.getAllTrips()
     }
 
+    /**
+     * AUDIT MEM-02 (2026-11-12): this used to be `getAllTrips().take(limit)` - every trip ever
+     * recorded was read from SQLite and materialised as objects, then all but [limit] were
+     * discarded. The filter now runs in the query, so heap use follows the screen, not the
+     * owner's total history. Signatures and call sites are unchanged, so nothing else moves.
+     */
     suspend fun recentTrips(limit: Int): List<TripEntity> = withContext(Dispatchers.IO) {
-        tripDao.getAllTrips().take(limit)
+        tripDao.getRecentTrips(limit)
     }
 
     suspend fun samplesForTrips(tripIds: List<String>, pids: List<String>): List<TelemetrySampleEntity> = withContext(Dispatchers.IO) {
@@ -131,6 +137,26 @@ class TripRepository(context: Context) {
 
     suspend fun getRawLogsForTrip(tripId: String): List<RawLogEntity> = withContext(Dispatchers.IO) {
         rawLogDao.getRawLogsForTrip(tripId)
+    }
+
+    /**
+     * The newest [limit] raw frames for the diagnostic console.
+     *
+     * AUDIT MEM-02 (2026-11-12): [getRawLogsForTrip] loads the whole log - tens of thousands of
+     * rows on a long drive - to fill a list that renders one screenful. This reads only the tail
+     * and returns it in the same ascending order the console expects. The full log is untouched
+     * on disk; [getRawLogsForTrip] and the exporters still use it.
+     */
+    suspend fun getRecentRawLogsForTrip(
+        tripId: String,
+        limit: Int = com.example.data.HeapGuard.RAW_CONSOLE_ROWS
+    ): List<RawLogEntity> = withContext(Dispatchers.IO) {
+        rawLogDao.getRecentRawLogsForTrip(tripId, limit).asReversed()
+    }
+
+    /** Total frames recorded for the trip, so the console can say how many it is not showing. */
+    suspend fun getRawLogCountForTrip(tripId: String): Int = withContext(Dispatchers.IO) {
+        rawLogDao.getRawLogCountForTrip(tripId)
     }
 
     suspend fun getEventsForTrip(tripId: String): List<DiagnosticEventEntity> = withContext(Dispatchers.IO) {
