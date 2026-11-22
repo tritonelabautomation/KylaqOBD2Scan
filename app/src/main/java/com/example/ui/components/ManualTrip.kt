@@ -274,7 +274,7 @@ data class FillTripDraft(
 
     fun toServiceRequest(nowMs: Long = System.currentTimeMillis()): ServiceInspectionRequest? {
         val entry = toServiceEntry(nowMs) ?: return null
-        return ServiceInspectionRequest(listOf(entry), notes = notes.trim())
+        return ServiceInspectionRequest(listOf(entry), note = notes.trim())
     }
 
     fun validateService(nowMs: Long = System.currentTimeMillis()): InspectionValidation {
