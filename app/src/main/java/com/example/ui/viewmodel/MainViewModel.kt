@@ -425,6 +425,48 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         triggerImmediateBackup()
     }
 
+    /**
+     * Saves the Service Inspection tab of `FillMissingTripDialog`.
+     *
+     * Every ticked task becomes one maintenance ledger line - the same record the health board
+     * already reads - so a workshop bill logged here immediately changes the due state, the
+     * ledger export and the cost history. It deliberately does NOT create a trip: a service
+     * visit is not a drive, and a synthesised 0 km drive would corrupt economy and cost/km.
+     *
+     * The odometer is only advanced when the owner actually typed it, matching
+     * [setMaintenanceOdo]; a blank field must not overwrite a known reading with zero.
+     */
+    fun logServiceInspection(request: com.example.ui.components.ServiceInspectionRequest) {
+        if (request.entries.isEmpty()) return
+        var saved = 0
+        request.entries.forEach { entry ->
+            if (entry.itemId.isBlank()) return@forEach
+            maintenanceRepository.log(
+                com.example.data.MaintenanceCatalog.ServiceLog(
+                    itemId = entry.itemId,
+                    // RecordTime is the one sanctioned clock: IST with an explicit offset.
+                    dateUtc = com.example.data.RecordTime.stamp(entry.dateMs),
+                    dateMs = entry.dateMs,
+                    odometerKm = entry.odometerKm,
+                    cost = entry.invoiceCostRupees,
+                    rating = null,
+                    notes = entry.toServiceNotes()
+                )
+            )
+            saved++
+        }
+        if (saved == 0) return
+        request.odometerKm?.let { maintenanceRepository.setCurrentOdometerKm(it) }
+        _mergeNotice.value = if (saved == 1) {
+            "Service inspection logged" + request.totalInvoiceCostRupees.let {
+                if (it > 0.0) String.format(java.util.Locale.US, " (₹%.2f)", it) else ""
+            }
+        } else {
+            "$saved service tasks logged"
+        }
+        triggerImmediateBackup()
+    }
+
     suspend fun tripTitleMap(): Map<String, String> =
         recordingManager.tripRepository.allTripsChronological().associate { it.id to it.title }
 

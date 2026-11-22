@@ -25,7 +25,7 @@ Built in Kotlin + Jetpack Compose (Material 3, dark "cyber" theme), Room, and co
 | **Trip analytics** | Recorded trips with overview + trends, cross-trip trend analyzer (idle fuel, avg speed, economy drift), fuel-grade comparison (e.g. X95 vs regular petrol), expected-vs-actual deviation math per trip |
 | **Fuel & money** | Fuel logs with MID (instrument cluster) vs OBD-recorded comparison, fuel-cost tracking, per-trip expenses, receipts parsing, reports & exports |
 | **Coaching** | ~32 km daily-route per-ride coaching, AI coach chat (Gemini REST with an offline rule-based fallback), Car Doctor with DTC library & VIN decoding |
-| **Fleet & care** | Vehicle garage & profiles, maintenance catalog + reminders, documents vault, PID config & scanner |
+| **Fleet & care** | Vehicle garage & profiles, maintenance catalog + reminders, documents vault, PID config & scanner. The **Fill missing / Log service** dialog has a *Trip* tab (reconstruct an unlogged drive) and a *Service Inspection* tab that writes real maintenance-ledger entries — per-task pollen/cabin-filter tagging, an invoice cost field and a PDF invoice attachment |
 | **Android Auto** | Template dashboard (`ObdCarAppService`) for trusted installs **and** a parked "Car Dash" activity for sideload scenarios — with an in-app guide explaining exactly which Android versions can use which route |
 | **Safety & backup** | Command safety validator on every TX frame, Google Drive / SAF backup & restore of trips and logs |
 
@@ -90,12 +90,14 @@ Implementation lives in `engine/PowertrainModel.kt`, `engine/GearModel.kt`, `eng
 
 ## 🧪 Verification policy
 
-- **29 test suites / 290 unit tests** run in CI on every push (`.github/workflows/build-apk.yml`), plus an APK build job.
+- **120 test suites / 1 006 unit tests** run in CI on every push (`.github/workflows/build-apk.yml`), plus an APK build job.
+- **Structural pre-gate:** `python3 tools/check_kotlin_structure.py` runs before the suite, so a truncated edit fails in seconds instead of after a 10-minute Gradle run.
 - **Reference trace replay:** a real captured ELM327 session from the owner's Kylaq is checked into `tools/trace_sim/reference_trace.txt`; `KylaqTraceReplayTest` and `KylaqRealWorldTraceIntegrationTest` assert the decoder, scheduler and store semantics against it.
 - **Adversarial decoder tests** (`PidDecoderAdversarialTest`, `DtcDecoderAdversarialTest`) fuzz malformed frames.
 - CI posts a parsed test digest back to the open pull request so red runs are triageable without Actions access.
 
 ```bash
+python3 tools/check_kotlin_structure.py                 # brace/string structure pre-gate
 ./gradlew testDebugUnitTest -PciExcludeRobolectric=1   # unit tests
 ./gradlew assembleDebug                                # debug APK
 python3 tools/trace_sim/replay_trace.py                # offline trace replay

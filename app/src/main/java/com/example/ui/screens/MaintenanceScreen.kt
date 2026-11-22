@@ -50,8 +50,18 @@ fun MaintenanceScreen(
     var showTrackDialog by remember { mutableStateOf(false) }
     var whyTarget by remember { mutableStateOf<MaintenanceCatalog.DueState?>(null) }
     var intervalTarget by remember { mutableStateOf<MaintenanceCatalog.ServiceItem?>(null) }
+    // Quick-add ("service") and an explicit row tap both open the same full dialog on its
+    // Service Inspection tab, pre-selecting the task so the owner does not re-pick it.
+    var inspectionTarget by remember { mutableStateOf<MaintenanceCatalog.ServiceItem?>(null) }
+    var showInspectionDialog by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) { if (viewModel.takeQuickAdd("service")) pickItem = true }
+    LaunchedEffect(Unit) {
+        if (viewModel.takeQuickAdd("service")) {
+            pickItem = false
+            inspectionTarget = null
+            showInspectionDialog = true
+        }
+    }
 
     val tracked = remember(refresh) { repo.trackedItemIds() }
     val logs = remember(refresh) { repo.logs() }
@@ -219,7 +229,10 @@ fun MaintenanceScreen(
                             }
                         }
                         Column(horizontalAlignment = Alignment.End) {
-                            TextButton(onClick = { logTarget = state.item }) { Text("Log") }
+                            TextButton(onClick = {
+                                inspectionTarget = state.item
+                                showInspectionDialog = true
+                            }) { Text("Log") }
                             TextButton(onClick = { intervalTarget = state.item }) {
                                 Text("Interval", fontSize = 11.sp, color = TextSecondaryDark)
                             }
@@ -456,6 +469,27 @@ fun MaintenanceScreen(
                     }) { Text("Reset", color = WarningRed) }
                     TextButton(onClick = { intervalTarget = null }) { Text("Cancel") }
                 }
+            }
+        )
+    }
+
+    if (showInspectionDialog) {
+        com.example.ui.components.FillMissingTripDialog(
+            initialTab = com.example.ui.components.TripLogTab.SERVICE,
+            initialServiceItemId = inspectionTarget?.id,
+            initialEndOdoKm = inspectionTarget?.let {
+                odoText.toDoubleOrNull() ?: repo.currentOdometerKm()
+            },
+            onDismiss = {
+                showInspectionDialog = false
+                inspectionTarget = null
+            },
+            onSave = { viewModel.createManualTrip(it) },
+            onSaveService = { request ->
+                viewModel.logServiceInspection(request)
+                showInspectionDialog = false
+                inspectionTarget = null
+                refresh++
             }
         )
     }

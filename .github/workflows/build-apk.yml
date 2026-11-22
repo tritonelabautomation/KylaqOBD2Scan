@@ -45,6 +45,13 @@ jobs:
         with:
           gradle-version: '9.3.1'
 
+      # Cheapest gate in the pipeline: braces/strings/comments must balance in every Kotlin
+      # file before a 10-minute Gradle run is spent discovering a truncated edit. The dialog
+      # and engine work in this branch touches untested-by-compiler UI code, so the structural
+      # check runs before the suite rather than after the build.
+      - name: Check Kotlin structure
+        run: python3 tools/check_kotlin_structure.py
+
       # continue-on-error so the reporting steps below always run; the job is still
       # failed at the end by "Fail the job when tests failed".
       - name: Run unit tests
